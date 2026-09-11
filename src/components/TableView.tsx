@@ -232,7 +232,7 @@ export const TableView: React.FC<TableViewProps> = ({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
-                        title="Open GitHub repository"
+                        title="Open Source code"
                       >
                         <Github className="w-3.5 h-3.5" aria-hidden="true" />
                       </a>

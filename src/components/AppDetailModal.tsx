@@ -141,7 +141,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
   };
 
   const hasAndroid = app.platforms.includes('android');
-  const FOSS_LICENSES = ['GPL-2.0+', 'GPL-3.0', 'GPL-2.0', 'MIT', 'Apache-2.0', 'MPL-2.0', 'LGPL-2.1', 'AGPL-3.0', 'EUPL-1.2', 'BSD', 'ISC'];
+  const FOSS_LICENSES = ['GPL-2.0+', 'GPL-3.0', 'GPL-2.0', 'MIT', 'Apache-2.0', 'MPL-2.0', 'LGPL-2.1', 'GNU LGPL', 'LGPL-3.0', 'GPL-2.0+', 'AGPL-3.0', 'EUPL-1.2', 'BSD', 'ISC'];
   const licenseClass = FOSS_LICENSES.includes(app.license) ? 'foss' : 'notfoss';
   const repoHost = app.githubUrl.includes('github.com')
     ? 'github'
@@ -383,8 +383,12 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 <span>
                   {licenseClass !== 'foss'
                     ? 'Distributed officially by its developer; free to download and use.'
-                    : repoHost === 'github'
-                      ? `Verified open-source repository with ${app.stars.toLocaleString()} stars on GitHub.`
+                    : !app.githubUrl
+                      ? 'Source code is published by the project.'
+                      : repoHost === 'github'
+                      ? (app.stars > 0
+                          ? `Verified open-source repository with ${app.stars.toLocaleString()} stars on GitHub.`
+                          : 'Verified open-source repository on GitHub.')
                       : repoHost === 'gitlab.com'
                         ? 'Verified open-source repository, hosted on GitLab.com.'
                         : 'Verified open-source repository, hosted on the project\'s own infrastructure.'}
@@ -395,9 +399,11 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 <span>
                   {licenseClass === 'foss'
                     ? `Distributed under the ${app.license} open-source license.`
-                    : licenseClass === 'notfoss' && app.license === 'Free for Personal Use'
+                    : app.license === 'Free for Personal Use'
                       ? 'Free to download and use, but the license is proprietary (not open source).'
-                      : 'Source code is published under a custom license (source-available, not OSI-approved).'}
+                      : app.license === 'Source-available'
+                        ? 'Source code is published under a custom license (source-available, not OSI-approved).'
+                        : `Distributed under the ${app.license} license.`}
                 </span>
               </li>
               {app.proprietaryAlternative && (

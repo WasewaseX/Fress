@@ -475,8 +475,8 @@ export const AppCard: React.FC<AppCardProps> = ({
               target="_blank"
               rel="noopener noreferrer"
               className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
-              aria-label={`View ${app.name} GitHub repository (opens in new window)`}
-              title="GitHub repository"
+              aria-label={`View ${app.name} source code (opens in new window)`}
+              title="Source code"
             >
               <Github className="w-3.5 h-3.5" aria-hidden="true" />
             </a>

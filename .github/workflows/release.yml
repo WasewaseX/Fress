@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'Fress v__VERSION__'
+          releaseBody: 'Windows installer. This is a beta release: features may change. Verify downloads with the SHA-256 checksums below.'
+          releaseDraft: false
+          prerelease: true
+          args: '--target x86_64-pc-windows-msvc'
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe -ErrorAction SilentlyContinue
+          $lines = @()
+          foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            $lines += "$hash  $($f.Name)"
+          }
+          $lines | Out-File -FilePath checksums.txt -Encoding ascii
+          Get-Content checksums.txt
+
+      - name: Upload checksum to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

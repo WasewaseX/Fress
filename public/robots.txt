@@ -1,0 +1,24 @@
+User-agent: *
+Allow: /
+Allow: /llms.txt
+
+# AI Crawlers explicitly welcomed for GEO indexing
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://fress.app/sitemap.xml

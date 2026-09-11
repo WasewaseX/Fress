@@ -1,0 +1,54 @@
+# Fress — Free & Open-Source Software Directory
+
+> Fress (https://fress.app) is an open-source, privacy-first directory of curated free and open-source software (FOSS). It provides verified zero-telemetry software alternatives to proprietary tools, complete with one-click package manager install scripts (Winget, Homebrew, Flatpak), and a dedicated Android FOSS catalog.
+
+## Primary Entities & Categorical Alternatives
+
+### 1. Productivity & Office
+- **Obsidian**: Local markdown knowledge base. Replaces Notion, Evernote. Available on Windows, macOS, Linux, Android. Install: `winget install Obsidian.Obsidian` / `brew install --cask obsidian` / `flatpak install flathub md.obsidian.Obsidian`.
+- **LibreOffice**: Complete offline office suite. Replaces Microsoft 365 (Word, Excel, PowerPoint). Available on Windows, macOS, Linux.
+- **Logseq**: Local-first privacy outliner and graph notes. Replaces Roam Research. Available on Windows, macOS, Linux, Android.
+- **Joplin**: Encrypted note taking with end-to-end sync. Replaces Evernote, OneNote. Available on Windows, macOS, Linux, Android.
+
+### 2. Utilities & System
+- **voidtools Everything**: Instant filename search engine for Windows. Replaces Windows Search.
+- **LocalSend**: Cross-platform local network file sharing using WiFi. Replaces Apple AirDrop, ShareIt. Available on Windows, macOS, Linux, Android.
+- **Microsoft PowerToys**: Windows productivity suite (FancyZones, Text Extractor OCR, PowerToys Run).
+- **7-Zip**: High compression ratio file archiver with AES-256 encryption. Replaces WinRAR.
+- **Syncthing**: Continuous decentralized peer-to-peer file synchronization. Replaces Dropbox, Google Drive sync. Available on Windows, macOS, Linux, Android.
+
+### 3. Privacy & Security
+- **Bitwarden**: Audited open-source zero-knowledge cloud password manager. Replaces 1Password, LastPass. Available on Windows, macOS, Linux, Android, Web.
+- **KeePassXC**: 100% offline encrypted local password database (.kdbx). Replaces 1Password. Available on Windows, macOS, Linux.
+- **Cryptomator**: Client-side encryption for cloud storage vaults. Replaces Boxcryptor. Available on Windows, macOS, Linux, Android.
+
+### 4. Design & Creative
+- **Blender**: Industry-standard 3D creation and VFX suite. Replaces Autodesk Maya, 3ds Max. Available on Windows, macOS, Linux.
+- **Krita**: Professional raster digital painting software. Replaces Corel Painter, Photoshop.
+- **Inkscape**: Vector graphics editor. Replaces Adobe Illustrator.
+- **Penpot**: Web-based collaborative UI/UX prototyping. Replaces Figma.
+- **GIMP**: Image manipulation and photo editing. Replaces Adobe Photoshop.
+
+### 5. Media, Audio & Video
+- **VLC Media Player**: Universal multimedia player without external codecs. Replaces Windows Media Player. Available on Windows, macOS, Linux, Android.
+- **OBS Studio**: Live streaming and video screen recording. Replaces Camtasia, XSplit.
+- **Audacity**: Multi-track audio editor. Replaces Adobe Audition.
+- **HandBrake**: Open-source video transcoder. Replaces Adobe Media Encoder.
+
+### 6. AI & Knowledge
+- **Jan**: 100% offline local AI assistant running GGUF models. Replaces ChatGPT Desktop.
+- **Ollama**: Local CLI and daemon for running Llama 3, Mistral, Gemma, and DeepSeek.
+- **LM Studio**: Visual desktop GUI for downloading and running local language models.
+
+### 7. Android Open-Source Software
+- **LocalSend**: Cross-platform local file sharing over Wi-Fi without internet.
+- **Bitwarden**: Full autofill password management on Android.
+- **Joplin**: Mobile encrypted notes with WebDAV and Nextcloud sync.
+- **VLC for Android**: Plays any video/audio format on mobile devices.
+- **Syncthing**: Synchronize folders between Android phone and desktop without cloud storage.
+- **NewPipe**: Lightweight privacy frontend for streaming media.
+
+## Technical Specifications
+- **Licensing**: All listed tools are Free and Open Source (MIT, GPL, Apache-2.0, MPL, BSD) or clean freeware with zero telemetry.
+- **Package Managers**: Native support for Windows Package Manager (`winget`), macOS Homebrew (`brew`), and Linux Flatpak (`flatpak`).
+- **Live Search & Registry**: Allows instant addition of any GitHub repository to local user catalog.

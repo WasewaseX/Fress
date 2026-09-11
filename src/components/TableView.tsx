@@ -123,17 +123,17 @@ export const TableView: React.FC<TableViewProps> = ({
                       {app.name}
                     </span>
                     {app.proprietaryAlternative && (
-                      <span className="text-[10px] font-mono text-amber-300/90 bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded">
+                      <span className="text-[11px] font-mono text-amber-300/90 bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded">
                         vs {app.proprietaryAlternative}
                       </span>
                     )}
                     {app.isOwnerPick && (
-                      <span className="inline-flex items-center gap-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-300 px-1.5 py-0.2 rounded border border-amber-500/20">
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-medium bg-amber-500/10 text-amber-300 px-1.5 py-0.2 rounded border border-amber-500/20">
                         <Award className="w-2.5 h-2.5" /> Pick
                       </span>
                     )}
                     {app.isTrendingToday && (
-                      <span className="inline-flex items-center gap-0.5 text-[10px] font-medium bg-emerald-500/10 text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-medium bg-emerald-500/10 text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-500/20">
                         <Flame className="w-2.5 h-2.5" /> Trend
                       </span>
                     )}
@@ -158,7 +158,7 @@ export const TableView: React.FC<TableViewProps> = ({
                       return (
                         <span 
                           key={p} 
-                          className={`text-[10px] uppercase font-mono px-1 py-0.2 rounded border ${
+                          className={`text-[11px] uppercase font-mono px-1 py-0.2 rounded border ${
                             isAnd 
                               ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 font-semibold' 
                               : 'text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.04] border-slate-950/10 dark:border-white/[0.06]'
@@ -206,7 +206,7 @@ export const TableView: React.FC<TableViewProps> = ({
                       )}
                     </button>
                   ) : (
-                    <span className="text-slate-600 font-mono text-[10px]">Direct DL</span>
+                    <span className="text-slate-600 font-mono text-[11px]">Direct DL</span>
                   )}
                 </td>
 

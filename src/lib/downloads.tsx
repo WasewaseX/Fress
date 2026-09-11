@@ -5,7 +5,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
 
-export type DownloadStatus = 'active' | 'completed' | 'error' | 'cancelled';
+export type DownloadStatus = 'active' | 'completed' | 'error' | 'cancelled' | 'browser';
 
 export interface DownloadItem {
   id: number;
@@ -121,12 +121,29 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const guessedName = nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
+
       if (!isTauri()) {
         // Browser fallback (web preview / dev in a normal tab):
-        // open a NEW tab and explain. Never navigate the current tab away.
+        // open a NEW tab, record it in the panel, explain. Never navigate away.
         window.open(url, '_blank', 'noopener,noreferrer');
+        setItems((prev) => [
+          {
+            id: Date.now(),
+            url,
+            name: guessedName || url,
+            dir: 'Browser downloads folder',
+            bytes: 0,
+            total: 0,
+            speed: 0,
+            eta: 0,
+            status: 'browser',
+            startedAt: Date.now(),
+          },
+          ...prev,
+        ]);
         toast.info('Opened the download in a new browser tab', {
-          description: 'The in-app download manager with progress runs in the Fress desktop app.',
+          description: 'The Fress desktop app adds a download manager with live progress and SHA-256 verification.',
         });
         return;
       }
@@ -138,8 +155,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } catch {
         dir = await invoke<string>('default_download_dir');
       }
-
-      const guessedName = nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
 
       try {
         const id = await invoke<number>('start_download', {

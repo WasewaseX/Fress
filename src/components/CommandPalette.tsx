@@ -221,7 +221,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
             aria-label="Command palette input"
           />
-          <kbd className="hidden sm:inline-block font-mono text-[10px] text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1.5 py-0.5 rounded ml-2">
+          <kbd className="hidden sm:inline-block font-mono text-[11px] text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1.5 py-0.5 rounded ml-2">
             ESC
           </kbd>
         </div>
@@ -251,7 +251,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         <div className="text-[11px] text-slate-400">{item.subtitle}</div>
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+                    <span className="text-[11px] font-mono text-slate-500 uppercase tracking-wider">
                       Action
                     </span>
                   </div>
@@ -283,11 +283,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold text-slate-100 truncate">{app.name}</span>
                         {app.proprietaryAlternative && (
-                          <span className="text-[10px] text-amber-300/90 font-mono bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded shrink-0">
+                          <span className="text-[11px] text-amber-300/90 font-mono bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded shrink-0">
                             vs {app.proprietaryAlternative}
                           </span>
                         )}
-                        <span className="text-[10px] text-slate-400 font-mono">
+                        <span className="text-[11px] text-slate-400 font-mono">
                           ★ {(app.stars / 1000).toFixed(0)}k
                         </span>
                       </div>
@@ -330,11 +330,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         {/* Footer Navigation Hints */}
         <div className="px-4 py-2.5 bg-slate-950/90 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between text-[11px] text-slate-400">
           <div className="flex items-center gap-3">
-            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[10px]">↑↓</kbd> Navigate</span>
-            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[10px]">↵</kbd> Select</span>
-            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[10px]">ESC</kbd> Dismiss</span>
+            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↑↓</kbd> Navigate</span>
+            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↵</kbd> Select</span>
+            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">ESC</kbd> Dismiss</span>
           </div>
-          <span className="font-mono text-[10px] text-slate-500">{apps.length} tools indexed</span>
+          <span className="font-mono text-[11px] text-slate-500">{apps.length} tools indexed</span>
         </div>
       </div>
     </div>

@@ -56,7 +56,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
             <DownloadCloud className="w-4 h-4 text-sky-400" aria-hidden="true" />
             <h2 className="text-sm font-bold text-slate-100">{t('downloads.title')}</h2>
             {active.length > 0 && (
-              <span className="text-[10px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded-full">
+              <span className="text-[11px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded-full">
                 {active.length}
               </span>
             )}
@@ -112,7 +112,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-slate-400 mb-2.5">
+                <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400 mb-2.5">
                   <span>
                     {formatBytes(item.bytes)}
                     {item.total > 0 && ` / ${formatBytes(item.total)}`}
@@ -134,7 +134,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                     onClick={() => {
                       navigator.clipboard?.writeText(item.sha256!);
                     }}
-                    className="w-full text-left text-[10px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
+                    className="w-full text-left text-[11px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
                     title={t('common.copy')}
                   >
                     <FileCheck2 className="w-3 h-3 shrink-0 text-emerald-400" />
@@ -177,7 +177,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
           <div className="flex items-center justify-between gap-2 text-[11px]">
             <div className="min-w-0">
               <p className="text-slate-400 font-medium">{t('downloads.folder')}</p>
-              <p className="text-slate-300 font-mono truncate text-[10px]" title={downloadDir || ''}>
+              <p className="text-slate-300 font-mono truncate text-[11px]" title={downloadDir || ''}>
                 {downloadDir || 'Default (Downloads/Fress)'}
               </p>
             </div>
@@ -199,15 +199,18 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
 function StatusChip({ status, error }: { status: string; error?: string }) {
   const { t } = useI18n();
   if (status === 'active') {
-    return <span className="shrink-0 text-[10px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded">{t('downloads.active')}</span>;
+    return <span className="shrink-0 text-[11px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded">{t('downloads.active')}</span>;
+  }
+  if (status === 'browser') {
+    return <span className="shrink-0 text-[11px] font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded">Opened in browser</span>;
   }
   if (status === 'completed') {
-    return <span className="shrink-0 text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><Check className="w-2.5 h-2.5" />{t('downloads.completed')}</span>;
+    return <span className="shrink-0 text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><Check className="w-2.5 h-2.5" />{t('downloads.completed')}</span>;
   }
   if (status === 'error') {
-    return <span className="shrink-0 text-[10px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><XCircle className="w-2.5 h-2.5" />{t('downloads.failed')}</span>;
+    return <span className="shrink-0 text-[11px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><XCircle className="w-2.5 h-2.5" />{t('downloads.failed')}</span>;
   }
-  return <span className="shrink-0 text-[10px] font-medium bg-slate-500/15 text-slate-400 border border-slate-500/30 px-1.5 py-0.5 rounded">{t('downloads.cancelled')}</span>;
+  return <span className="shrink-0 text-[11px] font-medium bg-slate-500/15 text-slate-400 border border-slate-500/30 px-1.5 py-0.5 rounded">{t('downloads.cancelled')}</span>;
 }
 
 function PanelButton({

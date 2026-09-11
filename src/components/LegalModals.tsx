@@ -28,6 +28,13 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
   onUpdateCookieConsent
 }) => {
   const [activeTab, setActiveTab] = useState<LegalTab>(initialTab);
+
+  // Re-sync the requested tab each time the modal opens (state persists between opens)
+  React.useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
   const [functionalCookies, setFunctionalCookies] = useState(cookieConsent.functional);
   const [analyticsCookies, setAnalyticsCookies] = useState(cookieConsent.analytics);
   const [savedNotice, setSavedNotice] = useState(false);
@@ -155,7 +162,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
                 Privacy Policy (Local-First Architecture)
               </h3>
               <p className="text-slate-400 text-[11px]">
-                Effective Date: September 2025. Last updated: September 2026.
+                Effective Date: September 2025. Last updated: September 2025.
               </p>
 
               <div className="space-y-2">
@@ -264,7 +271,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
                   <div>
                     <div className="flex items-center gap-2">
                       <strong className="text-slate-100">Essential Local Storage</strong>
-                      <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded border border-slate-700">
+                      <span className="text-[11px] bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded border border-slate-700">
                         Always Active
                       </span>
                     </div>

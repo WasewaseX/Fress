@@ -315,7 +315,7 @@ export const AppCard: React.FC<AppCardProps> = ({
           <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1.5 ml-auto flex-wrap" title="Available platforms">
             {app.platforms.map((p, i) => (
               <React.Fragment key={p}>
-                {i > 0 && <span className="text-slate-500 text-[10px]" aria-hidden="true">·</span>}
+                {i > 0 && <span className="text-slate-500 text-[11px]" aria-hidden="true">·</span>}
                 {renderPlatformBadge(p)}
               </React.Fragment>
             ))}
@@ -351,6 +351,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               void startDownload(target.url, `${app.name} ${target.label}`.trim());
             } else if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
               // In the desktop app, page links open the system browser
+              toast.info(`Opening the official download page for ${app.name}`, { description: target.label });
               import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(target.url)).catch(() => window.open(target.url, '_blank'));
             } else {
               window.open(target.url, '_blank', 'noopener,noreferrer');
@@ -381,8 +382,8 @@ export const AppCard: React.FC<AppCardProps> = ({
                     setShowInstallMenu(!showInstallMenu);
                   }
                 }}
-                className="inline-flex items-center gap-1 text-[11px] font-mono bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 px-2 py-1 rounded transition-colors"
-                title="Quick install command"
+                className="inline-flex items-center gap-1 text-xs font-mono bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 px-2.5 py-1.5 rounded-md transition-colors"
+                title="Copy the package-manager install command (for terminals; beginners can use the Download button instead)"
               >
                 {copiedType ? (
                   <>
@@ -392,7 +393,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                 ) : (
                   <>
                     <Terminal className="w-3 h-3 text-sky-400" />
-                    <span>{t('card.install')}</span>
+                    <span>{primaryCmd.startsWith('winget') ? 'winget' : primaryCmd.startsWith('brew') ? 'brew' : primaryCmd.startsWith('flatpak') ? 'flatpak' : primaryCmd.startsWith('scoop') ? 'scoop' : 'install'}</span>
                     {(app.brewCommand || app.flatpakCommand) && (
                       <ChevronDown className="w-2.5 h-2.5 ml-0.5" />
                     )}

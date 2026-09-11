@@ -19,11 +19,25 @@ import { useI18n } from '../lib/i18n';
 import { toast } from 'sonner';
 
 /** Device-aware download section: pick your platform, get real targets. */
+function detectUserPlatform(): Platform {
+  if (typeof navigator === 'undefined') return 'windows';
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('android')) return 'android';
+  if (ua.includes('iphone') || ua.includes('ipad')) return 'ios';
+  if (ua.includes('mac os') || ua.includes('macintosh')) return 'mac';
+  if (ua.includes('linux')) return 'linux';
+  return 'windows';
+}
+
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
-  const firstAvailable = app.platforms[0] || 'windows';
-  const [platform, setPlatform] = useState<Platform>(firstAvailable);
   const { startDownload } = useDownloads();
   const { t } = useI18n();
+  const inApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const preferred = (() => {
+    const guess = detectUserPlatform();
+    return app.platforms.includes(guess) ? guess : (app.platforms[0] || 'windows');
+  })();
+  const [platform, setPlatform] = useState<Platform>(preferred);
   const options = getDownloadOptions(app, platform);
   const unavailable = platformUnavailableNote(app, platform);
 
@@ -44,7 +58,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
 
       {/* Platform selector: segmented control with real hit targets */}
       <div className="flex items-center gap-1 flex-wrap mb-3 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] p-1 rounded-lg w-fit max-w-full">
-        {(Object.keys(PLATFORM_LABELS) as Platform[]).map((p) => {
+        {([...app.platforms, ...((Object.keys(PLATFORM_LABELS) as Platform[]).filter((p) => !app.platforms.includes(p)))] as Platform[]).map((p) => {
           const available = app.platforms.includes(p);
           return (
             <button
@@ -90,15 +104,15 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                 <Download className={`w-3.5 h-3.5 shrink-0 ${option.kind === 'direct' ? 'text-sky-100' : 'text-sky-400'}`} aria-hidden="true" />
                 <span className="truncate">
                   {option.label}
-                  {option.kind === 'direct' && <span className="ml-1.5 text-[10px] font-mono font-normal uppercase tracking-wide opacity-80">progress in app</span>}
-                  {option.kind === 'store' && <span className="ml-1.5 text-[10px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
+                  {option.kind === 'direct' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-80">progress in app</span>}
+                  {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
                 </span>
               </span>
               {option.kind !== 'direct' && <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />}
             </button>
           ))}
-          <p className="text-[10px] text-slate-400 leading-relaxed pt-0.5">
-            {t('detail.downloadsHint')} {t('detail.checkLatest')}
+          <p className="text-[11px] text-slate-400 leading-relaxed pt-0.5">
+            {inApp ? t('detail.downloadsHint') : 'Downloads open in a new browser tab. The Fress desktop app adds a built-in download manager with live progress and SHA-256 verification.'} {t('detail.checkLatest')}
           </p>
         </div>
       ) : (
@@ -164,6 +178,9 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             <p id="app-detail-tagline" className="text-xs text-slate-400 mt-0.5">
               {app.tagline}
             </p>
+            <p className="text-[11px] text-slate-500 mt-1 font-mono">
+              Listed since {app.addedAt} · links verified at review time
+            </p>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
@@ -196,6 +213,9 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
 
         {/* Content body */}
         <div id="app-detail-modal-body" className="p-4 sm:p-6 space-y-4 overflow-y-auto text-[13px] leading-relaxed text-slate-300">
+          {/* Downloads by device: the primary action, above the fold */}
+          <DownloadSection app={app} />
+
           {/* Overview */}
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
@@ -242,7 +262,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 {app.wingetCommand && (
                   <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
                     <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-mono text-slate-400 block">Winget (Windows)</span>
+                      <span className="text-[11px] uppercase font-mono text-slate-400 block">Winget (Windows)</span>
                       <code className="font-mono text-xs text-sky-300 select-all truncate block">
                         {app.wingetCommand}
                       </code>
@@ -270,7 +290,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 {app.brewCommand && (
                   <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
                     <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-mono text-slate-400 block">Homebrew (macOS / Linux)</span>
+                      <span className="text-[11px] uppercase font-mono text-slate-400 block">Homebrew (macOS / Linux)</span>
                       <code className="font-mono text-xs text-amber-300 select-all truncate block">
                         {app.brewCommand}
                       </code>
@@ -298,7 +318,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 {app.flatpakCommand && (
                   <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
                     <div className="min-w-0">
-                      <span className="text-[10px] uppercase font-mono text-slate-400 block">Flatpak (Linux)</span>
+                      <span className="text-[11px] uppercase font-mono text-slate-400 block">Flatpak (Linux)</span>
                       <code className="font-mono text-xs text-emerald-300 select-all truncate block">
                         {app.flatpakCommand}
                       </code>
@@ -339,9 +359,6 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             </div>
           )}
 
-          {/* Downloads by device */}
-          <DownloadSection app={app} />
-
           {/* Repository & Security */}
           <div id="detail-safety-box" className="border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3 bg-slate-950/[0.03] dark:bg-white/[0.02]">
             <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
@@ -351,7 +368,11 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             <ul className="space-y-1.5 text-slate-400 text-xs">
               <li className="flex items-center gap-2">
                 <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                <span>Verified open-source repository with {app.stars.toLocaleString()} stars on GitHub.</span>
+                <span>
+                  {app.githubUrl.includes('github.com')
+                    ? `Verified open-source repository with ${app.stars.toLocaleString()} stars on GitHub.`
+                    : `Verified open-source repository, hosted on its own infrastructure.`}
+                </span>
               </li>
               <li className="flex items-center gap-2">
                 <Check className="w-3 h-3 text-emerald-400 shrink-0" />
@@ -379,7 +400,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           </button>
 
           <div className="flex items-center gap-2">
-            {app.githubUrl && (
+            {app.githubUrl && (app.githubUrl.includes('github.com') || app.githubUrl.includes('gitlab')) && (
               <a
                 id="detail-github-link"
                 href={app.githubUrl}

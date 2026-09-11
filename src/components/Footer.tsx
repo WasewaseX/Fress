@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Download } from 'lucide-react';
+import { ShieldCheck, Download, ExternalLink } from 'lucide-react';
 import { LegalTab } from './LegalModals';
 
 interface FooterProps {
@@ -22,7 +22,7 @@ export const Footer: React.FC<FooterProps> = ({
               <span id="footer-brand-name" className="font-bold text-slate-200">
                 Fress
               </span>
-              <span id="footer-license-badge" className="text-[10px] font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded text-slate-400">
+              <span id="footer-license-badge" className="text-[11px] font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded text-slate-400">
                 MIT Licensed
               </span>
             </div>

@@ -1,3 +1,13 @@
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/600.css";
+@import "@fontsource/plus-jakarta-sans/700.css";
+@import "@fontsource/plus-jakarta-sans/800.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/vazirmatn/400.css";
+@import "@fontsource/vazirmatn/500.css";
+@import "@fontsource/vazirmatn/700.css";
 @import "tailwindcss";
 
 /* Enable class-based dark mode for Tailwind v4 */
@@ -13,7 +23,7 @@
   /* Dark theme base (default / .dark) */
   --color-slate-950: #090d16;
   --color-slate-900: #0d131f;
-  --color-slate-800: #161e2e;
+  --color-slate-800: #182132;
   --color-slate-700: #1e2736;
   --color-slate-600: #2c3648;
 }
@@ -125,6 +135,15 @@ body {
 }
 [data-sonner-toast] [data-title] {
   color: var(--color-slate-100) !important;
+}
+
+/* Persian typeface for RTL mode */
+[dir="rtl"] body,
+[dir="rtl"] input,
+[dir="rtl"] button,
+[dir="rtl"] textarea,
+[dir="rtl"] select {
+  font-family: "Vazirmatn", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
 }
 
 /* RTL (Farsi) adjustments: keep meaning, flip physical padding cues */

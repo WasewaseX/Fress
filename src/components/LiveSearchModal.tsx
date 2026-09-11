@@ -198,7 +198,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                 Live Open-Source Tool Search
               </h2>
               <p className="text-[11px] text-slate-400">
-                Search any software on GitHub and add it instantly to your local Fress catalog
+                Search GitHub and add tools to your local catalog. Entries you add here are yours: they are not curated or verified by Fress, so check licenses and links yourself.
               </p>
             </div>
           </div>
@@ -287,21 +287,21 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                     <h3 className="font-bold text-sm text-slate-100 truncate">
                       {item.name}
                     </h3>
-                    <span className="text-[10px] text-amber-300 font-mono inline-flex items-center gap-0.5 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
+                    <span className="text-[11px] text-amber-300 font-mono inline-flex items-center gap-0.5 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
                       <Star className="w-2.5 h-2.5" />
                       {item.stars ? (item.stars / 1000).toFixed(0) + 'k' : 'FOSS'}
                     </span>
-                    <span className="text-[10px] text-sky-300 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20">
+                    <span className="text-[11px] text-sky-300 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20">
                       {item.category}
                     </span>
                     {hasAndroid && (
-                      <span className="text-[10px] text-emerald-300 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20 inline-flex items-center gap-0.5">
+                      <span className="text-[11px] text-emerald-300 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20 inline-flex items-center gap-0.5">
                         <Smartphone className="w-2.5 h-2.5" />
                         Android
                       </span>
                     )}
                     {item.license && (
-                      <span className="text-[10px] text-slate-400 font-mono">
+                      <span className="text-[11px] text-slate-400 font-mono">
                         {item.license}
                       </span>
                     )}
@@ -323,7 +323,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                       <ExternalLink className="w-3 h-3" />
                     </a>
                     {item.wingetCommand && (
-                      <span className="font-mono text-[10px] text-slate-400 truncate max-w-xs">
+                      <span className="font-mono text-[11px] text-slate-400 truncate max-w-xs">
                         {item.wingetCommand}
                       </span>
                     )}

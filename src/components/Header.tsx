@@ -138,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span id="header-brand-title" className="font-extrabold text-base text-slate-100 tracking-tight">
               Fress
             </span>
-            <span className="text-[10px] font-mono font-semibold uppercase tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
+            <span className="text-[11px] font-mono font-semibold uppercase tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
               {t('common.beta')}
             </span>
           </div>
@@ -178,7 +178,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     type="button"
                     onClick={onOpenCommandPalette}
-                    className="text-[10px] font-mono bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] border border-slate-950/10 dark:border-white/[0.12] text-slate-300 px-1.5 py-0.5 rounded transition-colors"
+                    className="text-[11px] font-mono bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] border border-slate-950/10 dark:border-white/[0.12] text-slate-300 px-1.5 py-0.5 rounded transition-colors"
                     title="Open Command Palette (Ctrl+K)"
                   >
                     Ctrl+K
@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
               {downloadBadge > 0 && (
                 <span
                   id="downloads-active-badge"
-                  className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-bold flex items-center justify-center"
+                  className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[11px] font-bold flex items-center justify-center"
                 >
                   {downloadBadge}
                 </span>
@@ -303,6 +303,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => setShowSettings(!showSettings)}
                 className="p-1.5 text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] rounded-lg transition-colors"
                 title={t('header.settings')}
+                aria-label={t('header.settings')}
                 aria-expanded={showSettings}
                 aria-haspopup="true"
               >
@@ -316,7 +317,7 @@ export const Header: React.FC<HeaderProps> = ({
                     id="header-settings-dropdown"
                     className="absolute right-0 mt-1.5 w-56 bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl z-50 py-1 text-xs"
                   >
-                    <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                    <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
                       <Globe className="w-3 h-3" />
                       {t('header.language')}
                     </p>

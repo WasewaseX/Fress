@@ -37,7 +37,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
   return (
     <div 
       id="compare-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+      role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div 
@@ -205,7 +205,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   {appsToCompare.map((app) => (
                     <div key={app.id} className="px-3 flex flex-wrap gap-1">
                       {app.platforms.map((p) => (
-                        <span key={p} className="px-1.5 py-0.5 rounded text-[10px] uppercase font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] text-slate-300">
+                        <span key={p} className="px-1.5 py-0.5 rounded text-[11px] uppercase font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] text-slate-300">
                           {p}
                         </span>
                       ))}
@@ -272,7 +272,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   <div className="font-semibold text-slate-400">Install Command</div>
                   {appsToCompare.map((app) => (
                     <div key={app.id} className="px-3">
-                      <code className="text-[10px] font-mono text-sky-300 bg-black/40 px-2 py-1 rounded block truncate select-all">
+                      <code className="text-[11px] font-mono text-sky-300 bg-black/40 px-2 py-1 rounded block truncate select-all">
                         {app.wingetCommand || app.brewCommand || 'Direct installer'}
                       </code>
                     </div>

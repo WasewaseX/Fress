@@ -52,13 +52,15 @@ export const AppCard: React.FC<AppCardProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [copiedType, setCopiedType] = useState<string | null>(null);
   const [showInstallMenu, setShowInstallMenu] = useState(false);
-  const { startDownload, items: downloadItems } = useDownloads();
+  const { startDownload, recordExternalOpen, items: downloadItems } = useDownloads();
   const { t } = useI18n();
   const isDownloading = downloadItems.some((d) => d.name.startsWith(app.name) && d.status === 'active');
 
   const formatStars = (stars: number) => {
     if (stars >= 1000) {
-      return `${(stars / 1000).toFixed(stars >= 10000 ? 0 : 1)}k`;
+      const k = stars / 1000;
+      const label = k >= 10 ? k.toFixed(0) : k.toFixed(1);
+      return `${label.replace(/\.0$/, '')}k`;
     }
     return stars.toString();
   };
@@ -96,11 +98,22 @@ export const AppCard: React.FC<AppCardProps> = ({
   };
 
   const primaryCmd = app.wingetCommand || app.brewCommand || app.flatpakCommand;
+  const userOs: Platform = (() => {
+    if (typeof navigator === 'undefined') return 'windows';
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes('android')) return 'android';
+    if (ua.includes('mac os')) return 'mac';
+    if (ua.includes('linux')) return 'linux';
+    return 'windows';
+  })();
+  const osCommand = userOs === 'mac' ? app.brewCommand : userOs === 'linux' ? app.flatpakCommand || app.brewCommand : app.wingetCommand;
+  const shownCommand = osCommand || primaryCmd;
+
 
   return (
     <article 
       id={`app-card-${app.id}`}
-      className={`group relative bg-slate-900 dark:bg-slate-800 border rounded-lg p-4 flex flex-col justify-between transition-all duration-150 shadow-xs hover:shadow-md dark:shadow-lg dark:shadow-black/40 ${
+      className={`group relative bg-slate-900 dark:bg-slate-800 border rounded-lg p-4 flex flex-col justify-between transition-all duration-150 shadow-sm hover:shadow-md dark:shadow-lg dark:shadow-black/40 ${
         isBatchSelected 
           ? 'border-sky-500/60 bg-sky-950/15 ring-1 ring-sky-500/40' 
           : 'border-slate-950/10 dark:border-white/[0.08] hover:border-slate-950/30 dark:hover:border-white/[0.2]'
@@ -287,8 +300,8 @@ export const AppCard: React.FC<AppCardProps> = ({
         <div id={`app-meta-row-${app.id}`} className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-4">
           <span 
             id={`app-stars-count-${app.id}`}
-            className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-400"
-            title={`${app.stars.toLocaleString()} GitHub stars`}
+            className={`inline-flex items-center gap-1 font-mono text-xs text-slate-400 ${app.stars === 0 ? 'hidden' : ''}`}
+            title={app.githubUrl.includes('github.com') ? `${app.stars.toLocaleString()} stars on GitHub` : `${app.stars.toLocaleString()} community stars (approximate)`}
           >
             <Star className="w-3 h-3 fill-slate-400 text-slate-400" aria-hidden="true" />
             <span>{formatStars(app.stars)}</span>
@@ -296,7 +309,7 @@ export const AppCard: React.FC<AppCardProps> = ({
 
           <span 
             id={`app-license-badge-${app.id}`}
-            className="font-mono text-[11px] text-slate-400"
+            className="font-mono text-xs text-slate-400"
             title={`License: ${app.license}`}
           >
             {app.license}
@@ -354,6 +367,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               toast.info(`Opening the official download page for ${app.name}`, { description: target.label });
               import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(target.url)).catch(() => window.open(target.url, '_blank'));
             } else {
+              recordExternalOpen(`${app.name}: ${target.label}`, target.url);
               window.open(target.url, '_blank', 'noopener,noreferrer');
               toast.info(`Opening the official download page for ${app.name}`, {
                 description: target.label,
@@ -376,8 +390,10 @@ export const AppCard: React.FC<AppCardProps> = ({
                 type="button"
                 id={`quick-install-btn-${app.id}`}
                 onClick={(e) => {
-                  if (app.wingetCommand && !app.brewCommand && !app.flatpakCommand) {
-                    handleCopyCmd(e, app.wingetCommand, 'winget');
+                  const cmd = shownCommand;
+                  if (cmd) {
+                    handleCopyCmd(e, cmd, 'cmd');
+                    toast.success('Command copied', { description: 'Paste it into your terminal. Not sure? Use the Download button instead.' });
                   } else {
                     setShowInstallMenu(!showInstallMenu);
                   }
@@ -393,7 +409,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                 ) : (
                   <>
                     <Terminal className="w-3 h-3 text-sky-400" />
-                    <span>{primaryCmd.startsWith('winget') ? 'winget' : primaryCmd.startsWith('brew') ? 'brew' : primaryCmd.startsWith('flatpak') ? 'flatpak' : primaryCmd.startsWith('scoop') ? 'scoop' : 'install'}</span>
+                    <span>{shownCommand.startsWith('winget') ? 'winget' : shownCommand.startsWith('brew') ? 'brew' : shownCommand.startsWith('flatpak') ? 'flatpak' : shownCommand.startsWith('scoop') ? 'scoop' : 'install'}</span>
                     {(app.brewCommand || app.flatpakCommand) && (
                       <ChevronDown className="w-2.5 h-2.5 ml-0.5" />
                     )}

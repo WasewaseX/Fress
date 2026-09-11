@@ -5,7 +5,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
 
-export type DownloadStatus = 'active' | 'completed' | 'error' | 'cancelled' | 'browser';
+export type DownloadStatus = 'active' | 'completed' | 'error' | 'cancelled' | 'browser' | 'page';
 
 export interface DownloadItem {
   id: number;
@@ -34,6 +34,7 @@ interface DownloadsContextValue {
   activeCount: number;
   downloadDir: string | null;
   startDownload: (url: string, nameHint?: string) => Promise<void>;
+  recordExternalOpen: (name: string, url: string) => void;
   cancel: (id: number) => void;
   retry: (id: number) => void;
   clearFinished: () => void;
@@ -200,6 +201,24 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     [startDownload]
   );
 
+  const recordExternalOpen = useCallback((name: string, url: string) => {
+    setItems((prev) => [
+      {
+        id: Date.now(),
+        url,
+        name,
+        dir: 'Official website',
+        bytes: 0,
+        total: 0,
+        speed: 0,
+        eta: 0,
+        status: 'page',
+        startedAt: Date.now(),
+      },
+      ...prev.filter((it) => it.url !== url || it.status !== 'page'),
+    ]);
+  }, []);
+
   const clearFinished = useCallback(() => {
     setItems((prev) => prev.filter((it) => it.status === 'active'));
   }, []);
@@ -242,7 +261,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <DownloadsContext.Provider
-      value={{ items, activeCount, downloadDir, startDownload, cancel, retry, clearFinished, openFile, openFolder, chooseFolder }}
+      value={{ items, activeCount, downloadDir, startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder }}
     >
       {children}
     </DownloadsContext.Provider>

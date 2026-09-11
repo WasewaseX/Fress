@@ -42,14 +42,25 @@ export const Footer: React.FC<FooterProps> = ({
               <span>Privacy & Tracking Check</span>
             </button>
 
+            <a
+              id="footer-get-fress-btn"
+              href="https://github.com/WasewaseX/Fress/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-900 hover:bg-slate-850 px-2.5 py-1 rounded border border-slate-800 transition-colors"
+            >
+              <Download className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+              <span>Get Fress for Windows</span>
+            </a>
+
             <button
               id="footer-tauri-installer-btn"
               type="button"
               onClick={onOpenTauriModal}
               className="inline-flex items-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-900 hover:bg-slate-850 px-2.5 py-1 rounded border border-slate-800 transition-colors"
+              title="For developers: how to build the desktop installer from source"
             >
-              <Download className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-              <span>Windows .exe Installer</span>
+              <span>Build guide (developers)</span>
             </button>
           </div>
         </div>

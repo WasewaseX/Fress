@@ -452,6 +452,8 @@ function AppShell() {
         setIsBatchInstallModalOpen(false);
         setIsCompareModalOpen(false);
         setIsExportModalOpen(false);
+        setIsLiveSearchOpen(false);
+        setIsDownloadsOpen(false);
         setLegalModal((prev) => ({ ...prev, isOpen: false }));
       } else if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();

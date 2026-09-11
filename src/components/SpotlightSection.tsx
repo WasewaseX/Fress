@@ -21,10 +21,10 @@ export const SpotlightSection: React.FC<SpotlightSectionProps> = ({
 
         {/* Hero: the one place we raise our voice */}
         <div className="min-w-0">
-          <h1 id="spotlight-main-heading" className="text-2xl sm:text-[28px] font-extrabold text-slate-100 tracking-tight leading-tight">
+          <h1 id="spotlight-main-heading" className="text-[32px] sm:text-[40px] font-extrabold text-slate-100 tracking-tight leading-[1.1]">
             {t('hero.title')}
           </h1>
-          <p id="spotlight-main-desc" className="text-sm text-slate-400 mt-1.5 leading-relaxed max-w-2xl">
+          <p id="spotlight-main-desc" className="text-[15px] text-slate-400 mt-2.5 leading-relaxed max-w-2xl">
             {t('hero.subtitle')}
           </p>
         </div>

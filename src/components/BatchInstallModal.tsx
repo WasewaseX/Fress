@@ -59,7 +59,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
         .map((a) => `${a.wingetCommand} --accept-source-agreements --accept-package-agreements`);
       
       return `REM ==========================================\nREM Fress - Windows CMD Batch Install\nREM ==========================================\n\n` + 
-        commands.join(' && \\\n');
+        commands.join(' && ');
     }
 
     if (scriptType === 'brew') {

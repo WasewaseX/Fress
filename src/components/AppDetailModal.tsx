@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { PLATFORM_LABELS, getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
 import { useDownloads } from '../lib/downloads';
+import { useI18n } from '../lib/i18n';
 import { toast } from 'sonner';
 
 /** Device-aware download section: pick your platform, get real targets. */
@@ -22,6 +23,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const firstAvailable = app.platforms[0] || 'windows';
   const [platform, setPlatform] = useState<Platform>(firstAvailable);
   const { startDownload } = useDownloads();
+  const { t } = useI18n();
   const options = getDownloadOptions(app, platform);
   const unavailable = platformUnavailableNote(app, platform);
 
@@ -37,11 +39,11 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
     <div id="detail-download-box" className="border border-sky-500/25 rounded-lg p-3 bg-sky-500/5">
       <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
         <MonitorSmartphone className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-        <span>Download for your device</span>
+        <span>{t('detail.downloads')}</span>
       </h3>
 
-      {/* Platform selector */}
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+      {/* Platform selector: segmented control with real hit targets */}
+      <div className="flex items-center gap-1 flex-wrap mb-3 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] p-1 rounded-lg w-fit max-w-full">
         {(Object.keys(PLATFORM_LABELS) as Platform[]).map((p) => {
           const available = app.platforms.includes(p);
           return (
@@ -49,12 +51,12 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
               key={p}
               type="button"
               onClick={() => setPlatform(p)}
-              className={`text-[11px] font-medium px-2.5 py-1 rounded-md border transition-colors ${
+              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
                 platform === p
-                  ? 'bg-sky-600 text-white border-sky-500'
+                  ? 'bg-sky-600 text-white shadow-xs'
                   : available
-                    ? 'text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] border-slate-950/10 dark:border-white/[0.08]'
-                    : 'text-slate-500 border-slate-950/10 dark:border-white/[0.06] cursor-not-allowed opacity-60'
+                    ? 'text-slate-300 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08]'
+                    : 'text-slate-500 cursor-not-allowed opacity-60'
               }`}
               aria-pressed={platform === p}
               title={available ? PLATFORM_LABELS[p] : `Not available on ${PLATFORM_LABELS[p]}`}
@@ -66,7 +68,11 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
       </div>
 
       {unavailable ? (
-        <p className="text-xs text-slate-400 leading-relaxed">{unavailable}. {app.websiteUrl ? 'Check the official website for updates.' : ''}</p>
+        <div className="text-center py-4">
+          <MonitorSmartphone className="w-6 h-6 text-slate-500 mx-auto mb-2" aria-hidden="true" />
+          <p className="text-xs text-slate-300 font-medium mb-0.5">{t('detail.notAvailable')}</p>
+          <p className="text-[11px] text-slate-400 leading-relaxed">{unavailable}. {app.websiteUrl ? 'Check the official website for updates.' : ''}</p>
+        </div>
       ) : options.length > 0 ? (
         <div className="space-y-1.5">
           {options.map((option) => (
@@ -84,15 +90,15 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                 <Download className={`w-3.5 h-3.5 shrink-0 ${option.kind === 'direct' ? 'text-sky-100' : 'text-sky-400'}`} aria-hidden="true" />
                 <span className="truncate">
                   {option.label}
-                  {option.kind === 'direct' && <span className="ml-1.5 text-[9px] font-mono font-normal uppercase tracking-wide opacity-80">progress in app</span>}
-                  {option.kind === 'store' && <span className="ml-1.5 text-[9px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
+                  {option.kind === 'direct' && <span className="ml-1.5 text-[10px] font-mono font-normal uppercase tracking-wide opacity-80">progress in app</span>}
+                  {option.kind === 'store' && <span className="ml-1.5 text-[10px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
                 </span>
               </span>
               {option.kind !== 'direct' && <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />}
             </button>
           ))}
           <p className="text-[10px] text-slate-400 leading-relaxed pt-0.5">
-            Direct downloads run inside the Fress download manager with progress, cancel and SHA-256 verification. Other links open the official page in your browser. Always check the official page for the newest version.
+            {t('detail.downloadsHint')} {t('detail.checkLatest')}
           </p>
         </div>
       ) : (
@@ -128,6 +134,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
       role="dialog"
       aria-modal="true"
       aria-labelledby="app-detail-title"
+      aria-label={app ? `${app.name} details` : 'Application details'}
     >
       <div 
         id="app-detail-modal-container"
@@ -188,7 +195,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
         </div>
 
         {/* Content body */}
-        <div id="app-detail-modal-body" className="p-4 sm:p-6 space-y-4 overflow-y-auto text-xs text-slate-300">
+        <div id="app-detail-modal-body" className="p-4 sm:p-6 space-y-4 overflow-y-auto text-[13px] leading-relaxed text-slate-300">
           {/* Overview */}
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">

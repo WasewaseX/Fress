@@ -36,7 +36,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Focus input when opened
+  // Focus input when opened; close on Escape like every other modal
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => {
@@ -46,6 +46,13 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
       if (!query) {
         handleSearch('awesome open-source');
       }
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
     }
   }, [isOpen]);
 

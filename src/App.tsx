@@ -878,6 +878,12 @@ function AppShell() {
         onClose={() => setIsShortcutsModalOpen(false)}
       />
 
+      {/* Download manager panel */}
+      <DownloadManager
+        isOpen={isDownloadsOpen}
+        onClose={() => setIsDownloadsOpen(false)}
+      />
+
       {/* Interactive Cookie Consent Banner */}
       <CookieBanner
         cookieConsent={cookieConsent}

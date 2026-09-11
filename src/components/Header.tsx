@@ -130,7 +130,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header id="main-app-header" className="border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-900/95 backdrop-blur-md sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5">
-        <div id="header-content-row" className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div id="header-content-row" className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 flex-wrap">
 
           {/* Brand: app icon + name, nothing else */}
           <div id="header-brand-group" className="flex items-center gap-2.5 shrink-0">
@@ -138,13 +138,13 @@ export const Header: React.FC<HeaderProps> = ({
             <span id="header-brand-title" className="font-extrabold text-base text-slate-100 tracking-tight">
               Fress
             </span>
-            <span className="text-[9px] font-mono font-semibold uppercase tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-mono font-semibold uppercase tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
               {t('common.beta')}
             </span>
           </div>
 
           {/* Search bar & Cmd+K quick launcher */}
-          <div id="header-search-wrapper" className="flex-1 max-w-lg relative">
+          <div id="header-search-wrapper" className="flex-1 max-w-lg relative min-w-[200px]">
             <label htmlFor="app-search-input" className="sr-only">
               {t('header.search')} Ctrl+K
             </label>
@@ -159,7 +159,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
-                placeholder={`${t('header.search')} Ctrl+K...`}
+                placeholder={t('header.searchPlaceholder')}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] hover:border-slate-950/20 dark:hover:border-white/[0.2] text-slate-100 placeholder-slate-400 text-xs rounded-lg pl-9 pr-20 py-2 transition-colors focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -189,7 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Action group */}
-          <div id="header-actions-group" className="flex items-center gap-2 shrink-0">
+          <div id="header-actions-group" className="flex items-center gap-2 shrink-0 flex-wrap">
             <button
               id="header-live-search-btn"
               type="button"
@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
               {downloadBadge > 0 && (
                 <span
                   id="downloads-active-badge"
-                  className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[9px] font-bold flex items-center justify-center"
+                  className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-bold flex items-center justify-center"
                 >
                   {downloadBadge}
                 </span>

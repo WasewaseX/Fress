@@ -72,10 +72,9 @@ interface CuratedEntry {
 const CURATED: Record<string, CuratedEntry> = {
   vlc: {
     windows: [
-      { kind: 'direct', label: 'VLC for Windows (64-bit)', url: 'https://get.videolan.org/vlc/last/win64/', note: 'Installer, x86_64' },
-      { kind: 'direct', label: 'VLC for Windows (ARM)', url: 'https://get.videolan.org/vlc/last/win-arm/', note: 'Windows on ARM' },
+      { kind: 'page', label: 'VLC for Windows', url: 'https://www.videolan.org/vlc/download-windows.html', note: 'Installer, x86_64 and ARM' },
     ],
-    mac: [{ kind: 'direct', label: 'VLC for macOS', url: 'https://get.videolan.org/vlc/last/macosx/', note: 'Universal .dmg' }],
+    mac: [{ kind: 'page', label: 'VLC for macOS', url: 'https://www.videolan.org/vlc/download-macosx.html', note: 'Universal .dmg' }],
     android: [{ kind: 'page', label: 'VLC on Google Play', url: 'https://play.google.com/store/apps/details?id=org.videolan.vlc' }],
     ios: [{ kind: 'store', label: 'VLC on the App Store', url: 'https://apps.apple.com/app/vlc-media-player/id6503779629' }],
   },
@@ -112,7 +111,7 @@ const CURATED: Record<string, CuratedEntry> = {
     ios: [{ kind: 'store', label: 'Signal on the App Store', url: 'https://apps.apple.com/app/signal-private-messenger/id874139669' }],
   },
   'f-droid': {
-    android: [{ kind: 'page', label: 'Download F-Droid .apk', url: 'https://f-droid.org/en/F-Droid.apk', note: 'The official client installer' }],
+    android: [{ kind: 'direct', label: 'F-Droid .apk (direct)', url: 'https://f-droid.org/F-Droid.apk', note: 'Official client installer' }],
   },
   sumatra: {
     windows: [{ kind: 'page', label: 'Download installer or portable', url: 'https://www.sumatrapdfreader.org/download-free-pdf-viewer' }],
@@ -153,11 +152,11 @@ export function platformUnavailableNote(app: AppItem, platform: Platform): strin
   if (app.platforms.includes(platform)) return null;
   if (platform === 'ios') {
     return app.platforms.includes('android')
-      ? 'No iOS build; this app ships for Android and desktop.'
-      : 'No iOS build of this app.';
+      ? 'No iOS build; this app ships for Android and desktop'
+      : 'No iOS build of this app';
   }
   if (platform === 'android') {
-    return 'No Android build; check the desktop or web options.';
+    return 'No Android build; check the desktop or web options';
   }
-  return `No ${PLATFORM_LABELS[platform]} build; the app ships for: ${app.platforms.map((p) => PLATFORM_LABELS[p]).join(', ')}.`;
+  return `No ${PLATFORM_LABELS[platform]} build; the app ships for: ${app.platforms.map((p) => PLATFORM_LABELS[p]).join(', ')}`;
 }

@@ -18,9 +18,10 @@ import {
   ChevronDown,
   Download
 } from 'lucide-react';
-import { bestDownloadFor, PLATFORM_LABELS } from '../lib/appDownloads';
+import { bestDownloadFor } from '../lib/appDownloads';
 import { useDownloads } from '../lib/downloads';
 import { toast } from 'sonner';
+import { useI18n } from '../lib/i18n';
 
 
 interface AppCardProps {
@@ -52,6 +53,7 @@ export const AppCard: React.FC<AppCardProps> = ({
   const [copiedType, setCopiedType] = useState<string | null>(null);
   const [showInstallMenu, setShowInstallMenu] = useState(false);
   const { startDownload, items: downloadItems } = useDownloads();
+  const { t } = useI18n();
   const isDownloading = downloadItems.some((d) => d.name.startsWith(app.name) && d.status === 'active');
 
   const formatStars = (stars: number) => {
@@ -62,24 +64,19 @@ export const AppCard: React.FC<AppCardProps> = ({
   };
 
   const renderPlatformBadge = (platform: Platform) => {
-    const isAndroid = platform === 'android';
-    const label = 
-      platform === 'windows' ? 'Win' : 
-      platform === 'mac' ? 'Mac' : 
-      platform === 'linux' ? 'Lin' : 
-      platform === 'android' ? 'And' :
+    const label =
+      platform === 'windows' ? 'Windows' :
+      platform === 'mac' ? 'macOS' :
+      platform === 'linux' ? 'Linux' :
+      platform === 'android' ? 'Android' :
       platform === 'web' ? 'Web' : 'iOS';
 
     return (
-      <span 
-        key={platform} 
+      <span
+        key={platform}
         id={`platform-${platform}-${app.id}`}
-        className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
-          isAndroid
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 font-semibold'
-            : 'bg-slate-950/[0.04] dark:bg-white/[0.04] border-slate-950/10 dark:border-white/[0.08] text-slate-300'
-        }`}
-        title={`${platform} supported`}
+        className="text-[11px] text-slate-400"
+        title={`${label} supported`}
       >
         {label}
       </span>
@@ -103,7 +100,7 @@ export const AppCard: React.FC<AppCardProps> = ({
   return (
     <article 
       id={`app-card-${app.id}`}
-      className={`group relative bg-slate-900 border rounded-lg p-4 flex flex-col justify-between transition-all duration-150 shadow-xs hover:shadow-md ${
+      className={`group relative bg-slate-900 dark:bg-slate-800 border rounded-lg p-4 flex flex-col justify-between transition-all duration-150 shadow-xs hover:shadow-md dark:shadow-lg dark:shadow-black/40 ${
         isBatchSelected 
           ? 'border-sky-500/60 bg-sky-950/15 ring-1 ring-sky-500/40' 
           : 'border-slate-950/10 dark:border-white/[0.08] hover:border-slate-950/30 dark:hover:border-white/[0.2]'
@@ -126,39 +123,39 @@ export const AppCard: React.FC<AppCardProps> = ({
               />
             )}
 
-            <span id={`app-cat-badge-${app.id}`} className="text-[11px] font-medium text-slate-300 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-2 py-0.5 rounded">
+            <span id={`app-cat-badge-${app.id}`} className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               {app.category}
             </span>
 
             {app.isOwnerPick && (
               <span 
                 id={`app-owner-badge-${app.id}`}
-                className="text-[10px] font-medium bg-amber-400/10 text-amber-300 border border-amber-400/20 px-1.5 py-0.5 rounded flex items-center gap-1 whitespace-nowrap"
-                title="Recommended tool"
+                className="text-[11px] font-bold bg-amber-400 text-slate-950 border border-amber-400 px-2 py-0.5 rounded flex items-center gap-1 whitespace-nowrap shadow-xs"
+                title="Our single recommendation in the whole catalog"
               >
-                <Award className="w-3 h-3 text-amber-400" aria-hidden="true" />
-                <span>Pick</span>
+                <Award className="w-3 h-3" aria-hidden="true" />
+                <span>{t('card.badge.pick')}</span>
               </span>
             )}
 
             {app.isTrendingToday && (
               <span 
                 id={`app-trending-badge-${app.id}`}
-                className="text-[10px] font-medium bg-emerald-400/10 text-emerald-300 border border-emerald-400/20 px-1.5 py-0.5 rounded flex items-center gap-1 whitespace-nowrap"
-                title="Popular in open-source"
+                className="text-[11px] font-medium text-emerald-300 flex items-center gap-1 whitespace-nowrap"
+                title="Popular in open-source right now"
               >
-                <Flame className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                <span>Trending</span>
+                <Flame className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+                <span>{t('card.badge.trending')}</span>
               </span>
             )}
 
             {app.isCustom && (
               <span 
                 id={`app-custom-badge-${app.id}`}
-                className="text-[10px] font-medium bg-sky-400/10 text-sky-300 border border-sky-400/20 px-1.5 py-0.5 rounded"
+                className="text-[11px] font-medium bg-sky-400/10 text-sky-300 border border-sky-400/20 px-1.5 py-0.5 rounded"
                 title="Locally added custom software"
               >
-                Custom
+                {t('card.badge.custom')}
               </span>
             )}
           </div>
@@ -217,6 +214,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
               aria-label={isFavorite ? `Remove ${app.name} from favorites` : `Add ${app.name} to favorites`}
+              aria-pressed={isFavorite}
               title={isFavorite ? "Bookmarked" : "Add to bookmarks"}
             >
               <Bookmark className={`w-3.5 h-3.5 ${isFavorite ? 'fill-rose-400' : ''}`} aria-hidden="true" />
@@ -258,13 +256,13 @@ export const AppCard: React.FC<AppCardProps> = ({
             <h3 
               id={`app-title-${app.id}`} 
               onClick={() => onOpenDetail(app)}
-              className="font-semibold text-slate-100 text-[15px] leading-snug tracking-tight group-hover:text-sky-400 transition-colors cursor-pointer"
+              className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors cursor-pointer"
             >
               {app.name}
             </h3>
             {app.proprietaryAlternative && (
-              <span className="text-[10px] font-mono text-amber-300/90 bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded">
-                vs {app.proprietaryAlternative}
+              <span className="text-[11px] font-medium text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
+                {app.proprietaryAlternative}
               </span>
             )}
           </div>
@@ -274,31 +272,31 @@ export const AppCard: React.FC<AppCardProps> = ({
         </div>
 
         {/* Description */}
-        <p id={`app-desc-${app.id}`} className="text-xs text-slate-300 leading-relaxed line-clamp-2 mb-3">
+        <p id={`app-desc-${app.id}`} className="text-[13px] text-slate-300 leading-relaxed line-clamp-2 mb-3">
           {app.description}
         </p>
 
         {/* Curated Highlight */}
-        <div id={`app-highlight-row-${app.id}`} className="mb-3.5 pl-2.5 border-l-2 border-slate-950/[0.12] dark:border-white/[0.12] text-xs">
-          <p className="text-slate-400 text-[11px] leading-relaxed line-clamp-2">
+        <div id={`app-highlight-row-${app.id}`} className="mb-3.5 pl-2.5 border-l-2 border-slate-950/[0.12] dark:border-white/[0.12]">
+          <p className="text-slate-400 text-[12px] leading-relaxed line-clamp-2">
             {app.whyItsAwesome}
           </p>
         </div>
 
-        {/* Metadata Row: Stars, License, Offline, Platforms */}
-        <div id={`app-meta-row-${app.id}`} className="flex items-center flex-wrap gap-2 text-xs mb-4">
+        {/* Metadata Row: Stars, License, Platforms as quiet text (badges are rationed) */}
+        <div id={`app-meta-row-${app.id}`} className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-4">
           <span 
             id={`app-stars-count-${app.id}`}
-            className="inline-flex items-center gap-1 font-mono text-[11px] bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.08] px-2 py-0.5 rounded text-amber-300"
+            className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-400"
             title={`${app.stars.toLocaleString()} GitHub stars`}
           >
-            <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-hidden="true" />
+            <Star className="w-3 h-3 fill-slate-400 text-slate-400" aria-hidden="true" />
             <span>{formatStars(app.stars)}</span>
           </span>
 
           <span 
             id={`app-license-badge-${app.id}`}
-            className="font-mono text-[11px] bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.08] px-2 py-0.5 rounded text-slate-400"
+            className="font-mono text-[11px] text-slate-400"
             title={`License: ${app.license}`}
           >
             {app.license}
@@ -306,15 +304,21 @@ export const AppCard: React.FC<AppCardProps> = ({
 
           {app.offlineReady && (
             <span 
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-400/10 text-emerald-300 border border-emerald-400/20"
+              className="text-[11px] text-slate-400 inline-flex items-center gap-1"
               title="Runs 100% offline with zero cloud dependency"
             >
-              Offline Ready
+              <HardDrive className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+              <span>{t('card.offlineReady')}</span>
             </span>
           )}
 
-          <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1 ml-auto">
-            {app.platforms.map((p) => renderPlatformBadge(p))}
+          <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1.5 ml-auto flex-wrap" title="Available platforms">
+            {app.platforms.map((p, i) => (
+              <React.Fragment key={p}>
+                {i > 0 && <span className="text-slate-500 text-[10px]" aria-hidden="true">·</span>}
+                {renderPlatformBadge(p)}
+              </React.Fragment>
+            ))}
           </div>
         </div>
       </div>
@@ -329,7 +333,7 @@ export const AppCard: React.FC<AppCardProps> = ({
           aria-label={`View install instructions and details for ${app.name}`}
         >
           <Info className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-          <span>Guide</span>
+          <span>{t('card.guide')}</span>
         </button>
 
         {/* Download button: direct targets start the in-app download manager,
@@ -355,12 +359,12 @@ export const AppCard: React.FC<AppCardProps> = ({
               });
             }
           }}
-          className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2 py-1 rounded transition-colors"
+          className="inline-flex items-center gap-1 text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2.5 py-1.5 rounded-md transition-colors"
           title={isDownloading ? 'Downloading...' : 'Download this app'}
           aria-label={`Download ${app.name}`}
         >
-          <Download className={`w-3 h-3 ${isDownloading ? 'animate-pulse' : ''}`} aria-hidden="true" />
-          <span>{isDownloading ? 'Downloading' : 'Download'}</span>
+          <Download className={`w-3.5 h-3.5 ${isDownloading ? 'animate-pulse' : ''}`} aria-hidden="true" />
+          <span>{isDownloading ? t('card.download') + '...' : t('card.download')}</span>
         </button>
 
         {/* Quick Install Command Dropdown */}
@@ -383,12 +387,12 @@ export const AppCard: React.FC<AppCardProps> = ({
                 {copiedType ? (
                   <>
                     <Check className="w-3 h-3 text-emerald-400" />
-                    <span className="text-emerald-400">Copied!</span>
+                    <span className="text-emerald-400">{t('card.copied')}</span>
                   </>
                 ) : (
                   <>
                     <Terminal className="w-3 h-3 text-sky-400" />
-                    <span>Install</span>
+                    <span>{t('card.install')}</span>
                     {(app.brewCommand || app.flatpakCommand) && (
                       <ChevronDown className="w-2.5 h-2.5 ml-0.5" />
                     )}

@@ -122,16 +122,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!isTauri()) {
-        // Browser fallback (web preview / dev in a normal tab)
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = nameHint || '';
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        toast.info('Handed off to your browser', { description: url });
+        // Browser fallback (web preview / dev in a normal tab):
+        // open a NEW tab and explain. Never navigate the current tab away.
+        window.open(url, '_blank', 'noopener,noreferrer');
+        toast.info('Opened the download in a new browser tab', {
+          description: 'The in-app download manager with progress runs in the Fress desktop app.',
+        });
         return;
       }
 

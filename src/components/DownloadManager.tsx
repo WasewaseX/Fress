@@ -134,7 +134,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                     onClick={() => {
                       navigator.clipboard?.writeText(item.sha256!);
                     }}
-                    className="w-full text-left text-[9px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
+                    className="w-full text-left text-[10px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
                     title={t('common.copy')}
                   >
                     <FileCheck2 className="w-3 h-3 shrink-0 text-emerald-400" />

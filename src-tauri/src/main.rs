@@ -114,7 +114,7 @@ fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
 #[tauri::command]
 async fn start_download(
     app: AppHandle,
-    registry: State<'_, DownloadRegistry>,
+    registry: State<'_, Arc<DownloadRegistry>>,
     url: String,
     filename: Option<String>,
     directory: Option<String>,
@@ -139,7 +139,7 @@ async fn start_download(
     registry.cancels.lock().await.insert(id, CancelEntry(cancel_tx));
 
     let app_handle = app.clone();
-    let registry_map = Arc::new(registry.inner().cancels.clone());
+    let registry_map = Arc::clone(registry.inner());
 
     tokio::spawn(async move {
         let result = run_download(
@@ -153,7 +153,7 @@ async fn start_download(
         .await;
 
         // Remove from the cancel registry
-        registry_map.lock().await.remove(&id);
+        registry_map.cancels.lock().await.remove(&id);
 
         match result {
             Ok(payload) => {
@@ -278,7 +278,7 @@ async fn run_download(
 }
 
 #[tauri::command]
-async fn cancel_download(id: u32, registry: State<'_, DownloadRegistry>) -> Result<(), String> {
+async fn cancel_download(id: u32, registry: State<'_, Arc<DownloadRegistry>>) -> Result<(), String> {
     if let Some(entry) = registry.cancels.lock().await.remove(&id) {
         let _ = entry.0.send(()).await;
     }
@@ -302,7 +302,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(DownloadRegistry::default())
+        .manage(Arc::new(DownloadRegistry::default()))
         .invoke_handler(tauri::generate_handler![
             start_download,
             cancel_download,

@@ -1014,6 +1014,7 @@ async fn start_download(
     Ok(id)
 }
 
+#[allow(clippy::too_many_arguments)] // a download descriptor struct would just move the same names around
 async fn run_download(
     app: AppHandle,
     id: u32,
@@ -1148,9 +1149,7 @@ async fn run_download(
                     }
                 }
             };
-            if let Err(msg) = linked {
-                return Err(msg);
-            }
+            linked?;
             Ok(CompletePayload {
                 id,
                 path: final_dest.to_string_lossy().to_string(),

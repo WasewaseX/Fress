@@ -5,6 +5,10 @@ description = "Fress: a clean, curated directory of free and open-source softwar
 authors = ["Fress"]
 edition = "2021"
 
+[lib]
+name = "fress_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

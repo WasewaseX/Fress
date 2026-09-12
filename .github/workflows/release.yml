@@ -240,9 +240,7 @@ jobs:
       - name: Generate SHA256SUMS.txt
         run: |
           cd assets
-          sha256sum "$(ls | sort)" > SHA256SUMS.txt
-          # keep the manifest out of its own list
-          grep -v "SHA256SUMS.txt" SHA256SUMS.txt > tmp && mv tmp SHA256SUMS.txt
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 | xargs -0 sha256sum | sed 's|  \./|  |' > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - name: Upload checksums to the release
         run: |

@@ -134,7 +134,7 @@ jobs:
 
   build-macos-intel:
     needs: [version, create-release]
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -147,7 +147,7 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
-      - name: Build macOS Intel (.dmg)
+      - name: Cross-compile macOS Intel (.dmg) on the arm64 runner
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -49,7 +49,6 @@ jobs:
             | Platform | File |
             | --- | --- |
             | Windows (installer) | `Fress_*_x64-setup.exe` |
-            | Windows (MSI) | `Fress_*.msi` |
             | macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
             | macOS (Intel) | `Fress_*_x64.dmg` |
             | Linux (AppImage) | `Fress_*_amd64.AppImage` |
@@ -77,13 +76,13 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
-      - name: Build Windows installers (NSIS + MSI)
+      - name: Build Windows installer (NSIS)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target x86_64-pc-windows-msvc --bundles nsis msi'
+          args: '--target x86_64-pc-windows-msvc --bundles nsis'
 
   build-linux:
     needs: [version, create-release]

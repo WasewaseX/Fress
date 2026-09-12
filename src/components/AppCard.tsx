@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { bestDownloadFor } from '../lib/appDownloads';
 import { useDownloads } from '../lib/downloads';
+import { openExternal } from '../lib/external';
+import { resolveGitHubDownload, resolveFdroidDownload, guessUserPlatform } from '../lib/releaseFetch';
 import { toast } from 'sonner';
 import { useI18n } from '../lib/i18n';
 
@@ -55,6 +57,7 @@ export const AppCard: React.FC<AppCardProps> = ({
   const { startDownload, recordExternalOpen, items: downloadItems } = useDownloads();
   const { t } = useI18n();
   const isDownloading = downloadItems.some((d) => d.name.startsWith(app.name) && d.status === 'active');
+  const [resolving, setResolving] = useState(false);
 
   const formatStars = (stars: number) => {
     if (stars >= 1000) {
@@ -355,31 +358,54 @@ export const AppCard: React.FC<AppCardProps> = ({
           id={`download-btn-${app.id}`}
           type="button"
           onClick={() => {
-            const target = bestDownloadFor(app, (navigator.platform || '').toLowerCase().includes('win') ? 'windows' : app.platforms[0]);
-            if (!target) {
-              onOpenDetail(app);
-              return;
-            }
-            if (target.kind === 'direct') {
-              void startDownload(target.url, `${app.name} ${target.label}`.trim());
-            } else if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-              // In the desktop app, page links open the system browser
-              toast.info(`Opening the official download page for ${app.name}`, { description: target.label });
-              import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(target.url)).catch(() => window.open(target.url, '_blank'));
-            } else {
-              recordExternalOpen(`${app.name}: ${target.label}`, target.url);
-              window.open(target.url, '_blank', 'noopener,noreferrer');
-              toast.info(`Opening the official download page for ${app.name}`, {
-                description: target.label,
-              });
-            }
+            const platform = guessUserPlatform(app);
+            void (async () => {
+              setResolving(true);
+              try {
+                // 1) Live-resolve the latest STABLE file for this platform from GitHub Releases
+                const resolved = await resolveGitHubDownload(app, platform);
+                if (resolved) {
+                  void startDownload(resolved.url, resolved.filename);
+                  return;
+                }
+                // 2) Android: try the app's F-Droid package next
+                if (platform === 'android' && app.fdroidId) {
+                  const fd = await resolveFdroidDownload(app.fdroidId);
+                  if (fd) {
+                    void startDownload(fd.url, fd.filename);
+                    return;
+                  }
+                }
+                // 3) Curated targets: direct links stream in the app
+                const target = bestDownloadFor(app, platform);
+                if (!target) {
+                  onOpenDetail(app);
+                  return;
+                }
+                if (target.kind === 'direct') {
+                  void startDownload(target.url, `${app.name} ${target.label}`.trim());
+                } else if (target.kind === 'store' || !/github\.com\/[^/]+\/[^/]+\/releases/i.test(target.url)) {
+                  // Official vendor download pages are beginner-friendly; open them
+                  recordExternalOpen(`${app.name}: ${target.label}`, target.url);
+                  toast.info(`Opening the official download page for ${app.name}`, {
+                    description: target.label,
+                  });
+                  void openExternal(target.url);
+                } else {
+                  // A raw GitHub releases page is not beginner-friendly: open the in-app guide
+                  onOpenDetail(app);
+                }
+              } finally {
+                setResolving(false);
+              }
+            })();
           }}
           className="inline-flex items-center gap-1 text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2.5 py-1.5 rounded-md transition-colors"
-          title={isDownloading ? 'Downloading...' : 'Download this app'}
+          title={isDownloading ? 'Downloading...' : resolving ? 'Finding the latest stable download...' : 'Download this app'}
           aria-label={`Download ${app.name}`}
         >
-          <Download className={`w-3.5 h-3.5 ${isDownloading ? 'animate-pulse' : ''}`} aria-hidden="true" />
-          <span>{isDownloading ? t('card.download') + '...' : t('card.download')}</span>
+          <Download className={`w-3.5 h-3.5 ${isDownloading || resolving ? 'animate-pulse' : ''}`} aria-hidden="true" />
+          <span>{isDownloading || resolving ? t('card.download') + '...' : t('card.download')}</span>
         </button>
 
         {/* Quick Install Command Dropdown */}
@@ -474,6 +500,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               href={app.githubUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
               className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
               aria-label={`View ${app.name} source code (opens in new window)`}
               title="Source code"
@@ -488,6 +515,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               href={app.websiteUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
               className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
               aria-label={`Visit official website for ${app.name} (opens in new window)`}
             >

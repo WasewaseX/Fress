@@ -38,6 +38,8 @@ export interface AppItem {
   flatpakCommand?: string;
   scoopCommand?: string;
   aptCommand?: string;
+  fdroidId?: string;
+  playStoreId?: string;
   proprietaryAlternative?: string;
   isPortable?: boolean;
   architectures?: ('x86_64' | 'arm64' | 'universal')[];

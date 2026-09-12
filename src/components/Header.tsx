@@ -21,6 +21,9 @@ import {
   DownloadCloud,
   Globe,
   Check,
+  Folder,
+  FolderOpen,
+  RotateCcw,
 } from 'lucide-react';
 import { PrivacyAuditData } from '../types';
 import { useTheme } from './ThemeProvider';
@@ -51,7 +54,7 @@ interface HeaderProps {
   activeDownloadCount?: number;
 }
 
-/** Brand mark: a fresh leaf in a rounded tile, used as the app icon everywhere. */
+/** Brand mark: a blue leaf on a transparent background, used everywhere. */
 export const BrandMark: React.FC<{ size?: number }> = ({ size = 32 }) => (
   <svg
     width={size}
@@ -61,12 +64,17 @@ export const BrandMark: React.FC<{ size?: number }> = ({ size = 32 }) => (
     aria-label="Fress"
     className="shrink-0"
   >
-    <rect width="64" height="64" rx="14" fill="#0d7cb2" />
+    <defs>
+      <linearGradient id="fressLeafFill" x1="0" y1="0" x2="0.35" y2="1">
+        <stop offset="0" stopColor="#41b6f2" />
+        <stop offset="1" stopColor="#0d84c9" />
+      </linearGradient>
+    </defs>
     <path
       d="M46.5 15.5c-13.2 0-22.6 4.6-27.4 12.9-3.4 5.9-3.6 12.9-1 20.6l3.4-1.2c-2.2-6.6-2.1-12.5.7-17.4 2.5-4.4 7.2-7.8 13.7-9.7-4.3 2.8-7.4 6.4-9.1 10.6-2.4 5.9-1.7 12.4 1.9 17.7 5.9-1 10.9-3.3 14.7-6.8 5.3-4.9 8-12 8.1-21.5 0-2.9-.4-5.2-1.5-5.2z"
-      fill="#ffffff"
+      fill="url(#fressLeafFill)"
     />
-    <path d="M19 50.5c1.5-4.5 4-8.5 7.5-11.5" stroke="#8fd3ef" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+    <path d="M19 50.5c1.5-4.5 4-8.5 7.5-11.5" stroke="#0b6ea8" strokeWidth="2.4" strokeLinecap="round" fill="none" />
   </svg>
 );
 
@@ -95,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const { theme, setTheme } = useTheme();
-  const { activeCount } = useDownloads();
+  const { activeCount, downloadDir, chooseFolder, resetFolder } = useDownloads();
   const { t, lang, setLang } = useI18n();
 
   const downloadBadge = activeDownloadCount ?? activeCount;
@@ -315,8 +323,42 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="fixed inset-0 z-40" onClick={() => setShowSettings(false)} aria-hidden="true" />
                   <div
                     id="header-settings-dropdown"
-                    className="absolute right-0 mt-1.5 w-56 bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl z-50 py-1 text-xs"
+                    className="absolute right-0 mt-1.5 w-64 bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl z-50 py-1 text-xs"
                   >
+                    {/* Download location */}
+                    <div className="px-3 pt-2.5 pb-2.5 border-b border-slate-950/10 dark:border-white/[0.06]">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5 mb-1.5">
+                        <Folder className="w-3 h-3" />
+                        {t('settings.downloadFolder')}
+                      </p>
+                      <code
+                        className="block w-full truncate text-[10px] font-mono text-slate-300 bg-slate-950/[0.06] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.08] rounded px-1.5 py-1 mb-1.5"
+                        dir="ltr"
+                        title={downloadDir || ''}
+                      >
+                        {downloadDir || '…'}
+                      </code>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void chooseFolder()}
+                          className="flex-1 inline-flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded-md font-semibold border border-sky-500 transition-colors"
+                        >
+                          <FolderOpen className="w-3 h-3" />
+                          <span>{t('settings.changeFolder')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void resetFolder()}
+                          className="inline-flex items-center justify-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-950/[0.06] dark:bg-white/[0.06] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
+                          title="Use the system Downloads folder"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>{t('settings.resetFolder')}</span>
+                        </button>
+                      </div>
+                    </div>
+
                     <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
                       <Globe className="w-3 h-3" />
                       {t('header.language')}

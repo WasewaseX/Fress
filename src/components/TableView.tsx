@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AppItem } from '../types';
+import { openExternal } from '../lib/external';
 import { 
   Star, 
   ExternalLink, 
@@ -231,6 +232,7 @@ export const TableView: React.FC<TableViewProps> = ({
                         href={app.githubUrl}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
                         className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title="Open Source code"
                       >
@@ -243,6 +245,7 @@ export const TableView: React.FC<TableViewProps> = ({
                         href={app.websiteUrl}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
                         className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title="Open official website"
                       >

@@ -37,6 +37,199 @@ struct ErrorPayload {
     message: String,
 }
 
+#[derive(Serialize, Clone)]
+struct GhAsset {
+    name: String,
+    size: u64,
+    download_url: String,
+}
+
+#[derive(Serialize, Clone)]
+struct GhRelease {
+    tag: String,
+    name: String,
+    published_at: String,
+    html_url: String,
+    assets: Vec<GhAsset>,
+}
+
+#[derive(Serialize, Clone)]
+struct FdroidPackage {
+    package: String,
+    version: String,
+    version_code: i64,
+    apk_url: String,
+    page_url: String,
+}
+
+fn api_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent(format!(
+            "Fress/{} (+https://github.com/WasewaseX/Fress)",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Resolves the LATEST STABLE release of a GitHub repository.
+/// The /releases/latest endpoint already excludes drafts and prereleases,
+/// so beta/RC versions are never offered here.
+#[tauri::command]
+async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
+    let repo = repo.trim().trim_matches('/').to_string();
+    if repo.is_empty() {
+        return Err("No GitHub repository configured".into());
+    }
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let client = api_client()?;
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Err("No stable release found for this project".into());
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN {
+        return Err("GitHub rate limit reached; try again in a few minutes".into());
+    }
+    if !status.is_success() {
+        return Err(format!("GitHub returned HTTP {}", status));
+    }
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Bad response: {}", e))?;
+    let body: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+    let tag = body
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if tag.is_empty() {
+        return Err("Unexpected GitHub response".into());
+    }
+    let name = body
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| tag.clone());
+    let published_at = body
+        .get("published_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let html_url = match body.get("html_url").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => format!("https://github.com/{}/releases", repo),
+    };
+    let mut assets = Vec::new();
+    if let Some(list) = body.get("assets").and_then(|v| v.as_array()) {
+        for a in list {
+            let aname = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let dl = a
+                .get("browser_download_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let size = a.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+            if aname.is_empty() || dl.is_empty() {
+                continue;
+            }
+            assets.push(GhAsset {
+                name: aname.to_string(),
+                size,
+                download_url: dl.to_string(),
+            });
+        }
+    }
+    Ok(GhRelease {
+        tag,
+        name,
+        published_at,
+        html_url,
+        assets,
+    })
+}
+
+/// Resolves the suggested stable package version from the F-Droid index.
+#[tauri::command]
+async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
+    let pkg = pkg.trim().to_string();
+    if pkg.is_empty() {
+        return Err("No F-Droid package configured".into());
+    }
+    let url = format!("https://f-droid.org/api/v1/packages/{}", pkg);
+    let client = api_client()?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("Package not found on F-Droid".into());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("F-Droid returned HTTP {}", resp.status()));
+    }
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Bad response: {}", e))?;
+    let body: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+
+    let mut max_code: i64 = 0;
+    if let Some(list) = body.get("packages").and_then(|v| v.as_array()) {
+        for p in list {
+            if let Some(vc) = p.get("versionCode").and_then(|v| v.as_i64()) {
+                if vc > max_code {
+                    max_code = vc;
+                }
+            }
+        }
+    }
+    let version_code = body
+        .get("suggestedVersionCode")
+        .and_then(|v| v.as_i64())
+        .filter(|vc| *vc > 0 && (max_code == 0 || *vc <= max_code))
+        .unwrap_or(max_code);
+    if version_code <= 0 {
+        return Err("No package versions found on F-Droid".into());
+    }
+    let version = body
+        .get("packages")
+        .and_then(|v| v.as_array())
+        .and_then(|list| {
+            list.iter()
+                .find(|p| p.get("versionCode").and_then(|v| v.as_i64()) == Some(version_code))
+        })
+        .and_then(|p| p.get("versionName").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+
+    Ok(FdroidPackage {
+        apk_url: format!("https://f-droid.org/repo/{}_{}.apk", pkg, version_code),
+        page_url: format!("https://f-droid.org/packages/{}", pkg),
+        package: pkg,
+        version,
+        version_code,
+    })
+}
+
+/// Host CPU architecture ("x86_64" or "aarch64"), used to pick the right asset.
+#[tauri::command]
+fn host_arch() -> String {
+    std::env::consts::ARCH.to_string()
+}
+
 struct CancelEntry(mpsc::Sender<()>);
 
 #[derive(Default)]
@@ -287,10 +480,11 @@ async fn cancel_download(id: u32, registry: State<'_, Arc<DownloadRegistry>>) ->
 
 #[tauri::command]
 fn default_download_dir() -> String {
+    // Default is the user's normal Downloads folder, like any other app.
     let base = dirs::download_dir()
         .or_else(|| dirs::home_dir())
         .unwrap_or_else(|| PathBuf::from("."));
-    base.join("Fress").to_string_lossy().to_string()
+    base.to_string_lossy().to_string()
 }
 
 #[tauri::command]
@@ -307,7 +501,10 @@ fn main() {
             start_download,
             cancel_download,
             default_download_dir,
-            app_version
+            app_version,
+            fetch_latest_release,
+            fetch_fdroid_package,
+            host_arch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,54 +10,227 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  create-release:
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the release
+        id: create
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Fress v${{ needs.version.outputs.version }}
+          body: |
+            Fress v${{ needs.version.outputs.version }} — a clean, curated directory of free and open-source software.
+
+            **Installers for every platform**
+            | Platform | File |
+            | --- | --- |
+            | Windows (installer) | `Fress_*_x64-setup.exe` |
+            | Windows (MSI) | `Fress_*.msi` |
+            | macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
+            | macOS (Intel) | `Fress_*_x64.dmg` |
+            | Linux (AppImage) | `Fress_*_amd64.AppImage` |
+            | Linux (deb) | `Fress_*_amd64.deb` |
+            | Linux (rpm) | `Fress_*_x86_64.rpm` |
+            | Android (universal APK) | `Fress_*_universal.apk` |
+            | Android (arm64 APK) | `Fress_*_arm64.apk` |
+
+            Verify any download against `SHA256SUMS.txt`.
+
+            This is a beta release: features may change between betas.
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          draft: false
+
   build-windows:
+    needs: [version, create-release]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      - name: Install frontend dependencies
-        run: npm install
-
-      - name: Build Tauri app
+      - run: npm install
+      - name: Build Windows installers (NSIS + MSI)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: 'Fress v__VERSION__'
-          releaseBody: 'Windows installer. This is a beta release: features may change. Verify downloads with the SHA-256 checksums below.'
-          releaseDraft: false
-          prerelease: true
-          args: '--target x86_64-pc-windows-msvc'
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-pc-windows-msvc --bundles nsis msi'
 
-      - name: Generate checksums
-        shell: pwsh
-        run: |
-          $files = Get-ChildItem -Path src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe -ErrorAction SilentlyContinue
-          $lines = @()
-          foreach ($f in $files) {
-            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
-            $lines += "$hash  $($f.Name)"
-          }
-          $lines | Out-File -FilePath checksums.txt -Encoding ascii
-          Get-Content checksums.txt
-
-      - name: Upload checksum to release
-        uses: softprops/action-gh-release@v2
+  build-linux:
+    needs: [version, create-release]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          files: checksums.txt
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm install
+      - name: Build Linux bundles (AppImage + deb + rpm)
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-unknown-linux-gnu --bundles appimage deb rpm'
+
+  build-macos-arm:
+    needs: [version, create-release]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm install
+      - name: Build macOS Apple Silicon (.dmg)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target aarch64-apple-darwin --bundles dmg'
+
+  build-macos-intel:
+    needs: [version, create-release]
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm install
+      - name: Build macOS Intel (.dmg)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-apple-darwin --bundles dmg'
+
+  build-android:
+    needs: [version, create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Rust Android targets (fallback)
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - name: Point ANDROID_NDK_HOME at an installed NDK
+        run: |
+          if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
+            echo "ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
+          fi
+      - run: npm install
+      - name: Generate a signing keystore so the APK installs out of the box
+        run: |
+          keytool -genkey -v -keystore fress.keystore -alias fress \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass fressandroid -keypass fressandroid \
+            -dname "CN=Fress, OU=Fress, O=Fress, L=Internet, ST=Internet, C=US"
+      - name: Build Android APKs (all ABIs + universal)
+        env:
+          TAURI_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/fress.keystore
+          TAURI_ANDROID_KEYSTORE_PASSWORD: fressandroid
+          TAURI_ANDROID_KEY_ALIAS: fress
+          TAURI_ANDROID_KEY_PASSWORD: fressandroid
+        run: |
+          npx tauri android init
+          npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
+      - name: Rename and upload APKs
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          OUT="src-tauri/gen/android/app/build/outputs/apk"
+          cp "$OUT/universal/app-universal-release.apk" "Fress_${VERSION}_universal.apk"
+          cp "$OUT/arm64/app-arm64-release.apk" "Fress_${VERSION}_arm64.apk" || true
+          gh release upload "${{ needs.version.outputs.tag }}" "Fress_${VERSION}_universal.apk" --clobber
+          if [ -f "Fress_${VERSION}_arm64.apk" ]; then
+            gh release upload "${{ needs.version.outputs.tag }}" "Fress_${VERSION}_arm64.apk" --clobber
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  checksums:
+    needs: [version, create-release, build-windows, build-linux, build-macos-arm, build-macos-intel, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all release assets
+        run: |
+          mkdir -p assets
+          gh release download "${{ needs.version.outputs.tag }}" --dir assets --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd assets
+          sha256sum "$(ls | sort)" > SHA256SUMS.txt
+          # keep the manifest out of its own list
+          grep -v "SHA256SUMS.txt" SHA256SUMS.txt > tmp && mv tmp SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Upload checksums to the release
+        run: |
+          gh release upload "${{ needs.version.outputs.tag }}" assets/SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

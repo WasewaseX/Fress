@@ -1,5 +1,6 @@
 import React from 'react';
 import { AppItem } from '../types';
+import { openExternal } from '../lib/external';
 import { 
   Columns, 
   X, 
@@ -131,6 +132,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                         href={app.websiteUrl}
                         target="_blank"
                         rel="noreferrer"
+                        onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
                         className="text-[11px] text-sky-400 hover:underline inline-flex items-center gap-1"
                       >
                         <span>Website</span>
@@ -141,6 +143,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                         href={app.githubUrl}
                         target="_blank"
                         rel="noreferrer"
+                        onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
                         className="text-[11px] text-slate-400 hover:text-slate-100 inline-flex items-center gap-1"
                       >
                         <span>GitHub</span>

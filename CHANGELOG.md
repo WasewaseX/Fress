@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0-beta (2025-09-12)
+
+### Added
+- One-click stable downloads: Fress now resolves the app's real installer straight from GitHub Releases. Pick a platform and Fress fetches the latest STABLE file for it (Windows `.exe`/`.msi`, macOS `.dmg` for your architecture, Linux `.AppImage`/`.deb`/`.rpm`, Android `.apk`) — beta, RC, and draft releases are never offered.
+- F-Droid integration: Android apps with an F-Droid package download the current stable APK directly from f-droid.org; if the package is not in the main repository, Fress opens the correct F-Droid page instead.
+- Google Play links for Android apps with an official Play listing.
+- Download folder settings in the header menu: change the folder, or reset to the system Downloads folder (now the default, like every other app).
+- Release pipeline now ships every platform: Windows NSIS + MSI, macOS DMG for Apple Silicon and Intel, Linux AppImage + deb + rpm, Android universal + arm64 APK, plus a SHA256SUMS.txt covering all assets.
+
+### Fixed
+- All external buttons (GitHub, official websites, store links) now open reliably from the desktop app; the webview previously swallowed plain `window.open` and `target="_blank"` links, so nothing happened on click.
+- App icon redesigned: a blue leaf on a fully transparent background — no tile, no white ball — consistent between the taskbar, Windows Settings, and the app itself.
+
 ## 0.9.0-beta (2025-09-12)
 
 This is the first public beta. We are in beta until the catalog and download manager have survived real-world use; version numbers will stay below 1.0.0 until then.

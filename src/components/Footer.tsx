@@ -1,6 +1,7 @@
 import React from 'react';
 import { ShieldCheck, Download, ExternalLink } from 'lucide-react';
 import { LegalTab } from './LegalModals';
+import { openExternal } from '../lib/external';
 
 interface FooterProps {
   onOpenLegal: (tab: LegalTab) => void;
@@ -47,6 +48,7 @@ export const Footer: React.FC<FooterProps> = ({
               href="https://github.com/WasewaseX/Fress/releases/latest"
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => { e.preventDefault(); void openExternal('https://github.com/WasewaseX/Fress/releases/latest'); }}
               className="inline-flex items-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-900 hover:bg-slate-850 px-2.5 py-1 rounded border border-slate-800 transition-colors"
             >
               <Download className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />

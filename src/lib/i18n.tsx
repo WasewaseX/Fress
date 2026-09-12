@@ -111,6 +111,17 @@ const en: Dict = {
   'common.beta': 'beta',
   'theme.toLight': 'Switch to light mode',
   'theme.toDark': 'Switch to dark mode',
+  'detail.checkingStable': 'Checking the latest stable version…',
+  'detail.latestStableGithub': 'Latest stable release from GitHub',
+  'detail.latestStableFdroid': 'Latest stable release from F-Droid',
+  'detail.published': 'Published',
+  'detail.allReleases': 'All releases on GitHub',
+  'detail.otherWays': 'Other official options',
+  'detail.googlePlay': 'Google Play',
+  'detail.fdroid': 'F-Droid',
+  'settings.downloadFolder': 'Download folder',
+  'settings.changeFolder': 'Change…',
+  'settings.resetFolder': 'Reset to default',
 };
 
 const fa: Dict = {
@@ -210,6 +221,17 @@ const fa: Dict = {
   'common.beta': 'بتا',
   'theme.toLight': 'تغییر به حالت روشن',
   'theme.toDark': 'تغییر به حالت تاریک',
+  'detail.checkingStable': 'در حال بررسی جدیدترین نسخه پایدار…',
+  'detail.latestStableGithub': 'جدیدترین نسخه پایدار از GitHub',
+  'detail.latestStableFdroid': 'جدیدترین نسخه پایدار از F-Droid',
+  'detail.published': 'منتشرشده',
+  'detail.allReleases': 'همه نسخه‌ها در GitHub',
+  'detail.otherWays': 'گزینه‌های رسمی دیگر',
+  'detail.googlePlay': 'Google Play',
+  'detail.fdroid': 'F-Droid',
+  'settings.downloadFolder': 'پوشه دانلود',
+  'settings.changeFolder': 'تغییر…',
+  'settings.resetFolder': 'بازگشت به پیش‌فرض',
 };
 
 const es: Dict = {
@@ -309,6 +331,17 @@ const es: Dict = {
   'common.beta': 'beta',
   'theme.toLight': 'Cambiar a modo claro',
   'theme.toDark': 'Cambiar a modo oscuro',
+  'detail.checkingStable': 'Comprobando la última versión estable…',
+  'detail.latestStableGithub': 'Última versión estable de GitHub',
+  'detail.latestStableFdroid': 'Última versión estable de F-Droid',
+  'detail.published': 'Publicado',
+  'detail.allReleases': 'Todas las versiones en GitHub',
+  'detail.otherWays': 'Otras opciones oficiales',
+  'detail.googlePlay': 'Google Play',
+  'detail.fdroid': 'F-Droid',
+  'settings.downloadFolder': 'Carpeta de descargas',
+  'settings.changeFolder': 'Cambiar…',
+  'settings.resetFolder': 'Restablecer',
 };
 
 const fr: Dict = {
@@ -408,6 +441,17 @@ const fr: Dict = {
   'common.beta': 'bêta',
   'theme.toLight': 'Passer en mode clair',
   'theme.toDark': 'Passer en mode sombre',
+  'detail.checkingStable': 'Recherche de la dernière version stable…',
+  'detail.latestStableGithub': 'Dernière version stable depuis GitHub',
+  'detail.latestStableFdroid': 'Dernière version stable depuis F-Droid',
+  'detail.published': 'Publié le',
+  'detail.allReleases': 'Toutes les versions sur GitHub',
+  'detail.otherWays': 'Autres options officielles',
+  'detail.googlePlay': 'Google Play',
+  'detail.fdroid': 'F-Droid',
+  'settings.downloadFolder': 'Dossier de téléchargement',
+  'settings.changeFolder': 'Changer…',
+  'settings.resetFolder': 'Réinitialiser',
 };
 
 const de: Dict = {
@@ -507,6 +551,17 @@ const de: Dict = {
   'common.beta': 'Beta',
   'theme.toLight': 'Zum hellen Design wechseln',
   'theme.toDark': 'Zum dunklen Design wechseln',
+  'detail.checkingStable': 'Neueste stabile Version wird geprüft…',
+  'detail.latestStableGithub': 'Neueste stabile Version von GitHub',
+  'detail.latestStableFdroid': 'Neueste stabile Version von F-Droid',
+  'detail.published': 'Veröffentlicht am',
+  'detail.allReleases': 'Alle Versionen auf GitHub',
+  'detail.otherWays': 'Weitere offizielle Optionen',
+  'detail.googlePlay': 'Google Play',
+  'detail.fdroid': 'F-Droid',
+  'settings.downloadFolder': 'Download-Ordner',
+  'settings.changeFolder': 'Ändern…',
+  'settings.resetFolder': 'Zurücksetzen',
 };
 
 const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

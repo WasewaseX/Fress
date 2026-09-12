@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppItem, Platform } from '../types';
 import {
   X,
@@ -11,10 +11,22 @@ import {
   Smartphone,
   Edit2,
   Download,
-  MonitorSmartphone
+  MonitorSmartphone,
+  Loader2,
+  Play
 } from 'lucide-react';
 import { PLATFORM_LABELS, getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
-import { useDownloads } from '../lib/downloads';
+import { useDownloads, formatBytes } from '../lib/downloads';
+import { openExternal } from '../lib/external';
+import {
+  resolveGitHubDownload,
+  resolveFdroidDownload,
+  parseGithubRepo,
+  fdroidPageUrl,
+  playStoreUrl,
+  githubFetchSupported,
+  ResolvedDownload,
+} from '../lib/releaseFetch';
 import { useI18n } from '../lib/i18n';
 import { toast } from 'sonner';
 
@@ -29,6 +41,8 @@ function detectUserPlatform(): Platform {
   return 'windows';
 }
 
+type ResolveState = 'loading' | 'ready' | 'none';
+
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { startDownload, recordExternalOpen } = useDownloads();
   const { t } = useI18n();
@@ -41,14 +55,57 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const options = getDownloadOptions(app, platform);
   const unavailable = platformUnavailableNote(app, platform);
 
+  const [gh, setGh] = useState<ResolvedDownload | null>(null);
+  const [ghState, setGhState] = useState<ResolveState>('loading');
+  const [fd, setFd] = useState<ResolvedDownload | null>(null);
+  const [fdState, setFdState] = useState<ResolveState>('loading');
+
+  const wantGh = !unavailable && githubFetchSupported(platform) && !!parseGithubRepo(app.githubUrl);
+  const wantFd = !unavailable && platform === 'android' && !!app.fdroidId;
+
+  useEffect(() => {
+    let alive = true;
+    if (wantGh) {
+      setGhState('loading');
+      resolveGitHubDownload(app, platform).then((r) => {
+        if (!alive) return;
+        setGh(r);
+        setGhState(r ? 'ready' : 'none');
+      });
+    }
+    if (wantFd) {
+      setFdState('loading');
+      resolveFdroidDownload(app.fdroidId!).then((r) => {
+        if (!alive) return;
+        setFd(r);
+        setFdState(r ? 'ready' : 'none');
+      });
+    }
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.id, platform]);
+
+  const published = (() => {
+    if (!gh?.publishedAt) return '';
+    try {
+      return new Date(gh.publishedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  })();
+
   const handleOption = (option: DownloadOption) => {
     if (option.kind === 'direct') {
       void startDownload(option.url, option.label);
     } else {
       recordExternalOpen(`${app.name}: ${option.label}`, option.url);
-      window.open(option.url, '_blank', 'noopener,noreferrer');
+      void openExternal(option.url);
     }
   };
+
+  const secondary = options.filter((o) => !(gh && o.label === 'GitHub Releases'));
 
   return (
     <div id="detail-download-box" className="border border-sky-500/25 rounded-lg p-3 bg-sky-500/5">
@@ -88,36 +145,124 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
           <p className="text-xs text-slate-300 font-medium mb-0.5">{t('detail.notAvailable')}</p>
           <p className="text-[11px] text-slate-400 leading-relaxed">{unavailable}. {app.websiteUrl ? 'Check the official website for updates.' : ''}</p>
         </div>
-      ) : options.length > 0 ? (
+      ) : (
         <div className="space-y-1.5">
-          {options.map((option) => (
+          {/* Primary: the latest STABLE file for this platform, resolved live from GitHub */}
+          {wantGh && ghState === 'ready' && gh && (
             <button
-              key={option.label}
               type="button"
-              onClick={() => handleOption(option)}
-              className={`w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border transition-colors ${
-                option.kind === 'direct'
-                  ? 'bg-sky-600 hover:bg-sky-500 text-white border-sky-500 font-semibold'
-                  : 'text-slate-200 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border-slate-950/10 dark:border-white/[0.08]'
-              }`}
+              onClick={() => void startDownload(gh.url, gh.filename)}
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
-                <Download className={`w-3.5 h-3.5 shrink-0 ${option.kind === 'direct' ? 'text-sky-100' : 'text-sky-400'}`} aria-hidden="true" />
-                <span className="truncate">
-                  {option.label}
-                  {option.kind === 'direct' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-80">progress in app</span>}
-                  {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
+                <Download className="w-3.5 h-3.5 shrink-0 text-sky-100" aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    {gh.filename}
+                    {gh.size > 0 && <span className="ml-1.5 opacity-80 font-normal">{formatBytes(gh.size)}</span>}
+                  </span>
+                  <span className="block text-[11px] font-normal opacity-80 truncate">
+                    v{gh.version} · {t('detail.latestStableGithub')}
+                    {published ? ` · ${t('detail.published')} ${published}` : ''}
+                  </span>
                 </span>
               </span>
-              {option.kind !== 'direct' && <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />}
+              <span className="text-[10px] font-mono uppercase tracking-wide bg-white/15 rounded px-1.5 py-0.5 shrink-0">{t('card.download')}</span>
             </button>
-          ))}
+          )}
+          {wantGh && ghState === 'loading' && (
+            <div className="w-full flex items-center gap-2 text-xs px-3 py-2.5 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300" role="status">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" aria-hidden="true" />
+              <span>{t('detail.checkingStable')}</span>
+            </div>
+          )}
+
+          {/* Android: F-Droid (direct stable apk, falls back to the F-Droid page) */}
+          {wantFd && fdState === 'ready' && fd && (
+            <button
+              type="button"
+              onClick={() => void startDownload(fd.url, fd.filename)}
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 font-semibold transition-colors"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <Smartphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {t('detail.fdroid')} — v{fd.version}
+                  <span className="ml-1.5 text-[11px] font-normal opacity-80">{t('detail.latestStableFdroid')}</span>
+                </span>
+              </span>
+              <Download className="w-3 h-3 shrink-0" aria-hidden="true" />
+            </button>
+          )}
+          {wantFd && fdState === 'loading' && (
+            <div className="w-full flex items-center gap-2 text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300" role="status">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" aria-hidden="true" />
+              <span>{t('detail.fdroid')} · {t('detail.checkingStable')}</span>
+            </div>
+          )}
+          {wantFd && fdState === 'none' && (
+            <button
+              type="button"
+              onClick={() => {
+                recordExternalOpen(`${app.name}: F-Droid`, fdroidPageUrl(app.fdroidId!));
+                void openExternal(fdroidPageUrl(app.fdroidId!));
+              }}
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 transition-colors"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <Smartphone className="w-3.5 h-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                <span className="truncate">{t('detail.fdroid')}</span>
+              </span>
+              <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />
+            </button>
+          )}
+
+          {/* Android: Google Play listing */}
+          {platform === 'android' && app.playStoreId && (
+            <button
+              type="button"
+              onClick={() => {
+                recordExternalOpen(`${app.name}: ${t('detail.googlePlay')}`, playStoreUrl(app.playStoreId!));
+                void openExternal(playStoreUrl(app.playStoreId!));
+              }}
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 transition-colors"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <Play className="w-3.5 h-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+                <span className="truncate">{t('detail.googlePlay')}</span>
+              </span>
+              <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />
+            </button>
+          )}
+
+          {/* Secondary: every other official target */}
+          {secondary.length > 0 && (
+            <div className="pt-1 space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{t('detail.otherWays')}</p>
+              {secondary.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => handleOption(option)}
+                  className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border transition-colors text-slate-200 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border-slate-950/10 dark:border-white/[0.08]"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Download className="w-3.5 h-3.5 shrink-0 text-sky-400" aria-hidden="true" />
+                    <span className="truncate">
+                      {option.label === 'GitHub Releases' ? t('detail.allReleases') : option.label}
+                      {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
+                    </span>
+                  </span>
+                  <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          )}
+
           <p className="text-[11px] text-slate-400 leading-relaxed pt-0.5">
             {inApp ? t('detail.downloadsHint') : 'Downloads open in a new browser tab. The Fress desktop app adds a built-in download manager with live progress and SHA-256 verification.'} {t('detail.checkLatest')}
           </p>
         </div>
-      ) : (
-        <p className="text-xs text-slate-400 leading-relaxed">No direct download found. Visit the official website to get this app.</p>
       )}
     </div>
   );
@@ -434,6 +579,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 href={app.githubUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
                 className="inline-flex items-center gap-1 text-xs bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 border border-slate-950/10 dark:border-white/[0.1] px-3 py-1.5 rounded-lg transition-colors"
               >
                 <Github className="w-3.5 h-3.5" aria-hidden="true" />
@@ -448,6 +594,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 href={app.websiteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
                 className="inline-flex items-center gap-1 text-xs bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-sky-400 transition-colors shadow-xs"
               >
                 <span>Official Website</span>

@@ -41,6 +41,7 @@ interface DownloadsContextValue {
   openFile: (path: string) => void;
   openFolder: (path?: string) => void;
   chooseFolder: () => Promise<void>;
+  resetFolder: () => Promise<void>;
 }
 
 const DownloadsContext = createContext<DownloadsContextValue | null>(null);
@@ -257,11 +258,26 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const resetFolder = useCallback(async () => {
+    try {
+      localStorage.removeItem(DIR_KEY);
+    } catch {
+      // ignore
+    }
+    try {
+      const dir = await invoke<string>('default_download_dir');
+      setDownloadDir(dir);
+      toast.success('Download folder reset to your Downloads folder', { description: dir });
+    } catch {
+      setDownloadDir(null);
+    }
+  }, []);
+
   const activeCount = items.filter((it) => it.status === 'active').length;
 
   return (
     <DownloadsContext.Provider
-      value={{ items, activeCount, downloadDir, startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder }}
+      value={{ items, activeCount, downloadDir, startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder, resetFolder }}
     >
       {children}
     </DownloadsContext.Provider>

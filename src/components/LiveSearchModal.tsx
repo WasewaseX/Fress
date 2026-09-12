@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { openExternal } from '../lib/external';
 import { 
   Search, 
   X, 
@@ -317,7 +318,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 hover:text-sky-300 transition-colors"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openExternal(item.githubUrl); }}
                     >
                       <span>View GitHub</span>
                       <ExternalLink className="w-3 h-3" />

@@ -197,16 +197,32 @@ jobs:
         run: |
           npx tauri android init
           npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
-      - name: Rename and upload APKs
+      - name: Align, sign, and upload APKs
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           OUT="src-tauri/gen/android/app/build/outputs/apk"
-          cp "$OUT/universal/app-universal-release.apk" "Fress_${VERSION}_universal.apk"
-          cp "$OUT/arm64/app-arm64-release.apk" "Fress_${VERSION}_arm64.apk" || true
-          gh release upload "${{ needs.version.outputs.tag }}" "Fress_${VERSION}_universal.apk" --clobber
-          if [ -f "Fress_${VERSION}_arm64.apk" ]; then
-            gh release upload "${{ needs.version.outputs.tag }}" "Fress_${VERSION}_arm64.apk" --clobber
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          UNIVERSAL=$(find "$OUT" -path '*universal*' -name '*unsigned.apk' | head -1)
+          ARM64=$(find "$OUT" -path '*arm64*' -name '*unsigned.apk' | head -1)
+          echo "universal: $UNIVERSAL"
+          echo "arm64: $ARM64"
+          sign_one() {
+            IN="$1"; NAME="$2"
+            "$BT/zipalign" -f -p 4 "$IN" aligned.apk
+            "$BT/apksigner" sign --ks fress.keystore --ks-pass pass:fressandroid \
+              --ks-key-alias fress --key-pass pass:fressandroid --out "$NAME" aligned.apk
+            "$BT/apksigner" verify "$NAME"
+          }
+          if [ -z "$UNIVERSAL" ]; then echo "No universal APK found"; exit 1; fi
+          sign_one "$UNIVERSAL" "Fress_${VERSION}_universal.apk"
+          UPLOADS="Fress_${VERSION}_universal.apk"
+          if [ -n "$ARM64" ]; then
+            sign_one "$ARM64" "Fress_${VERSION}_arm64.apk"
+            UPLOADS="$UPLOADS Fress_${VERSION}_arm64.apk"
           fi
+          ls -la Fress_*.apk
+          gh release upload "${{ needs.version.outputs.tag }}" $UPLOADS --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

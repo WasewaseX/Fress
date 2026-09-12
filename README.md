@@ -4,13 +4,14 @@ A clean, curated directory of **free and open-source software** for Windows, mac
 
 No telemetry. No ads. No sponsored entries. Every app in the catalog is real, popular, actively maintained, and genuinely free.
 
-![Version](https://img.shields.io/badge/version-0.9.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-0.10.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Why Fress
 
 - **Curated, not scraped.** Every entry is checked by hand: official links, real descriptions, honest notes about what the app replaces.
-- **Download manager built in.** Direct downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification.
-- **Device-aware downloads.** Pick Windows, macOS, Linux, Android, or iOS and get the right target: `.apk` for Android, App Store links for iOS, installers for desktop.
+- **One-click stable downloads.** Pick your platform and Fress resolves the app's actual latest STABLE file straight from GitHub Releases or F-Droid — no hunting through release pages, and beta/RC builds are never offered.
+- **Download manager built in.** Downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification, saved to the folder you choose (your system Downloads folder by default).
+- **Device-aware downloads.** Windows, macOS, Linux, Android (GitHub APK, F-Droid, Google Play), and iOS — Fress picks the right file for your architecture.
 - **Light and dark themes.** Both are first-class: a warm paper light mode and a calm dark mode, following your system preference until you choose.
 - **Multiple languages.** English, Persian (full right-to-left support), Spanish, French, and German from the Settings menu.
 - **Local-first.** Favorites, custom entries, and settings live in your own storage. The app makes zero network calls beyond the links you click.
@@ -31,24 +32,37 @@ No telemetry. No ads. No sponsored entries. Every app in the catalog is real, po
 ## Development
 
 ```bash
-npm install          # or: bun install
+npm install
 npm run dev          # web preview at http://localhost:3000
 npm run lint         # type-check
 
 # Desktop app (requires Rust + platform deps, see https://tauri.app)
-cd src-tauri
-cargo tauri dev
-cargo tauri build    # produces the Windows installer
+npm run tauri dev
+npm run tauri build
+
+# Android (requires Android SDK + NDK)
+npm run tauri android init
+npm run tauri android build -- --apk
 ```
 
 The web preview works without Rust: download buttons hand off to your browser. Inside the Tauri desktop app, the full download manager activates.
 
 ## Releases
 
-Releases are tagged `v0.9.0-beta` (we are in beta). Windows installers are built by GitHub Actions, and every release includes SHA-256 checksums. Verify before running:
+Releases are tagged (we are in beta). Every release ships installers for all platforms, built by GitHub Actions:
+
+| Platform | File |
+| --- | --- |
+| Windows | `Fress_*_x64-setup.exe` |
+| macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
+| macOS (Intel) | `Fress_*_x64.dmg` |
+| Linux | `Fress_*_amd64.AppImage`, `.deb`, `.rpm` |
+| Android | `Fress_*_universal.apk` |
+
+Every release includes a `SHA256SUMS.txt` covering all assets. Verify before running:
 
 ```bash
-sha256sum -c checksums.txt
+sha256sum -c SHA256SUMS.txt
 ```
 
 ## Contributing

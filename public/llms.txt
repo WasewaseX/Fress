@@ -1,0 +1,85 @@
+# Fress — Free & Open-Source Software Directory
+
+> Fress is a local-first, zero-telemetry desktop app that curates free and
+> open-source software and downloads the latest stable installer straight
+> from official release sources (GitHub Releases, F-Droid, vendor pages).
+> This file lists the actual catalog; the app is the source of truth.
+
+## Productivity & Office
+
+- **AppFlowy**: Open-source Notion alternative. License: AGPL-3.0. Platforms: Windows, macOS, Linux, Android.
+- **Cal.com**: Open-source scheduling for everyone. License: MIT. Platforms: Web.
+- **Calibre**: The complete ebook manager. License: GPL-3.0. Platforms: Windows, macOS, Linux.
+- **Formbricks**: Open-source surveys and experience forms. License: AGPL-3.0 (open core). Platforms: Web.
+- **Joplin**: Secure note taking with end-to-end encryption. License: AGPL-3.0. Platforms: Windows, macOS, Linux, Android, iOS.
+- **LibreOffice**: Full-featured free office suite. License: MPL-2.0. Platforms: Windows, macOS, Linux.
+- **listmonk**: Newsletter and mailing list manager. License: AGPL-3.0. Platforms: Web.
+- **Nextcloud**: Your own file sync and collaboration cloud. License: AGPL-3.0. Platforms: Web, Windows, macOS, Linux, Android, iOS.
+- **NocoDB**: Open-source Airtable alternative. License: Sustainable Use License (fair-source). Platforms: Web.
+- **Obsidian**: Markdown-based personal knowledge base. License: Freeware (proprietary). Platforms: Windows, macOS, Linux, Android, iOS.
+- **Stirling PDF**: Everyday PDF toolbox you can self-host. License: MIT (open core). Platforms: Web, Windows.
+- **Thunderbird**: Private email and calendar client. License: MPL-2.0. Platforms: Windows, macOS, Linux.
+- **Zotero**: Research and reference manager. License: AGPL-3.0. Platforms: Windows, macOS, Linux.
+
+## Utilities & System
+
+- **7-Zip**: High-compression file archiver. License: GNU LGPL + unRAR restriction. Platforms: Windows, Linux.
+- **balenaEtcher**: USB image flashing made safe. License: Apache-2.0. Platforms: Windows, macOS, Linux.
+- **BleachBit**: System cleaner and privacy disk optimizer. License: GPL-3.0. Platforms: Windows, Linux.
+- **F-Droid**: The open-source app store for Android. License: AGPL-3.0. Platforms: Android.
+- **Flameshot**: Powerful yet simple to use screenshot software. License: GPL-3.0. Platforms: Windows, macOS, Linux.
+- **Home Assistant**: Local smart home control. License: Apache-2.0. Platforms: Web, Android, iOS.
+- **LocalSend**: Local network file sharing utility. License: Apache-2.0. Platforms: Windows, macOS, Linux, Android, iOS.
+- **Organic Maps**: Fast offline maps and GPS navigation powered by OpenStreetMap. License: Apache-2.0. Platforms: Android, iOS.
+- **PowerToys**: Power-user utilities for Windows. License: MIT. Platforms: Windows.
+- **qBittorrent**: Clean BitTorrent client. License: GPL-2.0+. Platforms: Windows, macOS, Linux.
+- **RustDesk**: Open source remote desktop software. License: AGPL-3.0. Platforms: Windows, macOS, Linux, Android, iOS.
+- **ShareX**: Screen capture, recording and file uploader. License: GPL-3.0. Platforms: Windows.
+- **Sumatra PDF**: Tiny, fast PDF and ebook reader. License: GPL-3.0. Platforms: Windows.
+- **Syncthing**: Continuous decentralized file synchronization. License: MPL-2.0. Platforms: Windows, macOS, Linux.
+
+## Privacy & Security
+
+- **Bitwarden**: Open source password manager. License: GPL-3.0 (some parts under the Bitwarden License). Platforms: Windows, macOS, Linux, Web, Android, iOS.
+- **Jitsi Meet**: No-account video calls. License: Apache-2.0. Platforms: Web, Android, iOS.
+- **KeePassDX**: Lightweight, offline KeePass vault password manager. License: GPL-3.0. Platforms: Android.
+- **KeePassXC**: Offline cross-platform password safe. License: GPL-2.0+. Platforms: Windows, macOS, Linux.
+- **Pi-hole**: Network-wide ad blocking. License: EUPL-1.2. Platforms: Web.
+- **SearXNG**: Private metasearch engine. License: AGPL-3.0. Platforms: Web.
+- **Signal**: Private messaging and calls. License: AGPL-3.0. Platforms: Windows, macOS, Linux, Android, iOS.
+- **Tor Browser**: Anonymous and censorship-proof browsing. License: MPL-2.0. Platforms: Windows, macOS, Linux, Android.
+- **Vaultwarden**: Self-hosted Bitwarden server. License: AGPL-3.0. Platforms: Web.
+
+## Design & Creative
+
+- **Blender**: 3D modeling, animation and rendering suite. License: GPL-2.0+. Platforms: Windows, macOS, Linux.
+- **GIMP**: Full featured image editor. License: GPL-3.0. Platforms: Windows, macOS, Linux.
+- **Inkscape**: Professional vector graphics editor. License: GPL-3.0. Platforms: Windows, macOS, Linux.
+- **Krita**: Digital painting and 2D illustration program. License: GPL-3.0. Platforms: Windows, macOS, Linux, Android.
+- **Upscayl**: AI image upscaler, offline. License: AGPL-3.0. Platforms: Windows, macOS, Linux.
+
+## Developer & Code
+
+- **Bruno**: Fast and git-friendly offline API client. License: MIT. Platforms: Windows, macOS, Linux.
+- **DevToys**: Offline Swiss Army knife for developers. License: MIT. Platforms: Windows, macOS, Linux.
+- **Termux**: Android terminal emulator and Linux environment. License: GPL-3.0. Platforms: Android.
+- **VSCodium**: Telemetry-free open source code editor. License: MIT. Platforms: Windows, macOS, Linux.
+
+## Media, Audio & Video
+
+- **AntennaPod**: Open-source podcast player and manager for Android. License: GPL-3.0. Platforms: Android.
+- **Audacity**: Multi-track audio editor and recorder. License: GPL-2.0+. Platforms: Windows, macOS, Linux.
+- **HandBrake**: Open-source video transcoder. License: GPL-2.0. Platforms: Windows, macOS, Linux.
+- **Immich**: Self-hosted Google Photos replacement. License: AGPL-3.0. Platforms: Web, Android, iOS.
+- **Kdenlive**: Multitrack video editor. License: GPL-3.0. Platforms: Windows, macOS, Linux.
+- **LosslessCut**: Lossless video and audio trimmer. License: GPL-2.0. Platforms: Windows, macOS, Linux.
+- **NewPipe**: Lightweight privacy-centric Android streaming client. License: GPL-3.0. Platforms: Android.
+- **OBS Studio**: Screen recording and live streaming. License: GPL-2.0. Platforms: Windows, macOS, Linux.
+- **Shotcut**: Free, open source, cross-platform video editor. License: GPL-3.0. Platforms: Windows, macOS, Linux.
+- **VLC Media Player** (the single Owner Pick): Universal multimedia player and streaming engine. License: GPL-2.0+. Platforms: Windows, macOS, Linux, Android, iOS.
+
+## AI & Knowledge
+
+- **Ollama**: Run local AI models on your own machine. License: MIT. Platforms: Windows, macOS, Linux.
+- **Whisper Desktop**: Offline speech-to-text on your GPU. License: MPL-2.0. Platforms: Windows.
+

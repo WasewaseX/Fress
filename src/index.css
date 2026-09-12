@@ -1,0 +1,214 @@
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/600.css";
+@import "@fontsource/plus-jakarta-sans/700.css";
+@import "@fontsource/plus-jakarta-sans/800.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/vazirmatn/400.css";
+@import "@fontsource/vazirmatn/500.css";
+@import "@fontsource/vazirmatn/700.css";
+@import "tailwindcss";
+
+/* Enable class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Custom step used across the app (was silently invalid before) */
+  --color-slate-850: #131a26;
+
+  /* Dark theme base (default / .dark) */
+  --color-slate-950: #090d16;
+  --color-slate-900: #0d131f;
+  --color-slate-800: #182132;
+  --color-slate-700: #1e2736;
+  --color-slate-600: #2c3648;
+}
+
+/* ------------------------------------------------------------------
+   LIGHT THEME
+   Warm paper surfaces instead of a blinding pure-white inversion.
+   Every existing slate utility (bg-slate-950, text-slate-400,
+   border-slate-800, ...) resolves to these values automatically,
+   so the whole UI switches theme from this single block.
+   ------------------------------------------------------------------ */
+:root:not(.dark) {
+  --color-slate-950: #f3f0e8;   /* page background: warm paper */
+  --color-slate-900: #faf8f2;   /* header, footer, raised bands */
+  --color-slate-850: #f1eee5;   /* hover surfaces */
+  --color-slate-800: #fffef9;   /* cards, inputs */
+  --color-slate-700: #e9e4d8;   /* chips, subtle buttons */
+  --color-slate-600: #d8d1c1;   /* strong borders */
+
+  /* Text scale: warm charcoal instead of inverted white */
+  --color-slate-500: #6f695c;   /* faint text (kept ≥4.5:1 at small sizes) */
+  --color-slate-400: #635d50;   /* secondary text */
+  --color-slate-300: #4c473d;   /* body text */
+  --color-slate-200: #35322b;   /* headings */
+  --color-slate-100: #27241e;   /* bright headings */
+
+  /* Accents: deepened for contrast on light surfaces */
+  --color-sky-950: #e6f1f7;     /* tinted backgrounds */
+  --color-sky-400: #14739f;     /* ≥4.5:1 on paper even at 11px */
+  --color-sky-500: #0d7cb2;
+  --color-sky-600: #0a6a99;
+  --color-sky-300: #0a6a99;
+  --color-sky-200: #0d7cb2;
+
+  --color-emerald-950: #e4f3e9;
+  --color-emerald-400: #27794a;
+  --color-emerald-500: #226a41;
+  --color-emerald-300: #1f7449;
+  --color-emerald-200: #1f7449; /* pale-on-pale killer: mapped dark */
+
+  --color-amber-400: #dda50e;
+  --color-amber-500: #c48f08;
+  --color-amber-300: #8a6206;
+  --color-amber-200: #8a6206;   /* warning rows readable in light mode */
+  --color-amber-100: #6b4e05;   /* strongest warning text tone */
+  --color-amber-950: #f7ecd2;   /* offline pill surface */
+
+  --color-rose-400: #d43a5f;
+  --color-rose-500: #c92c51;
+  --color-rose-300: #b02547;
+  --color-rose-800: #f5c6d1;
+  --color-rose-950: #fbe3e9;    /* delete-confirm surface */
+
+  --color-indigo-400: #5257cf;
+  --color-indigo-500: #4b50c4;
+  --color-indigo-600: #4045b4;
+  --color-indigo-300: #4045b4;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-slate-950);
+  color: var(--color-slate-200);
+  font-family: var(--font-sans);
+  transition: background-color 160ms ease;
+}
+
+/* Respect users who ask for less motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Scrollbars that match each theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-slate-600) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-600);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+::selection {
+  background: var(--color-sky-500);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-sky-500);
+  outline-offset: 2px;
+}
+
+/* Sonner toasts: theme aware instead of hardcoded dark styles */
+[data-sonner-toast] {
+  background: var(--color-slate-800) !important;
+  border: 1px solid var(--color-slate-700) !important;
+  color: var(--color-slate-100) !important;
+  box-shadow: 0 8px 24px rgba(20, 24, 34, 0.18);
+}
+[data-sonner-toast] [data-description] {
+  color: var(--color-slate-400) !important;
+}
+[data-sonner-toast] [data-title] {
+  color: var(--color-slate-100) !important;
+}
+
+/* Persian typeface for RTL mode */
+[dir="rtl"] body,
+[dir="rtl"] input,
+[dir="rtl"] button,
+[dir="rtl"] textarea,
+[dir="rtl"] select {
+  font-family: "Vazirmatn", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* RTL (Farsi) adjustments: keep meaning, flip physical padding cues */
+[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+[dir="rtl"] input[type="text"],
+[dir="rtl"] input[type="search"],
+[dir="rtl"] textarea {
+  text-align: right;
+}
+
+/* Consistent modal/backdrop polish */
+.fr-backdrop {
+  background: rgba(9, 13, 22, 0.62);
+  backdrop-filter: blur(4px);
+}
+:root:not(.dark) .fr-backdrop {
+  background: rgba(64, 58, 46, 0.34);
+}
+
+/* Placeholder for invalid Tailwind classes that slipped into the markup:
+   a hard-working no-scrollbar utility. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ------------------------------------------------------------------
+   LIGHT MODE STRUCTURE
+   In light mode slate-950 is the paper surface color, so the alpha
+   variants the markup uses for HAIRLINES and subtle fills (Tailwind
+   emits them as color-mix over the token) composite to nearly the
+   same paper tone and the UI loses its borders, row lines, input
+   boundaries and hover states. These rules re-ink exactly those
+   utilities for the light theme only; dark keeps stock Tailwind.
+   ------------------------------------------------------------------ */
+:root:not(.dark) .border-slate-950\/10 { border-color: rgba(66, 58, 42, 0.14); }
+:root:not(.dark) .border-slate-950\/20 { border-color: rgba(66, 58, 42, 0.22); }
+:root:not(.dark) .border-slate-950\/25 { border-color: rgba(66, 58, 42, 0.27); }
+:root:not(.dark) .border-slate-950\/30 { border-color: rgba(66, 58, 42, 0.33); }
+:root:not(.dark) .border-slate-950\/\[0\.12\] { border-color: rgba(66, 58, 42, 0.17); }
+:root:not(.dark) .border-slate-950\/\[0\.14\] { border-color: rgba(66, 58, 42, 0.19); }
+:root:not(.dark) .divide-slate-950\/10 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(66, 58, 42, 0.14); }
+:root:not(.dark) .bg-slate-950\/5 { background-color: rgba(66, 58, 42, 0.045); }
+:root:not(.dark) .bg-slate-950\/\[0\.03\] { background-color: rgba(66, 58, 42, 0.03); }
+:root:not(.dark) .bg-slate-950\/\[0\.04\] { background-color: rgba(66, 58, 42, 0.04); }
+:root:not(.dark) .bg-slate-950\/\[0\.05\] { background-color: rgba(66, 58, 42, 0.05); }
+:root:not(.dark) .bg-slate-950\/\[0\.06\] { background-color: rgba(66, 58, 42, 0.06); }
+:root:not(.dark) .bg-slate-950\/\[0\.08\] { background-color: rgba(66, 58, 42, 0.075); }
+:root:not(.dark) .bg-slate-950\/\[0\.1\] { background-color: rgba(66, 58, 42, 0.09); }
+:root:not(.dark) .bg-slate-950\/\[0\.12\] { background-color: rgba(66, 58, 42, 0.11); }
+/* Hover variants of the same structure utilities (escaped pseudo selector) */
+:root:not(.dark) .hover\:bg-slate-950\/5:hover { background-color: rgba(66, 58, 42, 0.07); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.04\]:hover { background-color: rgba(66, 58, 42, 0.055); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.05\]:hover { background-color: rgba(66, 58, 42, 0.065); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.06\]:hover { background-color: rgba(66, 58, 42, 0.08); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.08\]:hover { background-color: rgba(66, 58, 42, 0.10); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.1\]:hover { background-color: rgba(66, 58, 42, 0.12); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.12\]:hover { background-color: rgba(66, 58, 42, 0.14); }
+:root:not(.dark) .hover\:bg-slate-950\/\[0\.14\]:hover { background-color: rgba(66, 58, 42, 0.16); }

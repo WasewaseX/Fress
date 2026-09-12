@@ -1,0 +1,306 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # NOTE: a manual run on main creates the tag from HEAD if it does not
+  # exist yet (softprops/action-gh-release). For a rehearsal of a version
+  # that will also be tag-pushed later, delete the draft AND the tag
+  # afterwards, or push the tag only after a successful rehearsal.
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the release (unchecked = draft rehearsal, nothing goes public)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert package.json / tauri.conf.json / Cargo.toml versions match
+        run: |
+          PJ=$(node -p "require('./package.json').version")
+          TJ=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CJ=$(grep -m1 '^version = ' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "package.json=$PJ tauri.conf.json=$TJ Cargo.toml=$CJ"
+          if [ "$PJ" != "$TJ" ] || [ "$PJ" != "$CJ" ]; then
+            echo "::error::Version mismatch between package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml — bump all three together."
+            exit 1
+          fi
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "v$PJ" != "${{ github.ref_name }}" ]; then
+            echo "::error::Pushed tag ${{ github.ref_name }} does not match project version v$PJ."
+            exit 1
+          fi
+      - id: v
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  create-release:
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the release
+        id: create
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Fress v${{ needs.version.outputs.version }}
+          body: |
+            Fress v${{ needs.version.outputs.version }} — a clean, curated directory of free and open-source software.
+
+            **Installers for every platform**
+            | Platform | File |
+            | --- | --- |
+            | Windows (installer) | `Fress_*_x64-setup.exe` |
+            | macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
+            | macOS (Intel) | `Fress_*_x64.dmg` |
+            | Linux (AppImage) | `Fress_*_amd64.AppImage` |
+            | Linux (deb) | `Fress_*_amd64.deb` |
+            | Linux (rpm) | `Fress_*_x86_64.rpm` |
+            | Android (universal APK) | `Fress_*_universal.apk` |
+
+            Verify any download against `SHA256SUMS.txt`.
+
+            This is a beta release: features may change between betas.
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          # Stay a draft until every build job succeeded and checksums ran:
+          # users must never see a half-populated public release.
+          draft: true
+
+  build-windows:
+    needs: [version, create-release]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build Windows installer (NSIS)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-pc-windows-msvc --bundles nsis'
+
+  build-linux:
+    needs: [version, create-release]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - name: Build Linux bundles (AppImage + deb + rpm)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-unknown-linux-gnu --bundles appimage deb rpm'
+
+  build-macos-arm:
+    needs: [version, create-release]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build macOS Apple Silicon (.dmg)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target aarch64-apple-darwin --bundles dmg'
+
+  build-macos-intel:
+    needs: [version, create-release]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Cross-compile macOS Intel (.dmg) on the arm64 runner
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-apple-darwin --bundles dmg'
+
+  build-android:
+    needs: [version, create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Rust Android targets (fallback)
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - name: Point ANDROID_NDK_HOME at an installed NDK
+        run: |
+          if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
+            echo "ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
+          fi
+      - run: npm ci
+      - name: Restore the Android signing keystore from a repository secret
+        # A FIXED key across builds is what makes updates installable:
+        # Android refuses an update signed with a different key. The keystore
+        # lives in the ANDROID_KEYSTORE_B64 repository secret so it survives
+        # forever; without it a fresh key is generated (and users must
+        # uninstall the previous build before installing this one).
+        id: keystore
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d -i > fress.keystore
+            if ! keytool -list -keystore fress.keystore -storepass fressandroid -alias fress >/dev/null 2>&1; then
+              echo "::error::ANDROID_KEYSTORE_B64 did not decode to a valid keystore with alias 'fress'/password 'fressandroid'. See docs/android-signing.md."
+              exit 1
+            fi
+            echo "source=secret" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROID_KEYSTORE_B64 secret is not set — generating a NEW signing key. Updates over previous builds will not install."
+            keytool -genkey -v -keystore fress.keystore -alias fress \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass fressandroid -keypass fressandroid \
+              -dname "CN=Fress, OU=Fress, O=Fress, L=Internet, ST=Internet, C=US"
+            echo "source=generated" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build Android APKs (all ABIs + universal, unsigned)
+        # Deliberately NO TAURI_ANDROID_KEYSTORE_* env vars here: with them,
+        # gradle signs during the build and produces app-*.apk (not *unsigned*),
+        # which the find below would not match. The explicit zipalign+apksigner
+        # step signs with the persistent keystore instead.
+        run: |
+          npx tauri android init
+          npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
+      - name: Align, sign, and upload APKs
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          OUT="src-tauri/gen/android/app/build/outputs/apk"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          UNIVERSAL=$(find "$OUT" -path '*universal*' -name '*unsigned.apk' | head -1)
+          echo "universal: $UNIVERSAL"
+          sign_one() {
+            IN="$1"; NAME="$2"
+            "$BT/zipalign" -f -p 4 "$IN" aligned.apk
+            "$BT/apksigner" sign --ks fress.keystore --ks-pass pass:fressandroid \
+              --ks-key-alias fress --key-pass pass:fressandroid --out "$NAME" aligned.apk
+            "$BT/apksigner" verify "$NAME"
+          }
+          if [ -z "$UNIVERSAL" ]; then echo "No universal APK found"; exit 1; fi
+          sign_one "$UNIVERSAL" "Fress_${VERSION}_universal.apk"
+          UPLOADS="Fress_${VERSION}_universal.apk"
+          ls -la Fress_*.apk
+          gh release upload "${{ needs.version.outputs.tag }}" $UPLOADS --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  checksums:
+    needs: [version, create-release, build-windows, build-linux, build-macos-arm, build-macos-intel, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all release assets
+        run: |
+          mkdir -p assets
+          gh release download "${{ needs.version.outputs.tag }}" --dir assets --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd assets
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 | xargs -0 sha256sum | sed 's|  \./|  |' > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Upload checksums to the release
+        run: |
+          gh release upload "${{ needs.version.outputs.tag }}" assets/SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the release (leave draft state)
+        # Tag pushes publish; manual runs rehearse as drafts unless the
+        # "publish" input was checked.
+        if: ${{ github.event_name == 'push' || inputs.publish == true }}
+        run: |
+          gh release edit "${{ needs.version.outputs.tag }}" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-failure:
+    if: failure()
+    needs: [version, create-release, build-windows, build-linux, build-macos-arm, build-macos-intel, build-android, checksums]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize the failed release run
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MSG'
+          ## Release run failed
+          The draft release for `${{ needs.version.outputs.tag }}` was left behind with partial assets.
+          Recover with one of:
+          - Delete the draft release **and** its tag, fix the failure, re-tag.
+          - Re-run the failed jobs from the Actions tab (the existing draft is reused).
+          MSG

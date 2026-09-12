@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "fress"
-version = "0.10.1-beta"
+version = "0.11.0-beta"
 dependencies = [
  "dirs 5.0.1",
  "futures-util",

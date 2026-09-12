@@ -143,7 +143,8 @@ async fn cache_write(app: &AppHandle, key: &str, payload: &serde_json::Value) {
             }
             if files.len() > 256 {
                 files.sort_by_key(|(_, m)| *m);
-                for (path, _) in files.into_iter().take(files.len() - 256) {
+                let excess = files.len() - 256;
+                for (path, _) in files.into_iter().take(excess) {
                     let _ = tokio::fs::remove_file(path).await;
                 }
             }
@@ -367,7 +368,7 @@ async fn fetch_fdroid_package_inner(pkg: &str) -> Result<FdroidPackage, String> 
     Ok(FdroidPackage {
         apk_url: format!("https://f-droid.org/repo/{}_{}.apk", pkg, version_code),
         page_url: format!("https://f-droid.org/packages/{}", pkg),
-        package: pkg,
+        package: pkg.to_string(),
         version,
         version_code,
     })
@@ -1268,7 +1269,6 @@ async fn persist_approved_dirs(app: &AppHandle, registry: &DownloadRegistry) {
             // is never even briefly world-readable between write and chmod.
             #[cfg(unix)]
             {
-                use std::os::unix::fs::OpenOptionsExt;
                 match tokio::fs::OpenOptions::new()
                     .write(true)
                     .create(true)

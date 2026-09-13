@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-beta (2026-09-14)
+
+The first release that ships for every platform from one tag: Windows, macOS (Apple Silicon and Intel), Linux (AppImage, deb, rpm), and Android (universal and arm64 APKs).
+
+### Fixed
+- Star counts are live everywhere now, including the search-adjacent places people actually look at. The GitHub API quota (60 anonymous calls per hour — a catalog this size burns it fast) is handled with ETag re-validation, which is free, so counts stay fresh instead of silently freezing. Formatting matches github.com (19.6k, 950 — a 940-star repo no longer rounds down to "0k").
+- Thunderbird had `stars: 0` and no repository link; LibreOffice carried a made-up round number. Both now link their official repositories (thunderbird-desktop and the LibreOffice/core mirror) with the real counts.
+- Adding an app by hand no longer guesses 1,000 stars — the field fills itself from the live GitHub API once a repository URL is pasted.
+- Selected and highlighted controls in light mode (Picks, Trending, Favorites toggles, compare and bookmark buttons, the batch pill, table badges) kept pale text on white. They now use muted deep shades — dark enough to read, calm enough not to glare. Dark mode is untouched.
+
+### Changed
+- The repository was recreated clean: the git history carries one author (WasewaseX), the "Created from template" trace is gone, and no placeholder identities remain anywhere.
+- Releases restore instantly: all previous installers were re-published from byte-identical backups, and CI rebuilds each tagged version in the background.
+
 ## 0.12.1-beta (2026-09-13)
 
 ### Fixed

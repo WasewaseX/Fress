@@ -27,8 +27,9 @@ import {
 } from 'lucide-react';
 import { PrivacyAuditData } from '../types';
 import { useTheme } from './ThemeProvider';
-import { useDownloads } from '../lib/downloads';
+import { useDownloads, isAndroidWebview } from '../lib/downloads';
 import { LANGUAGES, useI18n } from '../lib/i18n';
+import pkg from '../../package.json';
 
 interface HeaderProps {
   searchQuery: string;
@@ -107,6 +108,26 @@ export const Header: React.FC<HeaderProps> = ({
   const { t, lang, setLang } = useI18n();
 
   const downloadBadge = activeDownloadCount ?? activeCount;
+  // Android's scoped storage has no arbitrary folder picker (that's a desktop
+  // capability), so the change/reset controls only exist on desktop.
+  const canPickFolder = !isAndroidWebview();
+
+  // Publish the header's rendered height as a CSS variable so the filter bar
+  // can stick directly beneath it on every screen size without guessing.
+  useEffect(() => {
+    const headerEl = document.getElementById('main-app-header');
+    if (!headerEl) return;
+    const update = () =>
+      document.documentElement.style.setProperty('--fress-header-h', `${headerEl.offsetHeight}px`);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(headerEl);
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
 
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,8 +167,12 @@ export const Header: React.FC<HeaderProps> = ({
             <span id="header-brand-title" className="font-extrabold text-base text-slate-100 tracking-tight">
               Fress
             </span>
-            <span className="text-[11px] font-mono font-semibold uppercase tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
-              {t('common.beta')}
+            <span
+              id="header-version-chip"
+              className="text-[11px] font-mono font-semibold tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded"
+              title="The exact version of this Fress install"
+            >
+              v{pkg.version}
             </span>
           </div>
 
@@ -338,25 +363,31 @@ export const Header: React.FC<HeaderProps> = ({
                       >
                         {downloadDir || '…'}
                       </code>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => void chooseFolder()}
-                          className="flex-1 inline-flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded-md font-semibold border border-sky-500 transition-colors"
-                        >
-                          <FolderOpen className="w-3 h-3" />
-                          <span>{t('settings.changeFolder')}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void resetFolder()}
-                          className="inline-flex items-center justify-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-950/[0.06] dark:bg-white/[0.06] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
-                          title="Use the system Downloads folder"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          <span>{t('settings.resetFolder')}</span>
-                        </button>
-                      </div>
+                      {canPickFolder ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void chooseFolder()}
+                            className="flex-1 inline-flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded-md font-semibold border border-sky-500 transition-colors"
+                          >
+                            <FolderOpen className="w-3 h-3" />
+                            <span>{t('settings.changeFolder')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void resetFolder()}
+                            className="inline-flex items-center justify-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-950/[0.06] dark:bg-white/[0.06] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
+                            title="Use the system Downloads folder"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>{t('settings.resetFolder')}</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 leading-snug">
+                          {t('settings.androidFolderNote')}
+                        </p>
+                      )}
                     </div>
 
                     <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">

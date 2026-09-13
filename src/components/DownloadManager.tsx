@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import { useDownloads, formatBytes, formatSpeed, formatEta } from '../lib/downloads';
+import { useDownloads, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
 import { useI18n } from '../lib/i18n';
 
 export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
@@ -153,7 +153,11 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                   {item.status === 'completed' && item.path && (
                     <>
                       <PanelButton onClick={() => openFile(item.path!)} icon={<CheckCircle2 className="w-3 h-3" />} label={t('downloads.openFile')} primary />
-                      <PanelButton onClick={() => openFolder(item.path)} icon={<FolderOpen className="w-3 h-3" />} label={t('downloads.showFolder')} />
+                      {/* Android saves into app-private storage that no file
+                          manager can browse, so only Open is offered there. */}
+                      {!isAndroidWebview() && (
+                        <PanelButton onClick={() => openFolder(item.path)} icon={<FolderOpen className="w-3 h-3" />} label={t('downloads.showFolder')} />
+                      )}
                     </>
                   )}
                 </div>

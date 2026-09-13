@@ -29,6 +29,12 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+/** True when running inside the Android app (used to adapt desktop-only UI,
+ * like the folder picker, to what Android's storage model actually allows). */
+export function isAndroidWebview(): boolean {
+  return typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+}
+
 interface DownloadsContextValue {
   items: DownloadItem[];
   activeCount: number;

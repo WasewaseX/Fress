@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, State};
+// `Manager` powers the Android-only app-data path lookup below.
+#[cfg_attr(not(target_os = "android"), allow(unused_imports))]
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex};
 
@@ -311,12 +313,7 @@ async fn start_download(
 ) -> Result<u32, String> {
     let dir: PathBuf = match directory {
         Some(d) if !d.trim().is_empty() => PathBuf::from(d),
-        _ => {
-            let base = dirs::download_dir()
-                .or_else(|| dirs::home_dir())
-                .unwrap_or_else(|| PathBuf::from("."));
-            base.join("Fress")
-        }
+        _ => platform_download_dir(&app),
     };
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create download folder: {}", e))?;
 
@@ -476,12 +473,34 @@ async fn cancel_download(id: u32, registry: State<'_, Arc<DownloadRegistry>>) ->
 }
 
 #[tauri::command]
-fn default_download_dir() -> String {
-    // Default is the user's normal Downloads folder, like any other app.
-    let base = dirs::download_dir()
+fn default_download_dir(app: AppHandle) -> String {
+    // Default is each platform's own download location, like any other app.
+    platform_download_dir(&app).to_string_lossy().to_string()
+}
+
+// Per-OS default download location. Desktop platforms get the user's real
+// Downloads folder (Windows FOLDERID_Downloads including OneDrive
+// redirection, macOS ~/Downloads, Linux XDG download dir). Android does not
+// let apps write a shared Downloads folder without storage permissions, so
+// the app's private directory is used instead; the UI explains this.
+fn platform_download_dir(app: &AppHandle) -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(dir) = app.path().app_data_dir() {
+            let downloads = dir.join("Download");
+            if std::fs::create_dir_all(&downloads).is_ok() {
+                return downloads;
+            }
+            return dir;
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app; // only needed for the Android path
+    }
+    dirs::download_dir()
         .or_else(|| dirs::home_dir())
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.to_string_lossy().to_string()
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 #[tauri::command]

@@ -47,11 +47,28 @@ const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
 const STORAGE_KEY_FAVORITES = 'fress_favorites';
 const STORAGE_KEY_COOKIES = 'awesome_free_apps_cookie_consent';
 const STORAGE_KEY_VIEW_MODE = 'awesome_free_apps_view_mode';
+const STORAGE_KEY_PLATFORM = 'fress_platform_filter';
+
+// Each device starts with its own platform preselected: Android opens on the
+// Android catalog, everything else opens on the full list. The user's last
+// choice is remembered and always wins over the device default.
+const isAndroidDevice = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+const deviceDefaultPlatform: FilterState['platform'] = isAndroidDevice ? 'android' : 'all';
+
+function initialPlatform(): FilterState['platform'] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_PLATFORM);
+    if (saved) return saved as FilterState['platform'];
+  } catch {
+    // ignore
+  }
+  return deviceDefaultPlatform;
+}
 
 const DEFAULT_FILTERS: FilterState = {
   search: '',
   category: 'All',
-  platform: 'all',
+  platform: deviceDefaultPlatform,
   beginnerOnly: false,
   ownerPickOnly: false,
   trendingOnly: false,
@@ -139,7 +156,10 @@ function AppShell() {
   });
 
   // Filters
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<FilterState>(() => ({
+    ...DEFAULT_FILTERS,
+    platform: initialPlatform(),
+  }));
 
   // Modals state
   const [selectedApp, setSelectedApp] = useState<AppItem | null>(null);
@@ -411,11 +431,23 @@ function AppShell() {
 
   // Filter change helper
   const handleFilterChange = (partial: Partial<FilterState>) => {
+    if (partial.platform !== undefined) {
+      try {
+        localStorage.setItem(STORAGE_KEY_PLATFORM, partial.platform);
+      } catch {
+        // ignore
+      }
+    }
     setFilters((prev) => ({ ...prev, ...partial }));
   };
 
   const handleResetFilters = () => {
-    setFilters(DEFAULT_FILTERS);
+    try {
+      localStorage.removeItem(STORAGE_KEY_PLATFORM);
+    } catch {
+      // ignore
+    }
+    setFilters({ ...DEFAULT_FILTERS, platform: deviceDefaultPlatform });
     toast.info('Filters reset to default.');
   };
 

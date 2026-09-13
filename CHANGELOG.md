@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0-beta (2025-09-13)
+
+### Fixed
+- Android launcher icon: the APK shipped the Tauri template icon by mistake; every Android launcher/adaptive icon is now the blue Fress leaf.
+- Android opens on the Android catalog: each device now starts with its own platform preselected (Android shows Android apps first, desktop shows everything), and your last chosen platform is remembered.
+- Header and filter bar no longer scroll away: the filter bar pins itself directly under the header, on every screen size.
+- Downloads land in one consistent folder: the engine's fallback matched the Settings display (the previous fallback silently added a "Fress" subfolder when no folder was set).
+- Per-OS download locations: Windows uses the real Downloads folder (including OneDrive redirection), macOS uses ~/Downloads, Linux uses the XDG download folder, and Android uses the app's storage with a clear note (Android does not permit arbitrary folder picking, so the change-folder control is desktop-only).
+
+### Changed
+- The header now shows the exact version (for example `v0.11.0-beta`) next to the app name, so it is always obvious which build you are running.
+- Installer metadata: the Windows uninstaller entry now lists Fress as the publisher.
+
 ## 0.10.0-beta (2025-09-12)
 
 ### Added

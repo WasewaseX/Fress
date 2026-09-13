@@ -196,6 +196,9 @@ jobs:
           TAURI_ANDROID_KEY_PASSWORD: fressandroid
         run: |
           npx tauri android init
+          # Stamp our own launcher icon (blue leaf) into the generated Android
+          # project. Without this the APK ships the Tauri template icon.
+          npx tauri icon src-tauri/icons/icon.png
           npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
       - name: Align, sign, and upload APKs
         run: |

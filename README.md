@@ -65,6 +65,29 @@ Every release includes a `SHA256SUMS.txt` covering all assets. Verify before run
 sha256sum -c SHA256SUMS.txt
 ```
 
+### Make sure you run the newest build
+
+Each Fress app shows its exact version in the header (for example `v0.11.0-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page — old installers keep working and can silently sit on your machine next to the new one.
+
+### Where downloads are saved (per operating system)
+
+Fress picks each operating system's own download location, the same place your browser uses:
+
+| Operating system | Default download folder | Change folder in-app |
+| --- | --- | --- |
+| Windows | `Downloads` (follows OneDrive redirection if set up) | Yes |
+| macOS | `~/Downloads` | Yes |
+| Linux | XDG downloads folder (usually `~/Downloads` or `~/Downloads/<locale>`) | Yes |
+| Android | The app's private storage (Android does not let apps pick arbitrary folders) | No — use Open after a download to install or share the file |
+
+### Why Windows shows "Unknown publisher"
+
+The Windows installer and executable are not code-signed. Signing certificates cost real money per year, so a free, open-source project without a budget ships unsigned binaries — Windows then shows the blue "Unknown publisher" / "Windows protected your PC" warning. This is expected for every unsigned program; it does not mean the file is infected. If you prefer not to click through the warning:
+
+- Verify the checksum against `SHA256SUMS.txt`, or
+- Build the app yourself from this repository (`npm run tauri build`), or
+- If this project ever receives funding, signed installers are the first thing it pays for.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). In short: app suggestions must be free, open-source, popular, actively maintained, and link to official pages only.

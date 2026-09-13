@@ -122,6 +122,7 @@ const en: Dict = {
   'settings.downloadFolder': 'Download folder',
   'settings.changeFolder': 'Change…',
   'settings.resetFolder': 'Reset to default',
+  'settings.androidFolderNote': 'On Android, downloads are saved in the app\'s private storage (Android does not allow folder picking). Use Open after a download to install or share the file.',
 };
 
 const fa: Dict = {
@@ -232,6 +233,7 @@ const fa: Dict = {
   'settings.downloadFolder': 'پوشه دانلود',
   'settings.changeFolder': 'تغییر…',
   'settings.resetFolder': 'بازگشت به پیش‌فرض',
+  'settings.androidFolderNote': 'در اندروید، دانلودها در حافظه خصوصی برنامه ذخیره می‌شوند (اندروید انتخاب پوشه را مجاز نمی‌داند). پس از دانلود از دکمه باز کردن برای نصب یا اشتراک فایل استفاده کنید.',
 };
 
 const es: Dict = {
@@ -342,6 +344,7 @@ const es: Dict = {
   'settings.downloadFolder': 'Carpeta de descargas',
   'settings.changeFolder': 'Cambiar…',
   'settings.resetFolder': 'Restablecer',
+  'settings.androidFolderNote': 'En Android, las descargas se guardan en el almacenamiento privado de la app (Android no permite elegir carpetas). Usa Abrir tras la descarga para instalar o compartir el archivo.',
 };
 
 const fr: Dict = {
@@ -452,6 +455,7 @@ const fr: Dict = {
   'settings.downloadFolder': 'Dossier de téléchargement',
   'settings.changeFolder': 'Changer…',
   'settings.resetFolder': 'Réinitialiser',
+  'settings.androidFolderNote': 'Sur Android, les téléchargements vont dans le stockage privé de l\'app (Android ne permet pas de choisir un dossier). Utilisez Ouvrir après un téléchargement pour installer ou partager le fichier.',
 };
 
 const de: Dict = {
@@ -562,6 +566,7 @@ const de: Dict = {
   'settings.downloadFolder': 'Download-Ordner',
   'settings.changeFolder': 'Ändern…',
   'settings.resetFolder': 'Zurücksetzen',
+  'settings.androidFolderNote': 'Auf Android werden Downloads im privaten App-Speicher gespeichert (Android erlaubt keine Ordnerauswahl). Nutze nach dem Download Öffnen, um die Datei zu installieren oder zu teilen.',
 };
 
 const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

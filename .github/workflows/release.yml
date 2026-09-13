@@ -58,7 +58,7 @@ jobs:
             | Android (arm64 APK) | `Fress_*_arm64.apk` |
 
             **Windows: about the "Unknown Publisher" warning**
-            The installer is Authenticode-signed (subject "Fress") but with a self-signed certificate, so Windows still shows a blue SmartScreen/UAC warning when you run it. That warning only disappears once the project buys an OV/EV code-signing certificate. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info → Run anyway**.
+            The installer carries a signature that proves it has not been modified, but until the publisher certificate is verified with Microsoft (see `CODE_SIGNING.md` in the repo), Windows still shows the blue warning out of caution. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info → Run anyway**.
 
             Verify any download against `SHA256SUMS.txt`.
 
@@ -86,7 +86,46 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: '--target x86_64-pc-windows-msvc --bundles nsis'
-      - name: Sign the installer (self-signed Authenticode, timestamped)
+      - name: Sign with Azure Trusted Signing (real Microsoft-trusted signature)
+        # This is the step that makes the "Unknown Publisher" blue warning go
+        # away for good. It runs only when the signing account is configured —
+        # see CODE_SIGNING.md for the one-time setup (a few minutes, the
+        # certificate comes from Microsoft's own signing service).
+        if: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODESIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODESIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CODESIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Upload the signed installer
+        if: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $bundle.FullName
+          Write-Host "Signature status: $($sig.Status) — signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "Trusted Signing did not produce a valid signature: $($sig.Status)" }
+          gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
+          Write-Host "Signed installer uploaded: $($bundle.Name)"
+
+      - name: Fall back to a self-signed signature (no signing account configured)
+        # Without a trusted certificate Windows will still show the blue
+        # "Unknown Publisher" warning — nothing we ship can change that, only
+        # a certificate chained to a trusted root can (see CODE_SIGNING.md).
+        # The self-signature still proves the file was not modified in transit.
+        if: ${{ secrets.AZURE_TENANT_ID == '' || secrets.AZURE_CLIENT_ID == '' || secrets.AZURE_CLIENT_SECRET == '' || secrets.AZURE_CODESIGNING_ACCOUNT == '' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -78,6 +78,31 @@
   --color-indigo-300: #4045b4;
 }
 
+/* ------------------------------------------------------------------
+   ACTIVE / SELECTED CHIP
+   One semantic style for every "currently selected" pill (filters,
+   view toggle, command palette rows).
+   Dark keeps the soft white-on-dark look it always had.
+   Light gets a warm cocoa brown with white text: strong contrast
+   (white text was landing on near-white paper before — unreadable)
+   and a muted, earthy shade that doesn't glare.
+   ------------------------------------------------------------------ */
+:root {
+  --fr-chip-active-bg: rgba(255, 255, 255, 0.14);
+  --fr-chip-active-text: #ffffff;
+  --fr-chip-active-border: rgba(255, 255, 255, 0.25);
+}
+:root:not(.dark) {
+  --fr-chip-active-bg: #7b5c3a;      /* cocoa — ~6:1 against white text */
+  --fr-chip-active-text: #ffffff;
+  --fr-chip-active-border: #6a4d2e;
+}
+.fr-chip-active {
+  background: var(--fr-chip-active-bg);
+  color: var(--fr-chip-active-text);
+  border-color: var(--fr-chip-active-border);
+}
+
 html {
   scroll-behavior: smooth;
 }

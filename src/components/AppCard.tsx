@@ -20,6 +20,7 @@ import { resolveGitHubDownload, resolveFdroidDownload, guessUserPlatform } from 
 import { toast } from 'sonner';
 import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
+import { useLiveStars, formatStarCount } from '../lib/starFetch';
 
 
 interface AppCardProps {
@@ -53,15 +54,9 @@ export const AppCard: React.FC<AppCardProps> = ({
   const tx = useAppText(app);
   const isDownloading = downloadItems.some((d) => d.name.startsWith(app.name) && d.status === 'active');
   const [resolving, setResolving] = useState(false);
-
-  const formatStars = (stars: number) => {
-    if (stars >= 1000) {
-      const k = stars / 1000;
-      const label = k >= 10 ? k.toFixed(0) : k.toFixed(1);
-      return `${label.replace(/\.0$/, '')}k`;
-    }
-    return stars.toString();
-  };
+  // Live value from GitHub/GitLab when reachable; falls back to the stored number.
+  const liveStars = useLiveStars(app.githubUrl);
+  const shownStars = liveStars ?? app.stars;
 
   const renderPlatformBadge = (platform: Platform) => {
     const label =
@@ -273,11 +268,11 @@ export const AppCard: React.FC<AppCardProps> = ({
         <div id={`app-meta-row-${app.id}`} className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-4">
           <span 
             id={`app-stars-count-${app.id}`}
-            className={`inline-flex items-center gap-1 font-mono text-xs text-slate-400 ${app.stars === 0 ? 'hidden' : ''}`}
-            title={app.githubUrl.includes('github.com') ? `${app.stars.toLocaleString()} stars on GitHub` : `${app.stars.toLocaleString()} community stars (approximate)`}
+            className={`inline-flex items-center gap-1 font-mono text-xs text-slate-400 ${shownStars === 0 ? 'hidden' : ''}`}
+            title={app.githubUrl.includes('github.com') ? `${shownStars.toLocaleString()} stars on GitHub, fetched live` : `${shownStars.toLocaleString()} stars on the project's own code forge`}
           >
             <Star className="w-3 h-3 fill-slate-400 text-slate-400" aria-hidden="true" />
-            <span>{formatStars(app.stars)}</span>
+            <span>{formatStarCount(shownStars)}</span>
           </span>
 
           <span 

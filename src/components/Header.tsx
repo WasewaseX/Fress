@@ -289,7 +289,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => onToggleViewMode('grid')}
                 className={`p-1.5 rounded-md text-xs transition-colors ${
                   viewMode === 'grid'
-                    ? 'bg-white text-slate-900 shadow-xs dark:bg-white/[0.14] dark:text-white'
+                    ? 'fr-chip-active shadow-xs'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
                 title="Grid Card View"
@@ -303,7 +303,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => onToggleViewMode('table')}
                 className={`p-1.5 rounded-md text-xs transition-colors ${
                   viewMode === 'table'
-                    ? 'bg-white text-slate-900 shadow-xs dark:bg-white/[0.14] dark:text-white'
+                    ? 'fr-chip-active shadow-xs'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
                 title="Compact Table View"

@@ -239,7 +239,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     onClick={() => item.action?.()}
                     onMouseEnter={() => setSelectedIndex(idx)}
                     className={`flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
-                      isSelected ? 'bg-sky-500/15 text-white border border-sky-500/30' : 'text-slate-300 hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04]'
+                      isSelected ? 'fr-chip-active border' : 'text-slate-300 hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04]'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -272,7 +272,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   }}
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
-                    isSelected ? 'bg-sky-500/15 text-white border border-sky-500/30' : 'text-slate-300 hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04]'
+                    isSelected ? 'fr-chip-active border' : 'text-slate-300 hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04]'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">

@@ -1,0 +1,344 @@
+{
+ "7zip": {
+  "old": 0,
+  "real": 3914,
+  "repo": "ip7z/7zip",
+  "source": "github"
+ },
+ "antennapod": {
+  "old": 7200,
+  "real": 8148,
+  "repo": "AntennaPod/AntennaPod",
+  "source": "github"
+ },
+ "appflowy": {
+  "old": 64000,
+  "real": 76599,
+  "repo": "AppFlowy-IO/AppFlowy",
+  "source": "github"
+ },
+ "audacity": {
+  "old": 14000,
+  "real": 18413,
+  "repo": "audacity/audacity",
+  "source": "github"
+ },
+ "balenaetcher": {
+  "old": 31000,
+  "real": 34334,
+  "repo": "balena-io/etcher",
+  "source": "github"
+ },
+ "bitwarden": {
+  "old": 20100,
+  "real": 20129,
+  "repo": "bitwarden/server",
+  "source": "github"
+ },
+ "bleachbit": {
+  "old": 3200,
+  "real": 6896,
+  "repo": "bleachbit/bleachbit",
+  "source": "github"
+ },
+ "blender": {
+  "old": 20000,
+  "real": 20312,
+  "repo": "blender/blender",
+  "source": "github"
+ },
+ "bruno": {
+  "old": 35000,
+  "real": 46928,
+  "repo": "usebruno/bruno",
+  "source": "github"
+ },
+ "cal-com": {
+  "old": 38000,
+  "real": 48429,
+  "repo": "calcom/cal.com",
+  "source": "github"
+ },
+ "calibre": {
+  "old": 21000,
+  "real": 25895,
+  "repo": "kovidgoyal/calibre",
+  "source": "github"
+ },
+ "devtoys": {
+  "old": 26500,
+  "real": 31993,
+  "repo": "DevToys-app/DevToys",
+  "source": "github"
+ },
+ "f-droid": {
+  "old": 3000,
+  "real": 2656,
+  "repo": "https://gitlab.com/fdroid/fdroidclient",
+  "source": "gitlab"
+ },
+ "flameshot": {
+  "old": 25000,
+  "real": 30838,
+  "repo": "flameshot-org/flameshot",
+  "source": "github"
+ },
+ "formbricks": {
+  "old": 13000,
+  "real": 12933,
+  "repo": "formbricks/formbricks",
+  "source": "github"
+ },
+ "gimp": {
+  "old": 5900,
+  "real": 6412,
+  "repo": "GNOME/gimp",
+  "source": "github"
+ },
+ "handbrake": {
+  "old": 17000,
+  "real": 24370,
+  "repo": "HandBrake/HandBrake",
+  "source": "github"
+ },
+ "home-assistant": {
+  "old": 82000,
+  "real": 90410,
+  "repo": "home-assistant/core",
+  "source": "github"
+ },
+ "immich": {
+  "old": 70000,
+  "real": 114031,
+  "repo": "immich-app/immich",
+  "source": "github"
+ },
+ "inkscape": {
+  "old": 4000,
+  "real": 3897,
+  "repo": "inkscape/inkscape",
+  "source": "github"
+ },
+ "jitsi-meet": {
+  "old": 25000,
+  "real": 29908,
+  "repo": "jitsi/jitsi-meet",
+  "source": "github"
+ },
+ "joplin": {
+  "old": 46000,
+  "real": 56348,
+  "repo": "laurent22/joplin",
+  "source": "github"
+ },
+ "kdenlive": {
+  "old": 4500,
+  "real": 5677,
+  "repo": "KDE/kdenlive",
+  "source": "github"
+ },
+ "keepassdx": {
+  "old": 5800,
+  "real": 7296,
+  "repo": "Kunzisoft/KeePassDX",
+  "source": "github"
+ },
+ "keepassxc": {
+  "old": 21500,
+  "real": 28791,
+  "repo": "keepassxreboot/keepassxc",
+  "source": "github"
+ },
+ "krita": {
+  "old": 3600,
+  "real": 10361,
+  "repo": "KDE/krita",
+  "source": "github"
+ },
+ "libreoffice": {
+  "old": 5000,
+  "real": null,
+  "repo": "https://git.libreoffice.org",
+  "source": "unsupported"
+ },
+ "listmonk": {
+  "old": 18000,
+  "real": 23397,
+  "repo": "knadh/listmonk",
+  "source": "github"
+ },
+ "localsend": {
+  "old": 90600,
+  "real": 90845,
+  "repo": "localsend/localsend",
+  "source": "github"
+ },
+ "losslesscut": {
+  "old": 25500,
+  "real": 43718,
+  "repo": "mifi/lossless-cut",
+  "source": "github"
+ },
+ "newpipe": {
+  "old": 32000,
+  "real": 39664,
+  "repo": "TeamNewPipe/NewPipe",
+  "source": "github"
+ },
+ "nextcloud": {
+  "old": 30000,
+  "real": 36795,
+  "repo": "nextcloud/server",
+  "source": "github"
+ },
+ "nocodb": {
+  "old": 55000,
+  "real": 64956,
+  "repo": "nocodb/nocodb",
+  "source": "github"
+ },
+ "obs-studio": {
+  "old": 62000,
+  "real": 76163,
+  "repo": "obsproject/obs-studio",
+  "source": "github"
+ },
+ "obsidian": {
+  "old": 21500,
+  "real": 21516,
+  "repo": "obsidianmd/obsidian-releases",
+  "source": "github"
+ },
+ "ollama": {
+  "old": 112000,
+  "real": 180813,
+  "repo": "ollama/ollama",
+  "source": "github"
+ },
+ "organicmaps": {
+  "old": 12400,
+  "real": 15402,
+  "repo": "organicmaps/organicmaps",
+  "source": "github"
+ },
+ "pi-hole": {
+  "old": 52000,
+  "real": 60882,
+  "repo": "pi-hole/pi-hole",
+  "source": "github"
+ },
+ "powertoys": {
+  "old": 118000,
+  "real": 138602,
+  "repo": "microsoft/PowerToys",
+  "source": "github"
+ },
+ "qbittorrent": {
+  "old": 30000,
+  "real": 40079,
+  "repo": "qbittorrent/qBittorrent",
+  "source": "github"
+ },
+ "rustdesk": {
+  "old": 82000,
+  "real": 123340,
+  "repo": "rustdesk/rustdesk",
+  "source": "github"
+ },
+ "searxng": {
+  "old": 20000,
+  "real": 36989,
+  "repo": "searxng/searxng",
+  "source": "github"
+ },
+ "sharex": {
+  "old": 31000,
+  "real": 39561,
+  "repo": "ShareX/ShareX",
+  "source": "github"
+ },
+ "shotcut": {
+  "old": 12000,
+  "real": 15195,
+  "repo": "mltframework/shotcut",
+  "source": "github"
+ },
+ "signal": {
+  "old": 15000,
+  "real": 16529,
+  "repo": "signalapp/Signal-Desktop",
+  "source": "github"
+ },
+ "stirling-pdf": {
+  "old": 55000,
+  "real": 91899,
+  "repo": "Stirling-Tools/Stirling-PDF",
+  "source": "github"
+ },
+ "sumatra": {
+  "old": 14000,
+  "real": 17573,
+  "repo": "sumatrapdfreader/sumatrapdf",
+  "source": "github"
+ },
+ "syncthing": {
+  "old": 64000,
+  "real": 88528,
+  "repo": "syncthing/syncthing",
+  "source": "github"
+ },
+ "termux": {
+  "old": 60700,
+  "real": 60750,
+  "repo": "termux/termux-app",
+  "source": "github"
+ },
+ "thunderbird": {
+  "old": 0,
+  "real": null,
+  "repo": "(no repo url)",
+  "source": "none"
+ },
+ "tor-browser": {
+  "old": 2000,
+  "real": 18,
+  "repo": "https://gitlab.torproject.org/tpo/applications/tor-browser",
+  "source": "gitlab"
+ },
+ "upscayl": {
+  "old": 38000,
+  "real": 49213,
+  "repo": "upscayl/upscayl",
+  "source": "github"
+ },
+ "vaultwarden": {
+  "old": 48000,
+  "real": 67349,
+  "repo": "dani-garcia/vaultwarden",
+  "source": "github"
+ },
+ "vlc": {
+  "old": 3000,
+  "real": 19625,
+  "repo": "videolan/vlc",
+  "source": "github"
+ },
+ "vscodium": {
+  "old": 28500,
+  "real": 33221,
+  "repo": "VSCodium/vscodium",
+  "source": "github"
+ },
+ "whisper-desktop": {
+  "old": 9500,
+  "real": 10659,
+  "repo": "Const-me/Whisper",
+  "source": "github"
+ },
+ "zotero": {
+  "old": 11000,
+  "real": 15248,
+  "repo": "zotero/zotero",
+  "source": "github"
+ }
+}

@@ -29,6 +29,7 @@ import {
 } from '../lib/releaseFetch';
 import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
+import { useLiveStars } from '../lib/starFetch';
 import { toast } from 'sonner';
 
 /** Device-aware download section: pick your platform, get real targets. */
@@ -277,8 +278,11 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const { t } = useI18n();
   const tx = useAppText(app);
+  const liveStars = useLiveStars(app?.githubUrl);
 
   if (!app) return null;
+
+  const shownStars = liveStars ?? app.stars;
 
   const handleCopy = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -532,12 +536,16 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                     : !app.githubUrl
                       ? 'Source code is published by the project.'
                       : repoHost === 'github'
-                      ? (app.stars > 0
-                          ? `Verified open-source repository with ${app.stars.toLocaleString()} stars on GitHub.`
+                      ? (shownStars > 0
+                          ? `Verified open-source repository with ${shownStars.toLocaleString()} stars on GitHub.`
                           : 'Verified open-source repository on GitHub.')
                       : repoHost === 'gitlab.com'
-                        ? 'Verified open-source repository, hosted on GitLab.com.'
-                        : 'Verified open-source repository, hosted on the project\'s own infrastructure.'}
+                        ? (shownStars > 0
+                            ? `Verified open-source repository with ${shownStars.toLocaleString()} stars on GitLab.com.`
+                            : 'Verified open-source repository, hosted on GitLab.com.')
+                        : (shownStars > 0
+                            ? `Verified open-source repository with ${shownStars.toLocaleString()} stars on the project's own forge.`
+                            : 'Verified open-source repository, hosted on the project\'s own infrastructure.')}
                 </span>
               </li>
               <li className="flex items-center gap-2">

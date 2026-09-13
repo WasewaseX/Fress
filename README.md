@@ -84,11 +84,10 @@ Fress picks each operating system's own download location, the same place your b
 
 ### Why Windows shows "Unknown publisher"
 
-The Windows installer is Authenticode-signed (subject "Fress") with a self-signed certificate and a timestamp. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning, because that warning only goes away with a paid OV/EV code-signing certificate — a recurring cost a free project without funding cannot pay. The signature still proves two useful things: the file is exactly the one CI produced, and it has not been altered since. If you prefer not to click **More info → Run anyway**:
+The Windows installer is signed with a timestamp, which proves the file is exactly the one CI produced and has not been altered. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning because it only hides for a certificate that chains to a root Windows already trusts — that's the fix, and the build pipeline already supports it end to end. [CODE_SIGNING.md](CODE_SIGNING.md) documents the one-time setup (Microsoft's Trusted Signing service, or the free SignPath Foundation route for open-source projects); until it's done, you can:
 
-- Verify the checksum against `SHA256SUMS.txt`, or
-- Build the app yourself from this repository (`npm run tauri build`), or
-- If this project ever receives funding, a real code-signing certificate is the first thing it pays for.
+- Click **More info → Run anyway** after checking the checksum against `SHA256SUMS.txt`, or
+- Build the app yourself from this repository (`npm run tauri build`).
 
 ## Contributing
 

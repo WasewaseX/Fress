@@ -93,7 +93,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               isActive
                 ? isAndroid
                   ? 'bg-emerald-500 text-slate-950 font-bold border-emerald-400'
-                  : 'bg-white text-slate-950 font-semibold border-white'
+                  : 'fr-chip-active font-semibold'
                 : isAndroid
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-400 border-slate-950/10 dark:border-white/[0.06] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-200'
@@ -229,7 +229,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 onClick={() => onFilterChange({ category: cat })}
                 className={`whitespace-nowrap px-2.5 py-1 rounded-md text-xs font-medium border transition-colors shrink-0 ${
                   isActive
-                    ? 'bg-white text-slate-900 border-slate-600 shadow-xs dark:bg-white/[0.14] dark:text-white dark:border-white/[0.25]'
+                    ? 'fr-chip-active shadow-xs'
                     : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-400 border-slate-950/10 dark:border-white/[0.06] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-200'
                 }`}
                 aria-pressed={isActive}

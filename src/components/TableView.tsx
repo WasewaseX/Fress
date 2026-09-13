@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
+import { useLiveStars } from '../lib/starFetch';
 import { 
   Star, 
   ExternalLink, 
@@ -27,6 +28,21 @@ interface TableViewProps {
   comparedAppIds?: string[];
   onToggleCompare?: (id: string) => void;
 }
+
+/** One table cell: live star count with the stored number as fallback. */
+const StarCell: React.FC<{ app: AppItem }> = ({ app }) => {
+  const live = useLiveStars(app.githubUrl);
+  const shown = live ?? app.stars;
+  if (shown === 0) {
+    return <span className="text-slate-600">—</span>;
+  }
+  return (
+    <div className="inline-flex items-center gap-1">
+      <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-hidden="true" />
+      <span>{shown.toLocaleString()}</span>
+    </div>
+  );
+};
 
 export const TableView: React.FC<TableViewProps> = ({
   apps,
@@ -174,10 +190,7 @@ export const TableView: React.FC<TableViewProps> = ({
 
                 {/* GitHub Stars */}
                 <td className="py-2.5 px-3 text-right font-mono text-amber-300">
-                  <div className="inline-flex items-center gap-1">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-hidden="true" />
-                    <span>{app.stars.toLocaleString()}</span>
-                  </div>
+                  <StarCell app={app} />
                 </td>
 
                 {/* License */}

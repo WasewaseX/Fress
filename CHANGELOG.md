@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.1-beta (2026-09-13)
+
+### Fixed
+- Star counts were hand-entered and had drifted into nonsense — VLC showed 3k (it really has 19.6k on its official GitHub mirror), 7-Zip showed 0, Immich showed 70k instead of 114k. Every number was replaced with the live value from each project's code hosting, and the catalog now refreshes them automatically every 24 hours (cards, table view, and the detail modal all show the same live count; offline it falls back to the last known value).
+- VLC, GIMP, and Inkscape now link their repo to the official GitHub mirror so the star count reflects where their community actually tracks the project.
+- Selected buttons in light mode (platform and category chips, grid/table toggle, command palette rows) had near-white text on a white background — invisible. They now use a muted cocoa-brown chip with white text: easy to spot, easy on the eyes. Dark mode looks exactly as before.
+- The "Unknown Publisher" blue warning on Windows: releases now sign through Azure Trusted Signing the moment the signing account is configured in repo secrets, which makes Windows show Fress as a verified publisher — no warning. Until that one-time setup is done (see CODE_SIGNING.md), releases keep the timestamped self-signature and the release page says so plainly.
+
+### Changed
+- Git history rewritten so every commit is authored by WasewaseX — the placeholder "Fress" identity no longer appears anywhere in the repository.
+
 ## 0.12.0-beta (2026-09-13)
 
 ### Added

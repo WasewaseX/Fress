@@ -69,6 +69,11 @@ jobs:
   build-windows:
     needs: [version, create-release]
     runs-on: windows-latest
+    env:
+      # "true" once the Trusted Signing account is configured in repo secrets.
+      # (The secrets context can't be used directly in a step-level if, but it
+      # can here, and the env context can be read from every step below.)
+      FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -91,7 +96,7 @@ jobs:
         # away for good. It runs only when the signing account is configured —
         # see CODE_SIGNING.md for the one-time setup (a few minutes, the
         # certificate comes from Microsoft's own signing service).
-        if: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+        if: env.FRESS_SIGNING_CONFIGURED == 'true'
         uses: azure/trusted-signing-action@v0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -107,7 +112,7 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
       - name: Upload the signed installer
-        if: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+        if: env.FRESS_SIGNING_CONFIGURED == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -125,7 +130,7 @@ jobs:
         # "Unknown Publisher" warning — nothing we ship can change that, only
         # a certificate chained to a trusted root can (see CODE_SIGNING.md).
         # The self-signature still proves the file was not modified in transit.
-        if: ${{ secrets.AZURE_TENANT_ID == '' || secrets.AZURE_CLIENT_ID == '' || secrets.AZURE_CLIENT_SECRET == '' || secrets.AZURE_CODESIGNING_ACCOUNT == '' }}
+        if: env.FRESS_SIGNING_CONFIGURED != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

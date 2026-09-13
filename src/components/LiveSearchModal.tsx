@@ -15,6 +15,7 @@ import {
   Layers
 } from 'lucide-react';
 import { AppItem, Platform, Category } from '../types';
+import { formatStarCount } from '../lib/starFetch';
 
 interface LiveSearchModalProps {
   isOpen: boolean;
@@ -317,7 +318,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                     </h3>
                     <span className="text-[11px] text-amber-300 font-mono inline-flex items-center gap-0.5 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
                       <Star className="w-2.5 h-2.5" />
-                      {item.stars ? (item.stars / 1000).toFixed(0) + 'k' : 'FOSS'}
+                      {typeof item.stars === 'number' && item.stars > 0 ? formatStarCount(item.stars) : 'FOSS'}
                     </span>
                     <span className="text-[11px] text-sky-300 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20">
                       {item.category}

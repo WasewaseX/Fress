@@ -116,7 +116,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         onClick={() => onFilterChange({ ownerPickOnly: !filters.ownerPickOnly })}
         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
           filters.ownerPickOnly
-            ? 'bg-amber-400/10 text-amber-300 border-amber-400/30'
+            ? 'fr-chip-active shadow-xs'
             : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-400 border-slate-950/10 dark:border-white/[0.06] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-200'
         }`}
         aria-pressed={filters.ownerPickOnly}
@@ -131,7 +131,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         onClick={() => onFilterChange({ trendingOnly: !filters.trendingOnly })}
         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
           filters.trendingOnly
-            ? 'bg-emerald-400/10 text-emerald-300 border-emerald-400/30'
+            ? 'bg-emerald-800/[0.07] text-emerald-900 border-emerald-800/25 dark:bg-emerald-400/10 dark:text-emerald-300 dark:border-emerald-400/30'
             : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-400 border-slate-950/10 dark:border-white/[0.06] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-200'
         }`}
         aria-pressed={filters.trendingOnly}
@@ -146,7 +146,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         onClick={() => onFilterChange({ favoritesOnly: !filters.favoritesOnly })}
         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
           filters.favoritesOnly
-            ? 'bg-rose-400/10 text-rose-300 border-rose-400/30'
+            ? 'bg-rose-800/[0.07] text-rose-900 border-rose-800/25 dark:bg-rose-400/10 dark:text-rose-300 dark:border-rose-400/30'
             : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-400 border-slate-950/10 dark:border-white/[0.06] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-200'
         }`}
         aria-pressed={filters.favoritesOnly}

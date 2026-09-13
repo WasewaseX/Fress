@@ -259,7 +259,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="header-batch-btn"
                 onClick={onOpenBatchInstall}
-                className="inline-flex items-center gap-1 bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
+                className="inline-flex items-center gap-1 bg-sky-800/[0.08] text-sky-900 border border-sky-800/25 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 hover:bg-sky-800/[0.14] dark:hover:bg-sky-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
                 title="Generate batch installer script"
               >
                 <Terminal className="w-3.5 h-3.5" />

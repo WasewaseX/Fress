@@ -122,7 +122,7 @@ export const AppCard: React.FC<AppCardProps> = ({
             {app.isTrendingToday && (
               <span 
                 id={`app-trending-badge-${app.id}`}
-                className="text-[11px] font-medium text-emerald-300 flex items-center gap-1 whitespace-nowrap"
+                className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300 flex items-center gap-1 whitespace-nowrap"
                 title="Popular in open-source right now"
               >
                 <Flame className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
@@ -149,7 +149,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                 onClick={() => onToggleCompare(app.id)}
                 className={`p-1.5 rounded text-xs transition-colors ${
                   isCompared 
-                    ? 'text-sky-400 bg-sky-400/15 border border-sky-400/30' 
+                    ? 'text-sky-800 bg-sky-800/[0.08] border border-sky-800/25 dark:text-sky-400 dark:bg-sky-400/15 dark:border-sky-400/30' 
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
                 }`}
                 title={isCompared ? 'In compare matrix' : 'Add to compare matrix'}
@@ -191,14 +191,14 @@ export const AppCard: React.FC<AppCardProps> = ({
               onClick={() => onToggleFavorite(app.id)}
               className={`p-1.5 rounded text-xs transition-colors ${
                 isFavorite 
-                  ? 'text-rose-400 bg-rose-400/10' 
+                  ? 'text-rose-700 bg-rose-800/[0.08] dark:text-rose-400 dark:bg-rose-400/10' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
               aria-label={isFavorite ? `Remove ${app.name} from favorites` : `Add ${app.name} to favorites`}
               aria-pressed={isFavorite}
               title={isFavorite ? "Bookmarked" : "Add to bookmarks"}
             >
-              <Bookmark className={`w-3.5 h-3.5 ${isFavorite ? 'fill-rose-400' : ''}`} aria-hidden="true" />
+              <Bookmark className={`w-3.5 h-3.5 ${isFavorite ? 'fill-rose-700 dark:fill-rose-400' : ''}`} aria-hidden="true" />
             </button>
           </div>
         </div>

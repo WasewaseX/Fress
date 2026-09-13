@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppItem, Category, Platform } from '../types';
 import { X, Plus, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { fetchLiveStarCount } from '../lib/starFetch';
 
 interface AddAppModalProps {
   isOpen: boolean;
@@ -37,7 +38,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   const [category, setCategory] = useState<Category>('Utilities & System');
   const [platforms, setPlatforms] = useState<Platform[]>(['windows']);
   const [license, setLicense] = useState('MIT');
-  const [stars, setStars] = useState<number>(1000);
+  const [stars, setStars] = useState<number>(0);
+  const [starsAutoFilled, setStarsAutoFilled] = useState(false);
   const [description, setDescription] = useState('');
   const [whyItsAwesome, setWhyItsAwesome] = useState('');
   const [beginnerGuide, setBeginnerGuide] = useState('');
@@ -61,6 +63,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setPlatforms(initialApp.platforms);
       setLicense(initialApp.license);
       setStars(initialApp.stars);
+      setStarsAutoFilled(false);
       setDescription(initialApp.description);
       setWhyItsAwesome(initialApp.whyItsAwesome);
       setBeginnerGuide(initialApp.beginnerGuide);
@@ -90,6 +93,28 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     setErrorMsg('');
     setInspectSuccessMsg('');
   }, [initialApp, isOpen]);
+
+  // Stars are never guessed: once a GitHub/GitLab URL is pasted, the live
+  // count is pulled from the forge API and prefilled. A manual override is
+  // still possible for repos the forge APIs don't cover.
+  useEffect(() => {
+    if (!isOpen) return;
+    const url = githubUrl.trim();
+    if (!url) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void fetchLiveStarCount(url).then((n) => {
+        if (alive && typeof n === 'number' && n >= 0) {
+          setStars(n);
+          setStarsAutoFilled(true);
+        }
+      });
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [githubUrl, isOpen]);
 
   if (!isOpen) return null;
 
@@ -387,9 +412,17 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 type="number"
                 min="0"
                 value={stars}
-                onChange={(e) => setStars(Number(e.target.value))}
+                onChange={(e) => {
+                  setStars(Number(e.target.value));
+                  setStarsAutoFilled(false);
+                }}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
+              <p className="text-[11px] text-slate-400 mt-1">
+                {starsAutoFilled
+                  ? 'Filled automatically from the live GitHub API.'
+                  : 'Filled automatically from GitHub once a repository URL is set.'}
+              </p>
             </div>
           </div>
 

@@ -1,32 +1,34 @@
 # Fress
 
-A clean, curated directory of **free and open-source software** for Windows, macOS, Linux, Android, and iOS. Built as a fast desktop app with Tauri 2.
+A short, checked directory of **free and open-source software** for Windows, macOS, Linux, Android, and iOS. Built as a fast desktop and mobile app with Tauri 2.
 
 No telemetry. No ads. No sponsored entries. Every app in the catalog is real, popular, actively maintained, and genuinely free.
 
-![Version](https://img.shields.io/badge/version-0.10.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-0.12.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Why Fress
 
 - **Curated, not scraped.** Every entry is checked by hand: official links, real descriptions, honest notes about what the app replaces.
 - **One-click stable downloads.** Pick your platform and Fress resolves the app's actual latest STABLE file straight from GitHub Releases or F-Droid — no hunting through release pages, and beta/RC builds are never offered.
+- **Update check for Fress itself.** The button in the footer compares your installed version with the latest release on GitHub and only downloads when there is something newer.
 - **Download manager built in.** Downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification, saved to the folder you choose (your system Downloads folder by default).
 - **Device-aware downloads.** Windows, macOS, Linux, Android (GitHub APK, F-Droid, Google Play), and iOS — Fress picks the right file for your architecture.
 - **Light and dark themes.** Both are first-class: a warm paper light mode and a calm dark mode, following your system preference until you choose.
-- **Multiple languages.** English, Persian (full right-to-left support), Spanish, French, and German from the Settings menu.
+- **Multiple languages.** English, Persian (full right-to-left support), Spanish, French, and German from the Settings menu — including the app descriptions, not just the menus.
 - **Local-first.** Favorites, custom entries, and settings live in your own storage. The app makes zero network calls beyond the links you click.
 
 ## Feature tour
 
 | Feature | Where |
 |---|---|
-| Live search on GitHub, add any project | "Live Search & Add" in the header |
+| Add apps: search GitHub or enter them | "Add app" in the header |
 | Batch installer scripts (winget / brew / flatpak / scoop) | Select cards, then "Batch" |
 | Side-by-side comparison matrix | Select up to 4 cards, then "Compare" |
 | Command palette | `Ctrl+K` |
 | Keyboard shortcuts | `?` or the More menu |
 | Export catalog as Markdown/JSON | More menu |
 | Download manager | "Downloads" in the header |
+| Update check for Fress | Footer button |
 | Language & theme | Settings (gear icon) |
 
 ## Development
@@ -82,11 +84,11 @@ Fress picks each operating system's own download location, the same place your b
 
 ### Why Windows shows "Unknown publisher"
 
-The Windows installer and executable are not code-signed. Signing certificates cost real money per year, so a free, open-source project without a budget ships unsigned binaries — Windows then shows the blue "Unknown publisher" / "Windows protected your PC" warning. This is expected for every unsigned program; it does not mean the file is infected. If you prefer not to click through the warning:
+The Windows installer is Authenticode-signed (subject "Fress") with a self-signed certificate and a timestamp. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning, because that warning only goes away with a paid OV/EV code-signing certificate — a recurring cost a free project without funding cannot pay. The signature still proves two useful things: the file is exactly the one CI produced, and it has not been altered since. If you prefer not to click **More info → Run anyway**:
 
 - Verify the checksum against `SHA256SUMS.txt`, or
 - Build the app yourself from this repository (`npm run tauri build`), or
-- If this project ever receives funding, signed installers are the first thing it pays for.
+- If this project ever receives funding, a real code-signing certificate is the first thing it pays for.
 
 ## Contributing
 

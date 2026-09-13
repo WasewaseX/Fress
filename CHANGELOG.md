@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0-beta (2026-09-13)
+
+### Added
+- Update check for Fress itself: the footer button (replacing "Get Fress") compares your installed version with the latest release on GitHub and only downloads when a newer build exists — it picks the right file for your platform automatically.
+- The whole catalog is translated: app descriptions, taglines, highlights, and setup notes now follow the selected language (English, Persian, Spanish, French, German) instead of staying English.
+
+### Fixed
+- Windows installer: the exe now carries a real Authenticode signature (subject "Fress", timestamped). The blue "Unknown Publisher" warning still appears because removing it requires a paid certificate; see the README for what the signature does and does not prove.
+- Misplaced and crowded card buttons: the card footer is now one clean row (Guide left; Download and GitHub right). The install-command chip and site link moved into the detail modal where they belong.
+- A stray "Advanced: paste these..." help line appeared inside the About section of the detail modal; it moved back to the install-commands section.
+- The download platform picker no longer shows every platform as a disabled button — only the platforms the app actually ships for, with your device preselected.
+- "Other official options" in the detail modal is capped at two entries so the download section stays readable.
+- Android download panel no longer offers the change-folder control (Android cannot pick arbitrary folders); it explains where files go instead.
+
+### Changed
+- One way to add apps: the header "Add app" button opens a single dialog with two tabs (Search GitHub / Enter manually). The duplicate "Search GitHub live" hero button and the separate "Add manually" menu item are gone.
+- Text rewrite across the interface: plain human wording instead of template/marketing filler ("The Pick" → "Our pick", no more "Privacy-First Storage Notice", no more refund-policy boilerplate for a free directory).
+- The live-search dialog says "Add" instead of "Add to My Fress", and no longer talks like Fress is a user account.
+
 ## 0.11.0-beta (2025-09-13)
 
 ### Fixed

@@ -34,8 +34,7 @@ import pkg from '../../package.json';
 interface HeaderProps {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  onOpenLiveSearch: () => void;
-  onOpenAddModal: () => void;
+  onOpenAddApps: () => void;
   onOpenTauriModal: () => void;
   onOpenPrivacyModal: () => void;
   onOpenShortcutsModal: () => void;
@@ -82,8 +81,7 @@ export const BrandMark: React.FC<{ size?: number }> = ({ size = 32 }) => (
 export const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
-  onOpenLiveSearch,
-  onOpenAddModal,
+  onOpenAddApps,
   onOpenTauriModal,
   onOpenPrivacyModal,
   onOpenShortcutsModal,
@@ -224,14 +222,14 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Action group */}
           <div id="header-actions-group" className="flex items-center gap-2 shrink-0 flex-wrap">
             <button
-              id="header-live-search-btn"
+              id="header-add-app-btn"
               type="button"
-              onClick={onOpenLiveSearch}
+              onClick={onOpenAddApps}
               className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-sky-500 transition-colors shadow-xs"
-              title="Search any open-source tool live on GitHub and add it to your catalog"
+              title="Add software to your catalog: search GitHub or enter it yourself"
             >
-              <Sparkles className="w-3.5 h-3.5 text-sky-100" aria-hidden="true" />
-              <span>{t('header.liveSearch')}</span>
+              <Plus className="w-3.5 h-3.5 text-sky-100" aria-hidden="true" />
+              <span>{t('header.addApp')}</span>
             </button>
 
             {/* Downloads */}
@@ -434,18 +432,6 @@ export const Header: React.FC<HeaderProps> = ({
                     className="absolute right-0 mt-1.5 w-52 bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl z-50 py-1 text-xs divide-y divide-slate-950/10 dark:divide-white/[0.06]"
                   >
                     <div className="py-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          onOpenAddModal();
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                      >
-                        <Plus className="w-3.5 h-3.5 text-sky-400" />
-                        <span>{t('header.addManually')}</span>
-                      </button>
-
                       {onOpenBatchInstall && batchCount === 0 && (
                         <button
                           type="button"

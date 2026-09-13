@@ -21,13 +21,18 @@ interface LiveSearchModalProps {
   onClose: () => void;
   onAddApp: (app: AppItem) => void;
   existingApps: AppItem[];
+  /** When true, shows the Search/Manual tabs so both add-flows share one entry point. */
+  showTabs?: boolean;
+  onSwitchTab?: (tab: 'search' | 'manual') => void;
 }
 
 export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   isOpen,
   onClose,
   onAddApp,
-  existingApps
+  existingApps,
+  showTabs = false,
+  onSwitchTab
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<AppItem[]>([]);
@@ -140,10 +145,10 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         });
         setResults(mappedItems);
       } else {
-        setErrorMsg('Search limit reached. You can still add manually or try again in a moment.');
+        setErrorMsg('GitHub search limit reached. Try again in a minute, or use the Enter manually tab.');
       }
     } catch (err: any) {
-      setErrorMsg('Could not query GitHub live search. Please check network connection.');
+      setErrorMsg('GitHub search failed. Check the internet connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -196,10 +201,10 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
             </div>
             <div>
               <h2 id="live-search-title" className="text-sm font-bold text-slate-100 tracking-tight">
-                Live Open-Source Tool Search
+                Search GitHub
               </h2>
               <p className="text-[11px] text-slate-400">
-                Search GitHub and add tools to your local catalog. Entries you add here are yours: they are not curated or verified by Fress, so check licenses and links yourself.
+                Anything you add here is saved on this device. These entries are not checked by us, so look at the license and links yourself.
               </p>
             </div>
           </div>
@@ -213,6 +218,28 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Shared tabs: one entry point for both ways of adding an app */}
+        {showTabs && onSwitchTab && (
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label="Add app method">
+            {([['search', 'Search GitHub'], ['manual', 'Enter manually']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={id === 'search'}
+                onClick={() => onSwitchTab(id)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
+                  id === 'search'
+                    ? 'bg-sky-600 text-white border border-sky-500'
+                    : 'text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Search Input Bar */}
         <div className="p-4 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950">
@@ -234,7 +261,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
 
           {/* Quick Search Badges */}
           <div className="flex items-center gap-1.5 flex-wrap mt-2.5 text-xs">
-            <span className="text-slate-400 text-[11px]">Popular:</span>
+            <span className="text-slate-400 text-[11px]">Try:</span>
             {['syncthing', 'neovim', 'tailscale', 'alacritty', 'obsidian', 'termux', 'ollama'].map((term) => (
               <button
                 key={term}
@@ -262,9 +289,9 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
           {results.length === 0 && !loading && (
             <div className="text-center py-12 text-slate-400 text-xs">
               <FolderGit2 className="w-8 h-8 mx-auto mb-2 text-slate-400" />
-              <p>Type a software or repository name above to search live.</p>
+              <p>Type a name above to search GitHub.</p>
               <p className="text-[11px] text-slate-400 mt-1">
-                You can add any GitHub project directly to your local Fress library.
+                Any public GitHub project can be added to your catalog.
               </p>
             </div>
           )}
@@ -350,7 +377,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                       className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md border border-sky-400 transition-colors shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Add to My Fress</span>
+                      <span>Add</span>
                     </button>
                   )}
                 </div>
@@ -361,7 +388,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
 
         {/* Footer info */}
         <div className="p-3 border-t border-slate-950/10 dark:border-white/[0.08] bg-slate-950 flex items-center justify-between text-xs text-slate-400">
-          <span>Added apps are stored locally on your device with offline persistence.</span>
+          <span>Saved on this device only.</span>
           <button
             type="button"
             onClick={onClose}

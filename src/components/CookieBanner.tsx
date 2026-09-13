@@ -27,10 +27,10 @@ export const CookieBanner: React.FC<CookieBannerProps> = ({
           <Cookie className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
           <div>
             <p className="text-slate-200 font-medium">
-              Privacy-First Storage Notice
+              Where your data goes
             </p>
             <p className="text-slate-400 text-[11px] leading-relaxed">
-              We store your bookmarks and custom added applications locally on your machine. We do not use third-party advertising or telemetry tracking cookies.
+              Your bookmarks and added apps are saved in this device's storage. Fress has no accounts, no ads and no analytics.
             </p>
           </div>
         </div>

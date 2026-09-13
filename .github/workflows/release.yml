@@ -43,7 +43,7 @@ jobs:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Fress v${{ needs.version.outputs.version }}
           body: |
-            Fress v${{ needs.version.outputs.version }} — a clean, curated directory of free and open-source software.
+            Fress v${{ needs.version.outputs.version }} — a short directory of free and open-source apps.
 
             **Installers for every platform**
             | Platform | File |
@@ -56,6 +56,9 @@ jobs:
             | Linux (rpm) | `Fress_*_x86_64.rpm` |
             | Android (universal APK) | `Fress_*_universal.apk` |
             | Android (arm64 APK) | `Fress_*_arm64.apk` |
+
+            **Windows: about the "Unknown Publisher" warning**
+            The installer is Authenticode-signed (subject "Fress") but with a self-signed certificate, so Windows still shows a blue SmartScreen/UAC warning when you run it. That warning only disappears once the project buys an OV/EV code-signing certificate. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info → Run anyway**.
 
             Verify any download against `SHA256SUMS.txt`.
 
@@ -83,6 +86,42 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: '--target x86_64-pc-windows-msvc --bundles nsis'
+      - name: Sign the installer (self-signed Authenticode, timestamped)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          Write-Host "Installer: $($bundle.FullName)"
+
+          # Self-signed code-signing certificate: gives the file a real
+          # Authenticode signature (subject "Fress") with a timestamp, but
+          # Windows will still show Unknown Publisher/SmartScreen because the
+          # certificate does not chain to a paid trusted root.
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Fress" `
+            -KeyUsage DigitalSignature -KeySpec Signature -KeyAlgorithm RSA -KeyLength 3072 `
+            -NotAfter (Get-Date).AddYears(3) -CertStoreLocation "Cert:\CurrentUser\My"
+          $pwd2 = ConvertTo-SecureString -String "fress-ci-sign" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath "fress-sign.pfx" -Password $pwd2 | Out-Null
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.DirectoryName -match 'x64$' } | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found" }
+          & $signtool.FullName sign /f fress-sign.pfx /p "fress-ci-sign" /fd SHA256 /td SHA256 `
+            /tr http://timestamp.digicert.com $bundle.FullName
+
+          # Hard check: the file must now carry a signature (untrusted root is
+          # expected; NotSigned or HashMismatch would mean signing failed).
+          $sig = Get-AuthenticodeSignature $bundle.FullName
+          Write-Host "Signature status: $($sig.Status) — $($sig.StatusMessage)"
+          if ($sig.Status -eq 'NotSigned' -or $sig.Status -eq 'HashMismatch') {
+            throw "Signing failed: $($sig.Status)"
+          }
+
+          # Replace the asset on the release with the signed file
+          gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
+          Write-Host "Signed installer uploaded: $($bundle.Name)"
 
   build-linux:
     needs: [version, create-release]

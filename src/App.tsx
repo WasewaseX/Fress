@@ -172,7 +172,9 @@ function AppShell() {
   const [isBatchInstallModalOpen, setIsBatchInstallModalOpen] = useState(false);
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isLiveSearchOpen, setIsLiveSearchOpen] = useState(false);
+  // One shared add-flow: 'search' (GitHub) or 'manual' (form). A single header
+  // button opens it; the tabs inside switch between the two methods.
+  const [addFlow, setAddFlow] = useState<null | 'search' | 'manual'>(null);
   const [isLiveTrending, setIsLiveTrending] = useState(false);
 
   const [legalModal, setLegalModal] = useState<{ isOpen: boolean; tab: LegalTab }>({
@@ -484,13 +486,13 @@ function AppShell() {
         setIsBatchInstallModalOpen(false);
         setIsCompareModalOpen(false);
         setIsExportModalOpen(false);
-        setIsLiveSearchOpen(false);
+        setAddFlow(null);
         setIsDownloadsOpen(false);
         setLegalModal((prev) => ({ ...prev, isOpen: false }));
       } else if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();
         setEditingApp(null);
-        setIsAddModalOpen(true);
+        setAddFlow('search');
       } else if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
         setIsBatchInstallModalOpen((prev) => !prev);
@@ -622,10 +624,9 @@ function AppShell() {
       <Header
         searchQuery={filters.search}
         onSearchChange={(search) => handleFilterChange({ search })}
-        onOpenLiveSearch={() => setIsLiveSearchOpen(true)}
-        onOpenAddModal={() => {
+        onOpenAddApps={() => {
           setEditingApp(null);
-          setIsAddModalOpen(true);
+          setAddFlow('search');
         }}
         onOpenTauriModal={() => setIsTauriModalOpen(true)}
         onOpenPrivacyModal={() => setIsPrivacyModalOpen(true)}
@@ -650,7 +651,6 @@ function AppShell() {
       <SpotlightSection
         onSelectTrending={() => handleFilterChange({ trendingOnly: true, ownerPickOnly: false, category: 'All' })}
         onSelectOwnerPicks={() => handleFilterChange({ ownerPickOnly: true, trendingOnly: false, category: 'All' })}
-        onOpenLiveSearch={() => setIsLiveSearchOpen(true)}
         totalApps={apps.length}
         androidCount={androidCount}
       />
@@ -725,11 +725,11 @@ function AppShell() {
                 type="button"
                 onClick={() => {
                   setEditingApp(null);
-                  setIsAddModalOpen(true);
+                  setAddFlow('search');
                 }}
                 className="text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded-md border border-sky-400"
               >
-                Add Custom Tool
+                Add it yourself
               </button>
             </div>
           </div>
@@ -871,20 +871,25 @@ function AppShell() {
       />
 
       <LiveSearchModal
-        isOpen={isLiveSearchOpen}
-        onClose={() => setIsLiveSearchOpen(false)}
+        isOpen={addFlow === 'search'}
+        onClose={() => setAddFlow(null)}
         onAddApp={handleSaveApp}
         existingApps={apps}
+        showTabs
+        onSwitchTab={(tab) => setAddFlow(tab)}
       />
 
       <AddAppModal
-        isOpen={isAddModalOpen}
+        isOpen={addFlow === 'manual' || isAddModalOpen}
         onClose={() => {
           setIsAddModalOpen(false);
           setEditingApp(null);
+          if (addFlow === 'manual') setAddFlow(null);
         }}
         onSaveApp={handleSaveApp}
         initialApp={editingApp}
+        showTabs={!isAddModalOpen}
+        onSwitchTab={(tab) => setAddFlow(tab)}
       />
 
       <TauriModal

@@ -28,6 +28,7 @@ import {
   ResolvedDownload,
 } from '../lib/releaseFetch';
 import { useI18n } from '../lib/i18n';
+import { useAppText } from '../lib/appText';
 import { toast } from 'sonner';
 
 /** Device-aware download section: pick your platform, get real targets. */
@@ -46,6 +47,7 @@ type ResolveState = 'loading' | 'ready' | 'none';
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { startDownload, recordExternalOpen } = useDownloads();
   const { t } = useI18n();
+  const tx = useAppText(app);
   const inApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const preferred = (() => {
     const guess = detectUserPlatform();
@@ -114,29 +116,25 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
         <span>{t('detail.downloads')}</span>
       </h3>
 
-      {/* Platform selector: segmented control with real hit targets */}
+      {/* Platform selector: only the platforms this app actually ships for,
+          with this device preselected. */}
       <div className="flex items-center gap-1 flex-wrap mb-3 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] p-1 rounded-lg w-fit max-w-full">
-        {([...app.platforms, ...((Object.keys(PLATFORM_LABELS) as Platform[]).filter((p) => !app.platforms.includes(p)))] as Platform[]).map((p) => {
-          const available = app.platforms.includes(p);
-          return (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPlatform(p)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
-                platform === p
-                  ? 'bg-sky-600 text-white shadow-xs'
-                  : available
-                    ? 'text-slate-300 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08]'
-                    : 'text-slate-500 cursor-not-allowed opacity-60'
-              }`}
-              aria-pressed={platform === p}
-              title={available ? PLATFORM_LABELS[p] : `Not available on ${PLATFORM_LABELS[p]}`}
-            >
-              {PLATFORM_LABELS[p]}
-            </button>
-          );
-        })}
+        {app.platforms.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setPlatform(p)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
+              platform === p
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'text-slate-300 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08]'
+            }`}
+            aria-pressed={platform === p}
+            title={PLATFORM_LABELS[p]}
+          >
+            {PLATFORM_LABELS[p]}
+          </button>
+        ))}
       </div>
 
       {unavailable ? (
@@ -235,11 +233,12 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             </button>
           )}
 
-          {/* Secondary: every other official target */}
+          {/* Secondary: at most two other official targets — the primary button
+              above is the one we recommend. */}
           {secondary.length > 0 && (
             <div className="pt-1 space-y-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{t('detail.otherWays')}</p>
-              {secondary.map((option) => (
+              {secondary.slice(0, 2).map((option) => (
                 <button
                   key={option.label}
                   type="button"
@@ -260,7 +259,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
           )}
 
           <p className="text-[11px] text-slate-400 leading-relaxed pt-0.5">
-            {inApp ? t('detail.downloadsHint') : 'Downloads open in a new browser tab. The Fress desktop app adds a built-in download manager with live progress and SHA-256 verification.'} {t('detail.checkLatest')}
+            {inApp ? t('detail.downloadsHint') : t('detail.downloadsHintBrowser')}
           </p>
         </div>
       )}
@@ -276,6 +275,8 @@ interface AppDetailModalProps {
 
 export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, onEditApp }) => {
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const { t } = useI18n();
+  const tx = useAppText(app);
 
   if (!app) return null;
 
@@ -332,10 +333,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
               {app.name}
             </h2>
             <p id="app-detail-tagline" className="text-xs text-slate-400 mt-0.5">
-              {app.tagline}
+              {tx.tagline}
             </p>
             <p className="text-[11px] text-slate-500 mt-1 font-mono">
-              Listed since {app.addedAt} · links verified at review time
+              Added {app.addedAt} · links checked when listed
             </p>
           </div>
 
@@ -375,11 +376,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           {/* Overview */}
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              About
+              {t('detail.overview')}
             </h3>
-              <p className="text-[11px] text-slate-400 mb-2">Advanced: paste these into your system terminal. Not sure? Use the download buttons at the top instead.</p>
             <p className="leading-relaxed text-slate-200 text-xs">
-              {app.description}
+              {tx.description}
             </p>
           </div>
 
@@ -387,10 +387,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           {app.whyItsAwesome && (
             <div id="detail-why-box" className="bg-slate-950/[0.03] dark:bg-white/[0.02] border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3">
               <h3 className="text-xs font-semibold text-sky-400 mb-1">
-                Key Highlight
+                {t('detail.whyItsAwesome')}
               </h3>
               <p className="leading-relaxed text-slate-300 text-xs">
-                {app.whyItsAwesome}
+                {tx.whyItsAwesome}
               </p>
             </div>
           )}
@@ -399,10 +399,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           {app.beginnerGuide && (
             <div id="detail-guide-box" className="bg-slate-950/[0.03] dark:bg-white/[0.02] border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3">
               <h3 className="text-xs font-semibold text-emerald-400 mb-1">
-                Setup Note
+                {t('detail.beginnerGuide')}
               </h3>
               <p className="leading-relaxed text-slate-300 text-xs">
-                {app.beginnerGuide}
+                {tx.beginnerGuide}
               </p>
             </div>
           )}
@@ -412,8 +412,9 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             <div id="detail-install-commands-section" className="space-y-2.5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <Terminal className="w-3.5 h-3.5 text-slate-400" />
-                <span>Install commands (terminal)</span>
+                <span>{t('detail.packageManagers')}</span>
               </h3>
+              <p className="text-[11px] text-slate-400 mb-2">For the terminal. Not sure what this is? Use the download buttons above instead.</p>
 
               <div className="space-y-2">
                 {app.wingetCommand && (
@@ -520,7 +521,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           <div id="detail-safety-box" className="border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3 bg-slate-950/[0.03] dark:bg-white/[0.02]">
             <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-              <span>Community & Transparency</span>
+              <span>Source & license</span>
             </h3>
             <ul className="space-y-1.5 text-slate-400 text-xs">
               <li className="flex items-center gap-2">

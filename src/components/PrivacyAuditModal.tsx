@@ -68,10 +68,10 @@ export const PrivacyAuditModal: React.FC<PrivacyAuditModalProps> = ({
               </span>
             </div>
             <h2 id="privacy-audit-title" className="text-sm sm:text-base font-bold text-slate-100 tracking-tight">
-              Privacy and Security Audit
+              Privacy check
             </h2>
             <p id="privacy-audit-desc" className="text-xs text-slate-400 mt-0.5">
-              Client & server security headers, zero trackers, and accessibility.
+              What this app sends, what it stores, and what it asks for.
             </p>
           </div>
           <button
@@ -90,24 +90,20 @@ export const PrivacyAuditModal: React.FC<PrivacyAuditModalProps> = ({
           <div id="audit-server-headers-box" className="border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3 bg-slate-950/[0.03] dark:bg-white/[0.02]">
             <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
               <Server className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-              <span>HTTP Security Headers</span>
+              <span>Where downloads come from</span>
             </h3>
             <div className="space-y-1 font-mono text-[11px]">
               <div className="bg-slate-950 border border-slate-950/10 dark:border-white/[0.06] p-2 rounded flex items-center justify-between">
-                <span className="text-slate-400">X-Content-Type-Options:</span>
-                <span className="text-emerald-400 font-bold">nosniff</span>
+                <span className="text-slate-400">api.github.com:</span>
+                <span className="text-emerald-400 font-bold">release info</span>
               </div>
               <div className="bg-slate-950 border border-slate-950/10 dark:border-white/[0.06] p-2 rounded flex items-center justify-between">
-                <span className="text-slate-400">X-Frame-Options:</span>
-                <span className="text-emerald-400 font-bold">SAMEORIGIN</span>
+                <span className="text-slate-400">f-droid.org:</span>
+                <span className="text-emerald-400 font-bold">apk info</span>
               </div>
               <div className="bg-slate-950 border border-slate-950/10 dark:border-white/[0.06] p-2 rounded flex items-center justify-between">
-                <span className="text-slate-400">Referrer-Policy:</span>
-                <span className="text-emerald-400 font-bold">strict-origin-when-cross-origin</span>
-              </div>
-              <div className="bg-slate-950 border border-slate-950/10 dark:border-white/[0.06] p-2 rounded flex items-center justify-between">
-                <span className="text-slate-400">Permissions-Policy:</span>
-                <span className="text-emerald-400 font-bold">geolocation=(), camera=(), microphone=()</span>
+                <span className="text-slate-400">Downloads:</span>
+                <span className="text-emerald-400 font-bold">official project servers only</span>
               </div>
             </div>
           </div>
@@ -116,24 +112,24 @@ export const PrivacyAuditModal: React.FC<PrivacyAuditModalProps> = ({
           <div id="audit-telemetry-box" className="border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3 bg-slate-950/[0.03] dark:bg-white/[0.02]">
             <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
               <EyeOff className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-              <span>Tracking & Telemetry Status</span>
+              <span>Tracking</span>
             </h3>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-slate-950 border border-slate-950/10 dark:border-white/[0.06] p-2.5 rounded-lg">
-                <span className="text-slate-400 block text-[11px]">Third-Party Trackers:</span>
+                <span className="text-slate-400 block text-[11px]">Trackers:</span>
                 <span className="font-mono text-emerald-400 font-bold text-sm">
-                  {auditData.thirdPartyTrackersFound} Detected
+                  {auditData.thirdPartyTrackersFound}
                 </span>
               </div>
               <div className="bg-slate-950 border border-slate-950/10 dark:border-white/[0.06] p-2.5 rounded-lg">
-                <span className="text-slate-400 block text-[11px]">Tracking Cookies:</span>
+                <span className="text-slate-400 block text-[11px]">Accounts:</span>
                 <span className="font-mono text-emerald-400 font-bold text-sm">
-                  0 Cookies
+                  none
                 </span>
               </div>
             </div>
             <p className="text-slate-400 text-[11px] mt-2 leading-relaxed">
-              No tracking scripts are loaded. Custom applications and bookmarks are stored strictly within your browser local storage.
+              No tracking scripts, no ads, no analytics. Bookmarks and added apps stay in this device's local storage.
             </p>
           </div>
 

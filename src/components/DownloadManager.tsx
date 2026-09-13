@@ -182,17 +182,21 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
             <div className="min-w-0">
               <p className="text-slate-400 font-medium">{t('downloads.folder')}</p>
               <p className="text-slate-300 font-mono truncate text-[11px]" title={downloadDir || ''}>
-                {downloadDir || 'Default (Downloads/Fress)'}
+                {downloadDir || t('downloads.folder') + ': Downloads'}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => void chooseFolder()}
-              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-sky-300 hover:text-sky-200 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 px-2.5 py-1 rounded-md transition-colors"
-            >
-              <FolderOpen className="w-3 h-3" />
-              <span>{t('downloads.changeFolder')}</span>
-            </button>
+            {!isAndroidWebview() ? (
+              <button
+                type="button"
+                onClick={() => void chooseFolder()}
+                className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-sky-300 hover:text-sky-200 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 px-2.5 py-1 rounded-md transition-colors"
+              >
+                <FolderOpen className="w-3 h-3" />
+                <span>{t('downloads.changeFolder')}</span>
+              </button>
+            ) : (
+              <span className="shrink-0 text-[10px] text-slate-500">{t('settings.androidFolderNote').split('.')[0]}.</span>
+            )}
           </div>
         </div>
       </aside>

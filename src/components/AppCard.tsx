@@ -2,20 +2,15 @@ import React, { useState } from 'react';
 import { AppItem, Platform } from '../types';
 import {
   Star,
-  ExternalLink,
   Github,
   Bookmark,
   Info,
   Edit2,
   Trash2,
-  Check,
   Award,
   Flame,
-  Terminal,
   Columns,
   HardDrive,
-  Copy,
-  ChevronDown,
   Download
 } from 'lucide-react';
 import { bestDownloadFor } from '../lib/appDownloads';
@@ -24,6 +19,7 @@ import { openExternal } from '../lib/external';
 import { resolveGitHubDownload, resolveFdroidDownload, guessUserPlatform } from '../lib/releaseFetch';
 import { toast } from 'sonner';
 import { useI18n } from '../lib/i18n';
+import { useAppText } from '../lib/appText';
 
 
 interface AppCardProps {
@@ -52,10 +48,9 @@ export const AppCard: React.FC<AppCardProps> = ({
   onToggleCompare
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [copiedType, setCopiedType] = useState<string | null>(null);
-  const [showInstallMenu, setShowInstallMenu] = useState(false);
   const { startDownload, recordExternalOpen, items: downloadItems } = useDownloads();
   const { t } = useI18n();
+  const tx = useAppText(app);
   const isDownloading = downloadItems.some((d) => d.name.startsWith(app.name) && d.status === 'active');
   const [resolving, setResolving] = useState(false);
 
@@ -87,31 +82,6 @@ export const AppCard: React.FC<AppCardProps> = ({
       </span>
     );
   };
-
-  const handleCopyCmd = async (e: React.MouseEvent, cmd: string, type: string) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopiedType(type);
-      setShowInstallMenu(false);
-      setTimeout(() => setCopiedType(null), 2000);
-    } catch {
-      // ignore
-    }
-  };
-
-  const primaryCmd = app.wingetCommand || app.brewCommand || app.flatpakCommand;
-  const userOs: Platform = (() => {
-    if (typeof navigator === 'undefined') return 'windows';
-    const ua = navigator.userAgent.toLowerCase();
-    if (ua.includes('android')) return 'android';
-    if (ua.includes('mac os')) return 'mac';
-    if (ua.includes('linux')) return 'linux';
-    return 'windows';
-  })();
-  const osCommand = userOs === 'mac' ? app.brewCommand : userOs === 'linux' ? app.flatpakCommand || app.brewCommand : app.wingetCommand;
-  const shownCommand = osCommand || primaryCmd;
-
 
   return (
     <article 
@@ -283,19 +253,19 @@ export const AppCard: React.FC<AppCardProps> = ({
             )}
           </div>
           <p id={`app-tagline-${app.id}`} className="text-xs text-slate-400 line-clamp-1 mt-0.5">
-            {app.tagline}
+            {tx.tagline}
           </p>
         </div>
 
         {/* Description */}
         <p id={`app-desc-${app.id}`} className="text-[13px] text-slate-300 leading-relaxed line-clamp-2 mb-3">
-          {app.description}
+          {tx.description}
         </p>
 
         {/* Curated Highlight */}
         <div id={`app-highlight-row-${app.id}`} className="mb-3.5 pl-2.5 border-l-2 border-slate-950/[0.12] dark:border-white/[0.12]">
           <p className="text-slate-400 text-[12px] leading-relaxed line-clamp-2">
-            {app.whyItsAwesome}
+            {tx.whyItsAwesome}
           </p>
         </div>
 
@@ -339,7 +309,8 @@ export const AppCard: React.FC<AppCardProps> = ({
         </div>
       </div>
 
-      {/* Action Footer */}
+      {/* Action Footer: Guide left; Download + GitHub right. One row, no clutter —
+          install commands and the official site live in the detail modal. */}
       <div id={`app-card-footer-${app.id}`} className="pt-3 border-t border-slate-950/10 dark:border-white/[0.06] flex items-center justify-between gap-2 relative">
         <button
           id={`view-guide-btn-${app.id}`}
@@ -352,147 +323,63 @@ export const AppCard: React.FC<AppCardProps> = ({
           <span>{t('card.guide')}</span>
         </button>
 
-        {/* Download button: direct targets start the in-app download manager,
-            everything else opens the detail modal with the device picker. */}
-        <button
-          id={`download-btn-${app.id}`}
-          type="button"
-          onClick={() => {
-            const platform = guessUserPlatform(app);
-            void (async () => {
-              setResolving(true);
-              try {
-                // 1) Live-resolve the latest STABLE file for this platform from GitHub Releases
-                const resolved = await resolveGitHubDownload(app, platform);
-                if (resolved) {
-                  void startDownload(resolved.url, resolved.filename);
-                  return;
-                }
-                // 2) Android: try the app's F-Droid package next
-                if (platform === 'android' && app.fdroidId) {
-                  const fd = await resolveFdroidDownload(app.fdroidId);
-                  if (fd) {
-                    void startDownload(fd.url, fd.filename);
-                    return;
-                  }
-                }
-                // 3) Curated targets: direct links stream in the app
-                const target = bestDownloadFor(app, platform);
-                if (!target) {
-                  onOpenDetail(app);
-                  return;
-                }
-                if (target.kind === 'direct') {
-                  void startDownload(target.url, `${app.name} ${target.label}`.trim());
-                } else if (target.kind === 'store' || !/github\.com\/[^/]+\/[^/]+\/releases/i.test(target.url)) {
-                  // Official vendor download pages are beginner-friendly; open them
-                  recordExternalOpen(`${app.name}: ${target.label}`, target.url);
-                  toast.info(`Opening the official download page for ${app.name}`, {
-                    description: target.label,
-                  });
-                  void openExternal(target.url);
-                } else {
-                  // A raw GitHub releases page is not beginner-friendly: open the in-app guide
-                  onOpenDetail(app);
-                }
-              } finally {
-                setResolving(false);
-              }
-            })();
-          }}
-          className="inline-flex items-center gap-1 text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2.5 py-1.5 rounded-md transition-colors"
-          title={isDownloading ? 'Downloading...' : resolving ? 'Finding the latest stable download...' : 'Download this app'}
-          aria-label={`Download ${app.name}`}
-        >
-          <Download className={`w-3.5 h-3.5 ${isDownloading || resolving ? 'animate-pulse' : ''}`} aria-hidden="true" />
-          <span>{isDownloading || resolving ? t('card.download') + '...' : t('card.download')}</span>
-        </button>
-
         {/* Quick Install Command Dropdown */}
         <div className="flex items-center gap-1.5">
-          {primaryCmd && (
-            <div className="relative">
-              <button
-                type="button"
-                id={`quick-install-btn-${app.id}`}
-                onClick={(e) => {
-                  const cmd = shownCommand;
-                  if (cmd) {
-                    handleCopyCmd(e, cmd, 'cmd');
-                    toast.success('Command copied', { description: 'Paste it into your terminal. Not sure? Use the Download button instead.' });
-                  } else {
-                    setShowInstallMenu(!showInstallMenu);
+          {/* Download button: direct targets start the in-app download manager,
+              everything else opens the detail modal with the device picker. */}
+          <button
+            id={`download-btn-${app.id}`}
+            type="button"
+            onClick={() => {
+              const platform = guessUserPlatform(app);
+              void (async () => {
+                setResolving(true);
+                try {
+                  // 1) Live-resolve the latest STABLE file for this platform from GitHub Releases
+                  const resolved = await resolveGitHubDownload(app, platform);
+                  if (resolved) {
+                    void startDownload(resolved.url, resolved.filename);
+                    return;
                   }
-                }}
-                className="inline-flex items-center gap-1 text-xs font-mono bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 px-2.5 py-1.5 rounded-md transition-colors"
-                title="Copy the package-manager install command (for terminals; beginners can use the Download button instead)"
-              >
-                {copiedType ? (
-                  <>
-                    <Check className="w-3 h-3 text-emerald-400" />
-                    <span className="text-emerald-400">{t('card.copied')}</span>
-                  </>
-                ) : (
-                  <>
-                    <Terminal className="w-3 h-3 text-sky-400" />
-                    <span>{shownCommand.startsWith('winget') ? 'winget' : shownCommand.startsWith('brew') ? 'brew' : shownCommand.startsWith('flatpak') ? 'flatpak' : shownCommand.startsWith('scoop') ? 'scoop' : 'install'}</span>
-                    {(app.brewCommand || app.flatpakCommand) && (
-                      <ChevronDown className="w-2.5 h-2.5 ml-0.5" />
-                    )}
-                  </>
-                )}
-              </button>
-
-              {/* Dropdown Options */}
-              {showInstallMenu && (
-                <div 
-                  className="absolute right-0 bottom-full mb-1 w-48 bg-slate-950 border border-slate-950/[0.14] dark:border-white/[0.14] rounded-lg shadow-xl p-1 z-30 text-xs"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {app.wingetCommand && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopyCmd(e, app.wingetCommand!, 'winget')}
-                      className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 flex items-center justify-between"
-                    >
-                      <span className="font-mono text-[11px]">winget (Win)</span>
-                      <Copy className="w-3 h-3 text-slate-400" />
-                    </button>
-                  )}
-                  {app.brewCommand && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopyCmd(e, app.brewCommand!, 'brew')}
-                      className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 flex items-center justify-between"
-                    >
-                      <span className="font-mono text-[11px]">brew (Mac/Lin)</span>
-                      <Copy className="w-3 h-3 text-slate-400" />
-                    </button>
-                  )}
-                  {app.flatpakCommand && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopyCmd(e, app.flatpakCommand!, 'flatpak')}
-                      className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 flex items-center justify-between"
-                    >
-                      <span className="font-mono text-[11px]">flatpak (Linux)</span>
-                      <Copy className="w-3 h-3 text-slate-400" />
-                    </button>
-                  )}
-                  {app.scoopCommand && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopyCmd(e, app.scoopCommand!, 'scoop')}
-                      className="w-full text-left px-2.5 py-1.5 rounded hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 flex items-center justify-between"
-                    >
-                      <span className="font-mono text-[11px]">scoop (Win)</span>
-                      <Copy className="w-3 h-3 text-slate-400" />
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                  // 2) Android: try the app's F-Droid package next
+                  if (platform === 'android' && app.fdroidId) {
+                    const fd = await resolveFdroidDownload(app.fdroidId);
+                    if (fd) {
+                      void startDownload(fd.url, fd.filename);
+                      return;
+                    }
+                  }
+                  // 3) Curated targets: direct links stream in the app
+                  const target = bestDownloadFor(app, platform);
+                  if (!target) {
+                    onOpenDetail(app);
+                    return;
+                  }
+                  if (target.kind === 'direct') {
+                    void startDownload(target.url, `${app.name} ${target.label}`.trim());
+                  } else if (target.kind === 'store' || !/github\.com\/[^/]+\/[^/]+\/releases/i.test(target.url)) {
+                    // Official vendor download pages are beginner-friendly; open them
+                    recordExternalOpen(`${app.name}: ${target.label}`, target.url);
+                    toast.info(`Opening the official download page for ${app.name}`, {
+                      description: target.label,
+                    });
+                    void openExternal(target.url);
+                  } else {
+                    // A raw GitHub releases page is not beginner-friendly: open the in-app guide
+                    onOpenDetail(app);
+                  }
+                } finally {
+                  setResolving(false);
+                }
+              })();
+            }}
+            className="inline-flex items-center gap-1 text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2.5 py-1.5 rounded-md transition-colors"
+            title={isDownloading ? 'Downloading...' : resolving ? 'Finding the latest stable download...' : 'Download this app'}
+            aria-label={`Download ${app.name}`}
+          >
+            <Download className={`w-3.5 h-3.5 ${isDownloading || resolving ? 'animate-pulse' : ''}`} aria-hidden="true" />
+            <span>{isDownloading || resolving ? t('card.download') + '...' : t('card.download')}</span>
+          </button>
 
           {app.githubUrl && (
             <a
@@ -509,20 +396,6 @@ export const AppCard: React.FC<AppCardProps> = ({
             </a>
           )}
 
-          {app.websiteUrl && (
-            <a
-              id={`website-link-${app.id}`}
-              href={app.websiteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
-              className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
-              aria-label={`Visit official website for ${app.name} (opens in new window)`}
-            >
-              <span>Site</span>
-              <ExternalLink className="w-3 h-3" aria-hidden="true" />
-            </a>
-          )}
         </div>
       </div>
     </article>

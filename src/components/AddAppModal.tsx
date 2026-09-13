@@ -7,6 +7,9 @@ interface AddAppModalProps {
   onClose: () => void;
   onSaveApp: (app: AppItem) => void;
   initialApp?: AppItem | null;
+  /** Shows the Search/Manual tabs when the modal is opened from the shared Add flow. */
+  showTabs?: boolean;
+  onSwitchTab?: (tab: 'search' | 'manual') => void;
 }
 
 const CATEGORIES: Category[] = [
@@ -23,7 +26,9 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   isOpen,
   onClose,
   onSaveApp,
-  initialApp
+  initialApp,
+  showTabs = false,
+  onSwitchTab
 }) => {
   const [name, setName] = useState('');
   const [tagline, setTagline] = useState('');
@@ -202,10 +207,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
         <div className="p-4 sm:p-5 border-b border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between gap-3 bg-slate-900">
           <div>
             <h2 id="add-modal-title" className="text-sm sm:text-base font-bold text-slate-100 tracking-tight">
-              {initialApp ? 'Edit Tool' : 'Add Custom Open-Source Tool'}
+              {initialApp ? 'Edit Tool' : 'Enter manually'}
             </h2>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Entries are saved locally to your device storage.
+              Saved on this device only.
             </p>
           </div>
           <button
@@ -216,6 +221,28 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Shared tabs: one entry point for both ways of adding an app */}
+        {showTabs && onSwitchTab && !initialApp && (
+          <div className="flex items-center gap-1 px-4 sm:px-5 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label="Add app method">
+            {([['search', 'Search GitHub'], ['manual', 'Enter manually']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={id === 'manual'}
+                onClick={() => onSwitchTab(id)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
+                  id === 'manual'
+                    ? 'bg-sky-600 text-white border border-sky-500'
+                    : 'text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
@@ -408,10 +435,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
             />
           </div>
 
-          {/* Key Highlight */}
+          {/* Highlight */}
           <div>
             <label htmlFor="input-why" className="block text-slate-300 font-medium mb-1">
-              Key Highlight
+              Highlight
             </label>
             <input
               id="input-why"
@@ -482,7 +509,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs px-4 py-2 rounded-lg border border-sky-400 transition-colors shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>{initialApp ? 'Save Changes' : 'Add to Catalog'}</span>
+              <span>{initialApp ? 'Save' : 'Add'}</span>
             </button>
           </div>
         </form>

@@ -1,0 +1,40 @@
+# Guard against ghost contributors.
+#
+# The repo history was rebuilt once after a stale clone config authored
+# commits as "Fress <fress@users.noreply.github.com>", which GitHub rendered
+# as a contributor through an unrelated 2011 account that owns that address.
+# Every author in this repository must be WasewaseX. If anything else shows
+# up, this job fails the push before a release can build on top of it.
+
+name: Author guard
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  authors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify every commit author and committer
+        run: |
+          set -eu
+          BASE="origin/${{ github.event.repository.default_branch }}"
+          git fetch origin "${{ github.event.repository.default_branch }}" --quiet 2>/dev/null || true
+          RANGE=$(git rev-parse --verify -q "$BASE" >/dev/null 2>&1 && echo "$BASE..HEAD" || echo "HEAD")
+          echo "Checking commit range: $RANGE"
+          VIOLATIONS=$(git log --format='%H|%an|%ae|%cn|%ce' "$RANGE" \
+            | grep -viE '\|WasewaseX\|WasewaseX@users\.noreply\.github\.com\|WasewaseX\|WasewaseX@users\.noreply\.github\.com$' || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::Foreign commit identity found. Only WasewaseX <WasewaseX@users.noreply.github.com> may author or commit here."
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "OK: every commit in range is authored and committed by WasewaseX."

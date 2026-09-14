@@ -12,57 +12,66 @@ for by a certificate authority it already trusts?*
   its job.
 
 So the warning disappears exactly when the installer is signed with a
-certificate that chains to a root Windows already trusts. That is the fix, and
-the build pipeline already supports it end to end.
+certificate that chains to a root Windows already trusts. The build pipeline
+already supports that end to end, and there is a **free** route.
 
-## The fix, step by step (Azure Trusted Signing)
+## The free fix: SignPath Foundation (recommended, $0)
 
-Trusted Signing is Microsoft's own signing service. The certificate comes from
-Microsoft, so Windows trusts the signature immediately — no reputation waiting
-period like with regular purchased certificates.
+The [SignPath Foundation](https://signpath.org) gives genuine open-source
+projects code signing at no cost — same service paying customers buy. Two
+things make it unusually friendly for a zero-budget project:
 
-One-time setup, roughly 15 minutes of clicking plus identity validation:
+- **No personal identification required.** They verify that binaries were built
+  from this repository (a build/policy check), not your government ID.
+- **No fees, ever, for OSS** — no per-signature or re-issuance charges.
 
-1. Create an Azure account (free to create) and open
-   [portal.azure.com](https://portal.azure.com).
-2. Create a **Trusted Signing** (Code Signing) resource. Pick the region whose
-   endpoint you'll use, e.g. East US → `https://eus.codesigning.azure.net/`.
-3. Inside the resource, create a **certificate profile** of type *Public Trust*.
-   Complete **identity validation** (individuals: government ID + a short
-   liveness check in the portal). Approval is usually minutes, sometimes a day.
-4. Entra ID → **App registration** → new registration → create a **client
-   secret**. Give the app the *Trusted Signing Certificate Profile Signer* role
-   on the Trusted Signing resource.
-5. Add these secrets under the repo's **Settings → Secrets and variables →
-   Actions**:
+One honest trade-off: the certificate is issued **to SignPath Foundation**, so
+Windows shows *SignPath Foundation* as the verified publisher (they vouch for
+the project by name) rather than "Fress". A paid certificate would show your
+own name instead.
 
-   | Secret | Example |
-   | --- | --- |
-   | `AZURE_TENANT_ID` | `00000000-0000-...` (Entra tenant) |
-   | `AZURE_CLIENT_ID` | `11111111-1111-...` (app registration) |
-   | `AZURE_CLIENT_SECRET` | the secret value |
-   | `AZURE_CODESIGNING_ENDPOINT` | `https://eus.codesigning.azure.net/` |
-   | `AZURE_CODESIGNING_ACCOUNT` | your Trusted Signing account name |
-   | `AZURE_CODESIGNING_PROFILE` | your certificate profile name |
+Fress already meets every published condition:
 
-6. Push any new version tag. The Windows job signs the installer through the
-   service and the release body no longer needs the "Run anyway" advice —
-   SmartScreen and UAC show **Fress** as a verified publisher.
+| Condition | Fress status |
+| --- | --- |
+| No malware / unwanted programs | clean catalog app |
+| OSI-approved license, no dual-licensing | MIT |
+| No proprietary components | 100% open, MIT |
+| Actively maintained | ongoing releases |
+| Already released in the form to be signed | v1.0.0-beta live |
+| Documented on the download page | README + release notes |
 
-Pricing note: the service has a monthly fee for the basic tier (about the price
-of a coffee per month, with thousands of signatures included). Identity
-validation itself is free.
+### Steps (15 minutes of form-filling, then their review)
 
-## Alternative (free, slower): SignPath Foundation
+1. Open [signpath.org/apply](https://signpath.org/apply) and submit the form
+   with the repository URL `https://github.com/WasewaseX/Fress`.
+2. Wait for their review (days, sometimes a couple of weeks). They check the
+   repo against the conditions above.
+3. Once approved you get a **SignPath.io organization** with a signing policy.
+   From the dashboard collect: **API token**, **organization ID**,
+   **project ID**, **signing policy ID**.
+4. Add four secrets under the repo's **Settings → Secrets and variables →
+   Actions**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORG_ID`, `SIGNPATH_PROJECT_ID`,
+   `SIGNPATH_SIGNING_POLICY_ID`.
+5. Say the word — the Windows build job gets rewired to: build unsigned →
+   `submit-signing-request` GitHub Action (key lives on SignPath's HSM) →
+   signed installer uploaded to the release. Then push the next version tag.
 
-The [SignPath Foundation](https://signpath.org) issues free Authenticode
-certificates to genuine open-source projects. The application review takes
-longer, and if approved we'd swap the CI step to sign with that certificate.
-The pipeline change is small once the certificate exists.
+## The paid alternative: Azure Trusted Signing
+
+Trusted Signing is Microsoft's own signing service (~the price of a coffee per
+month). The publisher shows *your own identity*, and trust is instant. If the
+project ever has a budget, `azure/trusted-signing-action` support is already
+wired into `release.yml`, gated on six secrets (`AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_CODESIGNING_ENDPOINT`,
+`AZURE_CODESIGNING_ACCOUNT`, `AZURE_CODESIGNING_PROFILE`). Setup: Azure
+account → Trusted Signing resource → Public Trust profile with identity
+validation → Entra app registration + client secret → add the six secrets →
+push a tag.
 
 ## What the current self-signed fallback still buys you
 
-Until the trusted certificate is in place, releases keep a timestamped
+Until a trusted certificate is in place, releases keep a timestamped
 self-signature. That does not remove the warning, but it does prove the file
 you downloaded is bit-for-bit the file CI produced — tampering breaks it. For
 full confidence, compare the file's SHA-256 against `SHA256SUMS.txt` on the

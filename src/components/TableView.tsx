@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
 import { useLiveStars } from '../lib/starFetch';
+import { sourceLinksFor } from '../lib/sourceLinks';
 import { 
   Star, 
   ExternalLink, 
@@ -13,7 +14,9 @@ import {
   Award,
   Columns,
   Check,
-  Github
+  Github,
+  Gitlab,
+  Code2
 } from 'lucide-react';
 
 interface TableViewProps {
@@ -240,18 +243,22 @@ export const TableView: React.FC<TableViewProps> = ({
                       </button>
                     )}
 
-                    {app.githubUrl && (
-                      <a
-                        href={app.githubUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
-                        className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
-                        title="Open Source code"
-                      >
-                        <Github className="w-3.5 h-3.5" aria-hidden="true" />
-                      </a>
-                    )}
+                    {sourceLinksFor(app).map((link, i) => {
+                      const Icon = link.kind === 'github' ? Github : link.kind === 'gitlab' ? Gitlab : Code2;
+                      return (
+                        <a
+                          key={link.url}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
+                          className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
+                          title={`Open ${link.label} source code`}
+                        >
+                          <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                        </a>
+                      );
+                    })}
 
                     {app.websiteUrl && (
                       <a

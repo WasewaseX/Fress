@@ -3,6 +3,8 @@ import { AppItem, Platform } from '../types';
 import {
   Star,
   Github,
+  Gitlab,
+  Code2,
   Bookmark,
   Info,
   Edit2,
@@ -17,6 +19,7 @@ import { bestDownloadFor } from '../lib/appDownloads';
 import { useDownloads } from '../lib/downloads';
 import { openExternal } from '../lib/external';
 import { resolveGitHubDownload, resolveFdroidDownload, guessUserPlatform } from '../lib/releaseFetch';
+import { sourceLinksFor } from '../lib/sourceLinks';
 import { toast } from 'sonner';
 import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
@@ -376,20 +379,24 @@ export const AppCard: React.FC<AppCardProps> = ({
             <span>{isDownloading || resolving ? t('card.download') + '...' : t('card.download')}</span>
           </button>
 
-          {app.githubUrl && (
-            <a
-              id={`github-link-${app.id}`}
-              href={app.githubUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
-              className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
-              aria-label={`View ${app.name} source code (opens in new window)`}
-              title="Source code"
-            >
-              <Github className="w-3.5 h-3.5" aria-hidden="true" />
-            </a>
-          )}
+          {sourceLinksFor(app).map((link, i) => {
+            const Icon = link.kind === 'github' ? Github : link.kind === 'gitlab' ? Gitlab : Code2;
+            return (
+              <a
+                key={link.url}
+                id={link.kind === 'gitlab' ? `gitlab-link-${app.id}` : i === 0 ? `github-link-${app.id}` : `source-link-${app.id}-${i}`}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
+                className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
+                aria-label={`View ${app.name} source code on ${link.label} (opens in new window)`}
+                title={`${link.label} source code`}
+              >
+                <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+              </a>
+            );
+          })}
 
         </div>
       </div>

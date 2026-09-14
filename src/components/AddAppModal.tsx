@@ -35,6 +35,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   const [tagline, setTagline] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [githubUrl, setGithubUrl] = useState('');
+  const [gitlabUrl, setGitlabUrl] = useState('');
   const [category, setCategory] = useState<Category>('Utilities & System');
   const [platforms, setPlatforms] = useState<Platform[]>(['windows']);
   const [license, setLicense] = useState('MIT');
@@ -59,6 +60,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setTagline(initialApp.tagline);
       setWebsiteUrl(initialApp.websiteUrl);
       setGithubUrl(initialApp.githubUrl);
+      setGitlabUrl(initialApp.gitlabUrl || '');
       setCategory(initialApp.category);
       setPlatforms(initialApp.platforms);
       setLicense(initialApp.license);
@@ -77,6 +79,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setTagline('');
       setWebsiteUrl('');
       setGithubUrl('');
+      setGitlabUrl('');
       setCategory('Utilities & System');
       setPlatforms(['windows']);
       setLicense('MIT');
@@ -193,6 +196,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       tagline: tagline.trim() || name.trim(),
       websiteUrl: websiteUrl.trim() || githubUrl.trim() || '#',
       githubUrl: githubUrl.trim() || undefined,
+      gitlabUrl: gitlabUrl.trim() || undefined,
       category,
       platforms,
       license: license.trim() || 'Open Source',
@@ -309,6 +313,20 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 <span>{isInspecting ? 'Fetching...' : 'Auto-Fill'}</span>
               </button>
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="input-gitlab-url" className="block text-slate-300 font-medium">
+              GitLab Repository URL <span className="text-slate-500 font-normal">(optional, shown as a second source button)</span>
+            </label>
+            <input
+              id="input-gitlab-url"
+              type="url"
+              value={gitlabUrl}
+              onChange={(e) => setGitlabUrl(e.target.value)}
+              placeholder="https://gitlab.com/owner/repository"
+              className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

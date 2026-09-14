@@ -32,8 +32,11 @@ export function getDownloadOptions(app: AppItem, platform: Platform): DownloadOp
     options.push(c);
   }
 
-  // Generic fallbacks, deduplicated
-  if (app.githubUrl) {
+  // Generic fallbacks, deduplicated. Skipped when the curated table already
+  // covers this platform: for projects like Tor Browser the primary repo is
+  // a launcher/mirror whose Releases page holds no installers, and a dead
+  // "GitHub Releases" link next to the real official targets only confuses.
+  if (app.githubUrl && curated.length === 0) {
     const releases = `${app.githubUrl.replace(/\/+$/, '')}/releases`;
     if (!options.some((o) => o.url === releases)) {
       options.push({

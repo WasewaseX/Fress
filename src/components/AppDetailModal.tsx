@@ -6,6 +6,8 @@ import {
   Check,
   ExternalLink,
   Github,
+  Gitlab,
+  Code2,
   Terminal,
   ShieldCheck,
   Smartphone,
@@ -30,6 +32,7 @@ import {
 import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
+import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
 import { toast } from 'sonner';
 
 /** Device-aware download section: pick your platform, get real targets. */
@@ -300,6 +303,11 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
       : app.githubUrl.includes('gitlab')
         ? 'selfgitlab'
         : 'none';
+  // One button per official home: GitHub next to GitLab when a project
+  // publishes on both, a single button when it does not.
+  const sourceLinks = sourceLinksFor(app);
+  const SourceIcon = ({ kind }: { kind: SourceLink['kind'] }) =>
+    kind === 'github' ? <Github className="w-3.5 h-3.5" aria-hidden="true" /> : kind === 'gitlab' ? <Gitlab className="w-3.5 h-3.5" aria-hidden="true" /> : <Code2 className="w-3.5 h-3.5" aria-hidden="true" />;
 
 
   return (
@@ -582,20 +590,22 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           </button>
 
           <div className="flex items-center gap-2">
-            {repoHost !== 'none' && (
+            {sourceLinks.map((link, i) => (
               <a
-                id="detail-github-link"
-                href={app.githubUrl}
+                key={link.url}
+                id={link.kind === 'gitlab' ? 'detail-gitlab-link' : i === 0 ? 'detail-github-link' : `detail-source-link-${i}`}
+                href={link.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
+                onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
+                title={link.url}
                 className="inline-flex items-center gap-1 text-xs bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 border border-slate-950/10 dark:border-white/[0.1] px-3 py-1.5 rounded-lg transition-colors"
               >
-                <Github className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>{repoHost === 'github' ? 'GitHub' : 'GitLab'}</span>
+                <SourceIcon kind={link.kind} />
+                <span>{link.label}</span>
                 <ExternalLink className="w-3 h-3 text-slate-400" aria-hidden="true" />
               </a>
-            )}
+            ))}
 
             {app.websiteUrl && (
               <a

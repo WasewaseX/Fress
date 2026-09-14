@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Projects that publish on both GitHub and GitLab now show two source buttons (a GitLab button next to the GitHub one), and the star count comes from GitHub when a project has both, so everything is compared on the same scale. Tor Browser and F-Droid were the two entries rated on their GitLab numbers (18 and 2,656 stars) while their official GitHub repos carry 879 and 3,039. Both now link the GitHub repo for stars and keep the GitLab link, where development actually happens, as a second button.
+- The add-app form takes an optional GitLab URL for the second source button.
+- The generic "GitHub Releases" link no longer appears for apps that already have hand-verified download targets on that platform. Tor Browser's primary GitHub repo is its launcher, which ships no installers in releases, so pointing there was noise.
+
 ## 1.0.0-beta (2026-09-14)
 
 The first release that ships for every platform from one tag: Windows, macOS (Apple Silicon and Intel), Linux (AppImage, deb, rpm), and Android (universal APK).

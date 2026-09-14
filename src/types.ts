@@ -23,6 +23,8 @@ export interface AppItem {
   whyItsAwesome: string;
   beginnerGuide: string;
   githubUrl: string;
+  /** Second official source link when a project also publishes on GitLab. */
+  gitlabUrl?: string;
   websiteUrl: string;
   downloadUrl?: string;
   category: Category;

@@ -1,21 +1,21 @@
 # Fress
 
-A short, checked directory of **free and open-source software** for Windows, macOS, Linux, Android, and iOS. Built as a fast desktop and mobile app with Tauri 2.
+A hand-checked directory of **free and open-source software** for Windows, macOS, Linux, and Android. It runs as a desktop and Android app, built with Tauri 2.
 
-No telemetry. No ads. No sponsored entries. Every app in the catalog is real, popular, actively maintained, and genuinely free.
+There is no telemetry and no advertising, and nothing in the catalog is sponsored. Every app in the catalog is real, popular, actively maintained, and genuinely free.
 
-![Version](https://img.shields.io/badge/version-0.12.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-1.0.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Why Fress
 
 - **Curated, not scraped.** Every entry is checked by hand: official links, real descriptions, honest notes about what the app replaces.
-- **One-click stable downloads.** Pick your platform and Fress resolves the app's actual latest STABLE file straight from GitHub Releases or F-Droid — no hunting through release pages, and beta/RC builds are never offered.
+- **One-click stable downloads.** Pick your platform and Fress resolves the app's actual latest STABLE file straight from GitHub Releases or F-Droid. No hunting through release pages, and beta/RC builds are never offered.
 - **Update check for Fress itself.** The button in the footer compares your installed version with the latest release on GitHub and only downloads when there is something newer.
 - **Download manager built in.** Downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification, saved to the folder you choose (your system Downloads folder by default).
-- **Device-aware downloads.** Windows, macOS, Linux, Android (GitHub APK, F-Droid, Google Play), and iOS — Fress picks the right file for your architecture.
-- **Light and dark themes.** Both are first-class: a warm paper light mode and a calm dark mode, following your system preference until you choose.
-- **Multiple languages.** English, Persian (full right-to-left support), Spanish, French, and German from the Settings menu — including the app descriptions, not just the menus.
-- **Local-first.** Favorites, custom entries, and settings live in your own storage. The app makes zero network calls beyond the links you click.
+- **Device-aware downloads.** Windows, macOS, Linux, and Android (GitHub APK, F-Droid, Google Play): Fress picks the right file for your architecture.
+- **Light and dark themes.** The light mode uses warm paper tones, the dark mode is easy on the eyes, and both follow your system preference until you pick one yourself.
+- **Multiple languages.** English, Persian (full right-to-left support), Spanish, French, and German from the Settings menu, including the app descriptions, not just the menus.
+- **Your data stays with you.** Favorites, custom entries, and settings live in your own storage. The only servers the app talks to are the ones hosting the apps: GitHub for release and star lookups, F-Droid for Android packages, and the download links you click.
 
 ## Feature tour
 
@@ -69,7 +69,7 @@ sha256sum -c SHA256SUMS.txt
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header (for example `v0.11.0-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page — old installers keep working and can silently sit on your machine next to the new one.
+Each Fress app shows its exact version in the header (for example `v1.0.0-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
 
 ### Where downloads are saved (per operating system)
 
@@ -80,11 +80,11 @@ Fress picks each operating system's own download location, the same place your b
 | Windows | `Downloads` (follows OneDrive redirection if set up) | Yes |
 | macOS | `~/Downloads` | Yes |
 | Linux | XDG downloads folder (usually `~/Downloads` or `~/Downloads/<locale>`) | Yes |
-| Android | The app's private storage (Android does not let apps pick arbitrary folders) | No — use Open after a download to install or share the file |
+| Android | The app's private storage (Android does not let apps pick arbitrary folders) | No. Use Open after a download to install or share the file |
 
 ### Why Windows shows "Unknown publisher"
 
-The Windows installer is signed with a timestamp, which proves the file is exactly the one CI produced and has not been altered. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning because it only hides for a certificate that chains to a root Windows already trusts — that's the fix, and the build pipeline already supports it end to end. [CODE_SIGNING.md](CODE_SIGNING.md) documents the one-time setup (Microsoft's Trusted Signing service, or the free SignPath Foundation route for open-source projects); until it's done, you can:
+The Windows installer is signed with a timestamp, which proves the file is exactly the one CI produced and has not been altered. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning because that warning only goes away once the publisher is covered by a certificate Windows already trusts. [CODE_SIGNING.md](CODE_SIGNING.md) documents the fix, including a free signing route for open-source projects (SignPath Foundation). Until that is set up, you can:
 
 - Click **More info → Run anyway** after checking the checksum against `SHA256SUMS.txt`, or
 - Build the app yourself from this repository (`npm run tauri build`).

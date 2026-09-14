@@ -2,13 +2,13 @@
 
 ## 1.0.0-beta (2026-09-14)
 
-The first release that ships for every platform from one tag: Windows, macOS (Apple Silicon and Intel), Linux (AppImage, deb, rpm), and Android (universal and arm64 APKs).
+The first release that ships for every platform from one tag: Windows, macOS (Apple Silicon and Intel), Linux (AppImage, deb, rpm), and Android (universal APK).
 
 ### Fixed
-- Star counts are live everywhere now, including the search-adjacent places people actually look at. The GitHub API quota (60 anonymous calls per hour — a catalog this size burns it fast) is handled with ETag re-validation, which is free, so counts stay fresh instead of silently freezing. Formatting matches github.com (19.6k, 950 — a 940-star repo no longer rounds down to "0k").
+- Star counts are live everywhere now, including search results. The GitHub API quota for anonymous calls (60 per hour, which a catalog this size burns fast) is handled with ETag re-validation, which is free, so counts stay fresh instead of silently freezing. Formatting matches github.com (19.6k, 950), so a 940-star repo no longer rounds down to "0k".
 - Thunderbird had `stars: 0` and no repository link; LibreOffice carried a made-up round number. Both now link their official repositories (thunderbird-desktop and the LibreOffice/core mirror) with the real counts.
-- Adding an app by hand no longer guesses 1,000 stars — the field fills itself from the live GitHub API once a repository URL is pasted.
-- Selected and highlighted controls in light mode (Picks, Trending, Favorites toggles, compare and bookmark buttons, the batch pill, table badges) kept pale text on white. They now use muted deep shades — dark enough to read, calm enough not to glare. Dark mode is untouched.
+- Adding an app by hand no longer guesses 1,000 stars. The field fills itself from the live GitHub API once a repository URL is pasted.
+- Selected and highlighted controls in light mode (Picks, Trending, Favorites toggles, compare and bookmark buttons, the batch pill, table badges) kept pale text on white. They now use muted deep shades that are easy to read. Dark mode is untouched.
 
 ### Changed
 - The repository was recreated clean: the git history carries one author (WasewaseX), the "Created from template" trace is gone, and no placeholder identities remain anywhere.
@@ -17,25 +17,25 @@ The first release that ships for every platform from one tag: Windows, macOS (Ap
 ## 0.12.1-beta (2026-09-13)
 
 ### Fixed
-- Star counts were hand-entered and had drifted into nonsense — VLC showed 3k (it really has 19.6k on its official GitHub mirror), 7-Zip showed 0, Immich showed 70k instead of 114k. Every number was replaced with the live value from each project's code hosting, and the catalog now refreshes them automatically every 24 hours (cards, table view, and the detail modal all show the same live count; offline it falls back to the last known value).
+- Star counts were hand-entered and had drifted into nonsense: VLC showed 3k (it really has 19.6k on its official GitHub mirror), 7-Zip showed 0, Immich showed 70k instead of 114k. Every number was replaced with the live value from each project's code hosting, and the catalog now refreshes them automatically every 24 hours (cards, table view, and the detail modal all show the same live count; offline it falls back to the last known value).
 - VLC, GIMP, and Inkscape now link their repo to the official GitHub mirror so the star count reflects where their community actually tracks the project.
-- Selected buttons in light mode (platform and category chips, grid/table toggle, command palette rows) had near-white text on a white background — invisible. They now use a muted cocoa-brown chip with white text: easy to spot, easy on the eyes. Dark mode looks exactly as before.
-- The "Unknown Publisher" blue warning on Windows: releases now sign through Azure Trusted Signing the moment the signing account is configured in repo secrets, which makes Windows show Fress as a verified publisher — no warning. Until that one-time setup is done (see CODE_SIGNING.md), releases keep the timestamped self-signature and the release page says so plainly.
+- Selected buttons in light mode (platform and category chips, grid/table toggle, command palette rows) had near-white text on a white background, so they were invisible. They now use a muted cocoa-brown chip with white text. Dark mode looks exactly as before.
+- The "Unknown Publisher" blue warning on Windows: releases now sign through Azure Trusted Signing the moment the signing account is configured in repo secrets, and Windows then shows Fress as a verified publisher with no warning. Until that one-time setup is done (see CODE_SIGNING.md), releases keep the timestamped self-signature and the release page says so plainly.
 
 ### Changed
-- Git history rewritten so every commit is authored by WasewaseX — the placeholder "Fress" identity no longer appears anywhere in the repository.
+- Git history rewritten so every commit is authored by WasewaseX; the placeholder "Fress" identity no longer appears in git history.
 
 ## 0.12.0-beta (2026-09-13)
 
 ### Added
-- Update check for Fress itself: the footer button (replacing "Get Fress") compares your installed version with the latest release on GitHub and only downloads when a newer build exists — it picks the right file for your platform automatically.
+- Update check for Fress itself: the footer button (replacing "Get Fress") compares your installed version with the latest release on GitHub and only downloads when a newer build exists. It picks the right file for your platform automatically.
 - The whole catalog is translated: app descriptions, taglines, highlights, and setup notes now follow the selected language (English, Persian, Spanish, French, German) instead of staying English.
 
 ### Fixed
-- Windows installer: the exe now carries a real Authenticode signature (subject "Fress", timestamped). The blue "Unknown Publisher" warning still appears because removing it requires a paid certificate; see the README for what the signature does and does not prove.
+- Windows installer: the exe now carries a real Authenticode signature (subject "Fress", timestamped). The blue "Unknown Publisher" warning still appears because removing it needs a certificate from an authority Windows trusts; see the README for what the signature does and does not prove.
 - Misplaced and crowded card buttons: the card footer is now one clean row (Guide left; Download and GitHub right). The install-command chip and site link moved into the detail modal where they belong.
 - A stray "Advanced: paste these..." help line appeared inside the About section of the detail modal; it moved back to the install-commands section.
-- The download platform picker no longer shows every platform as a disabled button — only the platforms the app actually ships for, with your device preselected.
+- The download platform picker no longer shows every platform as a disabled button. It only lists the platforms the app actually ships for, with your device preselected.
 - "Other official options" in the detail modal is capped at two entries so the download section stays readable.
 - Android download panel no longer offers the change-folder control (Android cannot pick arbitrary folders); it explains where files go instead.
 
@@ -60,7 +60,7 @@ The first release that ships for every platform from one tag: Windows, macOS (Ap
 ## 0.10.0-beta (2025-09-12)
 
 ### Added
-- One-click stable downloads: Fress now resolves the app's real installer straight from GitHub Releases. Pick a platform and Fress fetches the latest STABLE file for it (Windows `.exe`/`.msi`, macOS `.dmg` for your architecture, Linux `.AppImage`/`.deb`/`.rpm`, Android `.apk`) — beta, RC, and draft releases are never offered.
+- One-click stable downloads: Fress now resolves the app's real installer straight from GitHub Releases. Pick a platform and Fress fetches the latest STABLE file for it (Windows `.exe`/`.msi`, macOS `.dmg` for your architecture, Linux `.AppImage`/`.deb`/`.rpm`, Android `.apk`). Beta, RC, and draft releases are never offered.
 - F-Droid integration: Android apps with an F-Droid package download the current stable APK directly from f-droid.org; if the package is not in the main repository, Fress opens the correct F-Droid page instead.
 - Google Play links for Android apps with an official Play listing.
 - Download folder settings in the header menu: change the folder, or reset to the system Downloads folder (now the default, like every other app).
@@ -68,7 +68,7 @@ The first release that ships for every platform from one tag: Windows, macOS (Ap
 
 ### Fixed
 - All external buttons (GitHub, official websites, store links) now open reliably from the desktop app; the webview previously swallowed plain `window.open` and `target="_blank"` links, so nothing happened on click.
-- App icon redesigned: a blue leaf on a fully transparent background — no tile, no white ball — consistent between the taskbar, Windows Settings, and the app itself.
+- App icon redesigned: a blue leaf on a fully transparent background (no tile, no white ball), consistent between the taskbar, Windows Settings, and the app itself.
 
 ## 0.9.0-beta (2025-09-12)
 

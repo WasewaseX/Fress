@@ -1,78 +1,70 @@
-# Killing the "Unknown Publisher" warning
+# Windows signing and the "Unknown Publisher" warning
 
 ## Why Windows shows the blue warning
 
-When you run an installer, Windows asks one question: *is the publisher vouched
-for by a certificate authority it already trusts?*
+When you run the installer, Windows checks whether the publisher is vouched
+for by a certificate authority it already trusts.
 
-- No signature at all → "Unknown Publisher".
-- A self-signed signature (our current CI fallback) → still "Unknown Publisher",
-  because the certificate vouches for itself. That is expected and there is no
-  build flag, setting, or trick that changes it — the warning is Windows doing
-  its job.
+- No signature at all: Windows says "Unknown Publisher".
+- A self-signed signature (what CI applies today): still "Unknown Publisher",
+  because the certificate vouches for itself. No build flag or setting changes
+  this. The warning is Windows doing its job.
 
-So the warning disappears exactly when the installer is signed with a
-certificate that chains to a root Windows already trusts. The build pipeline
-already supports that end to end, and there is a **free** route.
+The warning goes away when the installer is signed with a certificate that
+chains to a root Windows already trusts. There is a free way to get there.
 
-## The free fix: SignPath Foundation (recommended, $0)
+## The free route: SignPath Foundation
 
-The [SignPath Foundation](https://signpath.org) gives genuine open-source
-projects code signing at no cost — same service paying customers buy. Two
-things make it unusually friendly for a zero-budget project:
+The [SignPath Foundation](https://signpath.org) signs binaries for open-source
+projects at no cost. Two things worth knowing:
 
-- **No personal identification required.** They verify that binaries were built
-  from this repository (a build/policy check), not your government ID.
-- **No fees, ever, for OSS** — no per-signature or re-issuance charges.
+- No personal identification is required. They verify that binaries were built
+  from this repository, not who you are.
+- There are no fees for open-source projects, including re-issues.
 
-One honest trade-off: the certificate is issued **to SignPath Foundation**, so
-Windows shows *SignPath Foundation* as the verified publisher (they vouch for
-the project by name) rather than "Fress". A paid certificate would show your
-own name instead.
+One trade-off: the certificate is issued to SignPath Foundation, so Windows
+lists *SignPath Foundation* as the verified publisher rather than "Fress".
 
-Fress already meets every published condition:
+Fress meets their published conditions:
 
 | Condition | Fress status |
 | --- | --- |
-| No malware / unwanted programs | clean catalog app |
+| No malware or unwanted programs | plain catalog app |
 | OSI-approved license, no dual-licensing | MIT |
-| No proprietary components | 100% open, MIT |
+| No proprietary components | entirely MIT |
 | Actively maintained | ongoing releases |
-| Already released in the form to be signed | v1.0.0-beta live |
-| Documented on the download page | README + release notes |
+| Already released in the form to be signed | v1.0.0-beta |
+| Documented on the download page | README and release notes |
 
-### Steps (15 minutes of form-filling, then their review)
+### Steps
 
-1. Open [signpath.org/apply](https://signpath.org/apply) and submit the form
-   with the repository URL `https://github.com/WasewaseX/Fress`.
-2. Wait for their review (days, sometimes a couple of weeks). They check the
-   repo against the conditions above.
-3. Once approved you get a **SignPath.io organization** with a signing policy.
-   From the dashboard collect: **API token**, **organization ID**,
-   **project ID**, **signing policy ID**.
-4. Add four secrets under the repo's **Settings → Secrets and variables →
+1. Apply at [signpath.org/apply](https://signpath.org/apply) with the
+   repository URL `https://github.com/WasewaseX/Fress`.
+2. Wait for their review (a few days to a couple of weeks).
+3. After approval you get a SignPath.io organization. From its dashboard
+   collect the API token, organization ID, project ID, and signing policy ID.
+4. Add them as repository secrets under **Settings -> Secrets and variables ->
    Actions**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORG_ID`, `SIGNPATH_PROJECT_ID`,
    `SIGNPATH_SIGNING_POLICY_ID`.
-5. Say the word — the Windows build job gets rewired to: build unsigned →
-   `submit-signing-request` GitHub Action (key lives on SignPath's HSM) →
-   signed installer uploaded to the release. Then push the next version tag.
+5. The Windows build job then signs the installer through their service
+   (`submit-signing-request` GitHub Action; the key stays on their HSM), and
+   the signed installer is uploaded to the release with the next version tag.
 
 ## The paid alternative: Azure Trusted Signing
 
-Trusted Signing is Microsoft's own signing service (~the price of a coffee per
-month). The publisher shows *your own identity*, and trust is instant. If the
-project ever has a budget, `azure/trusted-signing-action` support is already
-wired into `release.yml`, gated on six secrets (`AZURE_TENANT_ID`,
+Microsoft's own signing service costs a small monthly fee and shows your own
+name as the publisher. `release.yml` already contains the
+`azure/trusted-signing-action` path, gated on six secrets: `AZURE_TENANT_ID`,
 `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_CODESIGNING_ENDPOINT`,
-`AZURE_CODESIGNING_ACCOUNT`, `AZURE_CODESIGNING_PROFILE`). Setup: Azure
-account → Trusted Signing resource → Public Trust profile with identity
-validation → Entra app registration + client secret → add the six secrets →
-push a tag.
+`AZURE_CODESIGNING_ACCOUNT`, `AZURE_CODESIGNING_PROFILE`. Setup order: create
+the Azure account and Trusted Signing resource, complete identity validation
+on a Public Trust profile, create an Entra app registration with a client
+secret, add the six secrets, push a tag.
 
-## What the current self-signed fallback still buys you
+## What today's self-signed fallback proves
 
 Until a trusted certificate is in place, releases keep a timestamped
-self-signature. That does not remove the warning, but it does prove the file
-you downloaded is bit-for-bit the file CI produced — tampering breaks it. For
-full confidence, compare the file's SHA-256 against `SHA256SUMS.txt` on the
-release page.
+self-signature. It does not remove the warning, but it proves the file you
+downloaded is exactly the file CI produced; any modification breaks it. To
+check, compare the file's SHA-256 against `SHA256SUMS.txt` on the release
+page.

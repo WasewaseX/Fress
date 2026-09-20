@@ -3,7 +3,6 @@ import {
   Search,
   Plus,
   Download,
-  ShieldCheck,
   Keyboard,
   X,
   Upload,
@@ -25,7 +24,6 @@ import {
   FolderOpen,
   RotateCcw,
 } from 'lucide-react';
-import { PrivacyAuditData } from '../types';
 import { useTheme } from './ThemeProvider';
 import { useDownloads, isAndroidWebview } from '../lib/downloads';
 import { LANGUAGES, useI18n } from '../lib/i18n';
@@ -36,11 +34,10 @@ interface HeaderProps {
   onSearchChange: (value: string) => void;
   onOpenAddApps: () => void;
   onOpenTauriModal: () => void;
-  onOpenPrivacyModal: () => void;
+  onOpenWhatsNew?: () => void;
   onOpenShortcutsModal: () => void;
   onExportCatalog: () => void;
   onImportCatalog: (importedJson: string) => void;
-  auditData: PrivacyAuditData;
   totalApps: number;
   viewMode: 'grid' | 'table';
   onToggleViewMode: (mode: 'grid' | 'table') => void;
@@ -83,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchChange,
   onOpenAddApps,
   onOpenTauriModal,
-  onOpenPrivacyModal,
+  onOpenWhatsNew,
   onOpenShortcutsModal,
   onExportCatalog,
   onImportCatalog,
@@ -157,80 +154,38 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header id="main-app-header" className="border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-900/95 backdrop-blur-md sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5">
-        <div id="header-content-row" className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 flex-wrap">
-
-          {/* Brand: app icon + name, nothing else */}
-          <div id="header-brand-group" className="flex items-center gap-2.5 shrink-0">
-            <BrandMark size={32} />
-            <span id="header-brand-title" className="font-extrabold text-base text-slate-100 tracking-tight">
-              Fress
-            </span>
-            <span
-              id="header-version-chip"
-              className="text-[11px] font-mono font-semibold tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded"
-              title="The exact version of this Fress install"
-            >
-              v{pkg.version}
-            </span>
-          </div>
-
-          {/* Search bar & Cmd+K quick launcher */}
-          <div id="header-search-wrapper" className="flex-1 max-w-lg relative min-w-[200px]">
-            <label htmlFor="app-search-input" className="sr-only">
-              {t('header.search')} Ctrl+K
-            </label>
-            <div className="relative">
-              <Search
-                id="search-icon-indicator"
-                className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                aria-hidden="true"
-              />
-              <input
-                id="app-search-input"
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder={t('header.searchPlaceholder')}
-                className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] hover:border-slate-950/20 dark:hover:border-white/[0.2] text-slate-100 placeholder-slate-400 text-xs rounded-lg pl-9 pr-20 py-2 transition-colors focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
-              />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {searchQuery && (
-                  <button
-                    id="clear-search-btn"
-                    type="button"
-                    onClick={() => onSearchChange('')}
-                    aria-label="Clear search input"
-                    className="text-slate-400 hover:text-slate-100 p-0.5"
-                  >
-                    <X className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                )}
-                {onOpenCommandPalette && (
-                  <button
-                    type="button"
-                    onClick={onOpenCommandPalette}
-                    className="text-[11px] font-mono bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] border border-slate-950/10 dark:border-white/[0.12] text-slate-300 px-1.5 py-0.5 rounded transition-colors"
-                    title="Open Command Palette (Ctrl+K)"
-                  >
-                    Ctrl+K
-                  </button>
-                )}
-              </div>
+        {/* Mobile: row 1 = brand + compact actions, row 2 = search.
+            Desktop (md+): the wrapper dissolves (md:contents) and the three
+            groups line up in one row exactly like before. */}
+        <div id="header-content-row" className="flex flex-col md:flex-row md:items-center md:justify-between gap-2.5 md:gap-3">
+          <div className="flex items-center justify-between gap-2 md:contents">
+            {/* Brand: app icon + name, nothing else */}
+            <div id="header-brand-group" className="flex items-center gap-2.5 shrink-0 min-w-0 md:order-1">
+              <BrandMark size={32} />
+              <span id="header-brand-title" className="font-extrabold text-base text-slate-100 tracking-tight">
+                Fress
+              </span>
+              <span
+                id="header-version-chip"
+                className="hidden sm:inline-block text-[11px] font-mono font-semibold tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded"
+                title="The exact version of this Fress install"
+              >
+                v{pkg.version}
+              </span>
             </div>
-          </div>
 
-          {/* Action group */}
-          <div id="header-actions-group" className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button
-              id="header-add-app-btn"
-              type="button"
-              onClick={onOpenAddApps}
-              className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-sky-500 transition-colors shadow-xs"
-              title="Add software to your catalog: search GitHub or enter it yourself"
-            >
-              <Plus className="w-3.5 h-3.5 text-sky-100" aria-hidden="true" />
-              <span>{t('header.addApp')}</span>
-            </button>
+            {/* Action group */}
+            <div id="header-actions-group" className="flex items-center gap-2 shrink-0 flex-wrap md:order-3">
+              <button
+                id="header-add-app-btn"
+                type="button"
+                onClick={onOpenAddApps}
+                className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-2.5 md:px-3 py-1.5 rounded-lg border border-sky-500 transition-colors shadow-xs"
+                title="Add software to your catalog: search GitHub or enter it yourself"
+              >
+                <Plus className="w-3.5 h-3.5 text-sky-100" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('header.addApp')}</span>
+              </button>
 
             {/* Downloads */}
             <button
@@ -259,7 +214,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="header-batch-btn"
                 onClick={onOpenBatchInstall}
-                className="inline-flex items-center gap-1 bg-sky-800/[0.08] text-sky-900 border border-sky-800/25 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 hover:bg-sky-800/[0.14] dark:hover:bg-sky-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
+                className="hidden md:inline-flex items-center gap-1 bg-sky-800/[0.08] text-sky-900 border border-sky-800/25 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 hover:bg-sky-800/[0.14] dark:hover:bg-sky-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
                 title="Generate batch installer script"
               >
                 <Terminal className="w-3.5 h-3.5" />
@@ -273,7 +228,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 id="header-compare-btn"
                 onClick={onOpenCompare}
-                className="inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
+                className="hidden md:inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
                 title="Side-by-side feature comparison"
               >
                 <Columns className="w-3.5 h-3.5" />
@@ -282,7 +237,7 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             {/* View mode */}
-            <div id="view-mode-toggle" className="flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
+            <div id="view-mode-toggle" className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
               <button
                 id="view-mode-grid-btn"
                 type="button"
@@ -503,12 +458,12 @@ export const Header: React.FC<HeaderProps> = ({
                         type="button"
                         onClick={() => {
                           setShowMoreMenu(false);
-                          onOpenPrivacyModal();
+                          onOpenWhatsNew?.();
                         }}
                         className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
                       >
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>{t('header.privacyAudit')}</span>
+                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                        <span>What&apos;s new</span>
                       </button>
 
                       <button
@@ -537,6 +492,54 @@ export const Header: React.FC<HeaderProps> = ({
               className="hidden"
               aria-hidden="true"
             />
+            </div>
+          </div>
+
+          {/* Search bar: its own full-width row on phones, the middle slot on
+              desktop. Stays inside the sticky header, so search is always in
+              reach without the header eating half the screen. */}
+          <div id="header-search-wrapper" className="w-full md:w-auto md:flex-1 md:max-w-lg relative min-w-0 md:order-2">
+            <label htmlFor="app-search-input" className="sr-only">
+              {t('header.search')} Ctrl+K
+            </label>
+            <div className="relative">
+              <Search
+                id="search-icon-indicator"
+                className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                aria-hidden="true"
+              />
+              <input
+                id="app-search-input"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder={t('header.searchPlaceholder')}
+                className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] hover:border-slate-950/20 dark:hover:border-white/[0.2] text-slate-100 placeholder-slate-400 text-xs rounded-lg pl-9 pr-20 py-2 transition-colors focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {searchQuery && (
+                  <button
+                    id="clear-search-btn"
+                    type="button"
+                    onClick={() => onSearchChange('')}
+                    aria-label="Clear search input"
+                    className="text-slate-400 hover:text-slate-100 p-0.5"
+                  >
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
+                {onOpenCommandPalette && (
+                  <button
+                    type="button"
+                    onClick={onOpenCommandPalette}
+                    className="text-[11px] font-mono bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] border border-slate-950/10 dark:border-white/[0.12] text-slate-300 px-1.5 py-0.5 rounded transition-colors"
+                    title="Open Command Palette (Ctrl+K)"
+                  >
+                    Ctrl+K
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
+import { RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
 import { LegalTab } from './LegalModals';
 import { openExternal } from '../lib/external';
 import { useDownloads } from '../lib/downloads';
@@ -9,7 +9,6 @@ import pkg from '../../package.json';
 
 interface FooterProps {
   onOpenLegal: (tab: LegalTab) => void;
-  onOpenPrivacyAudit: () => void;
   onOpenTauriModal: () => void;
 }
 
@@ -86,7 +85,6 @@ const UpdateButton: React.FC = () => {
 
 export const Footer: React.FC<FooterProps> = ({
   onOpenLegal,
-  onOpenPrivacyAudit,
   onOpenTauriModal
 }) => {
   return (
@@ -108,16 +106,6 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
 
           <div id="footer-actions-group" className="flex items-center flex-wrap gap-2 text-xs">
-            <button
-              id="footer-privacy-audit-btn"
-              type="button"
-              onClick={onOpenPrivacyAudit}
-              className="inline-flex items-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-900 hover:bg-slate-800 px-2.5 py-1 rounded border border-slate-800 transition-colors"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-              <span>Privacy check</span>
-            </button>
-
             <UpdateButton />
 
             <button
@@ -151,19 +139,7 @@ export const Footer: React.FC<FooterProps> = ({
             >
               Terms
             </button>
-            <button
-              id="footer-link-consent"
-              type="button"
-              onClick={() => onOpenLegal('consent')}
-              className="hover:text-slate-200 underline underline-offset-2"
-            >
-              Storage preferences
-            </button>
           </div>
-
-          <p id="footer-compliance-notice" className="text-slate-400 text-[11px]">
-            No telemetry. Everything stays on this device.
-          </p>
         </div>
       </div>
     </footer>

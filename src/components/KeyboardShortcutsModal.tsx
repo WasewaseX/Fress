@@ -24,8 +24,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
     { key: 'F', description: 'Toggle Bookmarks / Favorites filter' },
     { key: 'T', description: 'Toggle GitHub Trending Today filter' },
     { key: 'O', description: 'Toggle Curator Recommendations filter' },
-    { key: 'D', description: 'Open Windows (.exe) desktop packaging guide' },
-    { key: 'P', description: 'Open Privacy and tracking audit' }
+    { key: 'D', description: 'Open Windows (.exe) desktop packaging guide' }
   ];
 
   return (

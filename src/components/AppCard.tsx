@@ -234,36 +234,18 @@ export const AppCard: React.FC<AppCardProps> = ({
           </div>
         )}
 
-        {/* App Title & Proprietary Alternative */}
-        <div className="mb-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 
-              id={`app-title-${app.id}`} 
-              onClick={() => onOpenDetail(app)}
-              className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors cursor-pointer"
-            >
-              {app.name}
-            </h3>
-            {app.proprietaryAlternative && (
-              <span className="text-[11px] font-medium text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded">
-                {app.proprietaryAlternative}
-              </span>
-            )}
-          </div>
+        {/* App title + one-line tagline. The full story, install commands
+            and links live in the guide popup so cards stay calm. */}
+        <div className="mb-3">
+          <h3 
+            id={`app-title-${app.id}`} 
+            onClick={() => onOpenDetail(app)}
+            className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors cursor-pointer"
+          >
+            {app.name}
+          </h3>
           <p id={`app-tagline-${app.id}`} className="text-xs text-slate-400 line-clamp-1 mt-0.5">
             {tx.tagline}
-          </p>
-        </div>
-
-        {/* Description */}
-        <p id={`app-desc-${app.id}`} className="text-[13px] text-slate-300 leading-relaxed line-clamp-2 mb-3">
-          {tx.description}
-        </p>
-
-        {/* Curated Highlight */}
-        <div id={`app-highlight-row-${app.id}`} className="mb-3.5 pl-2.5 border-l-2 border-slate-950/[0.12] dark:border-white/[0.12]">
-          <p className="text-slate-400 text-[12px] leading-relaxed line-clamp-2">
-            {tx.whyItsAwesome}
           </p>
         </div>
 

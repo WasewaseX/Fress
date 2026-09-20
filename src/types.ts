@@ -61,21 +61,3 @@ export interface FilterState {
   customOnly: boolean;
   sortBy: 'stars' | 'name' | 'newest';
 }
-
-export interface CookieConsentState {
-  decided: boolean;
-  essential: boolean;
-  functional: boolean;
-  analytics: boolean;
-  updatedAt: string;
-}
-
-export interface PrivacyAuditData {
-  trackingScriptsFound: number;
-  thirdPartyTrackersFound: number;
-  cookiesStatus: string;
-  externalLinkSanitization: boolean;
-  wcagContrastCompliant: boolean;
-  keyboardNavigable: boolean;
-  secureHeadersActive: boolean;
-}

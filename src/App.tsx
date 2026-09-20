@@ -7,10 +7,9 @@ import { TableView } from './components/TableView';
 import { AppDetailModal } from './components/AppDetailModal';
 import { AddAppModal } from './components/AddAppModal';
 import { TauriModal } from './components/TauriModal';
-import { PrivacyAuditModal } from './components/PrivacyAuditModal';
 import { LegalModals, LegalTab } from './components/LegalModals';
-import { CookieBanner } from './components/CookieBanner';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { WhatsNewModal } from './components/WhatsNewModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { Footer } from './components/Footer';
 import { CommandPalette } from './components/CommandPalette';
@@ -27,10 +26,11 @@ import { INITIAL_APPS } from './data/appsData';
 import { 
   AppItem, 
   Category,
-  FilterState, 
-  CookieConsentState, 
-  PrivacyAuditData 
+  FilterState 
 } from './types';
+import { checkForUpdate } from './lib/selfUpdate';
+import { openExternal } from './lib/external';
+import pkg from '../package.json';
 import { 
   SearchX, 
   RotateCcw, 
@@ -45,9 +45,11 @@ import { Toaster, toast } from 'sonner';
 
 const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
 const STORAGE_KEY_FAVORITES = 'fress_favorites';
-const STORAGE_KEY_COOKIES = 'awesome_free_apps_cookie_consent';
 const STORAGE_KEY_VIEW_MODE = 'awesome_free_apps_view_mode';
 const STORAGE_KEY_PLATFORM = 'fress_platform_filter';
+// Records the last version whose "What's new" note was closed. When it
+// disagrees with the running version, the note opens once after an update.
+const STORAGE_KEY_WHATSNEW = 'fress_whatsnew_seen';
 
 // Each device starts with its own platform preselected: Android opens on the
 // Android catalog, everything else opens on the full list. The user's last
@@ -136,24 +138,60 @@ function AppShell() {
     }
   };
 
-  // Cookie consent
-  const [cookieConsent, setCookieConsent] = useState<CookieConsentState>(() => {
+  // "What's new": opens by itself on the first launch after an update for
+  // people who already use Fress; brand-new installs start clean instead.
+  const [isWhatsNewOpen, setIsWhatsNewOpen] = useState(false);
+
+  useEffect(() => {
+    let returning = false;
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_COOKIES);
-      if (saved) {
-        return JSON.parse(saved);
+      returning = Boolean(
+        localStorage.getItem(STORAGE_KEY_FAVORITES) || localStorage.getItem(STORAGE_KEY_CUSTOM_APPS)
+      );
+      if (returning && localStorage.getItem(STORAGE_KEY_WHATSNEW) !== pkg.version) {
+        setIsWhatsNewOpen(true);
       }
     } catch {
-      // fallback
+      // ignore
     }
-    return {
-      decided: false,
-      essential: true,
-      functional: true,
-      analytics: false,
-      updatedAt: ''
+  }, []);
+
+  // Quiet update check shortly after launch. Says nothing when you are on
+  // the newest release; offers a one-tap download when you are not.
+  const { startDownload } = useDownloads();
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const state = await checkForUpdate(pkg.version);
+        if (cancelled || state.kind !== 'available') return;
+        toast(`Fress v${state.release.version} is available`, {
+          description: 'Installs straight over this copy. Bookmarks and added apps stay.',
+          duration: 15000,
+          action: {
+            label: state.asset ? 'Download' : 'View release',
+            onClick: () => {
+              if (state.asset) void startDownload(state.asset.url, state.asset.name);
+              else void openExternal(state.release.htmlUrl);
+            }
+          }
+        });
+      })();
+    }, 4000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
     };
-  });
+  }, [startDownload]);
+
+  const handleWhatsNewClose = () => {
+    setIsWhatsNewOpen(false);
+    try {
+      localStorage.setItem(STORAGE_KEY_WHATSNEW, pkg.version);
+    } catch {
+      // ignore
+    }
+  };
 
   // Filters
   const [filters, setFilters] = useState<FilterState>(() => ({
@@ -166,7 +204,6 @@ function AppShell() {
   const [editingApp, setEditingApp] = useState<AppItem | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isTauriModalOpen, setIsTauriModalOpen] = useState(false);
-  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isBatchInstallModalOpen, setIsBatchInstallModalOpen] = useState(false);
@@ -181,17 +218,6 @@ function AppShell() {
     isOpen: false,
     tab: 'privacy'
   });
-
-  // Real audit data
-  const auditData: PrivacyAuditData = {
-    trackingScriptsFound: 0,
-    thirdPartyTrackersFound: 0,
-    cookiesStatus: 'Clean local-first storage',
-    externalLinkSanitization: true,
-    wcagContrastCompliant: true,
-    keyboardNavigable: true,
-    secureHeadersActive: true
-  };
 
   // Persist favorites
   const toggleFavorite = (appId: string) => {
@@ -421,16 +447,6 @@ function AppShell() {
     }
   };
 
-  // Update cookie consent
-  const handleUpdateCookieConsent = (newConsent: CookieConsentState) => {
-    setCookieConsent(newConsent);
-    try {
-      localStorage.setItem(STORAGE_KEY_COOKIES, JSON.stringify(newConsent));
-    } catch {
-      // ignore
-    }
-  };
-
   // Filter change helper
   const handleFilterChange = (partial: Partial<FilterState>) => {
     if (partial.platform !== undefined) {
@@ -480,8 +496,8 @@ function AppShell() {
         setEditingApp(null);
         setIsAddModalOpen(false);
         setIsTauriModalOpen(false);
-        setIsPrivacyModalOpen(false);
         setIsShortcutsModalOpen(false);
+        setIsWhatsNewOpen(false);
         setIsCommandPaletteOpen(false);
         setIsBatchInstallModalOpen(false);
         setIsCompareModalOpen(false);
@@ -505,12 +521,6 @@ function AppShell() {
       } else if (e.key === 'd' || e.key === 'D') {
         e.preventDefault();
         setIsTauriModalOpen(true);
-      } else if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        setIsPrivacyModalOpen(true);
-      } else if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault();
-        setLegalModal({ isOpen: true, tab: 'consent' });
       } else if (e.key === 'f' || e.key === 'F') {
         e.preventDefault();
         handleFilterChange({ favoritesOnly: !filters.favoritesOnly });
@@ -629,11 +639,10 @@ function AppShell() {
           setAddFlow('search');
         }}
         onOpenTauriModal={() => setIsTauriModalOpen(true)}
-        onOpenPrivacyModal={() => setIsPrivacyModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
+        onOpenWhatsNew={() => setIsWhatsNewOpen(true)}
         onExportCatalog={handleExportCatalog}
         onImportCatalog={handleImportCatalog}
-        auditData={auditData}
         totalApps={apps.length}
         viewMode={viewMode}
         onToggleViewMode={handleToggleViewMode}
@@ -818,7 +827,6 @@ function AppShell() {
       {/* Footer */}
       <Footer
         onOpenLegal={(tab) => setLegalModal({ isOpen: true, tab })}
-        onOpenPrivacyAudit={() => setIsPrivacyModalOpen(true)}
         onOpenTauriModal={() => setIsTauriModalOpen(true)}
       />
 
@@ -841,7 +849,7 @@ function AppShell() {
       <BatchInstallModal
         isOpen={isBatchInstallModalOpen}
         onClose={() => setIsBatchInstallModalOpen(false)}
-        selectedApps={selectedBatchApps.length > 0 ? selectedBatchApps : apps.slice(0, 5)}
+        selectedApps={selectedBatchApps}
         allApps={apps}
         onToggleAppSelection={toggleBatchSelect}
         onSelectAll={handleSelectAllBatch}
@@ -851,7 +859,7 @@ function AppShell() {
       <CompareModal
         isOpen={isCompareModalOpen}
         onClose={() => setIsCompareModalOpen(false)}
-        appsToCompare={comparedApps.length > 0 ? comparedApps : apps.slice(0, 3)}
+        appsToCompare={comparedApps}
         allApps={apps}
         onAddAppToCompare={toggleCompareApp}
         onRemoveAppFromCompare={handleRemoveCompare}
@@ -897,19 +905,10 @@ function AppShell() {
         onClose={() => setIsTauriModalOpen(false)}
       />
 
-      <PrivacyAuditModal
-        isOpen={isPrivacyModalOpen}
-        onClose={() => setIsPrivacyModalOpen(false)}
-        auditData={auditData}
-        externalLinkCount={apps.length * 2}
-      />
-
       <LegalModals
         isOpen={legalModal.isOpen}
         initialTab={legalModal.tab}
         onClose={() => setLegalModal((prev) => ({ ...prev, isOpen: false }))}
-        cookieConsent={cookieConsent}
-        onUpdateCookieConsent={handleUpdateCookieConsent}
       />
 
       <KeyboardShortcutsModal
@@ -923,28 +922,10 @@ function AppShell() {
         onClose={() => setIsDownloadsOpen(false)}
       />
 
-      {/* Interactive Cookie Consent Banner */}
-      <CookieBanner
-        cookieConsent={cookieConsent}
-        onAcceptNecessary={() =>
-          handleUpdateCookieConsent({
-            decided: true,
-            essential: true,
-            functional: false,
-            analytics: false,
-            updatedAt: new Date().toISOString()
-          })
-        }
-        onAcceptAll={() =>
-          handleUpdateCookieConsent({
-            decided: true,
-            essential: true,
-            functional: true,
-            analytics: true,
-            updatedAt: new Date().toISOString()
-          })
-        }
-        onOpenPreferences={() => setLegalModal({ isOpen: true, tab: 'consent' })}
+      {/* Once-per-version release notes; reopenable from the header menu */}
+      <WhatsNewModal
+        isOpen={isWhatsNewOpen}
+        onClose={handleWhatsNewClose}
       />
     </div>
   );

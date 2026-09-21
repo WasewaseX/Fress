@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Platform } from '../types';
 import {
   X,
@@ -284,6 +285,8 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
   const tx = useAppText(app);
   const liveStars = useLiveStars(app?.githubUrl);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, !!app);
   if (!app) return null;
 
   const shownStars = liveStars ?? app.stars;
@@ -313,6 +316,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
 
   return (
     <div 
+      ref={panelRef}
       id="app-detail-modal-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
       role="dialog"

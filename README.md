@@ -4,7 +4,7 @@ A hand-checked directory of **free and open-source software** for Windows, macOS
 
 There is no telemetry and no advertising, and nothing in the catalog is sponsored. Every app in the catalog is real, popular, actively maintained, and genuinely free.
 
-![Version](https://img.shields.io/badge/version-1.0.0--beta-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/github/v/release/WasewaseX/Fress?include_prereleases&sort=semver&label=version) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Why Fress
 
@@ -69,7 +69,7 @@ sha256sum -c SHA256SUMS.txt
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header (for example `v1.0.0-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
+Each Fress app shows its exact version in the header (for example `v1.0.4-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
 
 ### Where downloads are saved (per operating system)
 

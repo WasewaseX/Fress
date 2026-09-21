@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { 
   X, 
   Copy, 
@@ -16,6 +17,8 @@ export const TauriModal: React.FC<TauriModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<'build' | 'config' | 'github'>('build');
   const [copiedCmd, setCopiedCmd] = useState(false);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const buildCommand = `npm install
@@ -30,6 +33,7 @@ npx @tauri-apps/cli build`;
 
   return (
     <div 
+      ref={panelRef}
       id="tauri-modal-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
       role="dialog"

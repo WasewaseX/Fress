@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { X, Keyboard } from 'lucide-react';
 
 interface KeyboardShortcutsModalProps {
@@ -10,6 +11,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   isOpen,
   onClose
 }) => {
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const shortcuts = [
@@ -29,6 +32,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
 
   return (
     <div 
+      ref={panelRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"

@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import {
   X,
   CheckCircle2,
@@ -37,13 +38,15 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const active = items.filter((it) => it.status === 'active');
   const finished = items.filter((it) => it.status !== 'active');
 
   return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('downloads.title')}>
+    <div ref={panelRef} className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('downloads.title')}>
       <div className="fr-backdrop absolute inset-0" onClick={onClose} aria-hidden="true" />
 
       <aside

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { X } from 'lucide-react';
 
 export type LegalTab = 'privacy' | 'terms';
@@ -23,6 +24,8 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
     }
   }, [isOpen, initialTab]);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const tabClass = (id: LegalTab) => `py-2.5 px-3 font-medium whitespace-nowrap border-b-2 transition-colors ${
@@ -33,6 +36,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
 
   return (
     <div
+      ref={panelRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"

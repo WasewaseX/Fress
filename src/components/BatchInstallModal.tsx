@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
 import { 
   Terminal, 
@@ -36,6 +37,8 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
   const [scriptType, setScriptType] = useState<ScriptType>('winget-ps');
   const [copied, setCopied] = useState(false);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   // Generate scripts based on selection
@@ -141,6 +144,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
 
   return (
     <div 
+      ref={panelRef}
       id="batch-install-modal-backdrop"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
       onClick={onClose}

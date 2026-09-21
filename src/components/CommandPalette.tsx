@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Category, Platform } from '../types';
 import { 
   Search, 
@@ -191,10 +192,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
   };
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   return (
     <div 
+      ref={panelRef}
       id="command-palette-backdrop"
       className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-start justify-center pt-16 sm:pt-24 px-4 animate-in fade-in duration-100"
       onClick={onClose}

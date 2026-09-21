@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.4-beta (2026-09-22)
+
+The "quick on its feet" release: the app loads in smaller pieces so updates arrive lighter, every popup now looks after keyboard focus, and the README stops showing an old version.
+
+### Added
+- Keyboard focus is now kept inside open popups. Opening any popup moves focus into it, Tab and Shift+Tab cycle through its buttons and links instead of slipping through to the page behind it, and closing it hands focus back to the exact button that opened it. This covers every popup in the app: app details, compare, batch install, add app, downloads, export, keyboard shortcuts, the legal texts, the command palette, live search, the Tauri guide and the What's new popup.
+
+### Changed
+- The app used to load as one big JavaScript file. It now ships as five smaller ones (framework, icons, the catalog data, third-party helpers and the app code itself), which the WebView can fetch in parallel and reuse between releases, so the first start is a bit lighter, most noticeably on Android phones.
+- The version badge in the README reads the newest release straight from GitHub instead of a number someone has to remember to update (it still said 1.0.0 while the app was shipping 1.0.3).
+
 ## 1.0.3-beta (2026-09-21)
 
 The "look closer" release: every app got its official icon, a new Combos tab groups apps into kits, the email recommendations now follow the strict vetting rules the project uses for privacy, and the privacypack idea is carried through the whole catalog, from mail to browser, with stricter picks.

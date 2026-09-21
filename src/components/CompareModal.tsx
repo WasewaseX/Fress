@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
 import { 
@@ -33,10 +34,13 @@ export const CompareModal: React.FC<CompareModalProps> = ({
   onRemoveAppFromCompare,
   onClearCompare
 }) => {
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   return (
     <div 
+      ref={panelRef}
       id="compare-modal-backdrop"
       role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
       onClick={onClose}

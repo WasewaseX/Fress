@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
 import { 
   Download, 
@@ -27,6 +28,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [format, setFormat] = useState<ExportFormat>('markdown');
   const [copied, setCopied] = useState(false);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const generateMarkdown = () => {
@@ -140,6 +143,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   return (
     <div 
+      ref={panelRef}
       id="export-modal-backdrop"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
       onClick={onClose}

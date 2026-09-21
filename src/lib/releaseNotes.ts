@@ -17,6 +17,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.4-beta',
+    date: '2026-09-22',
+    title: 'Faster starts and friendlier keyboard support',
+    items: [
+      'New: popups now look after keyboard focus. Tab stays inside the popup you opened, and closing it puts you back on the button you came from.',
+      'The app now loads as several smaller files instead of one big bundle, so the first start is a bit lighter, especially on Android.',
+      'Fixed: the version badge on GitHub showed an old release. It now always reads the newest one.',
+    ],
+  },
+  {
     version: '1.0.3-beta',
     date: '2026-09-21',
     title: 'Real icons, a Combos tab, and a stricter privacy bar',

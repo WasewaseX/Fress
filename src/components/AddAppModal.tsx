@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Category, Platform } from '../types';
 import { X, Plus, AlertCircle, RefreshCw, Check } from 'lucide-react';
 import { fetchLiveStarCount } from '../lib/starFetch';
@@ -118,6 +119,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     };
   }, [githubUrl, isOpen]);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const togglePlatform = (p: Platform) => {
@@ -221,6 +224,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
   return (
     <div 
+      ref={panelRef}
       id="add-app-modal-backdrop" 
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
       role="dialog"

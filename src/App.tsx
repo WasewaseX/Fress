@@ -9,7 +9,6 @@ import { AddAppModal } from './components/AddAppModal';
 import { TauriModal } from './components/TauriModal';
 import { LegalModals, LegalTab } from './components/LegalModals';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
-import { WhatsNewModal } from './components/WhatsNewModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { Footer } from './components/Footer';
 import { CommandPalette } from './components/CommandPalette';
@@ -18,19 +17,20 @@ import { CompareModal } from './components/CompareModal';
 import { ExportModal } from './components/ExportModal';
 import { LiveSearchModal } from './components/LiveSearchModal';
 import { DownloadManager } from './components/DownloadManager';
+import { WhatsNewModal } from './components/WhatsNewModal';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider } from './lib/i18n';
 import { DownloadsProvider, useDownloads } from './lib/downloads';
+import { openExternal } from './lib/external';
+import { checkForUpdate, OwnRelease } from './lib/selfUpdate';
+import pkg from '../package.json';
 
 import { INITIAL_APPS } from './data/appsData';
 import { 
   AppItem, 
   Category,
-  FilterState 
+  FilterState
 } from './types';
-import { checkForUpdate } from './lib/selfUpdate';
-import { openExternal } from './lib/external';
-import pkg from '../package.json';
 import { 
   SearchX, 
   RotateCcw, 
@@ -47,9 +47,6 @@ const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
 const STORAGE_KEY_FAVORITES = 'fress_favorites';
 const STORAGE_KEY_VIEW_MODE = 'awesome_free_apps_view_mode';
 const STORAGE_KEY_PLATFORM = 'fress_platform_filter';
-// Records the last version whose "What's new" note was closed. When it
-// disagrees with the running version, the note opens once after an update.
-const STORAGE_KEY_WHATSNEW = 'fress_whatsnew_seen';
 
 // Each device starts with its own platform preselected: Android opens on the
 // Android catalog, everything else opens on the full list. The user's last
@@ -81,9 +78,80 @@ const DEFAULT_FILTERS: FilterState = {
 
 function AppShell() {
   const { theme: uiTheme } = useTheme();
-  const { items: downloadItems } = useDownloads();
+  const { items: downloadItems, startDownload } = useDownloads();
   const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
   const activeDownloadCount = downloadItems.filter((d) => d.status === 'active').length;
+
+  // In-app self-update: compares this install against the newest GitHub
+  // release. Checked automatically at most once every 24 hours, plus on
+  // demand from the menu. When an update exists, the header shows a pill;
+  // tapping it downloads the platform file (an APK update on Android keeps
+  // all apps and data — no reinstall needed).
+  const [ownUpdate, setOwnUpdate] = useState<{ release: OwnRelease; asset: { name: string; size: number; url: string } | null } | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+
+  const runUpdateCheck = async (announce: boolean) => {
+    if (updateChecking) return;
+    setUpdateChecking(true);
+    const res = await checkForUpdate(pkg.version);
+    setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset } : null);
+    if (announce) {
+      if (res.kind === 'available') {
+        toast.info(`Fress v${res.release.version} is available.`, {
+          description: 'Use the Update button in the header — your apps and data are kept.',
+        });
+      } else if (res.kind === 'latest') {
+        toast.success(`You are on the latest version (v${pkg.version}).`);
+      } else {
+        toast.error('Could not check for updates right now.');
+      }
+    }
+    setUpdateChecking(false);
+  };
+
+  // Startup check, throttled to once a day so the GitHub API is not hammered.
+  useEffect(() => {
+    try {
+      const last = Number(localStorage.getItem('fress.last_update_check') || '0');
+      if (Date.now() - last < 24 * 60 * 60 * 1000) return;
+      localStorage.setItem('fress.last_update_check', String(Date.now()));
+    } catch {
+      return;
+    }
+    void runUpdateCheck(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleHeaderUpdateClick = () => {
+    if (!ownUpdate) return;
+    if (ownUpdate.asset) {
+      void startDownload(ownUpdate.asset.url, ownUpdate.asset.name);
+      toast.success('Update downloading…', {
+        description: 'When it finishes, open the file to update Fress. Your apps and data stay.',
+      });
+    } else {
+      void openExternal(ownUpdate.release.htmlUrl);
+    }
+  };
+
+  // "What's new": opens once per version, and only for returning users —
+  // a fresh install stays silent. Returning users upgrading from versions
+  // that never recorded a seen-version still get the release summary once.
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  useEffect(() => {
+    try {
+      const returning = !!(
+        localStorage.getItem(STORAGE_KEY_FAVORITES) ||
+        localStorage.getItem(STORAGE_KEY_CUSTOM_APPS) ||
+        localStorage.getItem('fress.seen_version')
+      );
+      const seen = localStorage.getItem('fress.seen_version');
+      if (returning && seen !== pkg.version) setShowWhatsNew(true);
+      localStorage.setItem('fress.seen_version', pkg.version);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Load custom apps from local storage
   const [apps, setApps] = useState<AppItem[]>(() => {
@@ -138,61 +206,6 @@ function AppShell() {
     }
   };
 
-  // "What's new": opens by itself on the first launch after an update for
-  // people who already use Fress; brand-new installs start clean instead.
-  const [isWhatsNewOpen, setIsWhatsNewOpen] = useState(false);
-
-  useEffect(() => {
-    let returning = false;
-    try {
-      returning = Boolean(
-        localStorage.getItem(STORAGE_KEY_FAVORITES) || localStorage.getItem(STORAGE_KEY_CUSTOM_APPS)
-      );
-      if (returning && localStorage.getItem(STORAGE_KEY_WHATSNEW) !== pkg.version) {
-        setIsWhatsNewOpen(true);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // Quiet update check shortly after launch. Says nothing when you are on
-  // the newest release; offers a one-tap download when you are not.
-  const { startDownload } = useDownloads();
-  useEffect(() => {
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void (async () => {
-        const state = await checkForUpdate(pkg.version);
-        if (cancelled || state.kind !== 'available') return;
-        toast(`Fress v${state.release.version} is available`, {
-          description: 'Installs straight over this copy. Bookmarks and added apps stay.',
-          duration: 15000,
-          action: {
-            label: state.asset ? 'Download' : 'View release',
-            onClick: () => {
-              if (state.asset) void startDownload(state.asset.url, state.asset.name);
-              else void openExternal(state.release.htmlUrl);
-            }
-          }
-        });
-      })();
-    }, 4000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [startDownload]);
-
-  const handleWhatsNewClose = () => {
-    setIsWhatsNewOpen(false);
-    try {
-      localStorage.setItem(STORAGE_KEY_WHATSNEW, pkg.version);
-    } catch {
-      // ignore
-    }
-  };
-
   // Filters
   const [filters, setFilters] = useState<FilterState>(() => ({
     ...DEFAULT_FILTERS,
@@ -218,6 +231,8 @@ function AppShell() {
     isOpen: false,
     tab: 'privacy'
   });
+
+  // Real audit data
 
   // Persist favorites
   const toggleFavorite = (appId: string) => {
@@ -497,7 +512,6 @@ function AppShell() {
         setIsAddModalOpen(false);
         setIsTauriModalOpen(false);
         setIsShortcutsModalOpen(false);
-        setIsWhatsNewOpen(false);
         setIsCommandPaletteOpen(false);
         setIsBatchInstallModalOpen(false);
         setIsCompareModalOpen(false);
@@ -640,10 +654,8 @@ function AppShell() {
         }}
         onOpenTauriModal={() => setIsTauriModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
-        onOpenWhatsNew={() => setIsWhatsNewOpen(true)}
         onExportCatalog={handleExportCatalog}
         onImportCatalog={handleImportCatalog}
-        totalApps={apps.length}
         viewMode={viewMode}
         onToggleViewMode={handleToggleViewMode}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
@@ -654,7 +666,16 @@ function AppShell() {
         compareCount={comparedAppIds.length}
         onOpenDownloads={() => setIsDownloadsOpen(true)}
         activeDownloadCount={activeDownloadCount}
+        updateVersion={ownUpdate ? ownUpdate.release.version : null}
+        onUpdateClick={handleHeaderUpdateClick}
+        onCheckForUpdates={() => void runUpdateCheck(true)}
+        onOpenWhatsNew={() => setShowWhatsNew(true)}
       />
+
+      {/* On phones the header is position:fixed (Android webviews do not keep
+          sticky headers pinned), so this spacer reserves its height. The
+          height variable is measured live by the Header's ResizeObserver. */}
+      <div className="md:hidden" style={{ height: 'var(--fress-header-h, 0px)' }} aria-hidden="true" />
 
       {/* Spotlight Section */}
       <SpotlightSection
@@ -849,6 +870,8 @@ function AppShell() {
       <BatchInstallModal
         isOpen={isBatchInstallModalOpen}
         onClose={() => setIsBatchInstallModalOpen(false)}
+        // No fallback list: a cleared selection must show an empty batch,
+        // never five random apps whose remove buttons do nothing.
         selectedApps={selectedBatchApps}
         allApps={apps}
         onToggleAppSelection={toggleBatchSelect}
@@ -859,6 +882,7 @@ function AppShell() {
       <CompareModal
         isOpen={isCompareModalOpen}
         onClose={() => setIsCompareModalOpen(false)}
+        // Same rule as the batch modal: empty means empty.
         appsToCompare={comparedApps}
         allApps={apps}
         onAddAppToCompare={toggleCompareApp}
@@ -905,10 +929,9 @@ function AppShell() {
         onClose={() => setIsTauriModalOpen(false)}
       />
 
-      <LegalModals
-        isOpen={legalModal.isOpen}
-        initialTab={legalModal.tab}
-        onClose={() => setLegalModal((prev) => ({ ...prev, isOpen: false }))}
+      <WhatsNewModal
+        isOpen={showWhatsNew}
+        onClose={() => setShowWhatsNew(false)}
       />
 
       <KeyboardShortcutsModal
@@ -922,10 +945,10 @@ function AppShell() {
         onClose={() => setIsDownloadsOpen(false)}
       />
 
-      {/* Once-per-version release notes; reopenable from the header menu */}
-      <WhatsNewModal
-        isOpen={isWhatsNewOpen}
-        onClose={handleWhatsNewClose}
+      <LegalModals
+        isOpen={legalModal.isOpen}
+        initialTab={legalModal.tab}
+        onClose={() => setLegalModal((prev) => ({ ...prev, isOpen: false }))}
       />
     </div>
   );

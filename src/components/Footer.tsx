@@ -101,7 +101,7 @@ export const Footer: React.FC<FooterProps> = ({
               </span>
             </div>
             <p id="footer-brand-desc" className="text-[11px] text-slate-400 max-w-xl leading-relaxed">
-              A short directory of free and open-source apps, based on the awesome-free-apps list. Everything runs on your device; nothing is collected.
+              A short directory of free and open-source apps, based on the awesome-free-apps list. Downloads come from the official projects.
             </p>
           </div>
 
@@ -140,6 +140,7 @@ export const Footer: React.FC<FooterProps> = ({
               Terms
             </button>
           </div>
+
         </div>
       </div>
     </footer>

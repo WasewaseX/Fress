@@ -17,6 +17,18 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.3-beta',
+    date: '2026-09-21',
+    title: 'Real icons, a Combos tab, and a stricter privacy bar',
+    items: [
+      'New: every app now shows its official icon. All icons ship inside the app, nothing is fetched from outside.',
+      'New: the Combos tab in the header. Kits of apps that solve one problem together, each with a one-click install script.',
+      'Tuta and Proton Mail joined the catalog. Both meet the strict bar: good jurisdiction, encryption on by default, open source, audited.',
+      'Categories got trimmed so every filter is worth using.',
+      'Removed the em dash habit from all text, so nothing reads machine-written.',
+    ],
+  },
+  {
     version: '1.0.1-beta',
     date: '2026-09-21',
     title: 'Cleaner, calmer, and it updates itself',
@@ -24,9 +36,9 @@ export const RELEASE_NOTES: ReleaseNote[] = [
       'A calmer look: cards are shorter and the long descriptions moved into the Guide popup, so the catalog is easy to scan at a glance.',
       'On Android the header now stays visible while you scroll instead of disappearing.',
       'Fixed the install script generator: clearing the selection no longer makes mystery apps appear that you could not remove.',
-      'Removed the privacy banners. Fress simply stays private — it does not need to keep asking.',
+      'Removed the privacy banners. Fress simply stays private. It does not need to keep asking.',
       'New: a window like this one appears once after every update, so you always know what changed.',
-      'New: Fress can update itself. When a new version is out, an Update button appears at the top. Tap it, open the downloaded file, done — your apps and data are kept.',
+      'New: Fress can update itself. When a new version is out, an Update button appears at the top. Tap it, open the downloaded file, done. Your apps and data are kept.',
     ],
   },
 ];

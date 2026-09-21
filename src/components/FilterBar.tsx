@@ -31,8 +31,7 @@ const CATEGORIES: Category[] = [
   'Design & Creative',
   'Utilities & System',
   'Privacy & Security',
-  'Media, Audio & Video',
-  'AI & Knowledge'
+  'Media, Audio & Video'
 ];
 
 const PLATFORMS: { id: Platform | 'all'; label: string; icon?: React.ReactNode }[] = [

@@ -85,7 +85,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
             <div className="space-y-3">
               <h3 className="text-sm font-bold text-slate-100">Terms</h3>
               <p>
-                Fress is a directory. It lists other people's software and links to their official downloads; it does not host or modify anything. Every app keeps its own license (MIT, GPL, Apache, and so on) — read and respect the license of whatever you install.
+                Fress is a directory. It lists other people's software and links to their official downloads; it does not host or modify anything. Every app keeps its own license (MIT, GPL, Apache, and so on). Read and respect the license of whatever you install.
               </p>
               <p>
                 The catalog is provided as-is. We check links and facts when we list an app, but projects change and we are not liable for what happens after you leave the app. If you add custom entries yourself, they are yours, not ours.

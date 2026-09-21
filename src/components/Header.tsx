@@ -10,6 +10,7 @@ import {
   FileDown,
   LayoutGrid,
   List,
+  Layers,
   Terminal,
   Columns,
   Share2,
@@ -39,6 +40,9 @@ interface HeaderProps {
   onImportCatalog: (importedJson: string) => void;
   viewMode: 'grid' | 'table';
   onToggleViewMode: (mode: 'grid' | 'table') => void;
+  /** Which top-level tab is open. */
+  page?: 'catalog' | 'combos';
+  onPageChange?: (page: 'catalog' | 'combos') => void;
   onOpenCommandPalette?: () => void;
   onOpenBatchInstall?: () => void;
   onOpenCompare?: () => void;
@@ -88,6 +92,8 @@ export const Header: React.FC<HeaderProps> = ({
   onImportCatalog,
   viewMode,
   onToggleViewMode,
+  page = 'catalog',
+  onPageChange,
   onOpenCommandPalette,
   onOpenBatchInstall,
   onOpenCompare,
@@ -182,7 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={onUpdateClick}
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-300 hover:bg-amber-200 border border-amber-400 px-2 py-0.5 rounded transition-colors"
-                title={`Fress v${updateVersion} is available — tap to download the update. Your apps and data are kept.`}
+                title={`Fress v${updateVersion} is available. Tap to download the update. Your apps and data are kept.`}
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
                 <span>Update v{updateVersion}</span>
@@ -297,8 +303,41 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
+            {/* Tabs: catalog vs combos (desktop; phones find them in the More menu) */}
+            {onPageChange && (
+              <div id="page-tabs" className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
+                <button
+                  id="page-catalog-btn"
+                  type="button"
+                  onClick={() => onPageChange('catalog')}
+                  className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                    page === 'catalog'
+                      ? 'fr-chip-active shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Browse the app catalog"
+                >
+                  Apps
+                </button>
+                <button
+                  id="page-combos-btn"
+                  type="button"
+                  onClick={() => onPageChange('combos')}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                    page === 'combos'
+                      ? 'fr-chip-active shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Kits of apps that work well together"
+                >
+                  <Layers className="w-3.5 h-3.5" aria-hidden="true" />
+                  Combos
+                </button>
+              </div>
+            )}
+
             {/* View mode (desktop; phones find it in the More menu) */}
-            <div id="view-mode-toggle" className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
+            <div id="view-mode-toggle" className={`hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg ${page === 'combos' ? 'md:hidden' : ''}`}>
               <button
                 id="view-mode-grid-btn"
                 type="button"
@@ -363,8 +402,48 @@ export const Header: React.FC<HeaderProps> = ({
                     id="header-more-dropdown"
                     className="absolute right-0 mt-1.5 w-60 bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl z-50 py-1 text-xs divide-y divide-slate-950/10 dark:divide-white/[0.06]"
                   >
-                    {/* Phones: view mode + theme live here instead of the bar */}
+                    {/* Phones: tabs, view mode + theme live here instead of the bar */}
                     <div className="py-1 md:hidden">
+                      {onPageChange && (
+                        <>
+                          <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                            <Layers className="w-3 h-3" />
+                            Section
+                          </p>
+                          <div className="px-3 pb-1 flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onPageChange('catalog');
+                                setShowMoreMenu(false);
+                              }}
+                              className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
+                                page === 'catalog'
+                                  ? 'fr-chip-active font-semibold'
+                                  : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
+                              }`}
+                            >
+                              <span>Apps</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onPageChange('combos');
+                                setShowMoreMenu(false);
+                              }}
+                              className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
+                                page === 'combos'
+                                  ? 'fr-chip-active font-semibold'
+                                  : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
+                              }`}
+                            >
+                              <Layers className="w-3.5 h-3.5" />
+                              <span>Combos</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+
                       <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
                         <LayoutGrid className="w-3 h-3" />
                         View

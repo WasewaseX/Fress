@@ -24,6 +24,37 @@ import { toast } from 'sonner';
 import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars, formatStarCount } from '../lib/starFetch';
+import { iconFor } from '../data/appIcons';
+
+/**
+ * Official project icon next to the app name, with a letter tile as the
+ * fallback for custom entries and anything without shipped artwork.
+ */
+export const AppIcon: React.FC<{ appId: string; name: string; size?: number }> = ({ appId, name, size = 28 }) => {
+  const src = iconFor({ id: appId });
+  if (!src) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex items-center justify-center rounded-md bg-slate-800 text-slate-200 font-bold select-none shrink-0"
+        style={{ width: size, height: size, fontSize: size * 0.5 }}
+      >
+        {name.charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      className="rounded-md shrink-0 object-contain"
+      onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+    />
+  );
+};
 
 
 interface AppCardProps {
@@ -237,6 +268,7 @@ export const AppCard: React.FC<AppCardProps> = ({
         {/* App Title & Proprietary Alternative */}
         <div className="mb-2">
           <div className="flex items-center gap-2 flex-wrap">
+            <AppIcon appId={app.id} name={app.name} />
             <h3 
               id={`app-title-${app.id}`} 
               onClick={() => onOpenDetail(app)}
@@ -298,8 +330,8 @@ export const AppCard: React.FC<AppCardProps> = ({
         </div>
       </div>
 
-      {/* Action Footer: Guide left; Download + GitHub right. One row, no clutter —
-          install commands and the official site live in the detail modal. */}
+      {/* Action Footer: Guide left; Download + GitHub right. One row, no clutter.
+          Install commands and the official site live in the detail modal. */}
       <div id={`app-card-footer-${app.id}`} className="pt-3 border-t border-slate-950/10 dark:border-white/[0.06] flex items-center justify-between gap-2 relative">
         <button
           id={`view-guide-btn-${app.id}`}

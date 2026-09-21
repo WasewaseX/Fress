@@ -1,6 +1,6 @@
 [package]
 name = "fress"
-version = "1.0.1-beta"
+version = "1.0.3-beta"
 description = "Fress: a clean, curated directory of free and open-source software"
 authors = ["Fress"]
 edition = "2021"

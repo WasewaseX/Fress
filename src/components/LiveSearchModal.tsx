@@ -110,8 +110,9 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
             category = 'Media, Audio & Video';
           } else if (text.includes('paint') || text.includes('draw') || text.includes('3d') || text.includes('design')) {
             category = 'Design & Creative';
-          } else if (text.includes('llm') || text.includes('ai') || text.includes('gpt')) {
-            category = 'AI & Knowledge';
+          }
+          if (text.includes('llm') || text.includes('ai') || text.includes('gpt')) {
+            category = 'Productivity & Office';
           }
 
           const hasAndroid = text.includes('android') || (repo.topics || []).includes('android');

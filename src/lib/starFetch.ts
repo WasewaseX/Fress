@@ -3,7 +3,7 @@
 // The curated numbers in appsData were hand-entered and drifted out of date
 // (some badly). This module asks GitHub/GitLab for the real number and hands
 // the caller the live value. Anything that fails (offline, rate limit, weird
-// host) returns null and the UI keeps showing the stored number — which is
+// host) returns null and the UI keeps showing the stored number, which is
 // itself synced against the live APIs at release time, so nothing on screen
 // is invented.
 //
@@ -82,7 +82,7 @@ function writeCache(key: string, n: number, etag?: string) {
     }
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
   } catch {
-    // storage unavailable — live fetches simply won't persist
+    // storage unavailable: live fetches simply won't persist
   }
 }
 
@@ -121,7 +121,7 @@ async function fetchStars(repo: RepoKey): Promise<number | null> {
       }
 
       // Out of quota (or throttled): give up quietly for this session. The
-      // stored number stays on screen — it is release-synced, never invented.
+      // stored number stays on screen. It is release-synced, never invented.
       if (res.status === 403 || res.status === 429) {
         quotaDry = res.headers.get('x-ratelimit-remaining') === '0';
         return null;

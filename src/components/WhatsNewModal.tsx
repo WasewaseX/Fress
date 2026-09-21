@@ -26,7 +26,7 @@ function SectionIcon({ heading, className }: { heading: string; className: strin
 }
 
 /**
- * "What's new" — a small, calm summary of the release you just updated to,
+ * "What's new" is a small, calm summary of the release you just updated to,
  * with the full detailed changelog embedded (parsed from CHANGELOG.md, so it
  * always matches what ships in the repo). Opened automatically once per
  * version (see App.tsx) and reachable any time from the header menu. Reading

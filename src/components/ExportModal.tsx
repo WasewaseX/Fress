@@ -33,7 +33,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     // Group apps by category
     const categories: string[] = Array.from(new Set(apps.map((a) => a.category as string)));
     
-    let md = `# Fress — Free & Open Source Software Directory\n\n`;
+    let md = `# Fress: Free & Open Source Software Directory\n\n`;
     md += `> Curated collection of authentic free and open-source applications inspired by Axorax/awesome-free-apps.\n\n`;
     md += `[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)\n`;
     md += `[![Curated Tools](https://img.shields.io/badge/Curated_Tools-${apps.length}-emerald.svg)](#)\n`;

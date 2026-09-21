@@ -43,7 +43,7 @@ jobs:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Fress v${{ needs.version.outputs.version }}
           body: |
-            Fress v${{ needs.version.outputs.version }} — a short directory of free and open-source apps.
+            Fress v${{ needs.version.outputs.version }}. A short directory of free and open-source apps.
 
             **Installers for every platform**
             | Platform | File |
@@ -58,7 +58,7 @@ jobs:
             | Android (arm64 APK) | `Fress_*_arm64.apk` |
 
             **Windows: about the "Unknown Publisher" warning**
-            The installer carries a signature that proves it has not been modified, but until the publisher certificate is verified with Microsoft (see `CODE_SIGNING.md` in the repo), Windows still shows the blue warning out of caution. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info → Run anyway**.
+            The installer carries a signature that proves it has not been modified, but until the publisher certificate is verified with Microsoft (see `CODE_SIGNING.md` in the repo), Windows still shows the blue warning out of caution. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info**, then **Run anyway**.
 
             Verify any download against `SHA256SUMS.txt`.
 
@@ -70,9 +70,8 @@ jobs:
     needs: [version, create-release]
     runs-on: windows-latest
     env:
-      # "true" once the Trusted Signing account is configured in repo secrets.
-      # (The secrets context can't be used directly in a step-level if, but it
-      # can here, and the env context can be read from every step below.)
+      # true only when the Trusted Signing account is set in repo secrets.
+      # Secrets can't be read in a step-level if, so this goes through env.
       FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -91,11 +90,9 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: '--target x86_64-pc-windows-msvc --bundles nsis'
-      - name: Sign with Azure Trusted Signing (real Microsoft-trusted signature)
-        # This is the step that makes the "Unknown Publisher" blue warning go
-        # away for good. It runs only when the signing account is configured —
-        # see CODE_SIGNING.md for the one-time setup (a few minutes, the
-        # certificate comes from Microsoft's own signing service).
+      - name: Sign with Azure Trusted Signing
+        # Runs only when the signing account is configured. One-time setup
+        # steps are in CODE_SIGNING.md.
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
         uses: azure/trusted-signing-action@v0
         with:
@@ -120,16 +117,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $bundle = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
           $sig = Get-AuthenticodeSignature $bundle.FullName
-          Write-Host "Signature status: $($sig.Status) — signer: $($sig.SignerCertificate.Subject)"
+          Write-Host "Signature status: $($sig.Status), signer: $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne 'Valid') { throw "Trusted Signing did not produce a valid signature: $($sig.Status)" }
           gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
           Write-Host "Signed installer uploaded: $($bundle.Name)"
 
-      - name: Fall back to a self-signed signature (no signing account configured)
-        # Without a trusted certificate Windows will still show the blue
-        # "Unknown Publisher" warning — nothing we ship can change that, only
-        # a certificate chained to a trusted root can (see CODE_SIGNING.md).
-        # The self-signature still proves the file was not modified in transit.
+      - name: Fall back to a self-signed signature
+        # Without a trusted certificate Windows still shows the blue
+        # "Unknown Publisher" warning. The self-signature still proves the
+        # file was not modified in transit. See CODE_SIGNING.md.
         if: env.FRESS_SIGNING_CONFIGURED != 'true'
         shell: pwsh
         env:
@@ -158,7 +154,7 @@ jobs:
           # Hard check: the file must now carry a signature (untrusted root is
           # expected; NotSigned or HashMismatch would mean signing failed).
           $sig = Get-AuthenticodeSignature $bundle.FullName
-          Write-Host "Signature status: $($sig.Status) — $($sig.StatusMessage)"
+          Write-Host "Signature status: $($sig.Status), $($sig.StatusMessage)"
           if ($sig.Status -eq 'NotSigned' -or $sig.Status -eq 'HashMismatch') {
             throw "Signing failed: $($sig.Status)"
           }

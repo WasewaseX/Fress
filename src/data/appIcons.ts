@@ -1,0 +1,73 @@
+import type { AppItem } from '../types';
+
+/**
+ * Official app icons, shipped with the catalog (public/icons/{id}.png).
+ * Kept separate from the app data files so the data stays about facts and
+ * the artwork sits in one place. Every icon belongs to its project.
+ */
+export const APP_ICONS: Record<string, string> = {
+  localsend: '/icons/localsend.png',
+  sharex: '/icons/sharex.png',
+  vlc: '/icons/vlc.png',
+  obsidian: '/icons/obsidian.png',
+  bitwarden: '/icons/bitwarden.png',
+  handbrake: '/icons/handbrake.png',
+  blender: '/icons/blender.png',
+  krita: '/icons/krita.png',
+  '7zip': '/icons/7zip.png',
+  devtoys: '/icons/devtoys.png',
+  vscodium: '/icons/vscodium.png',
+  rustdesk: '/icons/rustdesk.png',
+  inkscape: '/icons/inkscape.png',
+  audacity: '/icons/audacity.png',
+  losslesscut: '/icons/losslesscut.png',
+  keepassxc: '/icons/keepassxc.png',
+  bruno: '/icons/bruno.png',
+  libreoffice: '/icons/libreoffice.png',
+  bleachbit: '/icons/bleachbit.png',
+  ollama: '/icons/ollama.png',
+  flameshot: '/icons/flameshot.png',
+  shotcut: '/icons/shotcut.png',
+  syncthing: '/icons/syncthing.png',
+  joplin: '/icons/joplin.png',
+  newpipe: '/icons/newpipe.png',
+  termux: '/icons/termux.png',
+  antennapod: '/icons/antennapod.png',
+  keepassdx: '/icons/keepassdx.png',
+  organicmaps: '/icons/organicmaps.png',
+  gimp: '/icons/gimp.png',
+  'obs-studio': '/icons/obs-studio.png',
+  thunderbird: '/icons/thunderbird.png',
+  qbittorrent: '/icons/qbittorrent.png',
+  signal: '/icons/signal.png',
+  'tor-browser': '/icons/tor-browser.png',
+  sumatra: '/icons/sumatra.png',
+  powertoys: '/icons/powertoys.png',
+  calibre: '/icons/calibre.png',
+  kdenlive: '/icons/kdenlive.png',
+  balenaetcher: '/icons/balenaetcher.png',
+  zotero: '/icons/zotero.png',
+  'jitsi-meet': '/icons/jitsi-meet.png',
+  'f-droid': '/icons/f-droid.png',
+  immich: '/icons/immich.png',
+  nextcloud: '/icons/nextcloud.png',
+  'home-assistant': '/icons/home-assistant.png',
+  'pi-hole': '/icons/pi-hole.png',
+  searxng: '/icons/searxng.png',
+  vaultwarden: '/icons/vaultwarden.png',
+  'stirling-pdf': '/icons/stirling-pdf.png',
+  appflowy: '/icons/appflowy.png',
+  upscayl: '/icons/upscayl.png',
+  nocodb: '/icons/nocodb.png',
+  'cal-com': '/icons/cal-com.png',
+  listmonk: '/icons/listmonk.png',
+  formbricks: '/icons/formbricks.png',
+  'whisper-desktop': '/icons/whisper-desktop.png',
+  tuta: '/icons/tuta.png',
+  'proton-mail': '/icons/proton-mail.png',
+};
+
+/** Icon path for an app, or null when the app has no shipped icon. */
+export function iconFor(app: Pick<AppItem, 'id'>): string | null {
+  return APP_ICONS[app.id] || null;
+}

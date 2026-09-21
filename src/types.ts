@@ -7,8 +7,7 @@ export type Category =
   | 'Design & Creative'
   | 'Utilities & System'
   | 'Privacy & Security'
-  | 'Media, Audio & Video'
-  | 'AI & Knowledge';
+  | 'Media, Audio & Video';
 
 export type BeginnerRating = 
   | 'Super Beginner Friendly'

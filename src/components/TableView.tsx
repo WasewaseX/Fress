@@ -3,6 +3,7 @@ import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
+import { AppIcon } from './AppCard';
 import { 
   Star, 
   ExternalLink, 
@@ -37,7 +38,7 @@ const StarCell: React.FC<{ app: AppItem }> = ({ app }) => {
   const live = useLiveStars(app.githubUrl);
   const shown = live ?? app.stars;
   if (shown === 0) {
-    return <span className="text-slate-600">—</span>;
+    return <span className="text-slate-600">-</span>;
   }
   return (
     <div className="inline-flex items-center gap-1">
@@ -139,6 +140,7 @@ export const TableView: React.FC<TableViewProps> = ({
                 {/* Name & Alternative */}
                 <td className="py-2.5 px-3">
                   <div className="flex items-center gap-2 flex-wrap">
+                    <AppIcon appId={app.id} name={app.name} size={22} />
                     <span className="font-semibold text-slate-100 group-hover:text-sky-400 transition-colors">
                       {app.name}
                     </span>

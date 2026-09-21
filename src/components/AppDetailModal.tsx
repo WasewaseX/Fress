@@ -33,6 +33,7 @@ import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
+import { AppIcon } from './AppCard';
 import { toast } from 'sonner';
 
 /** Device-aware download section: pick your platform, get real targets. */
@@ -189,7 +190,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
               <span className="flex items-center gap-2 min-w-0">
                 <Smartphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                 <span className="truncate">
-                  {t('detail.fdroid')} — v{fd.version}
+                  {t('detail.fdroid')} (v{fd.version})
                   <span className="ml-1.5 text-[11px] font-normal opacity-80">{t('detail.latestStableFdroid')}</span>
                 </span>
               </span>
@@ -237,7 +238,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             </button>
           )}
 
-          {/* Secondary: at most two other official targets — the primary button
+          {/* Secondary: at most two other official targets. The primary button
               above is the one we recommend. */}
           {secondary.length > 0 && (
             <div className="pt-1 space-y-1.5">
@@ -341,7 +342,8 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 </span>
               )}
             </div>
-            <h2 id="app-detail-title" className="text-lg font-bold text-slate-100 tracking-tight">
+            <h2 id="app-detail-title" className="text-lg font-bold text-slate-100 tracking-tight flex items-center gap-2.5">
+              <AppIcon appId={app.id} name={app.name} size={34} />
               {app.name}
             </h2>
             <p id="app-detail-tagline" className="text-xs text-slate-400 mt-0.5">

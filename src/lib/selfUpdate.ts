@@ -2,8 +2,8 @@
  * Self-update for Fress itself.
  *
  * Checks the WasewaseX/Fress releases on GitHub, compares the running version
- * with the newest published release (prereleases included, drafts excluded —
- * every Fress build is tagged *-beta right now), and if there is something
+ * with the newest published release (prereleases included, drafts excluded.
+ * Every Fress build is tagged *-beta right now), and if there is something
  * newer, hands the platform-matched file to the download manager.
  *
  * The plain /releases/latest endpoint is useless here because Fress marks its

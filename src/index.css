@@ -84,7 +84,7 @@
    view toggle, command palette rows).
    Dark keeps the soft white-on-dark look it always had.
    Light gets a warm cocoa brown with white text: strong contrast
-   (white text was landing on near-white paper before — unreadable)
+   (white text was landing on near-white paper before, unreadable)
    and a muted, earthy shade that doesn't glare.
    ------------------------------------------------------------------ */
 :root {
@@ -93,7 +93,7 @@
   --fr-chip-active-border: rgba(255, 255, 255, 0.25);
 }
 :root:not(.dark) {
-  --fr-chip-active-bg: #7b5c3a;      /* cocoa — ~6:1 against white text */
+  --fr-chip-active-bg: #7b5c3a;      /* cocoa, about 6:1 against white text */
   --fr-chip-active-text: #ffffff;
   --fr-chip-active-border: #6a4d2e;
 }

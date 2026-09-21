@@ -19,8 +19,7 @@ const CATEGORIES: Category[] = [
   'Design & Creative',
   'Utilities & System',
   'Privacy & Security',
-  'Media, Audio & Video',
-  'AI & Knowledge'
+  'Media, Audio & Video'
 ];
 
 export const AddAppModal: React.FC<AddAppModalProps> = ({

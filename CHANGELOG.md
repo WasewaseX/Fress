@@ -1,19 +1,35 @@
 # Changelog
 
+## 1.0.3-beta (2026-09-21)
+
+The "look closer" release: every app got its official icon, a new Combos tab groups apps into kits, and the email recommendations now follow the strict vetting rules the project uses for privacy.
+
+### Added
+- Official icons: every app in the catalog now shows its real project icon next to the name, in cards, the table view and the detail popup. All 59 icons ship with the app itself, so nothing is loaded from third-party servers at startup. Custom entries and anything without artwork fall back to a clean letter tile.
+- Combos tab: a new tab in the header groups apps into kits that solve one problem together, like "Private messaging", "Own your files" or "Video studio". Each combo explains why the apps belong together, has a one-click install script (winget, Homebrew and Flatpak lines) and can hand the whole kit over to the batch selection bar. The idea comes from ente's PrivacyPack, rebuilt strictly with apps already in this catalog.
+
+### Changed
+- The catalog now follows a stricter privacy bar, using the same rules as the mail comparison: favorable jurisdiction, encryption on by default, open source code, independent audits. Two mail providers that meet the bar joined Privacy & Security: Tuta (Germany, encrypts subject lines too, publishes a warrant canary) and Proton Mail (Switzerland, zero-access encryption, audited). Providers that fail the bar (closed source, no at-rest encryption, Five Eyes jurisdiction) will not be listed.
+- Categories trimmed: "AI & Knowledge" is gone. Both of its apps (Ollama, Whisper Desktop) moved to Productivity & Office, which is what they actually are: tools you use to get work done. The remaining six categories all carry enough apps to be worth a filter.
+
+### Fixed
+- No em dashes anywhere in the interface or documentation. Text now reads with plain sentences instead of the punctuation pattern people associate with machine-written copy.
+- The release workflow comments were rewritten in plainer language, and the author-guard workflow keeps enforcing that every commit in the repository is authored by WasewaseX, so the old ghost contributor identity can never return.
+
 ## 1.0.1-beta (2026-09-21)
 
 The "stop scaring people" release: calmer cards, a header that behaves on phones, honest privacy removal, and a real update path.
 
 ### Added
-- In-app updates: Fress quietly checks GitHub (at most once a day) for a newer release. When one exists, an amber "Update" pill appears in the header next to the version; tapping it downloads the platform-matched file, and "Check for updates" also lives in the header menu. On Android the APK installs as a normal update over the old copy — no uninstalling, and bookmarks, added apps and settings survive.
+- In-app updates: Fress quietly checks GitHub (at most once a day) for a newer release. When one exists, an amber "Update" pill appears in the header next to the version; tapping it downloads the platform-matched file, and "Check for updates" also lives in the header menu. On Android the APK installs as a normal update over the old copy. No uninstalling, and bookmarks, added apps and settings survive.
 - "What's new" popup: opens by itself the first time the app is launched after an update (once per version, never on fresh installs) with a short, human summary of the release. It stays reachable from the header menu.
 
 ### Fixed
-- Batch install generator: clearing the selection (or removing the last app chip) made five arbitrary apps appear in the modal, and tapping the X on those chips could never remove them, because the chips were never in the real selection. The modal now shows the true selection — an honest empty state — and its copy/download buttons stay disabled until you pick something. The compare matrix had the same ghost-apps fallback and is fixed the same way.
+- Batch install generator: clearing the selection (or removing the last app chip) made five arbitrary apps appear in the modal, and tapping the X on those chips could never remove them, because the chips were never in the real selection. The modal now shows the true selection, an honest empty state, and its copy/download buttons stay disabled until you pick something. The compare matrix had the same ghost-apps fallback and is fixed the same way.
 - Android: the header scrolled out of view and could not be brought back, because position: sticky does not survive inside the Android webview. On phones the header is now pinned with fixed positioning (the same technique the platform bar already used) with a live-measured spacer, so it stays visible while the catalog scrolls underneath.
 
 ### Changed
-- Calmer cards: the long description and the "why it's awesome" paragraph moved into the Guide popup, which already carried the install commands, links and download picker. A card is now category, badges, name, one quiet tagline line, stars, license, platforms, and three actions — the catalog reads at a glance instead of feeling like a wall of text.
+- Calmer cards: the long description and the "why it's awesome" paragraph moved into the Guide popup, which already carried the install commands, links and download picker. A card is now category, badges, name, one quiet tagline line, stars, license, platforms, and three actions. The catalog reads at a glance instead of feeling like a wall of text.
 - The header is leaner: the settings gear merged into the menu (download folder and language live there now), and on phones the view switch and theme toggle moved into the menu too, leaving Add app, Downloads, and the menu.
 - Removed the cookie/privacy banner, the "Privacy check" panel, the storage-preferences dialog and the "No telemetry. Everything stays on this device." footer line. Fress never collected anything; it also stops begging for consent to collect nothing. The privacy and terms pages remain, opened voluntarily from the footer.
 - Projects that publish on both GitHub and GitLab now show two source buttons (a GitLab button next to the GitHub one), and the star count comes from GitHub when a project has both, so everything is compared on the same scale. Tor Browser and F-Droid were the two entries rated on their GitLab numbers (18 and 2,656 stars) while their official GitHub repos carry 879 and 3,039. Both now link the GitHub repo for stars and keep the GitLab link, where development actually happens, as a second button.

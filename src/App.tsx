@@ -18,6 +18,7 @@ import { ExportModal } from './components/ExportModal';
 import { LiveSearchModal } from './components/LiveSearchModal';
 import { DownloadManager } from './components/DownloadManager';
 import { WhatsNewModal } from './components/WhatsNewModal';
+import { ComboTab } from './components/ComboTab';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider } from './lib/i18n';
 import { DownloadsProvider, useDownloads } from './lib/downloads';
@@ -46,6 +47,7 @@ import { Toaster, toast } from 'sonner';
 const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
 const STORAGE_KEY_FAVORITES = 'fress_favorites';
 const STORAGE_KEY_VIEW_MODE = 'awesome_free_apps_view_mode';
+const STORAGE_KEY_PAGE = 'fress.page';
 const STORAGE_KEY_PLATFORM = 'fress_platform_filter';
 
 // Each device starts with its own platform preselected: Android opens on the
@@ -86,7 +88,7 @@ function AppShell() {
   // release. Checked automatically at most once every 24 hours, plus on
   // demand from the menu. When an update exists, the header shows a pill;
   // tapping it downloads the platform file (an APK update on Android keeps
-  // all apps and data — no reinstall needed).
+  // all apps and data, no reinstall needed).
   const [ownUpdate, setOwnUpdate] = useState<{ release: OwnRelease; asset: { name: string; size: number; url: string } | null } | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
 
@@ -98,7 +100,7 @@ function AppShell() {
     if (announce) {
       if (res.kind === 'available') {
         toast.info(`Fress v${res.release.version} is available.`, {
-          description: 'Use the Update button in the header — your apps and data are kept.',
+          description: 'Use the Update button in the header. Your apps and data are kept.',
         });
       } else if (res.kind === 'latest') {
         toast.success(`You are on the latest version (v${pkg.version}).`);
@@ -134,8 +136,8 @@ function AppShell() {
     }
   };
 
-  // "What's new": opens once per version, and only for returning users —
-  // a fresh install stays silent. Returning users upgrading from versions
+  // "What's new": opens once per version, and only for returning users.
+  // A fresh install stays silent. Returning users upgrading from versions
   // that never recorded a seen-version still get the release summary once.
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   useEffect(() => {
@@ -204,6 +206,31 @@ function AppShell() {
     } catch {
       // ignore
     }
+  };
+
+  // Top-level tab: the app catalog or the combos page. Remembered per device.
+  const [page, setPage] = useState<'catalog' | 'combos'>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PAGE);
+      if (saved === 'catalog' || saved === 'combos') return saved;
+    } catch {
+      // ignore
+    }
+    return 'catalog';
+  });
+
+  const handlePageChange = (next: 'catalog' | 'combos') => {
+    setPage(next);
+    try {
+      localStorage.setItem(STORAGE_KEY_PAGE, next);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Combos hand their whole app list over to the batch selection bar.
+  const handleComboToBatch = (ids: string[]) => {
+    setSelectedBatchAppIds((prev) => Array.from(new Set([...prev, ...ids])));
   };
 
   // Filters
@@ -658,6 +685,8 @@ function AppShell() {
         onImportCatalog={handleImportCatalog}
         viewMode={viewMode}
         onToggleViewMode={handleToggleViewMode}
+        page={page}
+        onPageChange={handlePageChange}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onOpenBatchInstall={() => setIsBatchInstallModalOpen(true)}
         onOpenCompare={() => setIsCompareModalOpen(true)}
@@ -678,27 +707,37 @@ function AppShell() {
       <div className="md:hidden" style={{ height: 'var(--fress-header-h, 0px)' }} aria-hidden="true" />
 
       {/* Spotlight Section */}
-      <SpotlightSection
-        onSelectTrending={() => handleFilterChange({ trendingOnly: true, ownerPickOnly: false, category: 'All' })}
-        onSelectOwnerPicks={() => handleFilterChange({ ownerPickOnly: true, trendingOnly: false, category: 'All' })}
-        totalApps={apps.length}
-        androidCount={androidCount}
-      />
+      {page === 'catalog' && (
+        <SpotlightSection
+          onSelectTrending={() => handleFilterChange({ trendingOnly: true, ownerPickOnly: false, category: 'All' })}
+          onSelectOwnerPicks={() => handleFilterChange({ ownerPickOnly: true, trendingOnly: false, category: 'All' })}
+          totalApps={apps.length}
+          androidCount={androidCount}
+        />
+      )}
 
       {/* Filter and Category Bar */}
-      <FilterBar
-        filters={filters}
-        onFilterChange={handleFilterChange}
-        onResetFilters={handleResetFilters}
-        favoritesCount={favorites.length}
-        customCount={customCount}
-        totalVisible={filteredApps.length}
-        totalAll={apps.length}
-      />
+      {page === 'catalog' && (
+        <FilterBar
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          onResetFilters={handleResetFilters}
+          favoritesCount={favorites.length}
+          customCount={customCount}
+          totalVisible={filteredApps.length}
+          totalAll={apps.length}
+        />
+      )}
 
       {/* Main Content Area: Grid or Table View */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24" id="main-content">
-        {filteredApps.length > 0 ? (
+        {page === 'combos' ? (
+          <ComboTab
+            apps={apps}
+            onOpenDetail={(item) => setSelectedApp(item)}
+            onAddToBatch={handleComboToBatch}
+          />
+        ) : filteredApps.length > 0 ? (
           viewMode === 'grid' ? (
             <div id="apps-catalog-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
               {filteredApps.map((app) => (

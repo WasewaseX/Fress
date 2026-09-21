@@ -28,7 +28,7 @@ export const OfflineIndicator: React.FC = () => {
       role="status"
     >
       <WifiOff className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-      <span>Offline Mode — Cached local catalog active</span>
+      <span>Offline mode. Cached local catalog active</span>
     </div>
   );
 };

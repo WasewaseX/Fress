@@ -70,7 +70,7 @@ export const EXTRA_APPS: AppItem[] = [
     category: 'Productivity & Office',
     platforms: ['windows', 'mac', 'linux'],
     license: 'MPL-2.0',
-    stars: 142,
+    stars: 156,
     beginnerRating: 'Super Beginner Friendly',
     isOwnerPick: false,
     isTrendingToday: false,

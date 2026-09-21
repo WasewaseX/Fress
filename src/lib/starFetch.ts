@@ -19,6 +19,10 @@ import { useEffect, useState } from 'react';
 const CACHE_KEY = 'fress.stars.v1';
 const ETAG_KEY = 'fress.stars.etags.v1';
 const TTL_MS = 6 * 60 * 60 * 1000;
+// Cache entries survive well past the refresh TTL: eviction only kicks in
+// when the store grows past 300 repos, and then drops entries older than
+// 30 days (a deliberate, distinct constant — not a multiple of TTL_MS).
+const MAX_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface CacheEntry { n: number; t: number; e?: string }
 type Cache = Record<string, CacheEntry>;
@@ -77,7 +81,7 @@ function writeCache(key: string, n: number, etag?: string) {
     const keys = Object.keys(cache);
     if (keys.length > 300) {
       for (const k of keys) {
-        if (Date.now() - cache[k].t > 30 * TTL_MS) delete cache[k];
+        if (Date.now() - cache[k].t > MAX_CACHE_AGE_MS) delete cache[k];
       }
     }
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
@@ -101,7 +105,7 @@ export async function fetchLiveStarCount(url?: string): Promise<number | null> {
 async function fetchStars(repo: RepoKey): Promise<number | null> {
   const cached = readCache()[repo.key];
   if (cached && Date.now() - cached.t < TTL_MS) return cached.n;
-  if (quotaDry) return null;
+  if (Date.now() < quotaDryUntil) return null;
   if (inflight.has(repo.key)) return inflight.get(repo.key)!;
 
   const job = (async () => {
@@ -120,10 +124,18 @@ async function fetchStars(repo: RepoKey): Promise<number | null> {
         return cached.n;
       }
 
-      // Out of quota (or throttled): give up quietly for this session. The
-      // stored number stays on screen. It is release-synced, never invented.
+      // Out of quota (or throttled): back off until GitHub says the hourly
+      // quota resets, or one hour when no reset header is present. The
+      // stored number stays on screen in the meantime — release-synced,
+      // never invented. The pause expires on its own, so a session left
+      // open resumes live fetches without a restart.
       if (res.status === 403 || res.status === 429) {
-        quotaDry = res.headers.get('x-ratelimit-remaining') === '0';
+        const resetHeader = res.headers.get('x-ratelimit-reset');
+        const resetAt = resetHeader ? Number(resetHeader) * 1000 : NaN;
+        quotaDryUntil =
+          Number.isFinite(resetAt) && resetAt > Date.now()
+            ? resetAt
+            : Date.now() + 60 * 60 * 1000;
         return null;
       }
       if (!res.ok) return null;
@@ -149,9 +161,10 @@ async function fetchStars(repo: RepoKey): Promise<number | null> {
   return job;
 }
 
-// Flipped for the rest of the session once GitHub reports the hourly quota
-// as spent; avoids 50 doomed requests on a rate-limited connection.
-let quotaDry = false;
+// While GitHub reports the hourly quota as spent, live fetches pause until
+// the quota resets (trusted from x-ratelimit-reset, else one hour); this
+// avoids 50 doomed requests on a rate-limited connection.
+let quotaDryUntil = 0;
 
 /**
  * Returns the live star count for the app's repo, or null while loading /

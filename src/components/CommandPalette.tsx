@@ -158,6 +158,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     return matches.slice(0, 12);
   }, [query, apps, viewMode]);
 
+  // The selection can go stale when the list shrinks under it (the apps
+  // array updates while the palette is open — live stars, a fresh import).
+  // Clamping keeps Enter and the highlight on a real row in every case;
+  // typing already resets the index in the input's onChange.
+  const activeIndex = Math.min(selectedIndex, Math.max(0, filteredItems.length - 1));
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -167,7 +173,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       setSelectedIndex((prev) => (prev - 1 + filteredItems.length) % Math.max(1, filteredItems.length));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const current = filteredItems[selectedIndex];
+      const current = filteredItems[activeIndex];
       if (current) {
         if (current.type === 'action' && current.action) {
           current.action();
@@ -234,7 +240,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         <div id="command-palette-list" className="max-h-96 overflow-y-auto p-2 divide-y divide-slate-950/10 dark:divide-white/[0.03]">
           {filteredItems.length > 0 ? (
             filteredItems.map((item, idx) => {
-              const isSelected = idx === selectedIndex;
+              const isSelected = idx === activeIndex;
               if (item.type === 'action') {
                 return (
                   <div

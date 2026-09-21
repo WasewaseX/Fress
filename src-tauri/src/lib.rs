@@ -263,7 +263,10 @@ fn filename_from_headers(url: &reqwest::Url, headers: &reqwest::header::HeaderMa
         if let Some(pos) = cd.find("filename*=") {
             let rest = &cd[pos + 10..];
             if let Some(name) = rest.split("''").nth(1) {
-                return Some(name.trim_matches('"').trim_end_matches(';').to_string());
+                let name = name.trim_matches('"').trim_end_matches(';');
+                // RFC 5987 ext-values are percent-encoded; without decoding,
+                // a Japanese PDF would land on disk as a literal "%E6%97%A5...".
+                return Some(percent_decode(name));
             }
         }
         if let Some(pos) = cd.find("filename=") {
@@ -281,6 +284,30 @@ fn filename_from_headers(url: &reqwest::Url, headers: &reqwest::header::HeaderMa
     }
 }
 
+/// Percent-decoding per RFC 5987/8187 (e.g. `%E6%97%A5` becomes the actual
+/// Unicode character). Invalid or truncated escapes are kept literally, and
+/// the byte sequence is lossily converted to UTF-8 so a filename always
+/// exists on disk even for non-UTF-8 charsets.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
 fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
     let mut candidate = dir.join(name);
     if !candidate.exists() {
@@ -290,12 +317,20 @@ fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "download".into());
+    // The extension carries no leading dot here; the format string below adds
+    // its own, so "MyApp (1).exe" keeps a single dot and extension-less files
+    // become "MyApp (1)" without a stray trailing dot.
     let ext = PathBuf::from(name)
         .extension()
-        .map(|s| format!(".{}", s.to_string_lossy()))
+        .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
     for i in 1..10_000u32 {
-        candidate = dir.join(format!("{} ({}).{}", stem, i, ext));
+        let candidate_name = if ext.is_empty() {
+            format!("{} ({})", stem, i)
+        } else {
+            format!("{} ({}).{}", stem, i, ext)
+        };
+        candidate = dir.join(candidate_name);
         if !candidate.exists() {
             break;
         }

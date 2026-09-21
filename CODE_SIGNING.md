@@ -52,6 +52,37 @@ Fress meets their published conditions:
    (`submit-signing-request` GitHub Action; the key stays on their HSM), and
    the signed installer is uploaded to the release with the next version tag.
 
+### The persistent publisher certificate (current CI default)
+
+CI no longer generates a throwaway self-signed certificate per release — a
+fresh identity every build proves nothing and accumulates no reputation with
+Defender or SmartScreen. Instead, one certificate is provided as repository
+secrets and reused for every release:
+
+- `WINDOWS_PFX_B64` — the `.pfx` (certificate + private key), base64-encoded
+- `WINDOWS_PFX_PASSWORD` — the .pfx export password
+
+Creating one on your own machine (run once, keep the .pfx backed up):
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Fress" `
+  -KeyUsage DigitalSignature -KeySpec Signature -KeyAlgorithm RSA -KeyLength 3072 `
+  -NotAfter (Get-Date).AddYears(5) -CertStoreLocation "Cert:\CurrentUser\My"
+$pwd = ConvertTo-SecureString -String "your-export-password" -Force -AsPlainText
+Export-PfxCertificate -Cert $cert -FilePath "fress-sign.pfx" -Password $pwd
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("fress-sign.pfx")) | Set-Clipboard
+```
+
+Then set `WINDOWS_PFX_B64` to the clipboard contents and `WINDOWS_PFX_PASSWORD`
+to the export password. Every Windows build (x64 + ARM64, installer +
+portable) is then signed with the same publisher identity.
+
+Honesty note: a self-signed publisher still shows "Unknown publisher" — only
+a certificate chaining to a trusted root (SignPath Foundation below, Azure
+Trusted Signing, or a paid CA) removes it. What the persistent signature does
+buy: identical publisher across releases, tamper evidence, and a stable
+identity for allow-lists and Microsoft's false-positive reporting.
+
 ### The paid alternative: Azure Trusted Signing
 
 Microsoft's own signing service costs a small monthly fee and shows your own
@@ -61,15 +92,29 @@ name as the publisher. `release.yml` already contains the
 `AZURE_CODESIGNING_ACCOUNT`, `AZURE_CODESIGNING_PROFILE`. Setup order: create
 the Azure account and Trusted Signing resource, complete identity validation
 on a Public Trust profile, create an Entra app registration with a client
-secret, add the six secrets, push a tag.
+secret, add the six secrets, push a tag. When configured it takes precedence
+over the .pfx path.
 
-### What today's self-signed fallback proves
+### Antivirus false positives (Trojan:Win32/Bearfoos.A!ml)
 
-Until a trusted certificate is in place, releases keep a timestamped
-self-signature. It does not remove the warning, but it proves the file you
-downloaded is exactly the file CI produced; any modification breaks it. To
-check, compare the file's SHA-256 against `SHA256SUMS.txt` on the release
-page.
+Microsoft Defender's machine-learning heuristics flag clean, low-reputation
+Windows binaries — unsigned installers that download other installers are a
+classic trigger, and release builds were additionally stripped (`strip = true`
+in Cargo.toml), which makes them look even more packer-like. Countermeasures
+in place: release builds are unstripped, the signature is persistent, Fress is
+distributed only through GitHub Releases with SHA256SUMS.txt, and a
+`virustotal` CI job (needs the `VIRUSTOTAL_API_KEY` secret, free account)
+attaches multi-engine scan links to every release. If a build is still
+flagged, submit it at <https://www.microsoft.com/en-us/wdsi/filesubmission>
+and check the SHA256 against `SHA256SUMS.txt` before running anything.
+
+### Android: the persistent keystore
+
+Same rule as Windows: the keystore is stored once as repository secret
+`ANDROID_KEYSTORE_B64` (base64 of `fress.keystore`, alias `fress`, store and
+key password `fressandroid`) and reused for every release. A fresh keystore
+per release would make Android refuse update-over-install (signature
+mismatch), forcing users to uninstall first.
 
 ## macOS: signing and notarization
 

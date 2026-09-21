@@ -49,6 +49,9 @@ jobs:
             | Platform | File |
             | --- | --- |
             | Windows (installer) | `Fress_*_x64-setup.exe` |
+            | Windows (portable, no install) | `Fress_*_x64-portable.zip` |
+            | Windows ARM64 (installer) | `Fress_*_arm64-setup.exe` |
+            | Windows ARM64 (portable) | `Fress_*_arm64-portable.zip` |
             | macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
             | macOS (Intel) | `Fress_*_x64.dmg` |
             | Linux (AppImage) | `Fress_*_amd64.AppImage` |
@@ -57,15 +60,18 @@ jobs:
             | Android (universal APK) | `Fress_*_universal.apk` |
             | Android (arm64 APK) | `Fress_*_arm64.apk` |
 
-            **Windows: about the "Unknown Publisher" warning**
-            The installer carries a signature that proves it has not been modified, but until the publisher certificate is verified with Microsoft (see `CODE_SIGNING.md` in the repo), Windows still shows the blue warning out of caution. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info**, then **Run anyway**.
+            **Where Fress is distributed**
+            Only here, on the official GitHub Releases page of this repository, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer on any other site or file host, it is not ours.
+
+            **Windows: antivirus warnings and "Unknown Publisher"**
+            The installer and the portable exe carry the project's persistent publisher signature when CI has the certificate configured; until that signature chains to a trusted root, Microsoft Defender's machine-learning heuristics can still flag clean downloads (for example `Trojan:Win32/Bearfoos.A!ml`). Verify the SHA256 against `SHA256SUMS.txt` — if it matches, the file is exactly what this repository built. Reporting false positives, certificate setup and long-term signing plans: `CODE_SIGNING.md` in the repository. The blue "Unknown publisher" warning appears until a trusted certificate is in place: **More info**, then **Run anyway**.
 
             **macOS: first launch**
             The dmg is signed and notarized when the Apple credentials are configured in CI (see `CODE_SIGNING.md`). Without them, macOS may refuse to open the app the first time: right-click the app icon and choose **Open**, then confirm. That only happens once.
 
             Verify any download against `SHA256SUMS.txt`.
 
-            This is a beta release: features may change between betas.
+            Pre-release: features may change between releases.
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           draft: false
 
@@ -76,6 +82,8 @@ jobs:
       # true only when the Trusted Signing account is set in repo secrets.
       # Secrets can't be read in a step-level if, so this goes through env.
       FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+      # true when a persistent publisher certificate (.pfx, base64) is set.
+      FRESS_PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_B64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -125,39 +133,40 @@ jobs:
           gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
           Write-Host "Signed installer uploaded: $($bundle.Name)"
 
-      - name: Fall back to a self-signed signature
-        # Without a trusted certificate Windows still shows the blue
-        # "Unknown Publisher" warning. The self-signature still proves the
-        # file was not modified in transit. See CODE_SIGNING.md.
-        if: env.FRESS_SIGNING_CONFIGURED != 'true'
+      - name: Sign with the persistent publisher certificate
+        # One .pfx is kept as a repository secret (WINDOWS_PFX_B64 = base64 of
+        # the certificate + private key, WINDOWS_PFX_PASSWORD) and reused for
+        # every release, so all builds carry the same publisher identity and
+        # can accumulate real Defender/SmartScreen reputation over time. The
+        # old per-run self-signed certificates were removed: a fresh identity
+        # every release builds no reputation with anyone. Setup: CODE_SIGNING.md.
+        if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WINDOWS_PFX_B64: ${{ secrets.WINDOWS_PFX_B64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $bundle = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
-          Write-Host "Installer: $($bundle.FullName)"
-
-          # Self-signed code-signing certificate: gives the file a real
-          # Authenticode signature (subject "Fress") with a timestamp, but
-          # Windows will still show Unknown Publisher/SmartScreen because the
-          # certificate does not chain to a paid trusted root.
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Fress" `
-            -KeyUsage DigitalSignature -KeySpec Signature -KeyAlgorithm RSA -KeyLength 3072 `
-            -NotAfter (Get-Date).AddYears(3) -CertStoreLocation "Cert:\CurrentUser\My"
-          $pwd2 = ConvertTo-SecureString -String "fress-ci-sign" -Force -AsPlainText
-          Export-PfxCertificate -Cert $cert -FilePath "fress-sign.pfx" -Password $pwd2 | Out-Null
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_PFX_B64)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "fress-sign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $bytes)
+          $pwd2 = ConvertTo-SecureString -String $env:WINDOWS_PFX_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\My" -Password $pwd2
+          Write-Host "Imported publisher certificate: $($cert.Thumbprint) ($($cert.Subject))"
 
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
             Where-Object { $_.DirectoryName -match 'x64$' } | Select-Object -First 1
           if (-not $signtool) { throw "signtool.exe not found" }
-          & $signtool.FullName sign /f fress-sign.pfx /p "fress-ci-sign" /fd SHA256 /td SHA256 `
+
+          $bundle = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          & $signtool.FullName sign /sha1 $cert.Thumbprint /fd SHA256 /td SHA256 `
             /tr http://timestamp.digicert.com $bundle.FullName
 
-          # Hard check: the file must now carry a signature (untrusted root is
+          # Hard check: the installer must carry a signature (untrusted root is
           # expected; NotSigned or HashMismatch would mean signing failed).
           $sig = Get-AuthenticodeSignature $bundle.FullName
-          Write-Host "Signature status: $($sig.Status), $($sig.StatusMessage)"
+          Write-Host "Installer signature: $($sig.Status)"
           if ($sig.Status -eq 'NotSigned' -or $sig.Status -eq 'HashMismatch') {
             throw "Signing failed: $($sig.Status)"
           }
@@ -165,6 +174,157 @@ jobs:
           # Replace the asset on the release with the signed file
           gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
           Write-Host "Signed installer uploaded: $($bundle.Name)"
+
+      - name: No signing certificate configured
+        # Shipping unsigned is honest: a random self-signed cert per release
+        # proves nothing and builds no reputation. The warning keeps the gap
+        # visible in the run summary until the secret is configured.
+        if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED != 'true'
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Windows binaries shipped unsigned. Configure WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD secrets for a persistent publisher signature (see CODE_SIGNING.md)."
+
+      - name: Package the portable exe
+        # A portable build is the bare app exe in a zip: no installer, no
+        # registry changes, runs from anywhere with the preinstalled WebView2
+        # runtime. Signed the same way as the installer when a certificate is
+        # configured, so both artifacts carry the same publisher identity.
+        if: env.FRESS_SIGNING_CONFIGURED == 'true' || env.FRESS_PFX_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "portable exe not found in release folder" }
+          Write-Host "Portable exe: $($exe.FullName)"
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.DirectoryName -match 'x64$' } | Select-Object -First 1
+          $thumb = (Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Sort-Object NotAfter -Descending | Select-Object -First 1).Thumbprint
+          if ($signtool -and $thumb) {
+            & $signtool.FullName sign /sha1 $thumb /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com $exe.FullName
+          } else {
+            Write-Host "No code-signing certificate in store; packaging unsigned portable exe."
+          }
+
+          $version = "${{ needs.version.outputs.version }}"
+          $zip = "Fress_${version}_x64-portable.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zip -Force
+          gh release upload "${{ needs.version.outputs.tag }}" $zip --clobber --repo "${{ github.repository }}"
+          Write-Host "Portable build uploaded: $zip"
+
+      - name: Package the portable exe (unsigned fallback)
+        if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "portable exe not found in release folder" }
+          $version = "${{ needs.version.outputs.version }}"
+          $zip = "Fress_${version}_x64-portable.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zip -Force
+          gh release upload "${{ needs.version.outputs.tag }}" $zip --clobber --repo "${{ github.repository }}"
+          Write-Host "Portable build uploaded: $zip"
+
+  build-windows-arm64:
+    # Native ARM64 builds for newer Windows-on-ARM devices: lighter and faster
+    # than running the x64 build through emulation. Produced on every release
+    # from now on, both as an installer and as a portable zip.
+    needs: [version, create-release]
+    runs-on: windows-latest
+    env:
+      FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+      FRESS_PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_B64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm install
+      - name: Build Windows ARM64 installer (NSIS)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target aarch64-pc-windows-msvc --bundles nsis'
+      - name: Sign with the persistent publisher certificate
+        if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WINDOWS_PFX_B64: ${{ secrets.WINDOWS_PFX_B64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_PFX_B64)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "fress-sign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $bytes)
+          $pwd2 = ConvertTo-SecureString -String $env:WINDOWS_PFX_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\My" -Password $pwd2
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.DirectoryName -match 'x64$' } | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found" }
+          $bundle = Get-ChildItem "src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          & $signtool.FullName sign /sha1 $cert.Thumbprint /fd SHA256 /td SHA256 `
+            /tr http://timestamp.digicert.com $bundle.FullName
+          $sig = Get-AuthenticodeSignature $bundle.FullName
+          if ($sig.Status -eq 'NotSigned' -or $sig.Status -eq 'HashMismatch') {
+            throw "Signing failed: $($sig.Status)"
+          }
+          gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
+          Write-Host "Signed ARM64 installer uploaded: $($bundle.Name)"
+
+      - name: No signing certificate configured
+        if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED != 'true'
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Windows ARM64 binaries shipped unsigned. Configure WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD secrets (see CODE_SIGNING.md)."
+
+      - name: Package the ARM64 portable exe
+        if: env.FRESS_SIGNING_CONFIGURED == 'true' || env.FRESS_PFX_CONFIGURED == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem "src-tauri/target/aarch64-pc-windows-msvc/release/*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "ARM64 portable exe not found in release folder" }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.DirectoryName -match 'x64$' } | Select-Object -First 1
+          $thumb = (Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Sort-Object NotAfter -Descending | Select-Object -First 1).Thumbprint
+          if ($signtool -and $thumb) {
+            & $signtool.FullName sign /sha1 $thumb /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com $exe.FullName
+          }
+          $version = "${{ needs.version.outputs.version }}"
+          $zip = "Fress_${version}_arm64-portable.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zip -Force
+          gh release upload "${{ needs.version.outputs.tag }}" $zip --clobber --repo "${{ github.repository }}"
+          Write-Host "ARM64 portable build uploaded: $zip"
+
+      - name: Package the ARM64 portable exe (unsigned fallback)
+        if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem "src-tauri/target/aarch64-pc-windows-msvc/release/*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "ARM64 portable exe not found in release folder" }
+          $version = "${{ needs.version.outputs.version }}"
+          $zip = "Fress_${version}_arm64-portable.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zip -Force
+          gh release upload "${{ needs.version.outputs.tag }}" $zip --clobber --repo "${{ github.repository }}"
+          Write-Host "ARM64 portable build uploaded: $zip"
 
   build-linux:
     needs: [version, create-release]
@@ -286,6 +446,9 @@ jobs:
   build-android:
     needs: [version, create-release]
     runs-on: ubuntu-latest
+    env:
+      # true when the persistent keystore is stored as a repository secret.
+      FRESS_KEYSTORE_CONFIGURED: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -310,8 +473,23 @@ jobs:
             echo "ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
           fi
       - run: npm install
-      - name: Generate a signing keystore so the APK installs out of the box
+      - name: Restore the persistent signing keystore
+        # Android refuses to update an installed app when the update is
+        # signed with a different key, so a fresh keystore per release
+        # silently broke update-over-install for existing users. The
+        # keystore is stored once as a repository secret (ANDROID_KEYSTORE_B64,
+        # base64 of the .keystore file) and reused for every release.
+        if: env.FRESS_KEYSTORE_CONFIGURED == 'true'
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
+          echo "${ANDROID_KEYSTORE_B64}" | base64 -d > fress.keystore
+          keytool -list -keystore fress.keystore -storepass fressandroid -alias fress >/dev/null \
+            || { echo '::error::ANDROID_KEYSTORE_B64 is not a valid fress.keystore (alias fress, storepass fressandroid)'; exit 1; }
+      - name: Generate a signing keystore (no persistent secret configured)
+        if: env.FRESS_KEYSTORE_CONFIGURED != 'true'
+        run: |
+          echo "::warning::Generating a fresh Android keystore. Users cannot update over a previous install (signature mismatch). Store ANDROID_KEYSTORE_B64 as a repository secret to keep the same key."
           keytool -genkey -v -keystore fress.keystore -alias fress \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass fressandroid -keypass fressandroid \
@@ -358,7 +536,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   checksums:
-    needs: [version, create-release, build-windows, build-linux, build-macos-arm, build-macos-intel, build-android]
+    needs: [version, create-release, build-windows, build-windows-arm64, build-linux, build-macos-arm, build-macos-intel, build-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -378,3 +556,30 @@ jobs:
           gh release upload "${{ needs.version.outputs.tag }}" assets/SHA256SUMS.txt --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  virustotal:
+    # Scans every release asset with VirusTotal and appends the analysis
+    # links to the release page, so users can see multi-engine results before
+    # they trust a download. Runs when a VIRUSTOTAL_API_KEY secret is set
+    # (free account at virustotal.com); skipped silently otherwise.
+    needs: [version, checksums]
+    runs-on: ubuntu-latest
+    env:
+      FRESS_VT_CONFIGURED: ${{ secrets.VIRUSTOTAL_API_KEY != '' }}
+    steps:
+      - name: Download all release assets
+        if: env.FRESS_VT_CONFIGURED == 'true'
+        run: |
+          mkdir -p assets
+          gh release download "${{ needs.version.outputs.tag }}" --dir assets --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan assets and attach analysis links
+        if: env.FRESS_VT_CONFIGURED == 'true'
+        uses: crazymax/virustotal-github-action@v0
+        with:
+          vt_api_key: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          files: assets/*
+          request_rate: 4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          update_release_body: true

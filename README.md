@@ -51,15 +51,20 @@ The web preview works without Rust: download buttons hand off to your browser. I
 
 ## Releases
 
-Releases are tagged (we are in beta). Every release ships installers for all platforms, built by GitHub Actions:
+Releases are tagged. Every release ships installers for all platforms, built by GitHub Actions:
 
 | Platform | File |
 | --- | --- |
-| Windows | `Fress_*_x64-setup.exe` |
+| Windows (installer) | `Fress_*_x64-setup.exe` |
+| Windows (portable, no install) | `Fress_*_x64-portable.zip` |
+| Windows ARM64 (installer) | `Fress_*_arm64-setup.exe` |
+| Windows ARM64 (portable) | `Fress_*_arm64-portable.zip` |
 | macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
 | macOS (Intel) | `Fress_*_x64.dmg` |
 | Linux | `Fress_*_amd64.AppImage`, `.deb`, `.rpm` |
-| Android | `Fress_*_universal.apk` |
+| Android | `Fress_*_universal.apk`, `Fress_*_arm64.apk` |
+
+**Fress is distributed only through this repository's GitHub Releases page**, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer anywhere else — a file host, a mirror, a "download site" — it is not ours.
 
 Every release includes a `SHA256SUMS.txt` covering all assets. Verify before running:
 
@@ -83,7 +88,6 @@ Fress picks each operating system's own download location, the same place your b
 | Android | The app's private storage (Android does not let apps pick arbitrary folders) | No. Use Open after a download to install or share the file |
 
 ### Why Windows shows "Unknown publisher"
-
 The Windows installer is signed with a timestamp, which proves the file is exactly the one CI produced and has not been altered. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning because that warning only goes away once the publisher is covered by a certificate Windows already trusts. [CODE_SIGNING.md](CODE_SIGNING.md) documents the fix, including a free signing route for open-source projects (SignPath Foundation). Until that is set up, you can:
 
 - Click **More info → Run anyway** after checking the checksum against `SHA256SUMS.txt`, or

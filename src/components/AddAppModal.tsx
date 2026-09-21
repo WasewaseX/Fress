@@ -3,6 +3,7 @@ import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Category, Platform } from '../types';
 import { X, Plus, AlertCircle, RefreshCw, Check } from 'lucide-react';
 import { fetchLiveStarCount } from '../lib/starFetch';
+import { sanitizeInstallCommand } from '../lib/installCommands';
 
 interface AddAppModalProps {
   isOpen: boolean;
@@ -192,6 +193,21 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       .map((t) => t.trim().toLowerCase())
       .filter((t) => t.length > 0);
 
+    // Install commands end up in generated batch scripts, so anything that
+    // is not a plain single install invocation is refused here, at the door.
+    if (wingetCommand.trim() && !sanitizeInstallCommand('winget', wingetCommand)) {
+      setErrorMsg('The Winget command looks unsafe, so it was not saved. Use one plain install command, e.g. "winget install Package.Id". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      return;
+    }
+    if (brewCommand.trim() && !sanitizeInstallCommand('brew', brewCommand)) {
+      setErrorMsg('The Homebrew command looks unsafe, so it was not saved. Use one plain install command, e.g. "brew install --cask name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      return;
+    }
+    if (flatpakCommand.trim() && !sanitizeInstallCommand('flatpak', flatpakCommand)) {
+      setErrorMsg('The Flatpak command looks unsafe, so it was not saved. Use one plain install command, e.g. "flatpak install flathub org.app.Name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      return;
+    }
+
     const newApp: AppItem = {
       id: initialApp ? initialApp.id : `custom-${Date.now()}`,
       name: name.trim(),
@@ -206,9 +222,9 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       description: description.trim(),
       whyItsAwesome: whyItsAwesome.trim() || 'Curated community open-source application.',
       beginnerGuide: beginnerGuide.trim() || 'Download and install from the official release page.',
-      wingetCommand: wingetCommand.trim() || undefined,
-      brewCommand: brewCommand.trim() || undefined,
-      flatpakCommand: flatpakCommand.trim() || undefined,
+      wingetCommand: sanitizeInstallCommand('winget', wingetCommand) || undefined,
+      brewCommand: sanitizeInstallCommand('brew', brewCommand) || undefined,
+      flatpakCommand: sanitizeInstallCommand('flatpak', flatpakCommand) || undefined,
       proprietaryAlternative: proprietaryAlternative.trim() || undefined,
       tags: tagArray.length > 0 ? tagArray : ['open-source', 'desktop'],
       isOwnerPick: initialApp ? initialApp.isOwnerPick : false,

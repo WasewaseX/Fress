@@ -44,6 +44,7 @@ import {
   Square 
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
+import { sanitizeInstallCommand } from './lib/installCommands';
 
 const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
 const STORAGE_KEY_FAVORITES = 'fress_favorites';
@@ -156,13 +157,22 @@ function AppShell() {
     }
   }, []);
 
-  // Load custom apps from local storage
+  // Load custom apps from local storage. Saved commands pass through the
+  // same check as imports: an older version or tampered storage must not be
+  // able to put a script payload back into circulation.
   const [apps, setApps] = useState<AppItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_CUSTOM_APPS);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        return [...INITIAL_APPS, ...parsed];
+        const parsed = JSON.parse(saved) as AppItem[];
+        const cleaned = (Array.isArray(parsed) ? parsed : []).map((item) => ({
+          ...item,
+          wingetCommand: sanitizeInstallCommand('winget', item.wingetCommand) || undefined,
+          brewCommand: sanitizeInstallCommand('brew', item.brewCommand) || undefined,
+          flatpakCommand: sanitizeInstallCommand('flatpak', item.flatpakCommand) || undefined,
+          scoopCommand: sanitizeInstallCommand('scoop', item.scoopCommand) || undefined
+        }));
+        return [...INITIAL_APPS, ...cleaned];
       }
     } catch {
       // fallback to initial apps
@@ -425,10 +435,30 @@ function AppShell() {
       setApps((prev) => {
         const existingIds = new Set(prev.map((a) => a.id));
         const newCustoms: AppItem[] = [];
+        let strippedCommands = 0;
 
         for (const item of incomingApps) {
           if (item && item.name && !existingIds.has(item.id)) {
-            newCustoms.push({ ...item, isCustom: true });
+            // A catalog backup can come from anyone. Install commands end up
+            // in generated batch scripts, so every command field is checked
+            // and anything that is not a plain install invocation is dropped
+            // instead of being stored.
+            const winget = sanitizeInstallCommand('winget', item.wingetCommand);
+            const brew = sanitizeInstallCommand('brew', item.brewCommand);
+            const flatpak = sanitizeInstallCommand('flatpak', item.flatpakCommand);
+            const scoop = sanitizeInstallCommand('scoop', item.scoopCommand);
+            strippedCommands += [
+              item.wingetCommand, item.brewCommand, item.flatpakCommand, item.scoopCommand
+            ].filter((raw, i) => raw && [winget, brew, flatpak, scoop][i] === null).length;
+
+            newCustoms.push({
+              ...item,
+              wingetCommand: winget || undefined,
+              brewCommand: brew || undefined,
+              flatpakCommand: flatpak || undefined,
+              scoopCommand: scoop || undefined,
+              isCustom: true
+            });
             existingIds.add(item.id);
           }
         }
@@ -445,6 +475,11 @@ function AppShell() {
           toast.success(`Imported ${newCustoms.length} new application(s).`);
         } else {
           toast.info('No new applications detected; all items are already in catalog.');
+        }
+        if (strippedCommands > 0) {
+          toast.warning(
+            `${strippedCommands} package command(s) in the backup were removed as unsafe. Only plain "<manager> install <package>" commands are accepted.`
+          );
         }
 
         return merged;

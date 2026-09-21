@@ -1,6 +1,6 @@
 [package]
 name = "fress"
-version = "1.0.5-beta"
+version = "1.0.0-alpha"
 description = "Fress: a clean, curated directory of free and open-source software"
 authors = ["Fress"]
 edition = "2021"
@@ -33,4 +33,8 @@ panic = "abort"
 codegen-units = 1
 lto = true
 opt-level = "s"
-strip = true
+# Kept unstripped on purpose. Stripped Windows binaries trip Microsoft's
+# machine-learning heuristics far more often (Trojan:Win32/Bearfoos.A!ml
+# false positives on signed, clean apps). The few extra MB of symbol table
+# buy fewer antivirus scares for users.
+strip = false

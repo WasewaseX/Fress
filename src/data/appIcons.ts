@@ -65,6 +65,10 @@ export const APP_ICONS: Record<string, string> = {
   'whisper-desktop': '/icons/whisper-desktop.png',
   tuta: '/icons/tuta.png',
   'proton-mail': '/icons/proton-mail.png',
+  'ente-photos': '/icons/ente-photos.png',
+  'ente-auth': '/icons/ente-auth.png',
+  aegis: '/icons/aegis.png',
+  'fossify-gallery': '/icons/fossify-gallery.png',
 };
 
 /** Icon path for an app, or null when the app has no shipped icon. */

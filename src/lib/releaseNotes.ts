@@ -23,7 +23,8 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     items: [
       'New: every app now shows its official icon. All icons ship inside the app, nothing is fetched from outside.',
       'New: the Combos tab in the header. Kits of apps that solve one problem together, each with a one-click install script.',
-      'Tuta and Proton Mail joined the catalog. Both meet the strict bar: good jurisdiction, encryption on by default, open source, audited.',
+      'New: Ente Auth, Aegis, Ente Photos and Fossify Gallery joined the catalog, with two new combos: Second factor kit and Photo backup.',
+      'Tuta and Proton Mail joined too. Both meet the strict bar: good jurisdiction, encryption on by default, open source, audited.',
       'Categories got trimmed so every filter is worth using.',
       'Removed the em dash habit from all text, so nothing reads machine-written.',
     ],

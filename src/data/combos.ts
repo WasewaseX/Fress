@@ -12,6 +12,8 @@ import {
   NotebookPen,
   House,
   Briefcase,
+  ShieldCheck,
+  Images,
 } from 'lucide-react';
 
 /**
@@ -70,6 +72,15 @@ export const COMBOS: Combo[] = [
     appIds: ['bitwarden', 'keepassxc', 'keepassdx'],
   },
   {
+    id: 'second-factor',
+    name: 'Second factor kit',
+    purpose: 'Move 2FA off SMS and into apps that cannot leak it.',
+    note: 'Ente Auth generates codes offline and syncs them encrypted, so a lost phone never locks you out. Aegis keeps tokens in a vault on an Android phone that has no internet permission at all. Bitwarden rounds it out as the zero-knowledge password manager those codes protect. Two factors, two separate apps, one breach takes neither.',
+    icon: ShieldCheck,
+    tile: 'bg-green-500/15 text-green-400',
+    appIds: ['ente-auth', 'aegis', 'bitwarden'],
+  },
+  {
     id: 'own-your-files',
     name: 'Own your files',
     purpose: 'Sync and back up photos without a cloud copy of your life.',
@@ -77,6 +88,15 @@ export const COMBOS: Combo[] = [
     icon: HardDrive,
     tile: 'bg-violet-500/15 text-violet-400',
     appIds: ['syncthing', 'nextcloud', 'immich'],
+  },
+  {
+    id: 'photo-backup',
+    name: 'Photo backup',
+    purpose: 'Get photos off your phone without handing them to a scanner.',
+    note: 'Ente Photos encrypts every shot before upload, so the cloud keeps your library but never sees it. Immich runs the same kind of backup on your own hardware if you would rather have no cloud in the loop. Fossify Gallery keeps the phone itself clean, an ad-free viewer with none of the tracking that crept into the apps it forked from.',
+    icon: Images,
+    tile: 'bg-blue-500/15 text-blue-400',
+    appIds: ['ente-photos', 'immich', 'fossify-gallery'],
   },
   {
     id: 'android-kit',

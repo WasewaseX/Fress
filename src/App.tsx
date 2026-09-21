@@ -19,6 +19,7 @@ import { LiveSearchModal } from './components/LiveSearchModal';
 import { DownloadManager } from './components/DownloadManager';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ComboTab } from './components/ComboTab';
+import { ReplaceTab } from './components/ReplaceTab';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider } from './lib/i18n';
 import { DownloadsProvider, useDownloads } from './lib/downloads';
@@ -208,18 +209,19 @@ function AppShell() {
     }
   };
 
-  // Top-level tab: the app catalog or the combos page. Remembered per device.
-  const [page, setPage] = useState<'catalog' | 'combos'>(() => {
+  // Top-level tab: the app catalog, the combos page or the replace guide.
+  // Remembered per device.
+  const [page, setPage] = useState<'catalog' | 'combos' | 'replace'>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_PAGE);
-      if (saved === 'catalog' || saved === 'combos') return saved;
+      if (saved === 'catalog' || saved === 'combos' || saved === 'replace') return saved;
     } catch {
       // ignore
     }
     return 'catalog';
   });
 
-  const handlePageChange = (next: 'catalog' | 'combos') => {
+  const handlePageChange = (next: 'catalog' | 'combos' | 'replace') => {
     setPage(next);
     try {
       localStorage.setItem(STORAGE_KEY_PAGE, next);
@@ -731,7 +733,14 @@ function AppShell() {
 
       {/* Main Content Area: Grid or Table View */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24" id="main-content">
-        {page === 'combos' ? (
+        {page === 'replace' ? (
+          <ReplaceTab
+            apps={apps}
+            onOpenDetail={(item) => setSelectedApp(item)}
+            onAddToBatch={handleComboToBatch}
+            onOpenCombos={() => handlePageChange('combos')}
+          />
+        ) : page === 'combos' ? (
           <ComboTab
             apps={apps}
             onOpenDetail={(item) => setSelectedApp(item)}

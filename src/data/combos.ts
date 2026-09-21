@@ -3,6 +3,7 @@ import {
   MessagesSquare,
   Compass,
   Mail,
+  ShieldHalf,
   KeyRound,
   HardDrive,
   Smartphone,
@@ -38,6 +39,45 @@ export interface Combo {
 }
 
 export const COMBOS: Combo[] = [
+  {
+    // The one combo tied to the "Replace your apps for better privacy" tab:
+    // for every type the tab covers, the single strongest catalog app under
+    // the Fress threat model (no government, provider or hacker gets readable
+    // data under default settings). OS swaps like GrapheneOS or Qubes are
+    // systems, not installable apps, so they only live in the Replace tab.
+    id: 'maximum-privacy',
+    name: 'Maximum privacy',
+    purpose: 'The no-compromise route: the strongest pick for every replaceable type.',
+    note: 'One app per type from the Replace tab, chosen on a single bar: nothing readable leaks by default. Tuta and Ente encrypt before anything leaves the device, Tor hides the route, SimpleX drops phone numbers and identifiers, and Mullvad never asks who you are. KeePassXC, Aegis, the Fossify apps, Jellyfin, Home Assistant, Pi-hole, Ollama and LibreOffice keep the data home in the first place, so there is nothing to seize or subpoena. For the pieces that are systems rather than apps, like GrapheneOS or Qubes OS, open the Replace tab.',
+    icon: ShieldHalf,
+    tile: 'bg-red-500/15 text-red-400',
+    appIds: [
+      'tuta', // Mail
+      'ente-photos', // Photos
+      'searxng', // Search
+      'tor-browser', // Browser
+      'simplex', // Messaging
+      'joplin', // Notes
+      'cryptomator', // Drive
+      'keepassxc', // Password Managers
+      'aegis', // 2FA
+      'fossify-calendar', // Calendar
+      'fossify-contacts', // Contacts
+      'f-droid', // App Store
+      'mullvad-vpn', // VPN
+      'ollama', // AI Assistant
+      'home-assistant', // Smart Home
+      'organicmaps', // Maps
+      'libretranslate', // Translator
+      'element', // Community
+      'mastodon', // Social Media
+      'jitsi-meet', // Video Conferencing
+      'cake-wallet', // Payments and Crypto Wallets
+      'pi-hole', // DNS
+      'jellyfin', // Entertainment
+      'libreoffice', // Office Suite
+    ],
+  },
   {
     id: 'private-messaging',
     name: 'Private messaging',

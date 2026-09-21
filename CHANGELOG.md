@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.5-beta (2026-09-22)
+
+The "replace it" release: ente's PrivacyPack is now a full tab of its own, with the downloader the pack never had and a security grade on every option.
+
+### Added
+- "Replace your apps for better privacy" tab: a new section in the header, ported from ente's PrivacyPack (github.com/ente-io/privacypack). Pick the mainstream app you use today in any of 28 categories, from Mail and Photos to VPN, DNS, Phone OS and Domain Hosting, and choose up to three private replacements per category. The pack's own Download button only ever saved a picture of your choices; here the Get button opens the app detail popup with the real device-aware download picker, and "Add picks to selection" hands everything to the batch install bar.
+- Security grades on every replacement: Fortress, Strong and Basic, graded for this project's threat model (default protection against governments and hackers: encryption or local-only by default, open source, what the operator can still see). The options in every category are sorted best-first, a "Start here" badge marks the sane first move for new users, and a legend at the top explains exactly what each grade promises, because a flat list of options with different guarantees was the most confusing thing about the pack.
+- The Maximum privacy combo: one new combo (the only one added) that routes every replaceable type to the single strongest catalog app for the job, the no-spy-access route: Tuta, Ente Photos, SearXNG, Tor Browser, SimpleX, Joplin, Cryptomator, KeePassXC, Aegis, the Fossify apps, F-Droid, Mullvad VPN, Ollama, Home Assistant, Organic Maps, LibreTranslate, Element, Mastodon, Jitsi Meet, Cake Wallet, Pi-hole, Jellyfin and LibreOffice. It is reachable from the Combos tab like any other combo, and from a card at the top of the Replace tab that can add the whole kit to the batch selection or jump to the Combos tab. System-level swaps that are not installable apps (GrapheneOS, Qubes OS, hosting providers) stay in the Replace tab where they belong.
+
+### Changed
+- The header now has three sections: Apps, Combos and Replace. On phones all three live in the menu, as before. The Replace tab keeps its own picks per device, so your choices survive a restart.
+- Every logo the Replace tab shows (mainstream apps and non-catalog options) ships inside the app, like the catalog icons, so the tab works fully offline.
+
 ## 1.0.4-beta (2026-09-22)
 
 The "quick on its feet" release: the app loads in smaller pieces so updates arrive lighter, every popup now looks after keyboard focus, and the README stops showing an old version.

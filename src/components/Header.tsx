@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   List,
   Layers,
+  Replace,
   Terminal,
   Columns,
   Share2,
@@ -41,8 +42,8 @@ interface HeaderProps {
   viewMode: 'grid' | 'table';
   onToggleViewMode: (mode: 'grid' | 'table') => void;
   /** Which top-level tab is open. */
-  page?: 'catalog' | 'combos';
-  onPageChange?: (page: 'catalog' | 'combos') => void;
+  page?: 'catalog' | 'combos' | 'replace';
+  onPageChange?: (page: 'catalog' | 'combos' | 'replace') => void;
   onOpenCommandPalette?: () => void;
   onOpenBatchInstall?: () => void;
   onOpenCompare?: () => void;
@@ -337,11 +338,27 @@ export const Header: React.FC<HeaderProps> = ({
                   <Layers className="w-3.5 h-3.5" aria-hidden="true" />
                   Combos
                 </button>
+                <button
+                  id="page-replace-btn"
+                  type="button"
+                  role="tab"
+                  aria-selected={page === 'replace'}
+                  onClick={() => onPageChange('replace')}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                    page === 'replace'
+                      ? 'fr-chip-active shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Replace your apps for better privacy"
+                >
+                  <Replace className="w-3.5 h-3.5" aria-hidden="true" />
+                  Replace
+                </button>
               </div>
             )}
 
             {/* View mode (desktop; phones find it in the More menu) */}
-            <div id="view-mode-toggle" className={`hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg ${page === 'combos' ? 'md:hidden' : ''}`}>
+            <div id="view-mode-toggle" className={`hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg ${page !== 'catalog' ? 'md:hidden' : ''}`}>
               <button
                 id="view-mode-grid-btn"
                 type="button"
@@ -415,7 +432,7 @@ export const Header: React.FC<HeaderProps> = ({
                             <Layers className="w-3 h-3" />
                             Section
                           </p>
-                          <div className="px-3 pb-1 flex items-center gap-1.5">
+                          <div className="px-3 pb-1 grid grid-cols-3 items-center gap-1.5">
                             <button
                               type="button"
                               aria-pressed={page === 'catalog'}
@@ -423,7 +440,7 @@ export const Header: React.FC<HeaderProps> = ({
                                 onPageChange('catalog');
                                 setShowMoreMenu(false);
                               }}
-                              className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
+                              className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
                                 page === 'catalog'
                                   ? 'fr-chip-active font-semibold'
                                   : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
@@ -438,7 +455,7 @@ export const Header: React.FC<HeaderProps> = ({
                                 onPageChange('combos');
                                 setShowMoreMenu(false);
                               }}
-                              className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
+                              className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
                                 page === 'combos'
                                   ? 'fr-chip-active font-semibold'
                                   : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
@@ -446,6 +463,22 @@ export const Header: React.FC<HeaderProps> = ({
                             >
                               <Layers className="w-3.5 h-3.5" aria-hidden="true" />
                               <span>Combos</span>
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={page === 'replace'}
+                              onClick={() => {
+                                onPageChange('replace');
+                                setShowMoreMenu(false);
+                              }}
+                              className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
+                                page === 'replace'
+                                  ? 'fr-chip-active font-semibold'
+                                  : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
+                              }`}
+                            >
+                              <Replace className="w-3.5 h-3.5" aria-hidden="true" />
+                              <span>Replace</span>
                             </button>
                           </div>
                         </>

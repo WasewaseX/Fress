@@ -17,6 +17,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.5-beta',
+    date: '2026-09-22',
+    title: 'Replace your apps for better privacy',
+    items: [
+      'New: the Replace tab, a port of ente\'s PrivacyPack. Pick what you use today in 28 categories, from Mail to VPN to Phone OS, and pick up to three private replacements per category.',
+      'New: every replacement carries a security grade, Fortress, Strong or Basic, sorted best-first with a Start here badge, so the long option lists finally say which options are actually the safe ones.',
+      'New: a real downloader, the thing PrivacyPack never had. Catalog apps get a Get button with the device-aware download picker, and any set of picks can go straight to the batch install bar.',
+      'New: the Maximum privacy combo. The single strongest app for every replaceable type, one kit, no spy access under default settings. Reachable from the Combos tab and from the top of the Replace tab.',
+    ],
+  },
+  {
     version: '1.0.4-beta',
     date: '2026-09-22',
     title: 'Faster starts and friendlier keyboard support',

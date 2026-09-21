@@ -195,17 +195,10 @@ jobs:
     needs: [version, create-release]
     runs-on: macos-latest
     env:
-      # Apple signing and notarization run only when these secrets exist.
-      # With them set, tauri-action signs the app, staples the notarization
-      # ticket and the dmg opens with no Gatekeeper warning. Without them
-      # the dmg still builds; users right-click -> Open on first launch.
-      # The one-time Apple setup is documented in CODE_SIGNING.md.
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Unset secrets expand to empty strings, and an empty APPLE_CERTIFICATE
+      # would still make the bundler attempt signing (it only checks presence).
+      # So the two build steps below are gated on this flag instead.
+      FRESS_APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -218,7 +211,28 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
-      - name: Build macOS Apple Silicon (.dmg)
+      - name: Build macOS Apple Silicon (.dmg), signed and notarized
+        # Runs only when the Apple Developer credentials are configured.
+        # tauri-action signs the app, submits it for notarization and staples
+        # the ticket, so the dmg opens with no Gatekeeper warning. Setup:
+        # CODE_SIGNING.md.
+        if: env.FRESS_APPLE_CONFIGURED == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target aarch64-apple-darwin --bundles dmg'
+      - name: Build macOS Apple Silicon (.dmg), unsigned
+        # Without Apple credentials the dmg still builds and ships; macOS asks
+        # for a one-time right-click -> Open on first launch.
+        if: env.FRESS_APPLE_CONFIGURED != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -230,14 +244,8 @@ jobs:
     needs: [version, create-release]
     runs-on: macos-latest
     env:
-      # Same Apple secrets as the Apple Silicon job. Cross-compiling from the
-      # arm64 runner keeps the Intel build fast; signing works the same.
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Same gate as the Apple Silicon job.
+      FRESS_APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -250,7 +258,24 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
-      - name: Cross-compile macOS Intel (.dmg) on the arm64 runner
+      - name: Cross-compile macOS Intel (.dmg), signed and notarized
+        # Cross-compiling from the arm64 runner keeps the Intel build fast;
+        # signing and notarization work the same way.
+        if: env.FRESS_APPLE_CONFIGURED == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: '--target x86_64-apple-darwin --bundles dmg'
+      - name: Cross-compile macOS Intel (.dmg), unsigned
+        if: env.FRESS_APPLE_CONFIGURED != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

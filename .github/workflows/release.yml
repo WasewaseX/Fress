@@ -608,26 +608,52 @@ jobs:
   virustotal:
     # Scans every release asset with VirusTotal and appends the analysis
     # links to the release page, so users can see multi-engine results before
-    # they trust a download. Runs when a VIRUSTOTAL_API_KEY secret is set
-    # (free account at virustotal.com); skipped silently otherwise.
+    # they trust a download. Uses the public VT API directly (4 uploads/min
+    # is enough for one release); runs when a VIRUSTOTAL_API_KEY secret is
+    # set (free account at virustotal.com), skipped silently otherwise.
     needs: [version, checksums]
     runs-on: ubuntu-latest
     env:
       FRESS_VT_CONFIGURED: ${{ secrets.VIRUSTOTAL_API_KEY != '' }}
     steps:
-      - name: Download all release assets
-        if: env.FRESS_VT_CONFIGURED == 'true'
-        run: |
-          mkdir -p assets
-          gh release download "${{ needs.version.outputs.tag }}" --dir assets --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Scan assets and attach analysis links
         if: env.FRESS_VT_CONFIGURED == 'true'
-        uses: crazymax/virustotal-github-action@v0
-        with:
-          vt_api_key: ${{ secrets.VIRUSTOTAL_API_KEY }}
-          files: assets/*
-          request_rate: 4
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          update_release_body: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "$TAG" --dir assets --clobber --repo "${{ github.repository }}"
+          LINKS=""
+          for f in assets/*; do
+            name=$(basename "$f")
+            [ "$name" = "SHA256SUMS.txt" ] && continue
+            sha=$(sha256sum "$f" | cut -d' ' -f1)
+            url="https://www.virustotal.com/gui/file/$sha/detection"
+            code=$(curl -sS -o /tmp/vt.json -w "%{http_code}" \
+              -H "x-apikey: $VT_API_KEY" "https://www.virustotal.com/api/v3/files/$sha")
+            if [ "$code" != "200" ]; then
+              # not in VT's corpus yet: upload (public API allows 4/min)
+              curl -sS -o /tmp/vt-up.json --max-time 300 \
+                -H "x-apikey: $VT_API_KEY" \
+                -F "file=@$f" "https://www.virustotal.com/api/v3/files" > /dev/null
+              sleep 16
+              echo "submitted $name (analysis running)"
+            fi
+            LINKS="${LINKS}- [\`$name\`]($url)"$'\n'
+          done
+          # Append the scan links section to the release body
+          gh release view "$TAG" --repo "${{ github.repository }}" --json body -q .body > body.md
+          if ! grep -q "VirusTotal scan" body.md; then
+            {
+              echo ""
+              echo "**VirusTotal scan of every asset**"
+              echo ""
+              sed 's/^//' <<< "$LINKS"
+              echo "ML-based engines flag clean, low-reputation binaries; the verdicts that matter are signature-based ones. Verify first against \`SHA256SUMS.txt\`."
+            } >> body.md
+            gh release edit "$TAG" --repo "${{ github.repository }}" --notes-file body.md
+            echo "release body updated with VirusTotal links"
+          fi

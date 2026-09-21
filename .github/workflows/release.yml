@@ -60,6 +60,9 @@ jobs:
             **Windows: about the "Unknown Publisher" warning**
             The installer carries a signature that proves it has not been modified, but until the publisher certificate is verified with Microsoft (see `CODE_SIGNING.md` in the repo), Windows still shows the blue warning out of caution. If the checksum matches `SHA256SUMS.txt`, the file is intact: click **More info**, then **Run anyway**.
 
+            **macOS: first launch**
+            The dmg is signed and notarized when the Apple credentials are configured in CI (see `CODE_SIGNING.md`). Without them, macOS may refuse to open the app the first time: right-click the app icon and choose **Open**, then confirm. That only happens once.
+
             Verify any download against `SHA256SUMS.txt`.
 
             This is a beta release: features may change between betas.
@@ -191,6 +194,18 @@ jobs:
   build-macos-arm:
     needs: [version, create-release]
     runs-on: macos-latest
+    env:
+      # Apple signing and notarization run only when these secrets exist.
+      # With them set, tauri-action signs the app, staples the notarization
+      # ticket and the dmg opens with no Gatekeeper warning. Without them
+      # the dmg still builds; users right-click -> Open on first launch.
+      # The one-time Apple setup is documented in CODE_SIGNING.md.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -214,6 +229,15 @@ jobs:
   build-macos-intel:
     needs: [version, create-release]
     runs-on: macos-latest
+    env:
+      # Same Apple secrets as the Apple Silicon job. Cross-compiling from the
+      # arm64 runner keeps the Intel build fast; signing works the same.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -3,23 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
     <title>Fress: free and open-source apps</title>
     <meta name="description" content="A short directory of free and open-source apps. Downloads come from the official projects. Runs on your device, nothing tracked." />
 
-    <!-- Set the real theme before first paint so the UI and the theme button always agree. -->
-    <script>
-      (function () {
-        try {
-          var stored = localStorage.getItem('fress.theme');
-          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var theme = stored === 'light' || stored === 'dark' ? stored : (prefersDark ? 'dark' : 'light');
-          document.documentElement.classList.toggle('dark', theme === 'dark');
-          document.documentElement.style.colorScheme = theme;
-        } catch (e) {
-          document.documentElement.classList.add('dark');
-        }
-      })();
-    </script>
+    <!-- Theme bootstrap lives in its own file so the CSP can stay script-src 'self'. -->
+    <script src="/theme.js"></script>
 
     <link rel="icon" type="image/png" href="/app-logo.png" />
   </head>

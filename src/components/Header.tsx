@@ -305,10 +305,12 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Tabs: catalog vs combos (desktop; phones find them in the More menu) */}
             {onPageChange && (
-              <div id="page-tabs" className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
+              <div id="page-tabs" role="tablist" aria-label="Catalog sections" className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
                 <button
                   id="page-catalog-btn"
                   type="button"
+                  role="tab"
+                  aria-selected={page === 'catalog'}
                   onClick={() => onPageChange('catalog')}
                   className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
                     page === 'catalog'
@@ -322,6 +324,8 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   id="page-combos-btn"
                   type="button"
+                  role="tab"
+                  aria-selected={page === 'combos'}
                   onClick={() => onPageChange('combos')}
                   className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
                     page === 'combos'
@@ -389,6 +393,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => setShowMoreMenu(!showMoreMenu)}
                 className="p-1.5 text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] rounded-lg transition-colors"
                 title={t('header.moreMenu')}
+                aria-label={t('header.moreMenu')}
                 aria-expanded={showMoreMenu}
                 aria-haspopup="true"
               >
@@ -413,6 +418,7 @@ export const Header: React.FC<HeaderProps> = ({
                           <div className="px-3 pb-1 flex items-center gap-1.5">
                             <button
                               type="button"
+                              aria-pressed={page === 'catalog'}
                               onClick={() => {
                                 onPageChange('catalog');
                                 setShowMoreMenu(false);
@@ -427,6 +433,7 @@ export const Header: React.FC<HeaderProps> = ({
                             </button>
                             <button
                               type="button"
+                              aria-pressed={page === 'combos'}
                               onClick={() => {
                                 onPageChange('combos');
                                 setShowMoreMenu(false);
@@ -437,7 +444,7 @@ export const Header: React.FC<HeaderProps> = ({
                                   : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
                               }`}
                             >
-                              <Layers className="w-3.5 h-3.5" />
+                              <Layers className="w-3.5 h-3.5" aria-hidden="true" />
                               <span>Combos</span>
                             </button>
                           </div>

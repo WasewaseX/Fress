@@ -23,8 +23,10 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     items: [
       'New: every app now shows its official icon. All icons ship inside the app, nothing is fetched from outside.',
       'New: the Combos tab in the header. Kits of apps that solve one problem together, each with a one-click install script.',
-      'New: Ente Auth, Aegis, Ente Photos and Fossify Gallery joined the catalog, with two new combos: Second factor kit and Photo backup.',
+      'New: twelve more vetted apps cover the gaps from mail to browser: LibreWolf, Mullvad VPN, Proton VPN, SimpleX, Element, Mastodon, Jellyfin, Cryptomator, LibreTranslate, Fossify Calendar and Contacts, and Cake Wallet.',
+      'New: the Complete privacy pack combo. The whole stack, from mail to browser, in one kit.',
       'Tuta and Proton Mail joined too. Both meet the strict bar: good jurisdiction, encryption on by default, open source, audited.',
+      'The app itself got safer: a strict content security policy now runs inside the app, and macOS builds are ready for signing and notarization.',
       'Categories got trimmed so every filter is worth using.',
       'Removed the em dash habit from all text, so nothing reads machine-written.',
     ],

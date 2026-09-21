@@ -47,6 +47,7 @@ export const AppIcon: React.FC<{ appId: string; name: string; size?: number }> =
     <img
       src={src}
       alt=""
+      aria-hidden="true"
       width={size}
       height={size}
       loading="lazy"

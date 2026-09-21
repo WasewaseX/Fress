@@ -69,6 +69,18 @@ export const APP_ICONS: Record<string, string> = {
   'ente-auth': '/icons/ente-auth.png',
   aegis: '/icons/aegis.png',
   'fossify-gallery': '/icons/fossify-gallery.png',
+  librewolf: '/icons/librewolf.png',
+  'mullvad-vpn': '/icons/mullvad-vpn.png',
+  'proton-vpn': '/icons/proton-vpn.png',
+  element: '/icons/element.png',
+  simplex: '/icons/simplex.png',
+  mastodon: '/icons/mastodon.png',
+  jellyfin: '/icons/jellyfin.png',
+  libretranslate: '/icons/libretranslate.png',
+  cryptomator: '/icons/cryptomator.png',
+  'fossify-calendar': '/icons/fossify-calendar.png',
+  'fossify-contacts': '/icons/fossify-contacts.png',
+  'cake-wallet': '/icons/cake-wallet.png',
 };
 
 /** Icon path for an app, or null when the app has no shipped icon. */

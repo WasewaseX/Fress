@@ -37,11 +37,16 @@ export function getDownloadOptions(app: AppItem, platform: Platform): DownloadOp
   // a launcher/mirror whose Releases page holds no installers, and a dead
   // "GitHub Releases" link next to the real official targets only confuses.
   if (app.githubUrl && curated.length === 0) {
-    const releases = `${app.githubUrl.replace(/\/+$/, '')}/releases`;
+    // The primary repo may live on GitLab (LibreWolf builds there), so the
+    // label and the releases path follow the forge instead of assuming
+    // GitHub. GitLab exposes releases under /-/releases.
+    const onGitlab = /gitlab/.test(app.githubUrl);
+    const base = app.githubUrl.replace(/\/+$/, '');
+    const releases = onGitlab ? `${base}/-/releases` : `${base}/releases`;
     if (!options.some((o) => o.url === releases)) {
       options.push({
         kind: 'page',
-        label: 'GitHub Releases',
+        label: onGitlab ? 'GitLab Releases' : 'GitHub Releases',
         url: releases,
         note: 'Official builds and changelogs',
       });

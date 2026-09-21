@@ -12,7 +12,10 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "opener:default",
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://**" }]
+    },
     "opener:allow-reveal-item-in-dir"
   ]
 }

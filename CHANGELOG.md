@@ -2,20 +2,24 @@
 
 ## 1.0.3-beta (2026-09-21)
 
-The "look closer" release: every app got its official icon, a new Combos tab groups apps into kits, and the email recommendations now follow the strict vetting rules the project uses for privacy.
+The "look closer" release: every app got its official icon, a new Combos tab groups apps into kits, the email recommendations now follow the strict vetting rules the project uses for privacy, and the privacypack idea is carried through the whole catalog, from mail to browser, with stricter picks.
 
 ### Added
-- Official icons: every app in the catalog now shows its real project icon next to the name, in cards, the table view and the detail popup. All 63 icons ship with the app itself, so nothing is loaded from third-party servers at startup. Custom entries and anything without artwork fall back to a clean letter tile.
+- Official icons: every app in the catalog now shows its real project icon next to the name, in cards, the table view and the detail popup. All 75 icons ship with the app itself, so nothing is loaded from third-party servers at startup. Custom entries and anything without artwork fall back to a clean letter tile.
 - Combos tab: a new tab in the header groups apps into kits that solve one problem together, like "Private messaging", "Photo backup" or "Video studio". Each combo explains why the apps belong together, has a one-click install script (winget, Homebrew and Flatpak lines) and can hand the whole kit over to the batch selection bar. The idea comes from ente's PrivacyPack, rebuilt strictly with apps already in this catalog.
-- Four more picks from the PrivacyPack lists that pass the vetting bar: Ente Auth and Aegis Authenticator (the two honest answers to Google Authenticator and Authy, one with encrypted sync and one that never touches the network), Ente Photos (end-to-end encrypted photo backup, Cure53 audited) and Fossify Gallery (the community fork of Simple Mobile Tools, kept free of the ads that came with the buyout). Two new combos came with them: "Second factor kit" and "Photo backup".
+- Twelve more picks from the PrivacyPack lists that pass the vetting bar, covering the domains the catalog was missing: LibreWolf (Firefox with telemetry stripped, the daily-driver browser next to Tor Browser), Mullvad VPN and Proton VPN (two audited no-logs VPNs, one anonymous by design and one Swiss), SimpleX Chat and Element (messaging with no user IDs at all, and the Matrix network), Mastodon (federated social), Jellyfin (the Plex experience that runs at home), Cryptomator (audited vaults for any cloud folder), LibreTranslate (self-hosted translation), Fossify Calendar and Fossify Contacts (Android apps with no internet permission), and Cake Wallet (the open-source Monero wallet). Three new combos came with them: "Complete privacy pack", "Encrypted cloud" and "Media server".
+- Two other PrivacyPack picks that had already passed earlier vetting rounds: Ente Auth and Aegis Authenticator (the two honest answers to Google Authenticator and Authy, one with encrypted sync and one that never touches the network), Ente Photos (end-to-end encrypted photo backup, Cure53 audited) and Fossify Gallery (the community fork of Simple Mobile Tools, kept free of the ads that came with the buyout), covered by the "Second factor kit" and "Photo backup" combos.
 
 ### Changed
 - The catalog now follows a stricter privacy bar, using the same rules as the mail comparison: favorable jurisdiction, encryption on by default, open source code, independent audits. Two mail providers that meet the bar joined Privacy & Security: Tuta (Germany, encrypts subject lines too, publishes a warrant canary) and Proton Mail (Switzerland, zero-access encryption, audited). Providers that fail the bar (closed source, no at-rest encryption, Five Eyes jurisdiction) will not be listed.
 - Categories trimmed: "AI & Knowledge" is gone. Both of its apps (Ollama, Whisper Desktop) moved to Productivity & Office, which is what they actually are: tools you use to get work done. The remaining six categories all carry enough apps to be worth a filter.
+- Accessibility basics tightened: the Apps/Combos switcher is a real tab list for screen readers (with the phone version reporting its pressed state), the menu button now carries a proper label, app icons are marked decorative so screen readers read the app name once instead of twice, and the offline banner already announced itself politely.
+- The app itself got harder to misuse: the webview now runs a strict Content-Security-Policy (no inline scripts, remote content limited to the two data sources it actually talks to), external links may only open https addresses, and the theme bootstrap moved out of the page into its own file so the policy can stay strict.
 
 ### Fixed
 - No em dashes anywhere in the interface or documentation. Text now reads with plain sentences instead of the punctuation pattern people associate with machine-written copy.
 - The release workflow comments were rewritten in plainer language, and the author-guard workflow keeps enforcing that every commit in the repository is authored by WasewaseX, so the old ghost contributor identity can never return.
+- macOS builds are now wired for signing and notarization: when the Apple Developer credentials are set as repository secrets, the dmgs ship signed and notarized and open with a plain double-click; without them the release page explains the one-time right-click -> Open step. The setup is documented in CODE_SIGNING.md.
 
 ## 1.0.1-beta (2026-09-21)
 

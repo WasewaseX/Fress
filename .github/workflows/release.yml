@@ -119,6 +119,22 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+      - name: Sign the portable exe with Azure Trusted Signing
+        if: env.FRESS_SIGNING_CONFIGURED == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODESIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODESIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CODESIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\x86_64-pc-windows-msvc\release
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
       - name: Upload the signed installer
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
         shell: pwsh
@@ -257,6 +273,38 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: '--target aarch64-pc-windows-msvc --bundles nsis'
+      - name: Sign the ARM64 installer with Azure Trusted Signing
+        if: env.FRESS_SIGNING_CONFIGURED == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODESIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODESIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CODESIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\nsis
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Sign the ARM64 portable exe with Azure Trusted Signing
+        if: env.FRESS_SIGNING_CONFIGURED == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODESIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODESIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CODESIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\aarch64-pc-windows-msvc\release
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
       - name: Sign with the persistent publisher certificate
         if: env.FRESS_SIGNING_CONFIGURED != 'true' && env.FRESS_PFX_CONFIGURED == 'true'
         shell: pwsh

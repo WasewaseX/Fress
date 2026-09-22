@@ -127,11 +127,33 @@ tampered download is refused and the old version keeps running (rollback).
 
 The release pipeline is already wired for it: every `tauri-action` build in
 `release.yml` produces the updater artifacts (`latest.json`, `.AppImage.sig`,
-`.app.tar.gz.sig`, `*-setup.exe.sig`) **when** the repository has the update
-key configured. Without the key nothing changes — releases build exactly as
-before, which is the state today.
+`.app.tar.gz.sig`, `*-setup.exe.sig`) when the repository has the update key
+configured. **The keypair was generated and the secrets were set on
+2026-09-22**, so from the next release on, the manifests and signatures ship
+automatically.
 
-### Generating the key (one-time, on your own machine)
+Current status at a glance:
+
+| Item | State |
+| --- | --- |
+| Private key | `TAURI_SIGNING_PRIVATE_KEY` secret (backup in the private `fress-state` repo, `updater-key-backup/`) |
+| Key password | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret (same backup) |
+| Public key | `fress-updater.key.pub` in this repo, also recorded below |
+| In-app updater plugin | not wired yet — the remaining step |
+
+Public key (safe to distribute; embed it in `tauri.conf.json` when the
+updater plugin gets wired):
+
+```text
+dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MzhDNjgxMjNGQjYzM0IKUldRN1kvc2pnY1k0VnNHRXkyL2UycG5NZFhvdUFLM3I0YXNsYTN4c2sxUlc4YVUyRktUdDM4Vk4K
+```
+
+### Generating a replacement key (rotation)
+
+The deployed keypair was generated 2026-09-22. Because no released app embeds
+its public key yet, it can still be rotated for free any time before the
+updater plugin ships. To rotate (also the recovery procedure if the key is
+ever exposed):
 
 ```bash
 npx tauri signer generate -w fress-updater.key
@@ -158,13 +180,12 @@ one manual reinstall for everyone.
 - `tauri-action` signs the updater bundles and uploads `latest.json` to the
   release; the platform entries map to the signed artifacts automatically.
 
-### Deliberately not done yet
+### Remaining step: wire the in-app plugin
 
 The in-app side (the `tauri-plugin-updater` dependency, the
-`plugins.updater` block in `tauri.conf.json` with the **public** key and the
-releases endpoint, the capability permission) is intentionally absent until a
-real keypair exists: a placeholder public key would make the updater trust a
-key nobody holds. When the key is generated, wire the plugin, put the public
+`plugins.updater` block in `tauri.conf.json` with the public key above and
+the releases endpoint, the capability permission) is the one piece still
+missing. The keypair it needs now exists — wire the plugin, put the public
 key in the config, and the CI manifests from that release onward are already
 signed with the matching private key.
 

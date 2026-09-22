@@ -619,12 +619,24 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           echo "build-tools: $BT"
           classify() {
-            case "$(basename "$(dirname "$1")")" in
-              universal) echo "universal" ;;
-              arm64|arm64-v8a) echo "arm64" ;;
-              armeabi-v7a|armeabi) echo "arm" ;;
-              x86_64) echo "x64" ;;
-              x86) echo "x86" ;;
+            # Gradle output layout: apk/<abi>/release/<file>.apk - the ABI
+            # directory is TWO levels above the file. Fall back to the file
+            # name itself (app-universal-release-unsigned.apk and friends).
+            local dir=$(basename "$(dirname "$(dirname "$1")")")
+            local file=$(basename "$1")
+            case "$dir" in
+              universal) echo "universal"; return ;;
+              arm64|arm64-v8a) echo "arm64"; return ;;
+              armeabi-v7a|armeabi) echo "arm"; return ;;
+              x86_64) echo "x64"; return ;;
+              x86) echo "x86"; return ;;
+            esac
+            case "$file" in
+              *universal*) echo "universal" ;;
+              *arm64*|*v8a*) echo "arm64" ;;
+              *armeabi*|*v7a*) echo "arm" ;;
+              *x86_64*) echo "x64" ;;
+              *x86*) echo "x86" ;;
               *) echo "" ;;
             esac
           }

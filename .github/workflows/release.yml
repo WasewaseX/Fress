@@ -335,6 +335,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-pc-windows-msvc
+      - name: Install cross-compile target
+        run: rustup target add aarch64-pc-windows-msvc
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -517,6 +519,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+      # rust-toolchain.toml pins channel 1.98.1, which rustup resolves as a
+      # SEPARATE toolchain from the action's "stable" install — targets given
+      # to the action land in the wrong one. Install explicitly into the
+      # ACTIVE (overridden) toolchain, same as the android fallback step.
+      - name: Install cross-compile target
+        run: rustup target add aarch64-apple-darwin
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -581,6 +589,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin
+      - name: Install cross-compile target
+        run: rustup target add x86_64-apple-darwin
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri

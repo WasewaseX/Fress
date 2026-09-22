@@ -356,9 +356,10 @@ fn part_path_for(dest: &PathBuf) -> PathBuf {
         .file_name()
         .map(|s| format!("{}.part", s.to_string_lossy()))
         .unwrap_or_else(|| "download.part".to_string());
-    dest.parent()
-        .map(|p| p.join(name))
-        .unwrap_or_else(|| PathBuf::from(name))
+    match dest.parent() {
+        Some(p) => p.join(name),
+        None => PathBuf::from(name),
+    }
 }
 
 #[tauri::command]
@@ -368,13 +369,13 @@ async fn start_download(
     url: String,
     filename: Option<String>,
     directory: Option<String>,
-    /// Trusted SHA-256 to verify against (hex). When given, a mismatching
-    /// download is deleted and reported as an integrity failure instead of
-    /// being handed to the user as a finished file.
+    // Trusted SHA-256 to verify against (hex). When given, a mismatching
+    // download is deleted and reported as an integrity failure instead of
+    // being handed to the user as a finished file.
     expected_sha256: Option<String>,
-    /// Continue an interrupted download from its .part file. The caller
-    /// passes the same filename it saw before; without a matching .part the
-    /// download simply starts over.
+    // Continue an interrupted download from its .part file. The caller
+    // passes the same filename it saw before; without a matching .part the
+    // download simply starts over.
     resume: Option<bool>,
 ) -> Result<u32, String> {
     let dir: PathBuf = match directory {

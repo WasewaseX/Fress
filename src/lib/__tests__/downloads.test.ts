@@ -39,10 +39,8 @@ describe('pickOwnAsset — Fress picking its own update file', () => {
   });
 
   it('prefers the setup exe on Windows, never the msi/zip side files', () => {
-    const ua = navigator;
-    // jsdom-free environment: navigator may be undefined-ish; the function
-    // falls back to 'windows' when the UA carries no OS markers.
-    void ua;
+    // No navigator in Node 20 CI: pickOwnAsset falls back to the 'windows'
+    // platform branch, which is exactly the branch under test here.
     const asset = pickOwnAsset(release([
       'Fress_1.0.2-alpha_x64_en-US.msi',
       'Fress_1.0.2-alpha_arm64-setup.exe',

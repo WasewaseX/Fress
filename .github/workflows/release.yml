@@ -73,7 +73,7 @@ jobs:
             | macOS (Intel) | `Fress_*_x64.dmg` |
             | Linux (AppImage) | `Fress_*_amd64.AppImage` |
             | Linux (deb) | `Fress_*_amd64.deb` |
-            | Linux (rpm) | `Fress_*_x86_64.rpm` |
+            | Linux (rpm) | `Fress-*.x86_64.rpm` |
             | Android (universal APK) | `Fress_*_universal.apk` |
             | Android (arm64 APK) | `Fress_*_arm64.apk` |
 
@@ -771,7 +771,6 @@ jobs:
             "Fress_${VERSION}_aarch64.dmg"
             "Fress_${VERSION}_amd64.AppImage"
             "Fress_${VERSION}_amd64.deb"
-            "Fress_${VERSION}_x86_64.rpm"
             "Fress_${VERSION}_universal.apk"
             "SHA256SUMS.txt"
           )
@@ -782,6 +781,14 @@ jobs:
               MISSING=1
             fi
           done
+          # The RPM follows the native RPM naming convention with dashes and
+          # a build number (Fress-1.0.2-alpha-1.x86_64.rpm), not the
+          # underscore scheme the other bundles use, so it is matched by glob.
+          if ! ls "Fress_${VERSION}"-*.x86_64.rpm >/dev/null 2>&1 || \
+             [ ! -s $(ls "Fress_${VERSION}"-*.x86_64.rpm | head -1) ]; then
+            echo "::error::required artifact missing or empty: Fress_${VERSION}-*.x86_64.rpm"
+            MISSING=1
+          fi
           if [ ! -f "Fress_${VERSION}_arm64.apk" ]; then
             echo "::warning::optional per-ABI asset missing: Fress_${VERSION}_arm64.apk (the universal APK covers every ABI)"
           fi

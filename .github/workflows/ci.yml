@@ -49,6 +49,17 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Build the frontend
+        # tauri::generate_context! embeds the frontendDist directory at
+        # compile time - without a built ../dist the proc macro panics and
+        # cargo check fails for reasons that have nothing to do with Rust.
+        run: |
+          npm ci
+          npm run build
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update

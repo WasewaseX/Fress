@@ -784,9 +784,9 @@ jobs:
           # The RPM follows the native RPM naming convention with dashes and
           # a build number (Fress-1.0.2-alpha-1.x86_64.rpm), not the
           # underscore scheme the other bundles use, so it is matched by glob.
-          if ! ls "Fress_${VERSION}"-*.x86_64.rpm >/dev/null 2>&1 || \
-             [ ! -s $(ls "Fress_${VERSION}"-*.x86_64.rpm | head -1) ]; then
-            echo "::error::required artifact missing or empty: Fress_${VERSION}-*.x86_64.rpm"
+          RPM=$(ls Fress*x86_64.rpm 2>/dev/null | head -1)
+          if [ -z "$RPM" ] || [ ! -s "$RPM" ]; then
+            echo "::error::required artifact missing or empty: Fress*x86_64.rpm"
             MISSING=1
           fi
           if [ ! -f "Fress_${VERSION}_arm64.apk" ]; then

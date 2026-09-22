@@ -182,12 +182,25 @@ one manual reinstall for everyone.
 
 ### Remaining step: wire the in-app plugin
 
-The in-app side (the `tauri-plugin-updater` dependency, the
-`plugins.updater` block in `tauri.conf.json` with the public key above and
-the releases endpoint, the capability permission) is the one piece still
-missing. The keypair it needs now exists — wire the plugin, put the public
-key in the config, and the CI manifests from that release onward are already
-signed with the matching private key.
+The **config** half is done: `tauri.conf.json` carries the
+`plugins.updater` block (public key above + the releases endpoint), which
+is what the release bundler needs to produce signed updater artifacts.
+Still missing is the **runtime** half: the `tauri-plugin-updater`
+dependency in `src-tauri/Cargo.toml`, its `.plugin(...)` registration in
+`lib.rs`, and the capability permission. Until that ships, updates are
+delivered by the built-in update check (in-app download + SHA-256
+verification against `SHA256SUMS.txt`) and the manifests/signatures in
+each release simply wait for it.
+
+Two notes for when the runtime plugin gets wired:
+
+- The endpoint points at GitHub's `releases/latest/download/latest.json`
+  alias, which only resolves for STABLE releases. While Fress publishes
+  alpha/beta prereleases, that alias 404s — use a per-channel manifest
+  (a branch file or a tiny redirect service listing the newest
+  prerelease) or ship a stable release.
+- Signing a bundled exe afterwards (e.g. Authenticode) invalidates the
+  `.sig` files; re-run the updater bundle step over signed binaries.
 
 ### Sequencing warning for later
 

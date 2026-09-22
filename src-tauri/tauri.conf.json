@@ -43,5 +43,13 @@
         "installMode": "currentUser"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MzhDNjgxMjNGQjYzM0IKUldRN1kvc2pnY1k0VnNHRXkyL2UycG5NZFhvdUFLM3I0YXNsYTN4c2sxUlc4YVUyRktUdDM4Vk4K",
+      "endpoints": [
+        "https://github.com/WasewaseX/Fress/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

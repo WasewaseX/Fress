@@ -45,6 +45,15 @@ export interface AppItem {
   isPortable?: boolean;
   architectures?: ('x86_64' | 'arm64' | 'universal')[];
   offlineReady?: boolean;
+  /** Date (YYYY-MM-DD) a human last re-checked this entry's links, releases
+   * and metadata. Optional until the entry is next reviewed; the detail
+   * modal shows it when present so freshness is never pretended. */
+  lastVerifiedAt?: string;
+  /** Per-platform asset-name regexes (case-insensitive) for projects whose
+   * release files follow no common naming scheme. When one matches, it
+   * outranks the heuristic asset picker entirely. Example:
+   *   assetPatterns: { windows: 'myapp-.*?-win64(-portable)?\\.zip' } */
+  assetPatterns?: Partial<Record<Platform, string>>;
   addedAt: string;
   isCustom?: boolean;
 }

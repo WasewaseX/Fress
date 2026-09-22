@@ -177,6 +177,29 @@ for (const app of apps) {
     warn(label, 'has an Android store id but does not list the android platform');
   }
 
+  // Download overrides must at least be valid regexes, and only for
+  // platforms the app supports - otherwise the override can never fire.
+  if (app.assetPatterns) {
+    for (const [plat, pattern] of Object.entries(app.assetPatterns)) {
+      if (!VALID_PLATFORMS.includes(plat as Platform)) {
+        err(label, `assetPatterns has an unknown platform: ${plat}`);
+        continue;
+      }
+      if (!app.platforms?.includes(plat as Platform)) {
+        err(label, `assetPatterns.${plat} is set but the app does not list that platform`);
+      }
+      try {
+        new RegExp(pattern as string, 'i');
+      } catch {
+        err(label, `assetPatterns.${plat} is not a valid regex: ${pattern}`);
+      }
+    }
+  }
+
+  if (app.lastVerifiedAt !== undefined && !ISO_DATE_RE.test(app.lastVerifiedAt)) {
+    err(label, `lastVerifiedAt must be YYYY-MM-DD, got: ${app.lastVerifiedAt}`);
+  }
+
   // 3. Icon: every catalog entry ships its official artwork.
   const iconPath = APP_ICONS[app.id];
   if (!iconPath) {

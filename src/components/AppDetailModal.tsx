@@ -16,7 +16,8 @@ import {
   Download,
   MonitorSmartphone,
   Loader2,
-  Play
+  Play,
+  AlertTriangle
 } from 'lucide-react';
 import { PLATFORM_LABELS, getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
 import { useDownloads, formatBytes } from '../lib/downloads';
@@ -173,6 +174,12 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
               </span>
               <span className="text-[10px] font-mono uppercase tracking-wide bg-white/15 rounded px-1.5 py-0.5 shrink-0">{t('card.download')}</span>
             </button>
+          )}
+          {wantGh && ghState === 'ready' && gh?.weak && (
+            <p className="text-[11px] text-amber-500 dark:text-amber-400 leading-snug flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
+              <span>{t('detail.weakPick')}</span>
+            </p>
           )}
           {wantGh && ghState === 'loading' && (
             <div className="w-full flex items-center gap-2 text-xs px-3 py-2.5 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300" role="status">
@@ -339,6 +346,18 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
               <span id="detail-license-badge" className="text-xs font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] text-slate-300 px-2 py-0.5 rounded">
                 {app.license}
               </span>
+              {app.lastVerifiedAt && (
+                // Freshness is only ever claimed when a human actually
+                // re-checked the entry - never faked for the whole catalog.
+                <span
+                  id="detail-verified-badge"
+                  className="text-xs text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-2 py-0.5 rounded inline-flex items-center gap-1"
+                  title={t('detail.lastVerifiedHint')}
+                >
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+                  <span>{t('detail.lastVerified').replace('{d}', app.lastVerifiedAt)}</span>
+                </span>
+              )}
               {hasAndroid && (
                 <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded inline-flex items-center gap-1 font-medium">
                   <Smartphone className="w-3 h-3" />

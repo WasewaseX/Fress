@@ -286,6 +286,7 @@ function AppShell() {
     setIsDownloadsOpen(true);
     try {
       let started = 0;
+      let weakPicks = 0;
       const skipped: string[] = [];
       for (const app of selectedBatchApps) {
         const platform = guessUserPlatform(app);
@@ -296,6 +297,7 @@ function AppShell() {
           if (resolved) {
             url = resolved.url;
             name = resolved.filename;
+            if (resolved.weak) weakPicks += 1;
           }
         } catch {
           url = null;
@@ -326,7 +328,12 @@ function AppShell() {
         }
       }
       if (started > 0) {
-        toast.success(t('batchDL.started').replace('{n}', String(started)));
+        toast.success(t('batchDL.started').replace('{n}', String(started)), {
+          description:
+            weakPicks > 0
+              ? t('batchDL.weakNote').replace('{n}', String(weakPicks))
+              : undefined,
+        });
       }
       if (skipped.length > 0) {
         toast.info(t('batchDL.skipped').replace('{n}', String(skipped.length)), {

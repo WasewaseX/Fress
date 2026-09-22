@@ -33,6 +33,13 @@ export interface ResolvedDownload {
   version: string;
   publishedAt?: string;
   releasePageUrl?: string;
+  /** 'override' = the catalog author pinned this exact naming pattern;
+   * 'heuristic' = picked by the scoring rules. */
+  matchedBy?: 'override' | 'heuristic';
+  /** True when the heuristic could only produce a low-confidence pick
+   * (odd extension, no architecture marker, stripped flags). The UI warns
+   * instead of presenting it as a sure thing. */
+  weak?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -47,7 +54,9 @@ export function parseGithubRepo(url?: string): string | null {
 }
 
 export function cleanVersion(tag: string): string {
-  return tag.replace(/^v/i, '').replace(/^ver/i, '') || tag;
+  // "ver" must be stripped before "v", or "v4.5" ordering turns "ver4.5"
+  // into "er4.5" (caught by unit tests).
+  return tag.replace(/^ver/i, '').replace(/^v/i, '') || tag;
 }
 
 /* ------------------------------------------------------------------ */
@@ -117,10 +126,68 @@ function scoreAsset(name: string, platform: Platform, arch: string): number {
 }
 
 export function pickAsset(assets: ReleaseAsset[], platform: Platform, arch: string): ReleaseAsset | null {
+  return pickAssetDetailed(assets, platform, arch)?.pick ?? null;
+}
+
+/** Below this heuristic score the pick is reported as low confidence.
+ * A typical solid pick scores 6-13; 1 and below means the only candidate
+ * was an odd extension or something stripped of identifying markers. */
+const WEAK_SCORE_MAX = 1;
+
+export interface AssetPick {
+  pick: ReleaseAsset;
+  matchedBy: 'override' | 'heuristic';
+  weak: boolean;
+}
+
+/**
+ * Picks the asset a user on this platform/architecture needs.
+ *
+ * Order of trust:
+ *  1. The app's own `assetPatterns[platform]` regex, when provided - the
+ *     catalog author vouched for that naming. Bad-extension files are still
+ *     excluded, and a pattern that matches nothing falls through to (2)
+ *     rather than failing the download.
+ *  2. The scoring heuristic below, which never claims certainty it does not
+ *     have: weak picks are flagged so the UI can show a caution instead of
+ *     silently handing over a questionable file.
+ */
+export function pickAssetDetailed(
+  assets: ReleaseAsset[],
+  platform: Platform,
+  arch: string,
+  patterns?: Partial<Record<Platform, string>>
+): AssetPick | null {
+  const usable = assets.filter((a) => !BAD_EXT.test(a.name) && !BAD_NAME.test(a.name));
+
+  const pattern = patterns?.[platform];
+  if (pattern) {
+    try {
+      const re = new RegExp(pattern, 'i');
+      const matches = usable.filter((a) => re.test(a.name));
+      if (matches.length > 0) {
+        // Among pattern matches the heuristic still breaks ties (x64 vs
+        // arm64 variants of the same pinned naming).
+        let best = matches[0];
+        let bestScore = -Infinity;
+        for (const a of matches) {
+          const s = scoreAsset(a.name, platform, arch);
+          if (s > bestScore) {
+            bestScore = s;
+            best = a;
+          }
+        }
+        return { pick: best, matchedBy: 'override', weak: false };
+      }
+    } catch {
+      // An invalid pattern must never kill the download path; the catalog
+      // validator flags it separately.
+    }
+  }
+
   let best: ReleaseAsset | null = null;
   let bestScore = -Infinity;
-  for (const a of assets) {
-    if (BAD_EXT.test(a.name) || BAD_NAME.test(a.name)) continue;
+  for (const a of usable) {
     const s = scoreAsset(a.name, platform, arch);
     if (s === -1) continue;
     if (s > bestScore) {
@@ -128,7 +195,8 @@ export function pickAsset(assets: ReleaseAsset[], platform: Platform, arch: stri
       best = a;
     }
   }
-  return best;
+  if (!best) return null;
+  return { pick: best, matchedBy: 'heuristic', weak: bestScore <= WEAK_SCORE_MAX };
 }
 
 /* ------------------------------------------------------------------ */
@@ -270,16 +338,18 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
     const p = (async () => {
         try {
           const [rel, arch] = await Promise.all([getLatestRelease(repo), getHostArch()]);
-          const pick = pickAsset(rel.assets, platform, arch);
-          if (!pick) return null;
+          const detailed = pickAssetDetailed(rel.assets, platform, arch, app.assetPatterns);
+          if (!detailed) return null;
           return {
             source: 'github',
-            url: pick.downloadUrl,
-            filename: pick.name,
-            size: pick.size,
+            url: detailed.pick.downloadUrl,
+            filename: detailed.pick.name,
+            size: detailed.pick.size,
             version: cleanVersion(rel.tag),
             publishedAt: rel.publishedAt,
             releasePageUrl: rel.htmlUrl,
+            matchedBy: detailed.matchedBy,
+            weak: detailed.weak || undefined,
           } as ResolvedDownload;
         } catch {
           return null;

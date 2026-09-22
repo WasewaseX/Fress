@@ -17,6 +17,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.3-alpha',
+    date: '2026-09-22',
+    title: 'Hardening: lint-clean Rust, small per-ABI Android APKs, updater-ready releases',
+    items: [
+      'Android finally ships the small APKs it always promised: one per architecture (arm64, armv7, x86_64, x86) at roughly half the universal APK size, alongside the universal one. The arm64 APK is now a required, gate-checked release artifact instead of a best effort.',
+      'The Rust side passes clippy at its strictest setting (-D warnings) and is fully formatted; both checks are now hard CI gates, so a warning fails a build like an error.',
+      'Release pipeline groundwork for signed in-app updates: when the update signing key is configured, every release now also carries a signed latest.json manifest and per-artifact signatures. Without the key, nothing changes.',
+    ],
+  },
+  {
     version: '1.0.2-alpha',
     date: '2026-09-22',
     title: 'Releases that prove themselves, resumable downloads, real verification',

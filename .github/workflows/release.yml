@@ -74,8 +74,10 @@ jobs:
             | Linux (AppImage) | `Fress_*_amd64.AppImage` |
             | Linux (deb) | `Fress_*_amd64.deb` |
             | Linux (rpm) | `Fress-*.x86_64.rpm` |
-            | Android (universal APK) | `Fress_*_universal.apk` |
-            | Android (arm64 APK) | `Fress_*_arm64.apk` |
+            | Android (universal APK, every device) | `Fress_*_universal.apk` |
+            | Android (arm64 APK, smaller download) | `Fress_*_arm64.apk` |
+            | Android (armv7 APK) | `Fress_*_arm.apk` |
+            | Android (x86_64 / x86 APK) | `Fress_*_x64.apk` / `Fress_*_x86.apk` |
 
             **Where Fress is distributed**
             Only here, on the official GitHub Releases page of this repository, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer on any other site or file host, it is not ours.
@@ -114,19 +116,37 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Decide updater signing flags
+        # The Tauri updater artifacts (latest.json + .sig files) are only
+        # built when the update key exists as a secret; without it the
+        # release builds exactly as before. See CODE_SIGNING.md.
+        id: updater
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build Windows installer (NSIS)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          includeUpdaterJson: true
           # NSIS only here. WiX (MSI) rejects prerelease versions like
           # 1.0.1-alpha ("Product version must be major.minor.build"), and
           # with both targets in one invocation that failure killed the whole
           # step before the finished NSIS exe could be uploaded - which is
           # exactly how v1.0.1-alpha lost its x64 installer. The MSI is built
           # separately below with a numeric build version.
-          args: '--target x86_64-pc-windows-msvc --bundles nsis'
+          args: '--target x86_64-pc-windows-msvc --bundles nsis ${{ steps.updater.outputs.args }}'
       - name: Build Windows MSI with a numeric build version
         # WiX only accepts ProductVersion of the form major.minor.build, so
         # the MSI is built from a config override that strips the prerelease
@@ -319,13 +339,28 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Decide updater signing flags
+        id: updater
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build Windows ARM64 installer (NSIS)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target aarch64-pc-windows-msvc --bundles nsis'
+          includeUpdaterJson: true
+          args: '--target aarch64-pc-windows-msvc --bundles nsis ${{ steps.updater.outputs.args }}'
       - name: Sign the ARM64 installer with Azure Trusted Signing
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
         uses: azure/trusted-signing-action@v0
@@ -444,13 +479,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: npm install
+      - name: Decide updater signing flags
+        id: updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build Linux bundles (AppImage + deb + rpm)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target x86_64-unknown-linux-gnu --bundles appimage deb rpm'
+          includeUpdaterJson: true
+          args: '--target x86_64-unknown-linux-gnu --bundles appimage deb rpm ${{ steps.updater.outputs.args }}'
 
   build-macos-arm:
     needs: [version, create-release]
@@ -472,6 +521,17 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Decide updater signing flags
+        id: updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build macOS Apple Silicon (.dmg), signed and notarized
         # Runs only when the Apple Developer credentials are configured.
         # tauri-action signs the app, submits it for notarization and staples
@@ -487,9 +547,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target aarch64-apple-darwin --bundles dmg'
+          includeUpdaterJson: true
+          args: '--target aarch64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
       - name: Build macOS Apple Silicon (.dmg), unsigned
         # Without Apple credentials the dmg still builds and ships; macOS asks
         # for a one-time right-click -> Open on first launch.
@@ -497,9 +560,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target aarch64-apple-darwin --bundles dmg'
+          includeUpdaterJson: true
+          args: '--target aarch64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
 
   build-macos-intel:
     needs: [version, create-release]
@@ -519,6 +585,17 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Decide updater signing flags
+        id: updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Cross-compile macOS Intel (.dmg), signed and notarized
         # Cross-compiling from the arm64 runner keeps the Intel build fast;
         # signing and notarization work the same way.
@@ -532,17 +609,23 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target x86_64-apple-darwin --bundles dmg'
+          includeUpdaterJson: true
+          args: '--target x86_64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
       - name: Cross-compile macOS Intel (.dmg), unsigned
         if: env.FRESS_APPLE_CONFIGURED != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target x86_64-apple-darwin --bundles dmg'
+          includeUpdaterJson: true
+          args: '--target x86_64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
 
   build-android:
     needs: [version, create-release]
@@ -595,7 +678,7 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass fressandroid -keypass fressandroid \
             -dname "CN=Fress, OU=Fress, O=Fress, L=Internet, ST=Internet, C=US"
-      - name: Build Android APKs (all ABIs + universal)
+      - name: Build Android APKs (per-ABI splits + universal)
         env:
           TAURI_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/fress.keystore
           TAURI_ANDROID_KEYSTORE_PASSWORD: fressandroid
@@ -606,6 +689,12 @@ jobs:
           # Stamp our own launcher icon (blue leaf) into the generated Android
           # project. Without this the APK ships the Tauri template icon.
           npx tauri icon src-tauri/icons/icon.png
+          # Two gradle passes: gradle's per-ABI split output and its universal
+          # APK are mutually exclusive (enabling the abi splits turns
+          # universalApk off), so pass one builds one small APK per ABI and
+          # pass two builds the universal one. The Rust cross builds are
+          # cached between the passes - the second run is mostly packaging.
+          npx tauri android build --apk --split-per-abi --target aarch64 --target armv7 --target i686 --target x86_64
           npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
       - name: Align, sign, and upload APKs
         # The old arm64 lookup (-path '*arm64*') never matched the actual
@@ -653,6 +742,7 @@ jobs:
             SIGNED[$kind]="Fress_${VERSION}_${kind}.apk"
           done
           if [ -z "${SIGNED[universal]:-}" ]; then echo "No universal APK found"; exit 1; fi
+          if [ -z "${SIGNED[arm64]:-}" ]; then echo "::error::--split-per-abi produced no arm64 APK; the per-ABI promise needs it"; exit 1; fi
           UPLOADS="${SIGNED[universal]}"
           for kind in arm64 arm x64 x86; do
             if [ -n "${SIGNED[$kind]:-}" ]; then UPLOADS="$UPLOADS ${SIGNED[$kind]}"; fi
@@ -772,6 +862,7 @@ jobs:
             "Fress_${VERSION}_amd64.AppImage"
             "Fress_${VERSION}_amd64.deb"
             "Fress_${VERSION}_universal.apk"
+            "Fress_${VERSION}_arm64.apk"
             "SHA256SUMS.txt"
           )
           MISSING=0
@@ -789,9 +880,10 @@ jobs:
             echo "::error::required artifact missing or empty: Fress*x86_64.rpm"
             MISSING=1
           fi
-          if [ ! -f "Fress_${VERSION}_arm64.apk" ]; then
-            echo "::warning::optional per-ABI asset missing: Fress_${VERSION}_arm64.apk (the universal APK covers every ABI)"
-          fi
+          # The per-ABI APKs are produced by the --split-per-abi gradle pass
+          # and enforced as required above (arm64) or best-effort (armv7,
+          # x86_64, x86) - the universal APK remains the fallback for
+          # architectures we could not split for.
           if [ "$MISSING" != "0" ]; then
             echo "::error::release is incomplete; it stays a private draft. Re-run the failed build jobs, this gate runs again afterwards."
             exit 1

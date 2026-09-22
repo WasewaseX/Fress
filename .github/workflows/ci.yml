@@ -65,13 +65,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Rust formatting
-        # Advisory until the existing tree is formatted in one dedicated
-        # commit; flip continue-on-error off afterwards.
-        continue-on-error: true
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Clippy
-        # Advisory for the same reason as rustfmt above.
-        continue-on-error: true
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets

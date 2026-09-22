@@ -116,6 +116,67 @@ key password `fressandroid`) and reused for every release. A fresh keystore
 per release would make Android refuse update-over-install (signature
 mismatch), forcing users to uninstall first.
 
+## In-app updates: the Tauri updater key
+
+Fress ships two update paths. Today the app checks GitHub Releases itself,
+downloads the matching installer and verifies its SHA256 against
+`SHA256SUMS.txt` (see `src/lib/selfUpdate.ts`). The second path is the Tauri
+updater: a signed `latest.json` manifest plus `.sig` signatures that a future
+in-app updater verifies with minisign before installing anything — a bad or
+tampered download is refused and the old version keeps running (rollback).
+
+The release pipeline is already wired for it: every `tauri-action` build in
+`release.yml` produces the updater artifacts (`latest.json`, `.AppImage.sig`,
+`.app.tar.gz.sig`, `*-setup.exe.sig`) **when** the repository has the update
+key configured. Without the key nothing changes — releases build exactly as
+before, which is the state today.
+
+### Generating the key (one-time, on your own machine)
+
+```bash
+npx tauri signer generate -w fress-updater.key
+```
+
+You are asked for an optional password (recommended). Then add two repository
+secrets under **Settings -> Secrets and variables -> Actions**:
+
+| Secret | Content |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | the full content of `fress-updater.key` (it is a text file) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password you chose (empty if none) |
+
+Back the key up with the same care as the Windows `.pfx` and the Android
+keystore. If it is lost, a new key can be generated, but already-installed
+updaters will not trust artifacts signed by the new key — that migration needs
+one manual reinstall for everyone.
+
+### What CI does with it
+
+- `updater-overrides.json` (repo root) turns on `bundle.createUpdaterArtifacts`
+  via `--config`, but only when the key secret exists (the `Decide updater
+  signing flags` step passes it to `tauri-action` conditionally).
+- `tauri-action` signs the updater bundles and uploads `latest.json` to the
+  release; the platform entries map to the signed artifacts automatically.
+
+### Deliberately not done yet
+
+The in-app side (the `tauri-plugin-updater` dependency, the
+`plugins.updater` block in `tauri.conf.json` with the **public** key and the
+releases endpoint, the capability permission) is intentionally absent until a
+real keypair exists: a placeholder public key would make the updater trust a
+key nobody holds. When the key is generated, wire the plugin, put the public
+key in the config, and the CI manifests from that release onward are already
+signed with the matching private key.
+
+### Sequencing warning for later
+
+If the Windows installers ever get Authenticode-signed **after** the build
+(SignPath or Azure Trusted Signing), the Authenticode step modifies the exe
+bytes and the minisign `.sig` produced by `tauri-action` no longer matches.
+In that setup the `.sig` files must be regenerated over the signed binaries
+(`npx tauri signer sign` on the signed file). Today no Authenticode signing is
+configured, so the signatures match what `tauri-action` uploads.
+
 ## macOS: signing and notarization
 
 Gatekeeper treats unsigned apps the same way Windows treats unknown publishers:

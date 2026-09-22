@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.3-alpha (2026-09-22)
+
+The hardening release: the Rust side is lint-clean under the strictest settings, Android finally ships the small per-ABI APKs it always promised, and the release pipeline is ready to produce signed updater manifests the moment a signing key exists.
+
+### Changed
+- **The Rust CI gates are no longer advisory.** The whole `src-tauri` tree is now formatted with `rustfmt`, and every `clippy` warning is fixed (`cargo clippy --all-targets -- -D warnings` passes clean) — the download runner's eight-parameter signature became a `DownloadPlan` struct, path helpers take `&Path` instead of `&PathBuf`, and the resume planner uses `if let` instead of an unwrap after a variant check. `continue-on-error` is removed from both the fmt and clippy CI steps; a warning now fails the build like any other error.
+- **Android ships real per-ABI APKs.** The build runs a second gradle pass with `--split-per-abi` (gradle's split output and its universal APK are mutually exclusive), producing one small APK per architecture: `arm64-v8a`, `armeabi-v7a`, `x86_64` and `x86` — roughly half the download size of the universal APK, which is still built and shipped for every device. The release-page table lists all of them.
+- `Fress_*_arm64.apk` is now a **required** release artifact: the verify-release gate fails if the split pass does not produce it (previously it only warned), and the Android build job fails fast with a clear error before the gate ever runs.
+
+### Added
+- **Signed-updater groundwork.** When the `TAURI_SIGNING_PRIVATE_KEY` secret exists, every desktop build now also produces Tauri updater artifacts — a signed `latest.json` manifest plus `.sig` signatures — by enabling `createUpdaterArtifacts` through a conditional config override (`updater-overrides.json`). Without the key, releases build exactly as before. The in-app updater plugin stays deliberately unwired until a real keypair exists (a placeholder public key would make the updater trust a key nobody holds); the full path is documented in `CODE_SIGNING.md`, including the Authenticode sequencing warning for when code signing arrives.
+
 ## 1.0.2-alpha (2026-09-22)
 
 The reliability release: releases only go live when they are complete and every file hashes true, the updater finally understands prereleases, downloads can survive a dropped connection, and the whole catalog is machine-checked on every PR.

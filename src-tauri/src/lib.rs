@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -104,7 +104,8 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
     if status == reqwest::StatusCode::NOT_FOUND {
         return Err("No stable release found for this project".into());
     }
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN
+    {
         return Err("GitHub rate limit reached; try again in a few minutes".into());
     }
     if !status.is_success() {
@@ -250,7 +251,8 @@ fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '(' || c == ')' {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '(' || c == ')'
+            {
                 c
             } else {
                 '_'
@@ -265,7 +267,10 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
-fn filename_from_headers(url: &reqwest::Url, headers: &reqwest::header::HeaderMap) -> Option<String> {
+fn filename_from_headers(
+    url: &reqwest::Url,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<String> {
     if let Some(cd) = headers.get(reqwest::header::CONTENT_DISPOSITION) {
         let cd = cd.to_str().ok()?;
         // attachment; filename="app.apk" or filename*=UTF-8''app.apk
@@ -317,7 +322,7 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
-fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let mut candidate = dir.join(name);
     if !candidate.exists() {
         return candidate;
@@ -351,7 +356,7 @@ fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
 /// the download finished (and verified, when a trusted hash was supplied),
 /// so a dropped connection can never leave a half-written "installer.exe"
 /// behind that a retry would then call "installer (1).exe".
-fn part_path_for(dest: &PathBuf) -> PathBuf {
+fn part_path_for(dest: &Path) -> PathBuf {
     let name = dest
         .file_name()
         .map(|s| format!("{}.part", s.to_string_lossy()))
@@ -390,7 +395,11 @@ async fn start_download(
     let requested_name = filename.map(|n| sanitize_filename(&n));
 
     let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
-    registry.cancels.lock().await.insert(id, CancelEntry(cancel_tx));
+    registry
+        .cancels
+        .lock()
+        .await
+        .insert(id, CancelEntry(cancel_tx));
 
     let app_handle = app.clone();
     let registry_map = Arc::clone(registry.inner());
@@ -399,11 +408,13 @@ async fn start_download(
         let result = run_download(
             app_handle.clone(),
             id,
-            url.clone(),
-            requested_name,
-            dir,
-            resume.unwrap_or(false),
-            expected_sha256,
+            DownloadPlan {
+                url: url.clone(),
+                requested_name,
+                dir,
+                resume: resume.unwrap_or(false),
+                expected_sha256,
+            },
             &mut cancel_rx,
         )
         .await;
@@ -432,22 +443,38 @@ async fn start_download(
     Ok(id)
 }
 
-async fn run_download(
-    app: AppHandle,
-    id: u32,
+/// Everything one download attempt needs, bundled so the runner keeps a
+/// readable signature and new knobs don't grow the parameter list forever.
+struct DownloadPlan {
     url: String,
     requested_name: Option<String>,
     dir: PathBuf,
     resume: bool,
     expected_sha256: Option<String>,
+}
+
+async fn run_download(
+    app: AppHandle,
+    id: u32,
+    plan: DownloadPlan,
     cancel_rx: &mut mpsc::Receiver<()>,
 ) -> Result<CompletePayload, (String, Option<String>)> {
+    let DownloadPlan {
+        url,
+        requested_name,
+        dir,
+        resume,
+        expected_sha256,
+    } = plan;
     // NOTE: no whole-request timeout here. reqwest's Client::timeout covers
     // the entire body stream, so the old 30s limit killed every download
     // that took longer than half a minute (a slow 100MB installer). The
     // stream loop below instead fails when no bytes arrive for 60s.
     let client = reqwest::Client::builder()
-        .user_agent(format!("Fress/{} (+https://github.com/WasewaseX/Fress)", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!(
+            "Fress/{} (+https://github.com/WasewaseX/Fress)",
+            env!("CARGO_PKG_VERSION")
+        ))
         .connect_timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::limited(8))
         .build()
@@ -456,16 +483,21 @@ async fn run_download(
     // Plan the resume before the first request: only when the caller named
     // the file (a retry always does) and a matching .part already exists.
     let mut planned_resume_len: u64 = 0;
-    if resume && requested_name.is_some() {
-        let candidate = unique_path(&dir, requested_name.as_ref().unwrap());
-        if let Ok(meta) = tokio::fs::metadata(part_path_for(&candidate)).await {
-            planned_resume_len = meta.len();
+    if resume {
+        if let Some(name) = requested_name.as_ref() {
+            let candidate = unique_path(&dir, name);
+            if let Ok(meta) = tokio::fs::metadata(part_path_for(&candidate)).await {
+                planned_resume_len = meta.len();
+            }
         }
     }
 
     let mut request = client.get(&url);
     if planned_resume_len > 0 {
-        request = request.header(reqwest::header::RANGE, format!("bytes={}-", planned_resume_len));
+        request = request.header(
+            reqwest::header::RANGE,
+            format!("bytes={}-", planned_resume_len),
+        );
     }
     let first = request
         .send()
@@ -486,8 +518,7 @@ async fn run_download(
 
     // 206 = the server honored the Range and we append; a plain 200 means it
     // ignored the range (or there was nothing to resume) and we start over.
-    let resuming =
-        first.status() == reqwest::StatusCode::PARTIAL_CONTENT && planned_resume_len > 0;
+    let resuming = first.status() == reqwest::StatusCode::PARTIAL_CONTENT && planned_resume_len > 0;
     let already_have = if resuming { planned_resume_len } else { 0 };
 
     let name = requested_name
@@ -530,7 +561,11 @@ async fn run_download(
 
     let mut stream = first.bytes_stream();
     let mut downloaded: u64 = already_have;
-    let total = if remote_len > 0 { remote_len + already_have } else { 0 };
+    let total = if remote_len > 0 {
+        remote_len + already_have
+    } else {
+        0
+    };
     let started = Instant::now();
     let mut last_emit = Instant::now() - Duration::from_secs(1);
 
@@ -600,7 +635,11 @@ async fn run_download(
     // Verification is a comparison against a trusted published value, not a
     // mere calculation. A mismatching file is rejected and removed: it must
     // never sit in the downloads folder looking finished.
-    let verified: Option<bool> = match expected_sha256.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let verified: Option<bool> = match expected_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(expected) => {
             let expected_norm = expected.trim_start_matches("0x").to_lowercase();
             if expected_norm != sha_hex {
@@ -633,7 +672,10 @@ async fn run_download(
 }
 
 #[tauri::command]
-async fn cancel_download(id: u32, registry: State<'_, Arc<DownloadRegistry>>) -> Result<(), String> {
+async fn cancel_download(
+    id: u32,
+    registry: State<'_, Arc<DownloadRegistry>>,
+) -> Result<(), String> {
     if let Some(entry) = registry.cancels.lock().await.remove(&id) {
         let _ = entry.0.send(()).await;
     }
@@ -667,7 +709,7 @@ fn platform_download_dir(app: &AppHandle) -> PathBuf {
         let _ = app; // only needed for the Android path
     }
     dirs::download_dir()
-        .or_else(|| dirs::home_dir())
+        .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

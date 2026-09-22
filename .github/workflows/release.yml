@@ -716,7 +716,9 @@ jobs:
             case "$dir" in
               universal) echo "universal"; return ;;
               arm64|arm64-v8a) echo "arm64"; return ;;
-              armeabi-v7a|armeabi) echo "arm"; return ;;
+              # tauri's gradle names the armv7 split dir "arm" (not
+              # armeabi-v7a): apk/arm/release/app-arm-release-unsigned.apk
+              arm|armeabi-v7a|armeabi) echo "arm"; return ;;
               x86_64) echo "x64"; return ;;
               x86) echo "x86"; return ;;
             esac
@@ -724,6 +726,7 @@ jobs:
               *universal*) echo "universal" ;;
               *arm64*|*v8a*) echo "arm64" ;;
               *armeabi*|*v7a*) echo "arm" ;;
+              *arm*) echo "arm" ;;
               *x86_64*) echo "x64" ;;
               *x86*) echo "x86" ;;
               *) echo "" ;;

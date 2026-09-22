@@ -156,12 +156,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      let dir: string;
+      // Resolve the target folder. If anything goes wrong we do NOT fail:
+      // a null directory makes the Rust side fall back to the platform's
+      // own Downloads folder. (The old retry-the-same-failing-call pattern
+      // could escape as an unhandled rejection: the click appeared to do
+      // absolutely nothing, not even a toast.)
+      let dir: string | null = null;
       try {
         const saved = localStorage.getItem(DIR_KEY);
         dir = saved || (await invoke<string>('default_download_dir'));
       } catch {
-        dir = await invoke<string>('default_download_dir');
+        dir = null;
       }
 
       try {
@@ -175,7 +180,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             id,
             url,
             name: guessedName || 'download',
-            dir,
+            dir: dir || '',
             bytes: 0,
             total: 0,
             speed: 0,

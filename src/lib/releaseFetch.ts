@@ -237,15 +237,37 @@ export function getHostArch(): Promise<string> {
 
 const ghCache = new Map<string, Promise<ResolvedDownload | null>>();
 const fdCache = new Map<string, Promise<ResolvedDownload | null>>();
+/**
+ * Failed lookups are remembered only briefly. A GitHub rate limit or a Wi-Fi
+ * blip used to be cached for the whole session: the first click resolved to
+ * nothing and every later click on the same app kept silently doing nothing
+ * until a restart. Successes stay cached for the session, failures expire so
+ * the next click really tries again.
+ */
+const FAIL_TTL_MS = 30_000;
+
+function cacheSet(
+  cache: Map<string, Promise<ResolvedDownload | null>>,
+  key: string,
+  value: Promise<ResolvedDownload | null>
+): void {
+  cache.set(key, value);
+  value.then((r) => {
+    if (r === null) {
+      // Expire failures after a short TTL so the next click really retries.
+      window.setTimeout(() => {
+        if (cache.get(key) === value) cache.delete(key);
+      }, FAIL_TTL_MS);
+    }
+  });
+}
 
 export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
   const repo = parseGithubRepo(app.githubUrl);
   if (!repo || platform === 'web' || platform === 'ios') return Promise.resolve(null);
   const key = `${repo}|${platform}`;
   if (!ghCache.has(key)) {
-    ghCache.set(
-      key,
-      (async () => {
+    const p = (async () => {
         try {
           const [rel, arch] = await Promise.all([getLatestRelease(repo), getHostArch()]);
           const pick = pickAsset(rel.assets, platform, arch);
@@ -262,8 +284,8 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
         } catch {
           return null;
         }
-      })()
-    );
+      })();
+    cacheSet(ghCache, key, p);
   }
   return ghCache.get(key)!;
 }
@@ -273,9 +295,7 @@ export function resolveFdroidDownload(pkgId: string): Promise<ResolvedDownload |
   if (!pkg) return Promise.resolve(null);
   const key = pkg;
   if (!fdCache.has(key)) {
-    fdCache.set(
-      key,
-      (async () => {
+    const p = (async () => {
         try {
           const r = await getFdroid(pkg);
           return {
@@ -289,8 +309,8 @@ export function resolveFdroidDownload(pkgId: string): Promise<ResolvedDownload |
         } catch {
           return null;
         }
-      })()
-    );
+      })();
+    cacheSet(fdCache, key, p);
   }
   return fdCache.get(key)!;
 }

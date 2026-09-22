@@ -18,7 +18,6 @@ import { ExportModal } from './components/ExportModal';
 import { LiveSearchModal } from './components/LiveSearchModal';
 import { DownloadManager } from './components/DownloadManager';
 import { WhatsNewModal } from './components/WhatsNewModal';
-import { ComboTab } from './components/ComboTab';
 import { ReplaceTab } from './components/ReplaceTab';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider } from './lib/i18n';
@@ -40,11 +39,15 @@ import {
   Columns, 
   Share2, 
   X, 
+  Download,
   CheckSquare, 
   Square 
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { sanitizeInstallCommand } from './lib/installCommands';
+import { bestDownloadFor } from './lib/appDownloads';
+import { guessUserPlatform, resolveGitHubDownload, resolveFdroidDownload } from './lib/releaseFetch';
+import { useI18n } from './lib/i18n';
 
 const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
 const STORAGE_KEY_FAVORITES = 'fress_favorites';
@@ -82,6 +85,7 @@ const DEFAULT_FILTERS: FilterState = {
 
 function AppShell() {
   const { theme: uiTheme } = useTheme();
+  const { t } = useI18n();
   const { items: downloadItems, startDownload } = useDownloads();
   const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
   const activeDownloadCount = downloadItems.filter((d) => d.status === 'active').length;
@@ -107,22 +111,34 @@ function AppShell() {
       } else if (res.kind === 'latest') {
         toast.success(`You are on the latest version (v${pkg.version}).`);
       } else {
-        toast.error('Could not check for updates right now.');
+        // Both the API and the atom fallback failed (offline, firewall). This
+        // is normal and must not look like the app is broken: quiet note, no
+        // red error.
+        toast.info(t('update.unavailable'), {
+          description: t('update.unavailableHint'),
+        });
       }
     }
     setUpdateChecking(false);
   };
 
   // Startup check, throttled to once a day so the GitHub API is not hammered.
+  // The throttle stamp is only saved AFTER the check finishes: a failed check
+  // (rate limit, offline) must not block every launch for the next 24 hours.
   useEffect(() => {
     try {
       const last = Number(localStorage.getItem('fress.last_update_check') || '0');
       if (Date.now() - last < 24 * 60 * 60 * 1000) return;
-      localStorage.setItem('fress.last_update_check', String(Date.now()));
     } catch {
       return;
     }
-    void runUpdateCheck(false);
+    void runUpdateCheck(false).then(() => {
+      try {
+        localStorage.setItem('fress.last_update_check', String(Date.now()));
+      } catch {
+        // ignore
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -219,19 +235,22 @@ function AppShell() {
     }
   };
 
-  // Top-level tab: the app catalog, the combos page or the replace guide.
-  // Remembered per device.
-  const [page, setPage] = useState<'catalog' | 'combos' | 'replace'>(() => {
+  // Top-level tab: the app catalog or the privacy pack. Remembered per device.
+  const [page, setPage] = useState<'catalog' | 'replace'>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_PAGE);
-      if (saved === 'catalog' || saved === 'combos' || saved === 'replace') return saved;
+      if (saved === 'catalog' || saved === 'replace') return saved;
+      // 'combos' was removed; returning users land on the catalog instead.
+      if (saved === 'combos') {
+        localStorage.setItem(STORAGE_KEY_PAGE, 'catalog');
+      }
     } catch {
       // ignore
     }
     return 'catalog';
   });
 
-  const handlePageChange = (next: 'catalog' | 'combos' | 'replace') => {
+  const handlePageChange = (next: 'catalog' | 'replace') => {
     setPage(next);
     try {
       localStorage.setItem(STORAGE_KEY_PAGE, next);
@@ -240,9 +259,75 @@ function AppShell() {
     }
   };
 
-  // Combos hand their whole app list over to the batch selection bar.
-  const handleComboToBatch = (ids: string[]) => {
+  // Selection helper shared by the Privacy Pack tab and the batch checkboxes.
+  const handleAddIdsToBatch = (ids: string[]) => {
     setSelectedBatchAppIds((prev) => Array.from(new Set([...prev, ...ids])));
+  };
+
+  // Real downloads for the whole batch selection: resolve the latest stable
+  // file for this device for every selected app and hand each one to the
+  // download manager. Sequential resolve keeps the GitHub API calm; the
+  // results are cached per repo anyway.
+  const [batchResolving, setBatchResolving] = useState(false);
+  const handleBatchDownload = async () => {
+    if (selectedBatchApps.length === 0 || batchResolving) return;
+    setBatchResolving(true);
+    setIsDownloadsOpen(true);
+    try {
+      let started = 0;
+      const skipped: string[] = [];
+      for (const app of selectedBatchApps) {
+        const platform = guessUserPlatform(app);
+        let url: string | null = null;
+        let name = app.name;
+        try {
+          const resolved = await resolveGitHubDownload(app, platform);
+          if (resolved) {
+            url = resolved.url;
+            name = resolved.filename;
+          }
+        } catch {
+          url = null;
+        }
+        if (!url && platform === 'android' && app.fdroidId) {
+          try {
+            const fd = await resolveFdroidDownload(app.fdroidId);
+            if (fd) {
+              url = fd.url;
+              name = fd.filename;
+            }
+          } catch {
+            url = null;
+          }
+        }
+        if (!url) {
+          const target = bestDownloadFor(app, platform);
+          if (target?.kind === 'direct') {
+            url = target.url;
+            name = `${app.name} ${target.label}`.trim();
+          }
+        }
+        if (url) {
+          void startDownload(url, name);
+          started += 1;
+        } else {
+          skipped.push(app.name);
+        }
+      }
+      if (started > 0) {
+        toast.success(t('batchDL.started').replace('{n}', String(started)));
+      }
+      if (skipped.length > 0) {
+        toast.info(t('batchDL.skipped').replace('{n}', String(skipped.length)), {
+          description: `${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''} — ${t('batchDL.skippedHint')}`,
+        });
+      }
+      if (started === 0 && skipped.length === 0) {
+        toast.info(t('batchDL.nothing'));
+      }
+    } finally {
+      setBatchResolving(false);
+    }
   };
 
   // Filters
@@ -772,14 +857,7 @@ function AppShell() {
           <ReplaceTab
             apps={apps}
             onOpenDetail={(item) => setSelectedApp(item)}
-            onAddToBatch={handleComboToBatch}
-            onOpenCombos={() => handlePageChange('combos')}
-          />
-        ) : page === 'combos' ? (
-          <ComboTab
-            apps={apps}
-            onOpenDetail={(item) => setSelectedApp(item)}
-            onAddToBatch={handleComboToBatch}
+            onAddToBatch={handleAddIdsToBatch}
           />
         ) : filteredApps.length > 0 ? (
           viewMode === 'grid' ? (
@@ -859,18 +937,34 @@ function AppShell() {
           <div className="flex items-center gap-2 mr-auto">
             <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
             <span className="text-xs font-semibold text-slate-100">
-              {selectedBatchAppIds.length} tool{selectedBatchAppIds.length > 1 ? 's' : ''} selected
+              {t('bar.selected').replace('{n}', String(selectedBatchAppIds.length))}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Primary action: real downloads for the whole selection. */}
             <button
               type="button"
+              id="batch-download-btn"
+              onClick={() => void handleBatchDownload()}
+              disabled={batchResolving}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white px-3 py-1.5 rounded-md transition-colors shadow-xs"
+              title={t('bar.downloadHint')}
+            >
+              <Download className={`w-3.5 h-3.5 ${batchResolving ? 'animate-pulse' : ''}`} />
+              <span>{batchResolving ? t('bar.downloading') : t('bar.download')}</span>
+            </button>
+
+            {/* Script generator stays available one click away. */}
+            <button
+              type="button"
+              id="batch-script-btn"
               onClick={() => setIsBatchInstallModalOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded-md transition-colors shadow-xs"
+              className="inline-flex items-center gap-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1.5 rounded-md transition-colors shadow-xs"
+              title={t('bar.scriptHint')}
             >
               <Terminal className="w-3.5 h-3.5" />
-              <span>Generate Script</span>
+              <span>{t('bar.script')}</span>
             </button>
 
             <button
@@ -883,7 +977,7 @@ function AppShell() {
               title="Compare up to 4 selected tools side-by-side"
             >
               <Columns className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Compare</span>
+              <span>{t('bar.compare')}</span>
             </button>
 
             <button

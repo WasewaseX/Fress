@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
 import { sanitizeInstallCommand, PkgManager } from '../lib/installCommands';
+import { useI18n } from '../lib/i18n';
 import { 
   Terminal, 
   Copy, 
@@ -36,6 +37,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
   onSelectAll,
   onClearSelection
 }) => {
+  const { t } = useI18n();
   const [scriptType, setScriptType] = useState<ScriptType>('winget-ps');
   const [copied, setCopied] = useState(false);
 
@@ -183,10 +185,10 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-100 tracking-tight">
-                Batch Install Script Generator
+                {t('bs.title')}
               </h2>
               <p className="text-xs text-slate-400">
-                Install multiple selected tools in one command without clicking manual installers.
+                {t('bs.subtitle')}
               </p>
             </div>
           </div>
@@ -212,7 +214,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
             >
-              PowerShell (Winget)
+              {t('bs.tab.wingetPs')}
             </button>
             <button
               type="button"
@@ -223,7 +225,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
             >
-              macOS / Linux (Brew)
+              {t('bs.tab.brew')}
             </button>
             <button
               type="button"
@@ -234,7 +236,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
             >
-              Brewfile
+              {t('bs.tab.brewfile')}
             </button>
             <button
               type="button"
@@ -245,7 +247,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
             >
-              Linux (Flatpak)
+              {t('bs.tab.flatpak')}
             </button>
             <button
               type="button"
@@ -256,7 +258,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
             >
-              Windows (Scoop)
+              {t('bs.tab.scoop')}
             </button>
           </div>
 
@@ -266,7 +268,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               onClick={onSelectAll}
               className="text-sky-400 hover:text-sky-300 font-medium"
             >
-              Select All ({allApps.length})
+              {t('bs.selectAll')} ({allApps.length})
             </button>
             <span className="text-slate-600">|</span>
             <button
@@ -274,7 +276,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               onClick={onClearSelection}
               className="text-slate-400 hover:text-slate-300"
             >
-              Clear Selection
+              {t('bs.clear')}
             </button>
           </div>
         </div>
@@ -282,7 +284,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
         {/* Selected Apps Chip Bar */}
         <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-950/10 dark:border-white/[0.04] flex items-center gap-1.5 overflow-x-auto text-xs">
           <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider mr-1 shrink-0">
-            Selected ({selectedApps.length}):
+            {t('bs.selected')} ({selectedApps.length}):
           </span>
           {selectedApps.length > 0 ? (
             selectedApps.map((app) => (
@@ -303,7 +305,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             ))
           ) : (
             <span className="text-slate-500 italic text-xs">
-              No apps selected. Pick tools from the catalog cards or table checkboxes.
+              {t('bs.noneSelected')}
             </span>
           )}
         </div>
@@ -320,13 +322,13 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
           <div className="flex flex-col gap-1.5 min-w-0">
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
-              <span>Every command is a plain single install invocation, checked before the script is written.</span>
+              <span>{t('bs.safeNote')}</span>
             </div>
             {selectedApps.length > 0 && skippedCount > 0 && (
               <div className="flex items-center gap-2 text-[11px] text-amber-400">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                 <span>
-                  {skippedCount} of {selectedApps.length} selected apps have no {tabLabel} package — they are not in this script.
+                  {t('bs.skipNote').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}
                 </span>
               </div>
             )}
@@ -340,7 +342,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-950/[0.05] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.1] text-slate-100 transition-colors disabled:opacity-50"
             >
               <Download className="w-3.5 h-3.5 text-slate-300" aria-hidden="true" />
-              <span>Download File</span>
+              <span>{t('bs.downloadFile')}</span>
             </button>
 
             <button
@@ -352,12 +354,12 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               {copied ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
-                  <span>Copied Script!</span>
+                  <span>{t('bs.copied')}</span>
                 </>
               ) : (
                 <>
                   <Copy className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
-                  <span>Copy Script</span>
+                  <span>{t('bs.copy')}</span>
                 </>
               )}
             </button>

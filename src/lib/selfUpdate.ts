@@ -2,12 +2,19 @@
  * Self-update for Fress itself.
  *
  * Checks the WasewaseX/Fress releases on GitHub, compares the running version
- * with the newest published release (prereleases included, drafts excluded.
- * Every Fress build is tagged *-beta right now), and if there is something
- * newer, hands the platform-matched file to the download manager.
+ * with the newest published release (prereleases included, drafts excluded),
+ * and if there is something newer, hands the platform-matched file to the
+ * download manager.
  *
  * The plain /releases/latest endpoint is useless here because Fress marks its
- * beta builds as prereleases; /releases?per_page=10 returns those.
+ * pre-stable builds as prereleases; /releases?per_page=10 returns those.
+ *
+ * The check MUST NOT surface errors to users: the REST API shares a small
+ * unauthenticated quota per IP, so it legitimately fails sometimes. When the
+ * API is unavailable we fall back to the releases.atom feed, which is served
+ * as a static file by github.com and is not rate limited. Only when BOTH
+ * sources fail does the check report an error, and the app shows a quiet
+ * note instead of a scary red toast.
  */
 
 const REPO = 'WasewaseX/Fress';
@@ -73,7 +80,7 @@ function isJunkAsset(name: string): boolean {
 
 /** Pick the file a user on this platform actually needs. */
 export function pickOwnAsset(release: OwnRelease): { name: string; size: number; url: string } | null {
-  const assets = release.assets.filter((a) => !isJunkAsset(a.name));
+  const assets = (release.assets || []).filter((a) => !isJunkAsset(a.name));
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
   const platform =
     ua.includes('android') ? 'android' :
@@ -118,15 +125,53 @@ export function pickOwnAsset(release: OwnRelease): { name: string; size: number;
 }
 
 /** Newest published release (drafts dropped), newest first from the API. */
-export async function fetchOwnLatestRelease(): Promise<OwnRelease | null> {
+async function fetchFromApi(): Promise<OwnRelease> {
   const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=10`, {
     headers: { Accept: 'application/vnd.github+json' },
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
   const raw = (await res.json()) as RawRelease[];
   const published = (raw || []).filter((r) => !r.draft);
-  if (published.length === 0) return null;
+  if (published.length === 0) throw new Error('No published releases');
   return mapRelease(published[0]);
+}
+
+/**
+ * Fallback: the releases.atom feed. Static file, no rate limit, no API.
+ * Only carries the tag name, so assets stay empty; the header then links to
+ * the releases page instead of starting a direct download.
+ */
+async function fetchFromAtom(): Promise<OwnRelease> {
+  const res = await fetch(`https://github.com/${REPO}/releases.atom`);
+  if (!res.ok) throw new Error(`Atom feed ${res.status}`);
+  const xml = await res.text();
+  // First <entry> is the newest release. The id looks like
+  // "tag:github.com,2008:Repository/123456/v1.0.1-alpha".
+  const entryMatch = xml.match(/<entry>[\s\S]*?<\/entry>/i);
+  const idMatch = entryMatch?.[0].match(/<id>[^<]*\/([^<]+)<\/id>/i);
+  const tag = idMatch?.[1]?.trim();
+  if (!tag) throw new Error('Atom feed has no release entries');
+  const updated = entryMatch?.[0].match(/<updated>([^<]+)<\/updated>/i)?.[1] || '';
+  return {
+    tag,
+    version: tag.replace(/^v/i, ''),
+    publishedAt: updated,
+    htmlUrl: `https://github.com/${REPO}/releases`,
+    assets: [],
+  };
+}
+
+/** Newest published release, API first, static atom feed as the fallback. */
+export async function fetchOwnLatestRelease(): Promise<OwnRelease | null> {
+  try {
+    return await fetchFromApi();
+  } catch {
+    try {
+      return await fetchFromAtom();
+    } catch {
+      return null;
+    }
+  }
 }
 
 export async function checkForUpdate(currentVersion: string): Promise<UpdateState> {

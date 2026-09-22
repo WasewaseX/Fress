@@ -49,6 +49,7 @@ jobs:
             | Platform | File |
             | --- | --- |
             | Windows (installer) | `Fress_*_x64-setup.exe` |
+            | Windows (MSI) | `Fress_*_x64_en-US.msi` |
             | Windows (portable, no install) | `Fress_*_x64-portable.zip` |
             | Windows ARM64 (installer) | `Fress_*_arm64-setup.exe` |
             | Windows ARM64 (portable) | `Fress_*_arm64-portable.zip` |
@@ -94,13 +95,16 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
-      - name: Build Windows installer (NSIS)
+      - name: Build Windows installer (NSIS + MSI)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: '--target x86_64-pc-windows-msvc --bundles nsis'
+          # The MSI (WiX) target ships alongside NSIS: Defender's ML heuristics
+          # keep flagging unsigned NSIS bootstrappers (Bearfoos.A!ml), while
+          # MSI packages pass far more often, so users have a calmer choice.
+          args: '--target x86_64-pc-windows-msvc --bundles nsis msi'
       - name: Sign with Azure Trusted Signing
         # Runs only when the signing account is configured. One-time setup
         # steps are in CODE_SIGNING.md.
@@ -199,6 +203,19 @@ jobs:
         shell: pwsh
         run: |
           Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Windows binaries shipped unsigned. Configure WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD secrets for a persistent publisher signature (see CODE_SIGNING.md)."
+
+      - name: Upload the MSI installer
+        # Straight upload, no signing step: the MSI carries its own metadata
+        # and Defender flags WiX packages far less often than NSIS ones.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi" | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found in bundle folder" }
+          gh release upload "${{ needs.version.outputs.tag }}" $msi.FullName --clobber --repo "${{ github.repository }}"
+          Write-Host "MSI installer uploaded: $($msi.Name)"
 
       - name: Package the portable exe
         # A portable build is the bare app exe in a zip: no installer, no

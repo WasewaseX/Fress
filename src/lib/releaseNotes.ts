@@ -17,6 +17,21 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.1-alpha',
+    date: '2026-09-22',
+    title: 'Calmer looks, real batch downloads, MSI installer',
+    items: [
+      'Fixed: the "You use now" dropdown no longer shows a white options list in the dark theme. Native dropdowns follow the app theme everywhere now.',
+      'Fixed: "Download" could do nothing visible after one GitHub rate limit. Nothing is cached into silence anymore: every click ends in a download, a note, or the guide.',
+      'New: the selection bar\'s main button is now "Download" and really downloads every selected app for your device. The install script generator is one click away.',
+      'Fixed: the update check stays quiet. It falls back to the always-available releases feed when the API is throttled instead of showing an error.',
+      'New: Privacy Pack, not Replace. One calm line at the top, the details in "About this list", the Maximum Privacy kit in calm green, and the Combos tab folded away.',
+      'New: all interface text and all 75 app descriptions are now fully translated in Persian, Spanish, French and German.',
+      'New: a Windows MSI installer ships next to the classic one. Antivirus engines flag it far less often; verify both against SHA256SUMS.txt.',
+      'New: a fresh app icon, free software out of the box.',
+    ],
+  },
+  {
     version: '1.0.5-beta',
     date: '2026-09-22',
     title: 'Replace your apps for better privacy',

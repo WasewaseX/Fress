@@ -374,22 +374,29 @@ export const AppCard: React.FC<AppCardProps> = ({
                   // 3) Curated targets: direct links stream in the app
                   const target = bestDownloadFor(app, platform);
                   if (!target) {
+                    toast.info(`Showing the download options for ${app.name}`);
                     onOpenDetail(app);
                     return;
                   }
                   if (target.kind === 'direct') {
                     void startDownload(target.url, `${app.name} ${target.label}`.trim());
                   } else if (target.kind === 'store' || !/github\.com\/[^/]+\/[^/]+\/releases/i.test(target.url)) {
-                    // Official vendor download pages are beginner-friendly; open them
+                    // Official vendor download pages are beginner-friendly; open them.
+                    // Say WHERE it opens: on Windows the browser can start in the
+                    // background, which reads as "the button did nothing".
                     recordExternalOpen(`${app.name}: ${target.label}`, target.url);
                     toast.info(`Opening the official download page for ${app.name}`, {
-                      description: target.label,
+                      description: `${target.label} — it opens in your browser.`,
                     });
                     void openExternal(target.url);
                   } else {
                     // A raw GitHub releases page is not beginner-friendly: open the in-app guide
                     onOpenDetail(app);
                   }
+                } catch {
+                  // No click may end in silence: worst case, show the in-app guide.
+                  toast.info(`Showing the download options for ${app.name}`);
+                  onOpenDetail(app);
                 } finally {
                   setResolving(false);
                 }

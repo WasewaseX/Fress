@@ -107,6 +107,17 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Native controls follow the app theme. Without this, WebView2 on Windows
+   renders <select> dropdown popups with the OS (light) theme: a blinding
+   white list inside the dark app. This also makes scrollbars and
+   checkboxes match light/dark everywhere. */
+html {
+  color-scheme: dark;
+}
+html:not(.dark) {
+  color-scheme: light;
+}
+
 body {
   margin: 0;
   background-color: var(--color-slate-950);

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.1-alpha (2026-09-22)
+
+The "it works on your machine" release: the Windows False-Positive Defense (MSI alongside NSIS), a fully themed interface, real batch downloads, and the Combos tab folded into the Privacy Pack.
+
+### Fixed
+- The "You use now" dropdown on the Privacy Pack no longer flashes a blinding white native list inside the dark theme. Native `<select>` popups now follow the app theme everywhere (`color-scheme`), and the Privacy Pack uses a custom themed dropdown of its own.
+- Downloads could go silently dead for a whole session: one GitHub rate limit was cached forever, so every later click resolved to nothing. Failed lookups now expire after 30 seconds, every download path ends in visible feedback (a download, a toast, or the in-app guide), and a failing folder lookup can no longer crash a download before it starts.
+- "Generate Script" became "Download": the floating selection bar's primary action now downloads the latest version of every selected app for the current device into the download manager. The script generator is still one click (and one menu entry) away.
+- The update check no longer reports a scary error. It falls back to the rate-limit-free releases.atom feed when the REST API is throttled, retries on the next launch when a check fails instead of waiting 24 hours, and any remaining failure is a quiet info note, not a red toast.
+- Catalog icons no longer vary wildly in visual size: every shipped icon was re-fitted to the same fill ratio, so 7-Zip's glyph is no longer half the size of VLC's.
+
+### Changed
+- The Combos tab is gone for now. Its one essential piece, the Maximum Privacy kit, lives at the top of the Privacy Pack with a calmer look ("Strongest defaults", emerald, no red alarm styling).
+- The Privacy Pack leads with one calm line. The long explanation, the source attribution and the grade legend moved into an "About this list" popover, so nothing evaluative greets you at first look. The tab itself is just called "Privacy".
+- Translations are no longer a quarter done: every UI surface (Privacy Pack, batch bar, script generator, update notices) is now translated, and the 18 newest catalog apps gained full descriptions in Persian, Spanish, French and German — all 75 apps are covered in all four languages.
+- New app icon: fresh free software out of the box, a sprout over an open box, replacing the old leaf.
+
+### Added
+- Windows MSI installer (`Fress_*_x64_en-US.msi`) shipped next to the NSIS one. Defender's machine-learning heuristics keep flagging unsigned NSIS bootstrappers as `Trojan:Win32/Bearfoos.A!ml`; WiX packages pass far more often, so users get a calmer choice alongside the SHA256-verified NSIS installer and portable build.
+
 ## 1.0.0-alpha (2026-09-22)
 
 The trust release: a security hole closed, seven bug fixes, Windows ARM64 and a portable build, and a distribution policy that gives antivirus engines and users a reason to believe the binaries.

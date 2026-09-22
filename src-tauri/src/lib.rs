@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 // `Manager` powers the Android-only app-data path lookup below.
 #[cfg_attr(not(target_os = "android"), allow(unused_imports))]
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -28,12 +28,21 @@ struct CompletePayload {
     path: String,
     bytes: u64,
     sha256: String,
+    /// Some(true) = compared against the publisher's trusted hash and it
+    /// matched. Some(false)/None = no trusted reference hash was supplied,
+    /// so the digest was computed but NOT verified. The UI must never show
+    /// "verified" for a hash that was only calculated.
+    verified: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ErrorPayload {
     id: u32,
     message: String,
+    /// "checksum" marks a failed integrity verification (the file has been
+    /// deleted); absent for ordinary network/disk errors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -338,6 +347,20 @@ fn unique_path(dir: &PathBuf, name: &str) -> PathBuf {
     candidate
 }
 
+/// Staging file for an in-flight download. The final name only appears when
+/// the download finished (and verified, when a trusted hash was supplied),
+/// so a dropped connection can never leave a half-written "installer.exe"
+/// behind that a retry would then call "installer (1).exe".
+fn part_path_for(dest: &PathBuf) -> PathBuf {
+    let name = dest
+        .file_name()
+        .map(|s| format!("{}.part", s.to_string_lossy()))
+        .unwrap_or_else(|| "download.part".to_string());
+    dest.parent()
+        .map(|p| p.join(name))
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
 #[tauri::command]
 async fn start_download(
     app: AppHandle,
@@ -345,6 +368,14 @@ async fn start_download(
     url: String,
     filename: Option<String>,
     directory: Option<String>,
+    /// Trusted SHA-256 to verify against (hex). When given, a mismatching
+    /// download is deleted and reported as an integrity failure instead of
+    /// being handed to the user as a finished file.
+    expected_sha256: Option<String>,
+    /// Continue an interrupted download from its .part file. The caller
+    /// passes the same filename it saw before; without a matching .part the
+    /// download simply starts over.
+    resume: Option<bool>,
 ) -> Result<u32, String> {
     let dir: PathBuf = match directory {
         Some(d) if !d.trim().is_empty() => PathBuf::from(d),
@@ -370,6 +401,8 @@ async fn start_download(
             url.clone(),
             requested_name,
             dir,
+            resume.unwrap_or(false),
+            expected_sha256,
             &mut cancel_rx,
         )
         .await;
@@ -381,13 +414,14 @@ async fn start_download(
             Ok(payload) => {
                 let _ = app_handle.emit("download-complete", payload);
             }
-            Err(msg) => {
+            Err((msg, kind)) => {
                 let cancelled = msg == "__cancelled__";
                 let _ = app_handle.emit(
                     "download-error",
                     ErrorPayload {
                         id,
                         message: if cancelled { "Cancelled".into() } else { msg },
+                        kind: if cancelled { None } else { kind },
                     },
                 );
             }
@@ -403,69 +437,140 @@ async fn run_download(
     url: String,
     requested_name: Option<String>,
     dir: PathBuf,
+    resume: bool,
+    expected_sha256: Option<String>,
     cancel_rx: &mut mpsc::Receiver<()>,
-) -> Result<CompletePayload, String> {
+) -> Result<CompletePayload, (String, Option<String>)> {
+    // NOTE: no whole-request timeout here. reqwest's Client::timeout covers
+    // the entire body stream, so the old 30s limit killed every download
+    // that took longer than half a minute (a slow 100MB installer). The
+    // stream loop below instead fails when no bytes arrive for 60s.
     let client = reqwest::Client::builder()
         .user_agent(format!("Fress/{} (+https://github.com/WasewaseX/Fress)", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::limited(8))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| (e.to_string(), None))?;
 
-    let first = client
-        .get(&url)
+    // Plan the resume before the first request: only when the caller named
+    // the file (a retry always does) and a matching .part already exists.
+    let mut planned_resume_len: u64 = 0;
+    if resume && requested_name.is_some() {
+        let candidate = unique_path(&dir, requested_name.as_ref().unwrap());
+        if let Ok(meta) = tokio::fs::metadata(part_path_for(&candidate)).await {
+            planned_resume_len = meta.len();
+        }
+    }
+
+    let mut request = client.get(&url);
+    if planned_resume_len > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={}-", planned_resume_len));
+    }
+    let first = request
         .send()
         .await
-        .map_err(|e| format!("Connection failed: {}", e))?;
+        .map_err(|e| (format!("Connection failed: {}", e), None))?;
 
     if !first.status().is_success() {
-        return Err(format!("Server returned HTTP {}", first.status()));
+        return Err((format!("Server returned HTTP {}", first.status()), None));
     }
 
     let headers = first.headers().clone();
     let final_url = first.url().clone();
-    let total = headers
+    let remote_len = headers
         .get(reqwest::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
 
+    // 206 = the server honored the Range and we append; a plain 200 means it
+    // ignored the range (or there was nothing to resume) and we start over.
+    let resuming =
+        first.status() == reqwest::StatusCode::PARTIAL_CONTENT && planned_resume_len > 0;
+    let already_have = if resuming { planned_resume_len } else { 0 };
+
     let name = requested_name
         .or_else(|| filename_from_headers(&final_url, &headers))
         .unwrap_or_else(|| format!("fress-download-{}.bin", id));
     let dest = unique_path(&dir, &name);
+    let part = part_path_for(&dest);
 
-    let mut file = tokio::fs::File::create(&dest)
-        .await
-        .map_err(|e| format!("Cannot write file: {}", e))?;
+    let mut file = if resuming {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&part)
+            .await
+            .map_err(|e| (format!("Cannot reopen partial download: {}", e), None))?
+    } else {
+        tokio::fs::File::create(&part)
+            .await
+            .map_err(|e| (format!("Cannot write file: {}", e), None))?
+    };
+
+    let mut hasher = Sha256::new();
+    // Seed the digest with the bytes from the earlier attempt so the final
+    // hash covers the complete file, not just the resumed tail.
+    if resuming {
+        let mut existing = tokio::fs::File::open(&part)
+            .await
+            .map_err(|e| (format!("Cannot read partial download: {}", e), None))?;
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = existing
+                .read(&mut buf)
+                .await
+                .map_err(|e| (format!("Cannot read partial download: {}", e), None))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+    }
 
     let mut stream = first.bytes_stream();
-    let mut hasher = Sha256::new();
-    let mut downloaded: u64 = 0;
+    let mut downloaded: u64 = already_have;
+    let total = if remote_len > 0 { remote_len + already_have } else { 0 };
     let started = Instant::now();
     let mut last_emit = Instant::now() - Duration::from_secs(1);
 
     while let Some(chunk) = tokio::select! {
         biased;
         _ = cancel_rx.recv() => {
+            // Deliberate stop: keep the .part file so the user can resume
+            // instead of restarting from zero.
             drop(file);
-            let _ = tokio::fs::remove_file(&dest).await;
-            return Err("__cancelled__".to_string());
+            return Err(("__cancelled__".to_string(), None));
         }
-        chunk = stream.next() => chunk,
+        chunk = tokio::time::timeout(Duration::from_secs(60), stream.next()) => {
+            match chunk {
+                Ok(c) => c,
+                Err(_) => {
+                    // No bytes for a full minute: treat the connection as
+                    // dead. The .part stays on disk for the Resume button.
+                    drop(file);
+                    return Err(("Connection stalled (no data for 60s)".to_string(), None));
+                }
+            }
+        }
     } {
-        let bytes = chunk.map_err(|e| format!("Download interrupted: {}", e))?;
+        let bytes = match chunk {
+            Ok(b) => b,
+            Err(e) => {
+                drop(file);
+                return Err((format!("Download interrupted: {}", e), None));
+            }
+        };
         hasher.update(&bytes);
         if file.write_all(&bytes).await.is_err() {
-            return Err("Disk write failed".to_string());
+            drop(file);
+            return Err(("Disk write failed".to_string(), None));
         }
         downloaded += bytes.len() as u64;
 
         // Emit progress at most ~10x per second
         if last_emit.elapsed() >= Duration::from_millis(100) {
             let elapsed = started.elapsed().as_secs_f64().max(0.001);
-            let speed = downloaded as f64 / elapsed;
+            let speed = (downloaded - already_have) as f64 / elapsed;
             let eta = if total > downloaded && speed > 0.0 {
                 (total - downloaded) as f64 / speed
             } else {
@@ -485,17 +590,44 @@ async fn run_download(
         }
     }
 
-    file.flush().await.map_err(|e| e.to_string())?;
+    file.flush().await.map_err(|e| (e.to_string(), None))?;
     drop(file);
 
     let digest = hasher.finalize();
     let sha_hex: String = digest.iter().map(|b| format!("{:02x}", b)).collect();
+
+    // Verification is a comparison against a trusted published value, not a
+    // mere calculation. A mismatching file is rejected and removed: it must
+    // never sit in the downloads folder looking finished.
+    let verified: Option<bool> = match expected_sha256.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(expected) => {
+            let expected_norm = expected.trim_start_matches("0x").to_lowercase();
+            if expected_norm != sha_hex {
+                let _ = tokio::fs::remove_file(&part).await;
+                return Err((
+                    format!(
+                        "Integrity check failed: the file hashes to {} but the publisher published {}. It was deleted. Re-download from the official source.",
+                        sha_hex, expected_norm
+                    ),
+                    Some("checksum".to_string()),
+                ));
+            }
+            Some(true)
+        }
+        None => None,
+    };
+
+    // Only now does the file appear under its real name.
+    tokio::fs::rename(&part, &dest)
+        .await
+        .map_err(|e| (format!("Cannot finalize the download: {}", e), None))?;
 
     Ok(CompletePayload {
         id,
         path: dest.to_string_lossy().to_string(),
         bytes: downloaded,
         sha256: sha_hex,
+        verified,
     })
 }
 

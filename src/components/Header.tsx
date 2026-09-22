@@ -56,6 +56,9 @@ interface HeaderProps {
   onUpdateClick?: () => void;
   onCheckForUpdates?: () => void;
   onOpenWhatsNew?: () => void;
+  /** Which prerelease roughness the in-app updater reports. */
+  updateChannel?: 'stable' | 'beta' | 'alpha';
+  onUpdateChannelChange?: (channel: 'stable' | 'beta' | 'alpha') => void;
 }
 
 /** Brand mark: a blue leaf on a transparent background, used everywhere. */
@@ -106,6 +109,8 @@ export const Header: React.FC<HeaderProps> = ({
   onUpdateClick,
   onCheckForUpdates,
   onOpenWhatsNew,
+  updateChannel = 'alpha',
+  onUpdateChannelChange,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -547,6 +552,31 @@ export const Header: React.FC<HeaderProps> = ({
                           <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
                           <span>Check for updates</span>
                         </button>
+                      )}
+
+                      {onUpdateChannelChange && (
+                        // Update channel: which roughness of build the
+                        // updater reports. Stable hides prereleases once a
+                        // stable 1.0 exists; Alpha sees everything.
+                        <div className="px-3 py-2 border-t border-slate-950/10 dark:border-white/[0.06] mt-1">
+                          <p className="text-[11px] text-slate-400 mb-1.5">Update channel</p>
+                          <div className="flex gap-1">
+                            {(['stable', 'beta', 'alpha'] as const).map((ch) => (
+                              <button
+                                key={ch}
+                                type="button"
+                                onClick={() => onUpdateChannelChange(ch)}
+                                className={`flex-1 px-2 py-1 rounded-md border text-[11px] capitalize transition-colors ${
+                                  updateChannel === ch
+                                    ? 'fr-chip-active font-semibold'
+                                    : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
+                                }`}
+                              >
+                                {ch}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       )}
 
                       {onOpenBatchInstall && batchCount === 0 && (

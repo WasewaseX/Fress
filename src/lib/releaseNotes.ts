@@ -17,6 +17,21 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.2-alpha',
+    date: '2026-09-22',
+    title: 'Releases that prove themselves, resumable downloads, real verification',
+    items: [
+      'Fixed: v1.0.1-alpha went out without any Windows x64 installer (the new MSI target choked on the -alpha version). Releases now stay private drafts until every required file for every platform exists and every file hashes against SHA256SUMS.txt — only then do they publish.',
+      'Fixed: the updater treated 1.0.1-alpha, 1.0.1-beta and the stable 1.0.1 as the same version. It now understands prerelease ordering, so the stable release correctly lands as an update.',
+      'New: update channels. Pick Stable, Beta or Alpha in the header menu; until Fress reaches stable, Alpha (everything) stays the default.',
+      'Fixed: a dropped connection no longer leaves a corrupt installer behind. Downloads write to a temporary file and only get their real name when complete — and Cancel is now a pause: Resume continues from where it stopped instead of restarting.',
+      'Changed: the download manager now verifies Fress updates against the checksum the release publishes. Verified shows in green; a mismatch deletes the file instead of pretending nothing happened.',
+      'New: Scoop and APT are first-class in the Add App form and the script generator gained an APT (sudo apt install) tab, so Linux users get real batch installs too.',
+      'Changed: backups now export as Fress (fress-backup-date.json) instead of the old project name, imports validate the file before touching anything, and bookmark restore is summarized in one clear toast.',
+      'Under the hood: 23 unit tests, a catalog validator that checks all 75 apps (links, platforms, commands, icons, translations), and a PR CI pipeline — this release also fixed an ARM64 installer that could be offered to x64 machines.',
+    ],
+  },
+  {
     version: '1.0.1-alpha',
     date: '2026-09-22',
     title: 'Calmer looks, real batch downloads, MSI installer',

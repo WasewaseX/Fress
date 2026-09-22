@@ -88,6 +88,8 @@ const en: Dict = {
   'downloads.cancelled': 'Cancelled',
   'downloads.cancel': 'Cancel',
   'downloads.retry': 'Retry',
+  'downloads.resume': 'Resume',
+  'downloads.verified': 'Verified',
   'downloads.openFile': 'Open file',
   'downloads.showFolder': 'Show in folder',
   'downloads.clearFinished': 'Clear finished',
@@ -197,6 +199,7 @@ const en: Dict = {
   'bs.tab.brewfile': 'Brewfile',
   'bs.tab.flatpak': 'Linux (flatpak)',
   'bs.tab.scoop': 'Windows (scoop)',
+  'bs.tab.apt': 'Linux (apt)',
 };
 
 const fa: Dict = {
@@ -272,6 +275,8 @@ const fa: Dict = {
   'downloads.cancelled': 'لغو شد',
   'downloads.cancel': 'لغو',
   'downloads.retry': 'تلاش دوباره',
+  'downloads.resume': 'ادامه',
+  'downloads.verified': 'تأیید شد',
   'downloads.openFile': 'بازکردن فایل',
   'downloads.showFolder': 'نمایش در پوشه',
   'downloads.clearFinished': 'پاک‌سازی پایان‌یافته‌ها',
@@ -382,6 +387,7 @@ const fa: Dict = {
   'bs.tab.brewfile': 'Brewfile',
   'bs.tab.flatpak': 'لینوکس (flatpak)',
   'bs.tab.scoop': 'ویندوز (scoop)',
+  'bs.tab.apt': 'لینوکس (apt)',
 };
 
 const es: Dict = {
@@ -457,6 +463,8 @@ const es: Dict = {
   'downloads.cancelled': 'Cancelado',
   'downloads.cancel': 'Cancelar',
   'downloads.retry': 'Reintentar',
+  'downloads.resume': 'Reanudar',
+  'downloads.verified': 'Verificado',
   'downloads.openFile': 'Abrir archivo',
   'downloads.showFolder': 'Mostrar en carpeta',
   'downloads.clearFinished': 'Limpiar terminadas',
@@ -567,6 +575,7 @@ const es: Dict = {
   'bs.tab.brewfile': 'Brewfile',
   'bs.tab.flatpak': 'Linux (flatpak)',
   'bs.tab.scoop': 'Windows (scoop)',
+  'bs.tab.apt': 'Linux (apt)',
 };
 
 const fr: Dict = {
@@ -642,6 +651,8 @@ const fr: Dict = {
   'downloads.cancelled': 'Annulé',
   'downloads.cancel': 'Annuler',
   'downloads.retry': 'Réessayer',
+  'downloads.resume': 'Reprendre',
+  'downloads.verified': 'Vérifié',
   'downloads.openFile': 'Ouvrir le fichier',
   'downloads.showFolder': 'Afficher dans le dossier',
   'downloads.clearFinished': 'Nettoyer les terminés',
@@ -752,6 +763,7 @@ const fr: Dict = {
   'bs.tab.brewfile': 'Brewfile',
   'bs.tab.flatpak': 'Linux (flatpak)',
   'bs.tab.scoop': 'Windows (scoop)',
+  'bs.tab.apt': 'Linux (apt)',
 };
 
 const de: Dict = {
@@ -827,6 +839,8 @@ const de: Dict = {
   'downloads.cancelled': 'Abgebrochen',
   'downloads.cancel': 'Abbrechen',
   'downloads.retry': 'Erneut versuchen',
+  'downloads.resume': 'Fortsetzen',
+  'downloads.verified': 'Verifiziert',
   'downloads.openFile': 'Datei öffnen',
   'downloads.showFolder': 'Im Ordner anzeigen',
   'downloads.clearFinished': 'Fertige löschen',
@@ -937,6 +951,7 @@ const de: Dict = {
   'bs.tab.brewfile': 'Brewfile',
   'bs.tab.flatpak': 'Linux (flatpak)',
   'bs.tab.scoop': 'Windows (scoop)',
+  'bs.tab.apt': 'Linux (apt)',
 };
 
 const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

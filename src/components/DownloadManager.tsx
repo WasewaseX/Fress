@@ -8,6 +8,7 @@ import {
   FolderOpen,
   FileCheck2,
   RotateCcw,
+  Play,
   Trash2,
   DownloadCloud,
   Copy,
@@ -96,7 +97,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                   <p className="text-xs font-semibold text-slate-100 break-all leading-snug" title={item.url}>
                     {item.name}
                   </p>
-                  <StatusChip status={item.status} error={item.error} />
+                  <StatusChip status={item.status} error={item.error} verified={item.verified} />
                 </div>
 
                 {/* Progress bar */}
@@ -150,7 +151,12 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                   {item.status === 'active' && (
                     <PanelButton onClick={() => cancel(item.id)} icon={<MinusCircle className="w-3 h-3" />} label={t('downloads.cancel')} />
                   )}
-                  {(item.status === 'error' || item.status === 'cancelled') && (
+                  {(item.status === 'error' || item.status === 'cancelled') && item.canResume && (
+                    // Resume picks up from the kept .part file instead of
+                    // restarting; the hash, if any, still covers the whole file.
+                    <PanelButton onClick={() => retry(item.id, true)} icon={<Play className="w-3 h-3" />} label={t('downloads.resume')} primary />
+                  )}
+                  {(item.status === 'error' || item.status === 'cancelled') && !item.canResume && (
                     <PanelButton onClick={() => retry(item.id)} icon={<RotateCcw className="w-3 h-3" />} label={t('downloads.retry')} />
                   )}
                   {item.status === 'completed' && item.path && (
@@ -207,7 +213,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
   );
 };
 
-function StatusChip({ status, error }: { status: string; error?: string }) {
+function StatusChip({ status, error, verified }: { status: string; error?: string; verified?: boolean }) {
   const { t } = useI18n();
   if (status === 'active') {
     return <span className="shrink-0 text-[11px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded">{t('downloads.active')}</span>;
@@ -216,7 +222,12 @@ function StatusChip({ status, error }: { status: string; error?: string }) {
     return <span className="shrink-0 text-[11px] font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded">Opened in browser</span>;
   }
   if (status === 'completed') {
-    return <span className="shrink-0 text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><Check className="w-2.5 h-2.5" />{t('downloads.completed')}</span>;
+    return (
+      <span className="shrink-0 text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+        <Check className="w-2.5 h-2.5" />
+        {verified === true ? t('downloads.verified') : t('downloads.completed')}
+      </span>
+    );
   }
   if (status === 'error') {
     return <span className="shrink-0 text-[11px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><XCircle className="w-2.5 h-2.5" />{t('downloads.failed')}</span>;

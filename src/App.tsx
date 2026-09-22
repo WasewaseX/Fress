@@ -23,7 +23,7 @@ import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider } from './lib/i18n';
 import { DownloadsProvider, useDownloads } from './lib/downloads';
 import { openExternal } from './lib/external';
-import { checkForUpdate, OwnRelease } from './lib/selfUpdate';
+import { checkForUpdate, OwnRelease, getUpdateChannel, setUpdateChannel, UpdateChannel } from './lib/selfUpdate';
 import pkg from '../package.json';
 
 import { INITIAL_APPS } from './data/appsData';
@@ -95,14 +95,23 @@ function AppShell() {
   // demand from the menu. When an update exists, the header shows a pill;
   // tapping it downloads the platform file (an APK update on Android keeps
   // all apps and data, no reinstall needed).
-  const [ownUpdate, setOwnUpdate] = useState<{ release: OwnRelease; asset: { name: string; size: number; url: string } | null } | null>(null);
+  const [ownUpdate, setOwnUpdate] = useState<{ release: OwnRelease; asset: { name: string; size: number; url: string } | null; expectedSha256: string | null } | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>(() => getUpdateChannel());
+
+  const handleUpdateChannelChange = (channel: UpdateChannel) => {
+    setUpdateChannelState(channel);
+    setUpdateChannel(channel);
+    toast.info(`Update channel: ${channel}`, {
+      description: 'Re-check for updates to apply the new channel.',
+    });
+  };
 
   const runUpdateCheck = async (announce: boolean) => {
     if (updateChecking) return;
     setUpdateChecking(true);
     const res = await checkForUpdate(pkg.version);
-    setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset } : null);
+    setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset, expectedSha256: res.expectedSha256 } : null);
     if (announce) {
       if (res.kind === 'available') {
         toast.info(`Fress v${res.release.version} is available.`, {
@@ -145,7 +154,9 @@ function AppShell() {
   const handleHeaderUpdateClick = () => {
     if (!ownUpdate) return;
     if (ownUpdate.asset) {
-      void startDownload(ownUpdate.asset.url, ownUpdate.asset.name);
+      // The download is verified against the release's published
+      // SHA256SUMS.txt entry before it counts as finished.
+      void startDownload(ownUpdate.asset.url, ownUpdate.asset.name, { expectedSha256: ownUpdate.expectedSha256 || undefined });
       toast.success('Update downloading…', {
         description: 'When it finishes, open the file to update Fress. Your apps and data stay.',
       });
@@ -483,11 +494,13 @@ function AppShell() {
 
   // Export catalog
   const handleExportCatalog = () => {
+    // Schema 1.3 renames the project metadata to Fress (older backups said
+    // "Awesome Free Apps Hub"); imports still accept every older schema.
     const payload = {
       meta: {
-        project: 'Awesome Free Apps Hub',
+        project: 'Fress',
         exportDate: new Date().toISOString(),
-        version: '1.2',
+        version: '1.3',
         totalItems: apps.length
       },
       favorites,
@@ -499,7 +512,7 @@ function AppShell() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `awesome-free-apps-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `fress-backup-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -509,80 +522,128 @@ function AppShell() {
 
   // Import catalog
   const handleImportCatalog = (jsonString: string) => {
+    let parsed: any;
     try {
-      const parsed = JSON.parse(jsonString);
-      const incomingApps: AppItem[] = parsed.customApps || parsed.apps || [];
-      if (!Array.isArray(incomingApps)) {
-        toast.error('Invalid backup file: Missing apps array.');
+      parsed = JSON.parse(jsonString);
+    } catch {
+      toast.error('Failed to parse backup JSON file.');
+      return;
+    }
+
+    // Shape validation before anything is touched: a corrupted or foreign
+    // file must be rejected with a reason, not half-applied.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      toast.error('Invalid backup file: expected a JSON object.');
+      return;
+    }
+    const incomingApps: AppItem[] = parsed.customApps || parsed.apps || [];
+    if (!Array.isArray(incomingApps)) {
+      toast.error('Invalid backup file: the apps list is not an array.');
+      return;
+    }
+    if (parsed.favorites !== undefined && !Array.isArray(parsed.favorites)) {
+      toast.error('Invalid backup file: the favorites list is corrupted (not an array).');
+      return;
+    }
+    if (parsed.meta && typeof parsed.meta === 'object' && typeof parsed.meta.version === 'string') {
+      const major = parseInt(parsed.meta.version.split('.')[0] || '0', 10);
+      if (major > 1) {
+        toast.error(`This backup was written by a newer Fress (schema ${parsed.meta.version}) and cannot be read safely.`);
         return;
       }
+    }
 
-      setApps((prev) => {
-        const existingIds = new Set(prev.map((a) => a.id));
-        const newCustoms: AppItem[] = [];
-        let strippedCommands = 0;
+    let strippedCommands = 0;
 
-        for (const item of incomingApps) {
-          if (item && item.name && !existingIds.has(item.id)) {
-            // A catalog backup can come from anyone. Install commands end up
-            // in generated batch scripts, so every command field is checked
-            // and anything that is not a plain install invocation is dropped
-            // instead of being stored.
-            const winget = sanitizeInstallCommand('winget', item.wingetCommand);
-            const brew = sanitizeInstallCommand('brew', item.brewCommand);
-            const flatpak = sanitizeInstallCommand('flatpak', item.flatpakCommand);
-            const scoop = sanitizeInstallCommand('scoop', item.scoopCommand);
-            strippedCommands += [
-              item.wingetCommand, item.brewCommand, item.flatpakCommand, item.scoopCommand
-            ].filter((raw, i) => raw && [winget, brew, flatpak, scoop][i] === null).length;
+    // Counts are computed outside the state setters: React may defer updater
+    // functions, so reading counters mutated inside them can toast stale
+    // numbers. The closure apps/favorites are fresh in this event handler.
+    const existingIds = new Set(apps.map((a) => a.id));
+    const existingNames = new Set(apps.map((a) => a.name.trim().toLowerCase()));
+    const newCustoms: AppItem[] = [];
+    let invalidCount = 0;
+    let skippedCount = 0;
 
-            newCustoms.push({
-              ...item,
-              wingetCommand: winget || undefined,
-              brewCommand: brew || undefined,
-              flatpakCommand: flatpak || undefined,
-              scoopCommand: scoop || undefined,
-              isCustom: true
-            });
-            existingIds.add(item.id);
-          }
-        }
+    for (const item of incomingApps) {
+      if (!item || typeof item !== 'object' || !item.name || typeof item.name !== 'string') {
+        invalidCount++;
+        continue;
+      }
+      if (existingIds.has(item.id)) {
+        skippedCount++;
+        continue;
+      }
+      // A catalog backup can come from anyone. Install commands end up
+      // in generated batch scripts, so every command field is checked
+      // and anything that is not a plain install invocation is dropped
+      // instead of being stored.
+      const winget = sanitizeInstallCommand('winget', item.wingetCommand);
+      const brew = sanitizeInstallCommand('brew', item.brewCommand);
+      const flatpak = sanitizeInstallCommand('flatpak', item.flatpakCommand);
+      const scoop = sanitizeInstallCommand('scoop', item.scoopCommand);
+      const apt = sanitizeInstallCommand('apt', item.aptCommand);
+      strippedCommands += [
+        item.wingetCommand, item.brewCommand, item.flatpakCommand, item.scoopCommand, item.aptCommand
+      ].filter((raw, i) => raw && [winget, brew, flatpak, scoop, apt][i] === null).length;
 
-        const merged = [...prev, ...newCustoms];
+      // Guard against the same application arriving twice under different
+      // ids (renamed export, merged backups).
+      if (existingNames.has(item.name.trim().toLowerCase())) {
+        skippedCount++;
+        continue;
+      }
+
+      newCustoms.push({
+        ...item,
+        wingetCommand: winget || undefined,
+        brewCommand: brew || undefined,
+        flatpakCommand: flatpak || undefined,
+        scoopCommand: scoop || undefined,
+        aptCommand: apt || undefined,
+        isCustom: true
+      });
+      existingIds.add(item.id);
+      existingNames.add(item.name.trim().toLowerCase());
+    }
+
+    const merged = [...apps, ...newCustoms];
+    try {
+      localStorage.setItem(STORAGE_KEY_CUSTOM_APPS, JSON.stringify(merged.filter((item) => item.isCustom)));
+    } catch {
+      // ignore
+    }
+    setApps(merged);
+
+    let mergedFavorites = 0;
+    if (Array.isArray(parsed.favorites) && parsed.favorites.length > 0) {
+      const fresh = parsed.favorites.filter((f: unknown) => typeof f === 'string' && !favorites.includes(f as string));
+      mergedFavorites = fresh.length;
+      if (mergedFavorites > 0) {
+        const combined = [...favorites, ...fresh];
         try {
-          const customOnly = merged.filter((item) => item.isCustom);
-          localStorage.setItem(STORAGE_KEY_CUSTOM_APPS, JSON.stringify(customOnly));
+          localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(combined));
         } catch {
           // ignore
         }
-
-        if (newCustoms.length > 0) {
-          toast.success(`Imported ${newCustoms.length} new application(s).`);
-        } else {
-          toast.info('No new applications detected; all items are already in catalog.');
-        }
-        if (strippedCommands > 0) {
-          toast.warning(
-            `${strippedCommands} package command(s) in the backup were removed as unsafe. Only plain "<manager> install <package>" commands are accepted.`
-          );
-        }
-
-        return merged;
-      });
-
-      if (Array.isArray(parsed.favorites) && parsed.favorites.length > 0) {
-        setFavorites((prev) => {
-          const combined = Array.from(new Set([...prev, ...parsed.favorites]));
-          try {
-            localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(combined));
-          } catch {
-            // ignore
-          }
-          return combined;
-        });
+        setFavorites(combined);
       }
-    } catch {
-      toast.error('Failed to parse backup JSON file.');
+    }
+
+    // One summary instead of a toast barrage: what was added, what was
+    // skipped, what was unusable, what happened to bookmarks.
+    const bits: string[] = [`${newCustoms.length} app${newCustoms.length === 1 ? '' : 's'} imported`];
+    if (skippedCount > 0) bits.push(`${skippedCount} already present`);
+    if (invalidCount > 0) bits.push(`${invalidCount} invalid entr${invalidCount === 1 ? 'y' : 'ies'} skipped`);
+    if (mergedFavorites > 0) bits.push(`${mergedFavorites} bookmark${mergedFavorites === 1 ? '' : 's'} restored`);
+    if (newCustoms.length > 0 || mergedFavorites > 0) {
+      toast.success(`Backup imported: ${bits.join(', ')}.`);
+    } else {
+      toast.info(`Nothing new to import (${bits.join(', ')}).`);
+    }
+    if (strippedCommands > 0) {
+      toast.warning(
+        `${strippedCommands} package command(s) in the backup were removed as unsafe. Only plain "<manager> install <package>" commands are accepted.`
+      );
     }
   };
 
@@ -818,6 +879,8 @@ function AppShell() {
         onOpenDownloads={() => setIsDownloadsOpen(true)}
         activeDownloadCount={activeDownloadCount}
         updateVersion={ownUpdate ? ownUpdate.release.version : null}
+        updateChannel={updateChannel}
+        onUpdateChannelChange={handleUpdateChannelChange}
         onUpdateClick={handleHeaderUpdateClick}
         onCheckForUpdates={() => void runUpdateCheck(true)}
         onOpenWhatsNew={() => setShowWhatsNew(true)}

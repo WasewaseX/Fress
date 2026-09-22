@@ -20,7 +20,23 @@ jobs:
       - uses: actions/checkout@v4
       - id: v
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
+
+          # One version everywhere. A tag that disagrees with package.json,
+          # Cargo.toml or tauri.conf.json would produce a release whose
+          # installer reports a different version than its tag says, so the
+          # whole run stops here instead of shipping a confusing release.
+          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$CARGO_VERSION" = "$VERSION" ] || fail "Cargo.toml version ($CARGO_VERSION) != package.json version ($VERSION)"
+          [ "$TAURI_VERSION" = "$VERSION" ] || fail "tauri.conf.json version ($TAURI_VERSION) != package.json version ($VERSION)"
+          if [ "${GITHUB_REF_TYPE:-branch}" = "tag" ]; then
+            [ "${GITHUB_REF_NAME}" = "v$VERSION" ] || fail "pushed tag (${GITHUB_REF_NAME}) != package.json version (v$VERSION)"
+          fi
+          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION tag=${GITHUB_REF_NAME:-n/a}"
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
@@ -74,7 +90,10 @@ jobs:
 
             Pre-release: features may change between releases.
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
-          draft: false
+          # Draft until the verify-release job proves every required artifact
+          # is present and hashes match. A failed build then leaves nothing
+          # public: no half-populated release page users can stumble into.
+          draft: true
 
   build-windows:
     needs: [version, create-release]
@@ -95,16 +114,46 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
-      - name: Build Windows installer (NSIS + MSI)
+      - name: Build Windows installer (NSIS)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          # The MSI (WiX) target ships alongside NSIS: Defender's ML heuristics
-          # keep flagging unsigned NSIS bootstrappers (Bearfoos.A!ml), while
-          # MSI packages pass far more often, so users have a calmer choice.
-          args: '--target x86_64-pc-windows-msvc --bundles nsis msi'
+          # NSIS only here. WiX (MSI) rejects prerelease versions like
+          # 1.0.1-alpha ("Product version must be major.minor.build"), and
+          # with both targets in one invocation that failure killed the whole
+          # step before the finished NSIS exe could be uploaded - which is
+          # exactly how v1.0.1-alpha lost its x64 installer. The MSI is built
+          # separately below with a numeric build version.
+          args: '--target x86_64-pc-windows-msvc --bundles nsis'
+      - name: Build Windows MSI with a numeric build version
+        # WiX only accepts ProductVersion of the form major.minor.build, so
+        # the MSI is built from a config override that strips the prerelease
+        # suffix (1.0.2-alpha -> 1.0.2). The file is then renamed to carry the
+        # full version so the release page stays uniform. Trade-off: two
+        # prereleases of the same numeric version (1.0.2-alpha, 1.0.2-beta)
+        # share an MSI ProductVersion; Windows may then offer "repair"
+        # instead of a clean in-place upgrade. The NSIS installer, the
+        # portable zip and the in-app updater all use the real version.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = "${{ needs.version.outputs.version }}"
+          $numeric = ($version -replace '-.*$', '')
+          $overrides = "{`"version`": `"$numeric`", `"bundle`": { `"targets`": [`"msi`"] } }"
+          Set-Content -Path msi-overrides.json -Value $overrides -Encoding utf8NoBOM
+          Write-Host "Building MSI with ProductVersion $numeric (app version $version)"
+          npx tauri build --target x86_64-pc-windows-msvc --bundles msi --config msi-overrides.json
+          if ($LASTEXITCODE -ne 0) { throw "MSI build failed with exit code $LASTEXITCODE" }
+          $msi = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi" | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found in bundle folder" }
+          $finalName = "Fress_${version}_x64_en-US.msi"
+          Copy-Item $msi.FullName $finalName -Force
+          gh release upload "${{ needs.version.outputs.tag }}" $finalName --clobber --repo "${{ github.repository }}"
+          Write-Host "MSI uploaded as $finalName"
       - name: Sign with Azure Trusted Signing
         # Runs only when the signing account is configured. One-time setup
         # steps are in CODE_SIGNING.md.
@@ -203,19 +252,6 @@ jobs:
         shell: pwsh
         run: |
           Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Windows binaries shipped unsigned. Configure WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD secrets for a persistent publisher signature (see CODE_SIGNING.md)."
-
-      - name: Upload the MSI installer
-        # Straight upload, no signing step: the MSI carries its own metadata
-        # and Defender flags WiX packages far less often than NSIS ones.
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $msi = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi" | Select-Object -First 1
-          if (-not $msi) { throw "MSI not found in bundle folder" }
-          gh release upload "${{ needs.version.outputs.tag }}" $msi.FullName --clobber --repo "${{ github.repository }}"
-          Write-Host "MSI installer uploaded: $($msi.Name)"
 
       - name: Package the portable exe
         # A portable build is the bare app exe in a zip: no installer, no
@@ -572,29 +608,43 @@ jobs:
           npx tauri icon src-tauri/icons/icon.png
           npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
       - name: Align, sign, and upload APKs
+        # The old arm64 lookup (-path '*arm64*') never matched the actual
+        # gradle output layout, so every release silently shipped only the
+        # universal APK. Now every unsigned APK is classified by its output
+        # directory and mapped to its release asset name; universal is
+        # mandatory, per-ABI files upload when present.
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           OUT="src-tauri/gen/android/app/build/outputs/apk"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           echo "build-tools: $BT"
-          UNIVERSAL=$(find "$OUT" -path '*universal*' -name '*unsigned.apk' | head -1)
-          ARM64=$(find "$OUT" -path '*arm64*' -name '*unsigned.apk' | head -1)
-          echo "universal: $UNIVERSAL"
-          echo "arm64: $ARM64"
-          sign_one() {
-            IN="$1"; NAME="$2"
-            "$BT/zipalign" -f -p 4 "$IN" aligned.apk
-            "$BT/apksigner" sign --ks fress.keystore --ks-pass pass:fressandroid \
-              --ks-key-alias fress --key-pass pass:fressandroid --out "$NAME" aligned.apk
-            "$BT/apksigner" verify "$NAME"
+          classify() {
+            case "$(basename "$(dirname "$1")")" in
+              universal) echo "universal" ;;
+              arm64|arm64-v8a) echo "arm64" ;;
+              armeabi-v7a|armeabi) echo "arm" ;;
+              x86_64) echo "x64" ;;
+              x86) echo "x86" ;;
+              *) echo "" ;;
+            esac
           }
-          if [ -z "$UNIVERSAL" ]; then echo "No universal APK found"; exit 1; fi
-          sign_one "$UNIVERSAL" "Fress_${VERSION}_universal.apk"
-          UPLOADS="Fress_${VERSION}_universal.apk"
-          if [ -n "$ARM64" ]; then
-            sign_one "$ARM64" "Fress_${VERSION}_arm64.apk"
-            UPLOADS="$UPLOADS Fress_${VERSION}_arm64.apk"
-          fi
+          declare -A SIGNED=()
+          for apk in $(find "$OUT" -name '*unsigned.apk' -not -path '*aligned*'); do
+            kind=$(classify "$apk")
+            echo "found APK: $apk -> ${kind:-unclassified}"
+            if [ -z "$kind" ]; then continue; fi
+            if [ -n "${SIGNED[$kind]:-}" ]; then continue; fi
+            "$BT/zipalign" -f -p 4 "$apk" aligned.apk
+            "$BT/apksigner" sign --ks fress.keystore --ks-pass pass:fressandroid \
+              --ks-key-alias fress --key-pass pass:fressandroid --out "Fress_${VERSION}_${kind}.apk" aligned.apk
+            "$BT/apksigner" verify "Fress_${VERSION}_${kind}.apk"
+            SIGNED[$kind]="Fress_${VERSION}_${kind}.apk"
+          done
+          if [ -z "${SIGNED[universal]:-}" ]; then echo "No universal APK found"; exit 1; fi
+          UPLOADS="${SIGNED[universal]}"
+          for kind in arm64 arm x64 x86; do
+            if [ -n "${SIGNED[$kind]:-}" ]; then UPLOADS="$UPLOADS ${SIGNED[$kind]}"; fi
+          done
           ls -la Fress_*.apk
           gh release upload "${{ needs.version.outputs.tag }}" $UPLOADS --clobber
         env:
@@ -674,3 +724,79 @@ jobs:
             gh release edit "$TAG" --repo "${{ github.repository }}" --notes-file body.md
             echo "release body updated with VirusTotal links"
           fi
+
+  verify-release:
+    # The gate between "CI built something" and "users can download it".
+    # Runs after every build and the checksum pass, checks that every
+    # required artifact is present and that every uploaded file still hashes
+    # to its SHA256SUMS.txt entry, and only then publishes the draft. A
+    # missing AppImage or a truncated upload now leaves the release as a
+    # private draft: re-run the failed jobs, the draft fills back up.
+    needs: [version, checksums, virustotal]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify asset completeness and checksums, then publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "$TAG" --dir assets --clobber --repo "${{ github.repository }}"
+
+          cd assets
+          echo "Assets on the release:"
+          ls -la
+
+          REQUIRED=(
+            "Fress_${VERSION}_x64-setup.exe"
+            "Fress_${VERSION}_x64_en-US.msi"
+            "Fress_${VERSION}_x64-portable.zip"
+            "Fress_${VERSION}_arm64-setup.exe"
+            "Fress_${VERSION}_arm64-portable.zip"
+            "Fress_${VERSION}_x64.dmg"
+            "Fress_${VERSION}_aarch64.dmg"
+            "Fress_${VERSION}_amd64.AppImage"
+            "Fress_${VERSION}_amd64.deb"
+            "Fress_${VERSION}_x86_64.rpm"
+            "Fress_${VERSION}_universal.apk"
+            "SHA256SUMS.txt"
+          )
+          MISSING=0
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -s "$f" ]; then
+              echo "::error::required artifact missing or empty: $f"
+              MISSING=1
+            fi
+          done
+          if [ ! -f "Fress_${VERSION}_arm64.apk" ]; then
+            echo "::warning::optional per-ABI asset missing: Fress_${VERSION}_arm64.apk (the universal APK covers every ABI)"
+          fi
+          if [ "$MISSING" != "0" ]; then
+            echo "::error::release is incomplete; it stays a private draft. Re-run the failed build jobs, this gate runs again afterwards."
+            exit 1
+          fi
+
+          # Smoke test: every shipped file must still hash to its
+          # SHA256SUMS.txt entry, so a corrupted/truncated upload can never
+          # publish alongside a checksum that no longer matches it.
+          STATUS=0
+          while read -r expected name; do
+            if [ "$name" = "SHA256SUMS.txt" ]; then continue; fi
+            if [ ! -f "$name" ]; then
+              echo "::error::SHA256SUMS.txt lists $name which is not on the release"; STATUS=1; continue
+            fi
+            actual=$(sha256sum "$name" | cut -d' ' -f1)
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$name hashes to $actual but SHA256SUMS.txt says $expected"; STATUS=1
+            fi
+          done < <(sed 's/  \+/ /g' SHA256SUMS.txt)
+          for f in *; do
+            if [ "$f" = "SHA256SUMS.txt" ]; then continue; fi
+            grep -q " $f\$" SHA256SUMS.txt || { echo "::error::$f has no SHA256SUMS.txt entry"; STATUS=1; }
+          done
+          [ "$STATUS" = "0" ] || { echo "::error::checksum verification failed; release stays a draft"; exit 1; }
+
+          echo "All required artifacts present, all hashes match. Publishing."
+          gh release edit "$TAG" --draft=false --repo "${{ github.repository }}"

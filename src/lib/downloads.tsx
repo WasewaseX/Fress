@@ -4,6 +4,9 @@ import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
+import { formatBytes, formatSpeed, formatEta } from './format';
+
+export { formatBytes, formatSpeed, formatEta };
 
 export type DownloadStatus = 'active' | 'completed' | 'error' | 'cancelled' | 'browser' | 'page';
 
@@ -20,6 +23,14 @@ export interface DownloadItem {
   error?: string;
   path?: string;
   sha256?: string;
+  /** Trusted hash this download is being verified against, if one is known. */
+  expectedSha256?: string;
+  /** true = the digest matched the trusted hash. Never true when only
+   * calculated. absent = no trusted reference was available. */
+  verified?: boolean;
+  /** Set on error/cancel when a .part file was kept and a resume can pick
+   * up from where it stopped. */
+  canResume?: boolean;
   startedAt: number;
 }
 
@@ -39,10 +50,10 @@ interface DownloadsContextValue {
   items: DownloadItem[];
   activeCount: number;
   downloadDir: string | null;
-  startDownload: (url: string, nameHint?: string) => Promise<void>;
+  startDownload: (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean }) => Promise<void>;
   recordExternalOpen: (name: string, url: string) => void;
   cancel: (id: number) => void;
-  retry: (id: number) => void;
+  retry: (id: number, resume?: boolean) => void;
   clearFinished: () => void;
   openFile: (path: string) => void;
   openFolder: (path?: string) => void;
@@ -93,26 +104,37 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       }
     ).then((un) => unlisteners.push(un));
 
-    listen<{ id: number; path: string; bytes: number; sha256: string }>('download-complete', (event) => {
+    listen<{ id: number; path: string; bytes: number; sha256: string; verified?: boolean }>('download-complete', (event) => {
       const p = event.payload;
       setItems((prev) =>
         prev.map((it) =>
-          it.id === p.id ? { ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, total: p.bytes, speed: 0, eta: 0 } : it
+          it.id === p.id ? { ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, verified: p.verified === true ? true : undefined, total: p.bytes, speed: 0, eta: 0, canResume: false } : it
         )
       );
       const item = itemsRef.current.find((it) => it.id === p.id);
-      toast.success(`Downloaded ${item?.name || 'file'}`, {
-        description: p.path,
-      });
+      if (p.verified === true) {
+        toast.success(`Downloaded ${item?.name || 'file'}`, {
+          description: `SHA-256 verified against the published checksum. ${p.path}`,
+        });
+      } else {
+        toast.success(`Downloaded ${item?.name || 'file'}`, {
+          description: p.path,
+        });
+      }
     });
 
-    listen<{ id: number; message: string }>('download-error', (event) => {
+    listen<{ id: number; message: string; kind?: string }>('download-error', (event) => {
       const p = event.payload;
       if (p.message === 'Cancelled') {
-        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'cancelled' } : it)));
-        toast.info('Download cancelled');
+        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'cancelled', canResume: true } : it)));
+        toast.info('Download paused — use Resume to continue');
+      } else if (p.kind === 'checksum') {
+        // The file failed verification and was deleted on disk. A resume is
+        // pointless; the source itself must be retried.
+        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'error', error: p.message, canResume: false, sha256: undefined } : it)));
+        toast.error('Integrity check failed', { description: p.message });
       } else {
-        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'error', error: p.message } : it)));
+        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'error', error: p.message, canResume: true } : it)));
         toast.error('Download failed', { description: p.message });
       }
     }).then((un) => unlisteners.push(un));
@@ -123,7 +145,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const startDownload = useCallback(
-    async (url: string, nameHint?: string) => {
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean }) => {
       if (!url || !/^https?:\/\//i.test(url)) {
         toast.error('This link is not a direct download');
         return;
@@ -174,6 +196,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           url,
           filename: guessedName || null,
           directory: dir,
+          expectedSha256: opts?.expectedSha256 || null,
+          resume: opts?.resume || false,
         });
         setItems((prev) => [
           {
@@ -186,6 +210,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             speed: 0,
             eta: 0,
             status: 'active',
+            expectedSha256: opts?.expectedSha256,
             startedAt: Date.now(),
           },
           ...prev,
@@ -203,11 +228,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const retry = useCallback(
-    (id: number) => {
+    (id: number, resume?: boolean) => {
       const item = itemsRef.current.find((it) => it.id === id);
       if (item) {
         setItems((prev) => prev.filter((it) => it.id !== id));
-        void startDownload(item.url, item.name);
+        void startDownload(item.url, item.name, {
+          expectedSha256: item.expectedSha256,
+          resume: resume || false,
+        });
       }
     },
     [startDownload]
@@ -299,25 +327,4 @@ export function useDownloads(): DownloadsContextValue {
   const ctx = useContext(DownloadsContext);
   if (!ctx) throw new Error('useDownloads must be used inside DownloadsProvider');
   return ctx;
-}
-
-export function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
-export function formatSpeed(bps: number): string {
-  return `${formatBytes(bps)}/s`;
-}
-
-export function formatEta(secs: number): string {
-  if (!secs || !isFinite(secs) || secs <= 0) return '';
-  if (secs < 60) return `${Math.ceil(secs)}s left`;
-  const m = Math.floor(secs / 60);
-  const s = Math.ceil(secs % 60);
-  if (m < 60) return `${m}m ${s}s left`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m left`;
 }

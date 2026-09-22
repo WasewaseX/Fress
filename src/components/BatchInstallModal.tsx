@@ -26,7 +26,7 @@ interface BatchInstallModalProps {
   onClearSelection: () => void;
 }
 
-type ScriptType = 'winget-ps' | 'winget-cmd' | 'brew' | 'brewfile' | 'flatpak' | 'scoop';
+type ScriptType = 'winget-ps' | 'winget-cmd' | 'brew' | 'brewfile' | 'flatpak' | 'scoop' | 'apt';
 
 export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
   isOpen,
@@ -53,13 +53,16 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
         ? 'flatpak'
         : scriptType === 'scoop'
           ? 'scoop'
-          : 'winget';
-  const tabLabel = { winget: 'winget', brew: 'Homebrew', flatpak: 'Flatpak', scoop: 'Scoop' }[tabManager];
+          : scriptType === 'apt'
+            ? 'apt'
+            : 'winget';
+  const tabLabel = { winget: 'winget', brew: 'Homebrew', flatpak: 'Flatpak', scoop: 'Scoop', apt: 'APT' }[tabManager];
 
   const rawCommandOf = (a: AppItem): string | undefined =>
     tabManager === 'winget' ? a.wingetCommand
     : tabManager === 'brew' ? a.brewCommand
     : tabManager === 'flatpak' ? a.flatpakCommand
+    : tabManager === 'apt' ? a.aptCommand
     : a.scoopCommand;
 
   // Last line of defense: nothing reaches the script without passing the
@@ -126,6 +129,13 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
       return `# Windows Scoop Installer\n${skipNote}# \nscoop install ${pkgs}`;
     }
 
+    if (scriptType === 'apt') {
+      const commands = validCommands.map((c) => `sudo ${c.cmd} -y`);
+
+      return `#!/usr/bin/env bash\n# ==========================================\n# Fress - Linux APT Batch Install (Debian/Ubuntu)\n# ==========================================\n\n${skipNote}sudo apt update\n\n` +
+        commands.join('\n');
+    }
+
     return '';
   };
 
@@ -147,7 +157,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
     let mimeType = 'text/plain';
 
     if (scriptType === 'winget-cmd') extension = 'bat';
-    if (scriptType === 'brew' || scriptType === 'flatpak') extension = 'sh';
+    if (scriptType === 'brew' || scriptType === 'flatpak' || scriptType === 'apt') extension = 'sh';
     if (scriptType === 'brewfile') {
       filename = 'Brewfile';
       extension = '';
@@ -259,6 +269,17 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               }`}
             >
               {t('bs.tab.scoop')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setScriptType('apt')}
+              className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
+                scriptType === 'apt'
+                  ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
+                  : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
+              }`}
+            >
+              {t('bs.tab.apt')}
             </button>
           </div>
 

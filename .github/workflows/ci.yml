@@ -1,0 +1,66 @@
+name: CI
+
+# General validation layer for pull requests (and pushes to main).
+# Packaging stays exclusive to tag pushes (release.yml): PRs get typecheck,
+# unit tests, the catalog validator, a production frontend build and a Rust
+# compile check — everything needed to know a change is sound without
+# paying for six platform bundles.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Typecheck, tests, catalog, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Catalog validator
+        # The catalog is the product: duplicate ids, dead links, commands
+        # that belong to no platform the app supports, missing icons or
+        # translations all fail the PR.
+        run: npm run validate:catalog
+      - name: Production build
+        run: npm run build
+
+  rust:
+    name: Rust check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Rust formatting
+        # Advisory until the existing tree is formatted in one dedicated
+        # commit; flip continue-on-error off afterwards.
+        continue-on-error: true
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Clippy
+        # Advisory for the same reason as rustfmt above.
+        continue-on-error: true
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets

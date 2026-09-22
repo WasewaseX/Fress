@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.2-alpha (2026-09-22)
+
+The reliability release: releases only go live when they are complete and every file hashes true, the updater finally understands prereleases, downloads can survive a dropped connection, and the whole catalog is machine-checked on every PR.
+
+### Fixed
+- v1.0.1-alpha shipped without any Windows x64 installer at all: the new MSI target rejected the `-alpha` version format, and that failure aborted the build step before the finished NSIS exe could be uploaded. The MSI is now built separately with a numeric build version (WiX only accepts `major.minor.build`), renamed to carry the full version, and uploaded on its own.
+- Releases can no longer go out half-populated. A release is created as a **draft**, and a final `verify-release` job checks that every required artifact exists (Windows x64/ARM64 installers, portables, MSI, both macOS dmgs, AppImage/deb/rpm, universal APK, SHA256SUMS.txt), re-hashes every uploaded file against `SHA256SUMS.txt`, and only then publishes. A missing AppImage now means a private draft and a re-run — not a public release with holes.
+- The Git tag, `package.json`, `Cargo.toml` and `tauri.conf.json` must agree on the version before any release job runs; a disagreement fails the run in seconds.
+- The self-updater compared only `major.minor.patch`, so `1.0.1-alpha`, `1.0.1-beta` and the stable `1.0.1` all looked identical. Version comparison now implements real SemVer prerelease ordering (`1.0.1` > `1.0.1-rc.1` > `1.0.1-beta` > `1.0.1-alpha`), so the stable release is correctly offered as an update over any prerelease.
+- Interrupted downloads no longer leave a corrupt `installer.exe` behind (with the retry landing as `installer (1).exe`). The engine writes to a `.part` file and renames it only when the download is complete; failed or cancelled downloads keep the `.part` for **Resume**, which continues with an HTTP `Range` request instead of restarting from zero. Cancelling is now a pause, not a loss.
+- A download that produced no bytes for 60 seconds is now reported as stalled instead of hanging forever, and the old 30-second whole-request timeout — which killed every download that legitimately took longer than 30 seconds — is gone.
+- The Android release has claimed to include an arm64 APK since the first release, but the lookup pattern never matched the actual build output, so only the universal APK ever shipped. APK discovery now classifies the real gradle output directories (universal, arm64, arm, x64, x86) and uploads everything it finds.
+- LibreWolf's `githubUrl` pointed at its GitLab repository, sending star lookups and release detection to GitHub with a `gitlab.com` path. It now carries both its GitHub community mirror and the official GitLab source.
+- Custom apps no longer pretend to work offline: the Add App form used to stamp `offlineReady: true` on every entry, which showed a false "Works offline" badge in the catalog.
+- Backups exported with the old "Awesome Free Apps Hub" project name and filename now export as Fress (`fress-backup-YYYY-MM-DD.json`, schema 1.3); imports still accept every older backup.
+
+### Changed
+- **SHA-256 in the download manager is now verification, not decoration.** When a trusted reference hash exists (Fress's own updates are checked against the release's published `SHA256SUMS.txt`), the finished file is compared against it: match shows a green "Verified" badge, mismatch deletes the file and reports an integrity failure. A hash that was only calculated is never presented as verified.
+- APT is a real package manager in Fress now instead of dead metadata: the Add App form has Scoop and APT fields (validated, loaded when editing, saved), the script generator has an APT tab (`sudo apt update` + `sudo apt install -y …`), and imports sanitize `aptCommand` like every other command field.
+- Backup imports validate the file shape before touching anything: corrupted or foreign JSON is rejected with a reason, a favorites list that is not an array is caught, newer schema majors are refused, duplicate apps under different ids are skipped, and the import ends with one summary (imported / already present / invalid / bookmarks restored).
+
+### Added
+- Update channels: **Stable / Beta / Alpha**, selectable in the header menu. Stable hides all prereleases, Beta adds beta/rc, Alpha sees everything (the current default until Fress reaches stable). The release list is channel-filtered and SemVer-sorted, not trusted to API ordering.
+- A catalog validator (`npm run validate:catalog`, run in CI on every PR) that checks duplicate ids and duplicate apps, missing descriptions, non-HTTPS or invalid URLs, GitHub repository shapes, platform/command coherence (a winget command on a Linux-only app fails), sanitized commands, F-Droid and Play Store id formats, icon presence on disk, and full translation coverage for all 75 apps in all four languages.
+- Unit tests (vitest, `npm test`) covering the SemVer comparison, the install-command sanitizer, the update asset picker and the download formatters — the asset picker test immediately caught an x64 machine being offered the ARM64 installer, which is fixed.
+- A general CI workflow (`.github/workflows/ci.yml`) for PRs: TypeScript check, unit tests, catalog validation, production build, and `cargo check` on the Rust side. Packaging remains exclusive to tag pushes.
+
 ## 1.0.1-alpha (2026-09-22)
 
 The "it works on your machine" release: the Windows False-Positive Defense (MSI alongside NSIS), a fully themed interface, real batch downloads, and the Combos tab folded into the Privacy Pack.

@@ -14,13 +14,14 @@
 // exactly one known package manager: chaining, pipes, substitution,
 // redirection, quotes, globs and control characters all fail the check.
 
-export type PkgManager = 'winget' | 'brew' | 'flatpak' | 'scoop';
+export type PkgManager = 'winget' | 'brew' | 'flatpak' | 'scoop' | 'apt';
 
 const MANAGER_PREFIX: Record<PkgManager, string> = {
   winget: 'winget install',
   brew: 'brew install',
   flatpak: 'flatpak install',
-  scoop: 'scoop install'
+  scoop: 'scoop install',
+  apt: 'apt install'
 };
 
 // Characters a package install command never legitimately needs. Anything
@@ -36,7 +37,7 @@ const REST_ALLOWED = /^[A-Za-z0-9 ._\-:=+/]+$/;
 
 /** Human-readable label for UI messages. */
 export function managerLabel(manager: PkgManager): string {
-  return { winget: 'winget', brew: 'Homebrew', flatpak: 'Flatpak', scoop: 'Scoop' }[manager];
+  return { winget: 'winget', brew: 'Homebrew', flatpak: 'Flatpak', scoop: 'Scoop', apt: 'APT' }[manager];
 }
 
 /**

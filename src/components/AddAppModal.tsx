@@ -48,6 +48,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   const [wingetCommand, setWingetCommand] = useState('');
   const [brewCommand, setBrewCommand] = useState('');
   const [flatpakCommand, setFlatpakCommand] = useState('');
+  const [scoopCommand, setScoopCommand] = useState('');
+  const [aptCommand, setAptCommand] = useState('');
   const [proprietaryAlternative, setProprietaryAlternative] = useState('');
   const [tags, setTags] = useState('');
   
@@ -73,6 +75,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setWingetCommand(initialApp.wingetCommand || '');
       setBrewCommand(initialApp.brewCommand || '');
       setFlatpakCommand(initialApp.flatpakCommand || '');
+      setScoopCommand(initialApp.scoopCommand || '');
+      setAptCommand(initialApp.aptCommand || '');
       setProprietaryAlternative(initialApp.proprietaryAlternative || '');
       setTags(initialApp.tags.join(', '));
     } else {
@@ -91,6 +95,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setWingetCommand('');
       setBrewCommand('');
       setFlatpakCommand('');
+      setScoopCommand('');
+      setAptCommand('');
       setProprietaryAlternative('');
       setTags('');
     }
@@ -164,6 +170,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       if (!wingetCommand) setWingetCommand(`winget install ${data.name || cleanRepo}`);
       if (!brewCommand) setBrewCommand(`brew install --cask ${(data.name || cleanRepo).toLowerCase()}`);
       if (!flatpakCommand) setFlatpakCommand(`flatpak install flathub ${(data.name || cleanRepo).toLowerCase()}`);
+      if (!scoopCommand) setScoopCommand(`scoop install ${(data.name || cleanRepo).toLowerCase()}`);
+      if (!aptCommand) setAptCommand(`apt install ${(data.name || cleanRepo).toLowerCase()}`);
 
       if (data.topics && data.topics.length > 0 && !tags) {
         setTags(data.topics.slice(0, 5).join(', '));
@@ -207,6 +215,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setErrorMsg('The Flatpak command looks unsafe, so it was not saved. Use one plain install command, e.g. "flatpak install flathub org.app.Name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
       return;
     }
+    if (scoopCommand.trim() && !sanitizeInstallCommand('scoop', scoopCommand)) {
+      setErrorMsg('The Scoop command looks unsafe, so it was not saved. Use one plain install command, e.g. "scoop install name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      return;
+    }
+    if (aptCommand.trim() && !sanitizeInstallCommand('apt', aptCommand)) {
+      setErrorMsg('The APT command looks unsafe, so it was not saved. Use one plain install command, e.g. "apt install name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      return;
+    }
 
     const newApp: AppItem = {
       id: initialApp ? initialApp.id : `custom-${Date.now()}`,
@@ -225,12 +241,16 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       wingetCommand: sanitizeInstallCommand('winget', wingetCommand) || undefined,
       brewCommand: sanitizeInstallCommand('brew', brewCommand) || undefined,
       flatpakCommand: sanitizeInstallCommand('flatpak', flatpakCommand) || undefined,
+      scoopCommand: sanitizeInstallCommand('scoop', scoopCommand) || undefined,
+      aptCommand: sanitizeInstallCommand('apt', aptCommand) || undefined,
       proprietaryAlternative: proprietaryAlternative.trim() || undefined,
       tags: tagArray.length > 0 ? tagArray : ['open-source', 'desktop'],
       isOwnerPick: initialApp ? initialApp.isOwnerPick : false,
       isTrendingToday: initialApp ? initialApp.isTrendingToday : false,
       isCustom: true,
-      offlineReady: true,
+      // offlineReady is a claim about the software, not a default: it stays
+      // empty unless the app itself is known to work offline.
+      offlineReady: initialApp?.offlineReady,
       addedAt: initialApp?.addedAt || new Date().toISOString().split('T')[0]
     };
 
@@ -560,6 +580,36 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 value={flatpakCommand}
                 onChange={(e) => setFlatpakCommand(e.target.value)}
                 placeholder="flatpak install flathub ..."
+                className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="input-scoop" className="block text-slate-300 font-medium mb-1">
+                Scoop Command
+              </label>
+              <input
+                id="input-scoop"
+                type="text"
+                value={scoopCommand}
+                onChange={(e) => setScoopCommand(e.target.value)}
+                placeholder="scoop install syncthing"
+                className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="input-apt" className="block text-slate-300 font-medium mb-1">
+                APT Command
+              </label>
+              <input
+                id="input-apt"
+                type="text"
+                value={aptCommand}
+                onChange={(e) => setAptCommand(e.target.value)}
+                placeholder="apt install syncthing"
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs font-mono text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>

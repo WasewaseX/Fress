@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 // Live star counts, kept honest.
 //
 // The curated numbers in appsData were hand-entered and drifted out of date

@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -121,7 +125,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           description: p.path,
         });
       }
-    });
+    }).then((un) => unlisteners.push(un));
+
+    // The Rust side resumes automatically after a dropped connection. A quiet
+    // note explains why the progress bar jumped backwards instead of an
+    // error toast implying the download was lost.
+    listen<{ id: number; attempt: number; message: string }>('download-retrying', (event) => {
+      const p = event.payload;
+      const item = itemsRef.current.find((it) => it.id === p.id);
+      setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'active', canResume: false } : it)));
+      toast.info(`Reconnecting ${item?.name || 'download'} (attempt ${p.attempt})`, {
+        description: 'The connection dropped — continuing from where it stopped.',
+      });
+    }).then((un) => unlisteners.push(un));
 
     listen<{ id: number; message: string; kind?: string }>('download-error', (event) => {
       const p = event.payload;

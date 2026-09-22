@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { openExternal } from '../lib/external';
@@ -43,6 +47,9 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  // Monotonic id: only the newest search may touch state (stale responses
+  // used to overwrite fresh results and kill the spinner early).
+  const searchReqId = useRef(0);
 
   // Focus input when opened; close on Escape like every other modal
   useEffect(() => {
@@ -70,6 +77,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   const existingNames = new Set(existingApps.map((a) => a.name.toLowerCase()));
 
   const handleSearch = async (searchTerm: string) => {
+    const myId = ++searchReqId.current;
     const q = searchTerm.trim();
     if (!q) {
       setResults([]);
@@ -86,8 +94,10 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.items && data.items.length > 0) {
-          setResults(data.items);
-          setLoading(false);
+          if (myId === searchReqId.current) {
+            setResults(data.items);
+            setLoading(false);
+          }
           return;
         }
       }
@@ -146,14 +156,14 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
             addedAt: new Date().toISOString().split('T')[0]
           };
         });
-        setResults(mappedItems);
+        if (myId === searchReqId.current) setResults(mappedItems);
       } else {
-        setErrorMsg('GitHub search limit reached. Try again in a minute, or use the Enter manually tab.');
+        if (myId === searchReqId.current) setErrorMsg('GitHub search limit reached. Try again in a minute, or use the Enter manually tab.');
       }
     } catch (err: any) {
-      setErrorMsg('GitHub search failed. Check the internet connection and try again.');
+      if (myId === searchReqId.current) setErrorMsg('GitHub search failed. Check the internet connection and try again.');
     } finally {
-      setLoading(false);
+      if (myId === searchReqId.current) setLoading(false);
     }
   };
 

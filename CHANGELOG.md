@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.4-alpha (2026-09-23)
+
+The "everything just works" release: picking a private app downloads it, the download button actually downloads, and downloads survive flaky connections without anyone pressing Resume.
+
+### Fixed
+- **Privacy tab: selecting a replacement now adds it to the batch download immediately.** The separate "Add picks to selection" button is gone — the pick, the selection bar and the toast stay in sync both ways (deselecting removes it again, clearing a category removes all of its picks).
+- **Downloading no longer "just opens a help window".** When the one-click resolver came up empty and the curated target was a GitHub releases page, the card opened the in-app guide instead — for whole groups of apps. Now every fallback ends in an actual download, or the official download page opening in the browser with a toast saying so.
+- **Newer catalog apps resolve again.** Repos that publish several release streams from one repo (Obsidian's desktop vs mobile tags, Tuta's desktop vs web, Ente's photos/auth/server, Mullvad, DevToys, Cake Wallet) had their latest release point at the *wrong* stream, so the desktop installer "did not exist". The resolver now scans the recent stable releases and finds the right one — verified against the live GitHub API for every app in the catalog.
+- **The official download page now outranks the forge releases page** in the fallback chain, so an Android-only GitHub repo (Proton Mail) no longer sends Windows users to an APK list.
+- The Download button's "Downloading…" state now matches by app id as well as display name, so files like `Cake_Wallet_v5.9.0_Windows.exe` light it up correctly.
+- The detail modal explains itself when a platform has no ready-made file in the releases (new in five languages), instead of silently showing nothing.
+- Signal's Android entry offers the official APK sideload page, not only Google Play.
+- **Keyboard shortcuts no longer swallow the browser's own combos.** Ctrl/Cmd+A, Ctrl+F and Ctrl+D used to open modals when focus was outside a form field; only the documented single-letter shortcuts remain.
+- The Brewfile generator no longer writes formula packages as `cask "…"` entries (Syncthing's script aborted `brew bundle`); formulas now emit `brew "…"`.
+- Live search results can no longer be overwritten by a slower, older request (stale-response race); the spinner also stays honest.
+- Manually added apps no longer invent 1,000 stars; the export CSV no longer writes the literal string `undefined` for missing links; the compare view no longer renders a dead GitHub link for apps without a repo; "Restore backup" closes the menu before opening the file picker; the offline banner, empty state and "Opened in browser" chip are translated in all five languages.
+
+### Changed
+- **Downloads heal themselves.** A stalled or dropped connection now resumes automatically (up to two retries from the kept `.part` file) with a quiet "Reconnecting" note — the old error-then-manual-Resume path is gone. Cancels and checksum failures are never retried.
+- **The speed readout and ETA are now truthful.** The old number was the average since the download started; it stayed pinned near the early peak after any hiccup. It is now a rolling 4-second window.
+- License hardening without touching the MIT license: every source file carries an SPDX header, the new `NOTICE` file documents copyright, the trademark scope of the Fress name/logo, attribution for third-party catalog icons and ente's PrivacyPack, and the icon audit (all 76 catalog icons plus the privacy-pack logos are the respective projects' official artwork, used for identification only).
+
 ## 1.0.3-alpha (2026-09-22)
 
 The hardening release: the Rust side is lint-clean under the strictest settings, Android finally ships the small per-ABI APKs it always promised, and the release pipeline is ready to produce signed updater manifests the moment a signing key exists.

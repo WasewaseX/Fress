@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 // Package-manager install commands: validated at every border.
 //
 // Custom apps let people bring their own install commands, and a catalog

@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
@@ -27,6 +31,7 @@ interface ReplaceTabProps {
   apps: AppItem[];
   onOpenDetail: (app: AppItem) => void;
   onAddToBatch: (ids: string[]) => void;
+  onRemoveFromBatch: (ids: string[]) => void;
 }
 
 interface PicksState {
@@ -97,7 +102,7 @@ const PP_LEVEL_DOT: Record<PpLevel, string> = {
  * catalog apps straight from here. Explanation and the grade legend live in
  * the About popover, so the first look stays calm.
  */
-export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAddToBatch }) => {
+export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAddToBatch, onRemoveFromBatch }) => {
   const { t } = useI18n();
 
   const byId = useMemo(() => {
@@ -179,28 +184,32 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
       }
       return { ...prev, [cat.id]: { ...cur, a: [...cur.a, alt.id] } };
     });
+    // Selecting a replacement IS adding it to the batch download. Catalog
+    // apps go straight into the selection bar - no separate "add picks to
+    // selection" step for the user to discover (and miss). Deselecting
+    // removes it again, so the checkbox and the pick stay in sync.
+    if (alt.catalogId && byId.has(alt.catalogId)) {
+      const isPicked = picks[cat.id]?.a.includes(alt.id) ?? false;
+      if (isPicked) {
+        onRemoveFromBatch([alt.catalogId]);
+      } else {
+        onAddToBatch([alt.catalogId]);
+        toast.success(`${alt.name} ${t('pp.toastAdded')}`);
+      }
+    }
   };
 
   const clearCategory = (cat: PpCategory) => {
+    // Same sync rule as toggleAlt: unpicking removes from the batch selection.
+    const ids = (picks[cat.id]?.a ?? [])
+      .map((id) => cat.alternatives.find((x) => x.id === id))
+      .filter((x): x is PpAlternative => Boolean(x && x.catalogId && byId.has(x.catalogId)))
+      .map((x) => x.catalogId as string);
+    if (ids.length > 0) onRemoveFromBatch(Array.from(new Set(ids)));
     setPicks((prev) => ({ ...prev, [cat.id]: { m: prev[cat.id]?.m ?? cat.mainstream[0].id, a: [] } }));
   };
 
   const totalPicks = Object.values(picks).reduce((n, p) => n + p.a.length, 0);
-
-  const sendPicksToBatch = (cat: PpCategory) => {
-    const state = picks[cat.id];
-    const ids = (state?.a ?? [])
-      .map((id) => cat.alternatives.find((x) => x.id === id))
-      .filter((x): x is PpAlternative => Boolean(x && x.catalogId && byId.has(x.catalogId)))
-      .map((x) => x.catalogId as string);
-    const unique = Array.from(new Set(ids));
-    if (unique.length === 0) {
-      toast.info(t('pp.toastNoneCatalog'));
-      return;
-    }
-    onAddToBatch(unique);
-    toast.success(`${unique.length} × "${cat.name}" — ${t('pp.toastAdded')}`);
-  };
 
   const sendComboToBatch = () => {
     if (!maxPrivacyCombo) return;
@@ -353,7 +362,6 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
             .map((id) => cat.alternatives.find((x) => x.id === id))
             .filter((x): x is PpAlternative => Boolean(x));
           const mainstream = cat.mainstream.find((x) => x.id === state.m) ?? cat.mainstream[0];
-          const canBatch = picked.some((x) => x.catalogId && byId.has(x.catalogId));
           const mainOpen = openPicker === `main:${cat.id}`;
           const altOpen = openPicker === `alt:${cat.id}`;
           return (
@@ -564,21 +572,6 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                     );
                   })}
                 </ul>
-              )}
-
-              {canBatch && (
-                <div className="mt-3 pt-3 border-t border-slate-950/10 dark:border-white/[0.06]">
-                  <button
-                    type="button"
-                    id={`pp-batch-${cat.id}`}
-                    onClick={() => sendPicksToBatch(cat)}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 px-2.5 py-1.5 rounded-md border border-slate-950/10 dark:border-white/[0.08] transition-colors"
-                    title={t('pp.addPicksHint')}
-                  >
-                    <CheckSquare className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-                    <span>{t('pp.addPicksToSelection')}</span>
-                  </button>
-                </div>
               )}
             </article>
           );

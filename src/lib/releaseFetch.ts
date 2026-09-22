@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import { invoke } from '@tauri-apps/api/core';
 import { AppItem, Platform } from '../types';
 import { isTauri } from './downloads';
@@ -242,6 +246,55 @@ async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
   };
 }
 
+/** How far the recent-releases scan reaches. Multi-stream repos (desktop +
+ * mobile + server tags from one repo: Obsidian, Tuta, Ente) need roughly a
+ * dozen entries before the right stream shows up; 20 covers every repo in
+ * the catalog with one API call. */
+const RECENT_RELEASES_COUNT = 20;
+
+interface GhReleaseListRaw {
+  tag_name: string;
+  name: string;
+  published_at: string;
+  html_url: string;
+  prerelease: boolean;
+  assets: { name: string; size: number; browser_download_url: string }[];
+}
+
+async function getRecentReleases(repo: string, count: number): Promise<ReleaseInfo[]> {
+  if (isTauri()) {
+    const r = await invoke<GhReleaseRaw[]>('fetch_recent_releases', { repo, count });
+    return (r || []).map((rel) => ({
+      tag: rel.tag,
+      name: rel.name,
+      publishedAt: rel.published_at,
+      htmlUrl: rel.html_url,
+      assets: (rel.assets || []).map((a) => ({ name: a.name, size: a.size, downloadUrl: a.download_url })),
+    }));
+  }
+  const resp = await fetch(
+    `https://api.github.com/repos/${repo}/releases?per_page=${count}`,
+    { headers: { Accept: 'application/vnd.github+json' } }
+  );
+  if (resp.status === 404) throw new Error('No stable release found');
+  if (resp.status === 403 || resp.status === 429) throw new Error('GitHub rate limit reached');
+  if (!resp.ok) throw new Error(`GitHub HTTP ${resp.status}`);
+  const d: GhReleaseListRaw[] = await resp.json();
+  return (Array.isArray(d) ? d : [])
+    .filter((r) => r.prerelease !== true)
+    .map((r) => ({
+      tag: r.tag_name || '',
+      name: r.name || r.tag_name || '',
+      publishedAt: r.published_at || '',
+      htmlUrl: r.html_url || `https://github.com/${repo}/releases`,
+      assets: (r.assets || []).map((a) => ({
+        name: a.name,
+        size: a.size,
+        downloadUrl: a.browser_download_url,
+      })),
+    }));
+}
+
 export interface FdroidInfo {
   apkUrl: string;
   pageUrl: string;
@@ -286,7 +339,8 @@ export function getHostArch(): Promise<string> {
   if (!archPromise) {
     archPromise = (async () => {
       if (!isTauri()) {
-        const ua = navigator.userAgent || '';
+        // typeof guard: Node 20 (CI) has no global navigator.
+        const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
         return /arm|aarch/i.test(ua) ? 'aarch64' : 'x86_64';
       }
       try {
@@ -323,7 +377,8 @@ function cacheSet(
   value.then((r) => {
     if (r === null) {
       // Expire failures after a short TTL so the next click really retries.
-      window.setTimeout(() => {
+      // globalThis: window does not exist in Node (tests) or workers.
+      globalThis.setTimeout(() => {
         if (cache.get(key) === value) cache.delete(key);
       }, FAIL_TTL_MS);
     }
@@ -337,20 +392,38 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
   if (!ghCache.has(key)) {
     const p = (async () => {
         try {
-          const [rel, arch] = await Promise.all([getLatestRelease(repo), getHostArch()]);
-          const detailed = pickAssetDetailed(rel.assets, platform, arch, app.assetPatterns);
-          if (!detailed) return null;
-          return {
-            source: 'github',
-            url: detailed.pick.downloadUrl,
-            filename: detailed.pick.name,
-            size: detailed.pick.size,
-            version: cleanVersion(rel.tag),
-            publishedAt: rel.publishedAt,
-            releasePageUrl: rel.htmlUrl,
-            matchedBy: detailed.matchedBy,
-            weak: detailed.weak || undefined,
-          } as ResolvedDownload;
+          const arch = await getHostArch();
+          // 1) The cheapest correct answer: the repo's single latest stable
+          //    release. This is where every well-behaved project resolves.
+          //    A 404 here (repos with only prereleases, or release-less
+          //    mirrors) must not kill the attempt - the recent scan below
+          //    still runs.
+          let latest: ReleaseInfo | null = null;
+          try {
+            latest = await getLatestRelease(repo);
+          } catch {
+            latest = null;
+          }
+          if (latest) {
+            const detailed = pickAssetDetailed(latest.assets, platform, arch, app.assetPatterns);
+            if (detailed) {
+              return toResolved(detailed, latest);
+            }
+          }
+          // 2) Multi-stream repos (Obsidian publishes desktop and mobile
+          //    under different tags, Tuta splits desktop/web, Ente splits
+          //    photos/auth/server): the latest release is often the WRONG
+          //    stream, so the platform's installer seems not to exist. Scan
+          //    the recent stable releases in order instead - the first one
+          //    carrying a confident match for this platform wins.
+          const recent = await getRecentReleases(repo, RECENT_RELEASES_COUNT);
+          for (const candidate of recent) {
+            const cPick = pickAssetDetailed(candidate.assets, platform, arch, app.assetPatterns);
+            if (cPick && !cPick.weak) {
+              return toResolved(cPick, candidate);
+            }
+          }
+          return null;
         } catch {
           return null;
         }
@@ -358,6 +431,20 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
     cacheSet(ghCache, key, p);
   }
   return ghCache.get(key)!;
+}
+
+function toResolved(detailed: AssetPick, rel: ReleaseInfo): ResolvedDownload {
+  return {
+    source: 'github',
+    url: detailed.pick.downloadUrl,
+    filename: detailed.pick.name,
+    size: detailed.pick.size,
+    version: cleanVersion(rel.tag),
+    publishedAt: rel.publishedAt,
+    releasePageUrl: rel.htmlUrl,
+    matchedBy: detailed.matchedBy,
+    weak: detailed.weak || undefined,
+  };
 }
 
 export function resolveFdroidDownload(pkgId: string): Promise<ResolvedDownload | null> {

@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState } from 'react';
 import { RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
 import { LegalTab } from './LegalModals';

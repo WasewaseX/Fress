@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Fress - a catalog of free and open-source software.
+# Copyright (c) 2026 WasewaseX and Fress contributors
+# SPDX-License-Identifier: MIT
+#
 """Apply the live-audited star counts (scripts/real_stars.json) to the catalog,
 plus the hand-audited repo fixes:
 

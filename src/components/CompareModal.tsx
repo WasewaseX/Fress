@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
@@ -142,16 +146,20 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                         <span>Website</span>
                         <ExternalLink className="w-3 h-3" />
                       </a>
-                      <span className="text-slate-600">·</span>
-                      <a
-                        href={app.githubUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
-                        className="text-[11px] text-slate-400 hover:text-slate-100 inline-flex items-center gap-1"
-                      >
-                        <span>GitHub</span>
-                      </a>
+                      {app.githubUrl && (
+                        <>
+                          <span className="text-slate-600">·</span>
+                          <a
+                            href={app.githubUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => { e.preventDefault(); void openExternal(app.githubUrl); }}
+                            className="text-[11px] text-slate-400 hover:text-slate-100 inline-flex items-center gap-1"
+                          >
+                            <span>GitHub</span>
+                          </a>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}

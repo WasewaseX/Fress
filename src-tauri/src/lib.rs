@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -117,13 +121,70 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
         .map_err(|e| format!("Bad response: {}", e))?;
     let body: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+    parse_gh_release(&body, &repo).ok_or_else(|| "Unexpected GitHub response".to_string())
+}
+
+/// Lists the most recent stable releases of a repository, newest first.
+///
+/// Some projects publish several release streams from one repo (a desktop
+/// tag, a mobile tag, a server tag - Obsidian, Tuta, Ente). The single
+/// /releases/latest answer is then often the WRONG stream for the platform
+/// the user wants, and every download resolves to nothing. This command
+/// hands back enough recent releases for the frontend to scan them in order
+/// and find the stream that actually carries the platform's installer.
+#[tauri::command]
+async fn fetch_recent_releases(repo: String, count: Option<u32>) -> Result<Vec<GhRelease>, String> {
+    let repo = repo.trim().trim_matches('/').to_string();
+    if repo.is_empty() {
+        return Err("No GitHub repository configured".into());
+    }
+    let per_page = count.unwrap_or(20).clamp(1, 30);
+    let url = format!(
+        "https://api.github.com/repos/{}/releases?per_page={}",
+        repo, per_page
+    );
+    let client = api_client()?;
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN
+    {
+        return Err("GitHub rate limit reached; try again in a few minutes".into());
+    }
+    if !status.is_success() {
+        return Err(format!("GitHub returned HTTP {}", status));
+    }
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Bad response: {}", e))?;
+    let body: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+    let list = body
+        .as_array()
+        .ok_or_else(|| "Unexpected GitHub response".to_string())?;
+    // GitHub returns prereleases here too; the frontend picks assets only
+    // from entries the caller marks stable, so filter them out at the source.
+    Ok(list
+        .iter()
+        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
+        .filter_map(|r| parse_gh_release(r, &repo))
+        .collect())
+}
+
+/// Shared parser for one GitHub release JSON object.
+fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
     let tag = body
         .get("tag_name")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
     if tag.is_empty() {
-        return Err("Unexpected GitHub response".into());
+        return None;
     }
     let name = body
         .get("name")
@@ -159,7 +220,7 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
             });
         }
     }
-    Ok(GhRelease {
+    Some(GhRelease {
         tag,
         name,
         published_at,
@@ -405,19 +466,42 @@ async fn start_download(
     let registry_map = Arc::clone(registry.inner());
 
     tokio::spawn(async move {
-        let result = run_download(
-            app_handle.clone(),
-            id,
-            DownloadPlan {
-                url: url.clone(),
-                requested_name,
-                dir,
-                resume: resume.unwrap_or(false),
-                expected_sha256,
-            },
-            &mut cancel_rx,
-        )
-        .await;
+        // Transient network failures (stall, dropped connection) are retried
+        // automatically: the .part file is already on disk, so a resume costs
+        // nothing and most Wi-Fi/VPN blips heal within seconds. What the user
+        // used to see was an error toast + a manual Resume click; now the
+        // same recovery happens on its own. Deliberate cancels, checksum
+        // failures and HTTP-status errors are never retried.
+        const MAX_AUTO_RETRIES: u32 = 2;
+        let mut plan = DownloadPlan {
+            url: url.clone(),
+            requested_name,
+            dir,
+            resume: resume.unwrap_or(false),
+            expected_sha256,
+        };
+        let mut attempt: u32 = 0;
+        let result = loop {
+            let r = run_download(app_handle.clone(), id, plan.clone(), &mut cancel_rx).await;
+            match r {
+                Err((msg, kind))
+                    if kind.as_deref() == Some("network") && attempt < MAX_AUTO_RETRIES =>
+                {
+                    attempt += 1;
+                    plan.resume = true; // pick up from the .part file
+                    tokio::time::sleep(Duration::from_secs(2 * u64::from(attempt))).await;
+                    let _ = app_handle.emit(
+                        "download-retrying",
+                        RetryPayload {
+                            id,
+                            attempt,
+                            message: msg.clone(),
+                        },
+                    );
+                }
+                other => break other,
+            }
+        };
 
         // Remove from the cancel registry
         registry_map.cancels.lock().await.remove(&id);
@@ -445,12 +529,21 @@ async fn start_download(
 
 /// Everything one download attempt needs, bundled so the runner keeps a
 /// readable signature and new knobs don't grow the parameter list forever.
+#[derive(Clone)]
 struct DownloadPlan {
     url: String,
     requested_name: Option<String>,
     dir: PathBuf,
     resume: bool,
     expected_sha256: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct RetryPayload {
+    id: u32,
+    /// 1-based count of automatic retries so far.
+    attempt: u32,
+    message: String,
 }
 
 async fn run_download(
@@ -566,8 +659,12 @@ async fn run_download(
     } else {
         0
     };
-    let started = Instant::now();
     let mut last_emit = Instant::now() - Duration::from_secs(1);
+    // Rolling samples for a truthful CURRENT speed. The old number was the
+    // average since the download started, so after any stall or auto-resume
+    // it stayed pinned near the early peak and the ETA looked stuck.
+    let mut speed_samples: Vec<(Instant, u64)> = Vec::with_capacity(40);
+    const SPEED_WINDOW: Duration = Duration::from_secs(4);
 
     while let Some(chunk) = tokio::select! {
         biased;
@@ -584,7 +681,10 @@ async fn run_download(
                     // No bytes for a full minute: treat the connection as
                     // dead. The .part stays on disk for the Resume button.
                     drop(file);
-                    return Err(("Connection stalled (no data for 60s)".to_string(), None));
+                    return Err((
+                        "Connection stalled (no data for 60s)".to_string(),
+                        Some("network".to_string()),
+                    ));
                 }
             }
         }
@@ -593,7 +693,10 @@ async fn run_download(
             Ok(b) => b,
             Err(e) => {
                 drop(file);
-                return Err((format!("Download interrupted: {}", e), None));
+                return Err((
+                    format!("Download interrupted: {}", e),
+                    Some("network".to_string()),
+                ));
             }
         };
         hasher.update(&bytes);
@@ -605,8 +708,18 @@ async fn run_download(
 
         // Emit progress at most ~10x per second
         if last_emit.elapsed() >= Duration::from_millis(100) {
-            let elapsed = started.elapsed().as_secs_f64().max(0.001);
-            let speed = (downloaded - already_have) as f64 / elapsed;
+            speed_samples.retain(|(t, _)| t.elapsed() < SPEED_WINDOW);
+            speed_samples.push((Instant::now(), downloaded));
+            let speed = if let Some((oldest_t, oldest_b)) = speed_samples.first() {
+                let dt = oldest_t.elapsed().as_secs_f64();
+                if dt > 0.05 {
+                    (downloaded.saturating_sub(*oldest_b)) as f64 / dt
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
             let eta = if total > downloaded && speed > 0.0 {
                 (total - downloaded) as f64 / speed
             } else {
@@ -730,6 +843,7 @@ pub fn run() {
             default_download_dir,
             app_version,
             fetch_latest_release,
+            fetch_recent_releases,
             fetch_fdroid_package,
             host_arch
         ])

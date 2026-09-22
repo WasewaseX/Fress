@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import { AppItem, Platform } from '../types';
 
 export type DownloadKind = 'direct' | 'page' | 'store' | 'package';
@@ -32,10 +36,20 @@ export function getDownloadOptions(app: AppItem, platform: Platform): DownloadOp
     options.push(c);
   }
 
-  // Generic fallbacks, deduplicated. Skipped when the curated table already
-  // covers this platform: for projects like Tor Browser the primary repo is
-  // a launcher/mirror whose Releases page holds no installers, and a dead
-  // "GitHub Releases" link next to the real official targets only confuses.
+  // Generic fallbacks, deduplicated. The OFFICIAL download page comes
+  // before the forge releases page: for a beginner "the project's own
+  // download page with a big green button" beats "a releases page full of
+  // build artifacts" - and for apps whose GitHub repo is only one platform
+  // (e.g. an Android-only repo next to a desktop app) the releases page
+  // would not even carry the user's platform. The forge page is skipped
+  // entirely when the curated table already covers this platform: for
+  // projects like Tor Browser the primary repo is a launcher/mirror whose
+  // Releases page holds no installers, and a dead "GitHub Releases" link
+  // next to the real official targets only confuses.
+  if (app.downloadUrl && !options.some((o) => o.url === app.downloadUrl)) {
+    options.push({ kind: 'page', label: 'Official download page', url: app.downloadUrl });
+  }
+
   if (app.githubUrl && curated.length === 0) {
     // The primary repo may live on GitLab (LibreWolf builds there), so the
     // label and the releases path follow the forge instead of assuming
@@ -51,10 +65,6 @@ export function getDownloadOptions(app: AppItem, platform: Platform): DownloadOp
         note: 'Official builds and changelogs',
       });
     }
-  }
-
-  if (app.downloadUrl && !options.some((o) => o.url === app.downloadUrl)) {
-    options.push({ kind: 'page', label: 'Official download page', url: app.downloadUrl });
   }
 
   if (options.length === 0 && app.websiteUrl) {
@@ -115,7 +125,10 @@ const CURATED: Record<string, CuratedEntry> = {
     windows: [{ kind: 'page', label: 'Windows installer', url: 'https://signal.org/download/' }],
     mac: [{ kind: 'page', label: 'macOS installer', url: 'https://signal.org/download/' }],
     linux: [{ kind: 'page', label: 'Linux builds', url: 'https://signal.org/download/' }],
-    android: [{ kind: 'page', label: 'Signal on Google Play', url: 'https://play.google.com/store/apps/details?id=org.thoughtcrime.securesms' }],
+    android: [
+      { kind: 'page', label: 'Signal APK (sideload)', url: 'https://signal.org/android/apk/', note: 'Direct APK, no Play Services needed' },
+      { kind: 'page', label: 'Signal on Google Play', url: 'https://play.google.com/store/apps/details?id=org.thoughtcrime.securesms' },
+    ],
     ios: [{ kind: 'store', label: 'Signal on the App Store', url: 'https://apps.apple.com/app/signal-private-messenger/id874139669' }],
   },
   'f-droid': {

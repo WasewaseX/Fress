@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 /**
  * Human release notes for the "What's new" popup.
  *
@@ -16,6 +20,20 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: '1.0.4-alpha',
+    date: '2026-09-23',
+    title: 'Everything just works: picks download themselves, downloads heal themselves',
+    items: [
+      'Privacy tab: selecting a private replacement adds it to the batch download right away — no separate "add picks to selection" step anymore, and deselecting removes it again.',
+      "Fixed: downloading could just pop the guide window. Every download click now ends in a download or in the official download page opening in your browser — never a silent help window.",
+      'Fixed: newer apps like Obsidian, Tuta, Mullvad, DevToys or Cake Wallet resolved to nothing because their repos publish several release streams. The resolver scans recent releases now and finds the installer for your platform.',
+      'Downloads survive flaky connections on their own: a stall or drop resumes automatically from where it stopped, with a quiet "Reconnecting" note instead of an error.',
+      'The speed and ETA readouts are now a live rolling window instead of an average stuck at the early peak.',
+      'Smaller fixes everywhere: keyboard shortcuts no longer hijack Ctrl+A/Ctrl+F/Ctrl+D, the Brewfile generator handles formula packages, live-search results no longer race, and several strings are translated in all five languages.',
+      'License hardening with the MIT license untouched: SPDX headers on every source file and a NOTICE covering copyright, trademarks and the icon audit (all catalog icons are the projects\' official artwork).',
+    ],
+  },
   {
     version: '1.0.3-alpha',
     date: '2026-09-22',

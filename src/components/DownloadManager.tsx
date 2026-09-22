@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import {
@@ -219,7 +223,7 @@ function StatusChip({ status, error, verified }: { status: string; error?: strin
     return <span className="shrink-0 text-[11px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded">{t('downloads.active')}</span>;
   }
   if (status === 'browser') {
-    return <span className="shrink-0 text-[11px] font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded">Opened in browser</span>;
+    return <span className="shrink-0 text-[11px] font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded">{t('downloads.openedInBrowser')}</span>;
   }
   if (status === 'completed') {
     return (

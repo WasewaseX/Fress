@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 // Theme handling with a single source of truth.
 //
 // The startup bug report was: app opens showing the wrong mode icon, pressing

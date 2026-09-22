@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState } from 'react';
 import { AppItem, Platform } from '../types';
 import {
@@ -87,7 +91,19 @@ export const AppCard: React.FC<AppCardProps> = ({
   const { startDownload, recordExternalOpen, items: downloadItems } = useDownloads();
   const { t } = useI18n();
   const tx = useAppText(app);
-  const isDownloading = downloadItems.some((d) => d.name.startsWith(app.name) && d.status === 'active');
+  // The panel names entries by the real file name ("VLC-3.0.2-win64.exe",
+  // "Cake_Wallet_v5.9.0_Windows.exe"), which often does NOT start with the
+  // app's display name ("VLC media player", "Cake Wallet"). Match the
+  // stable app id inside the name or the source URL as well, so the button
+  // shows its "Downloading..." state for anything this app started.
+  const appIdLc = app.id.toLowerCase();
+  const isDownloading = downloadItems.some(
+    (d) =>
+      d.status === 'active' &&
+      (d.name.startsWith(app.name) ||
+        d.name.toLowerCase().includes(appIdLc) ||
+        d.url.toLowerCase().includes(appIdLc))
+  );
   const [resolving, setResolving] = useState(false);
   // Live value from GitHub/GitLab when reachable; falls back to the stored number.
   const liveStars = useLiveStars(app.githubUrl);
@@ -380,18 +396,16 @@ export const AppCard: React.FC<AppCardProps> = ({
                   }
                   if (target.kind === 'direct') {
                     void startDownload(target.url, `${app.name} ${target.label}`.trim());
-                  } else if (target.kind === 'store' || !/github\.com\/[^/]+\/[^/]+\/releases/i.test(target.url)) {
-                    // Official vendor download pages are beginner-friendly; open them.
-                    // Say WHERE it opens: on Windows the browser can start in the
-                    // background, which reads as "the button did nothing".
+                  } else {
+                    // Every other target IS the download page: open it in the
+                    // browser and say so. Popping the in-app guide here (the
+                    // old behavior) read as "the download button opens a help
+                    // window instead of downloading".
                     recordExternalOpen(`${app.name}: ${target.label}`, target.url);
                     toast.info(`Opening the official download page for ${app.name}`, {
                       description: `${target.label} — it opens in your browser.`,
                     });
                     void openExternal(target.url);
-                  } else {
-                    // A raw GitHub releases page is not beginner-friendly: open the in-app guide
-                    onOpenDetail(app);
                   }
                 } catch {
                   // No click may end in silence: worst case, show the in-app guide.

@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
@@ -60,7 +64,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       for (const app of catApps) {
         const platformsStr = app.platforms.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(', ');
         const altStr = app.proprietaryAlternative ? `\`${app.proprietaryAlternative}\`` : '-';
-        md += `| [**${app.name}**](${app.websiteUrl}) | ${app.tagline} | ${altStr} | ${platformsStr} | \`${app.license}\` | ★ ${app.stars.toLocaleString()} |\n`;
+        md += `| [**${app.name}**](${app.websiteUrl || '-'}) | ${app.tagline} | ${altStr} | ${platformsStr} | \`${app.license}\` | ★ ${app.stars.toLocaleString()} |\n`;
       }
       md += `\n`;
     }
@@ -85,8 +89,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       `"${app.license}"`,
       app.stars,
       `"${(app.proprietaryAlternative || '').replace(/"/g, '""')}"`,
-      `"${app.websiteUrl}"`,
-      `"${app.githubUrl}"`,
+      `"${app.websiteUrl || ''}"`,
+      `"${app.githubUrl || ''}"`,
       `"${(app.wingetCommand || '').replace(/"/g, '""')}"`
     ]);
 

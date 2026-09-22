@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Search,
@@ -624,6 +628,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          setShowMoreMenu(false);
                           fileInputRef.current?.click();
                         }}
                         className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"

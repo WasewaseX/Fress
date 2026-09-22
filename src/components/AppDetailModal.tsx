@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useEffect, useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Platform } from '../types';
@@ -179,6 +183,14 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             <p className="text-[11px] text-amber-500 dark:text-amber-400 leading-snug flex items-start gap-1.5">
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
               <span>{t('detail.weakPick')}</span>
+            </p>
+          )}
+          {wantGh && ghState === 'none' && (
+            <p
+              className="text-[11px] text-slate-400 leading-snug px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04]"
+              role="status"
+            >
+              {t('detail.noAutoDownload')}
             </p>
           )}
           {wantGh && ghState === 'loading' && (

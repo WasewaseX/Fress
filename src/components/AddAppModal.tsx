@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Category, Platform } from '../types';
@@ -88,7 +92,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setCategory('Utilities & System');
       setPlatforms(['windows']);
       setLicense('MIT');
-      setStars(1000);
+      setStars(0); // never invent a star count for a manually added app
       setDescription('');
       setWhyItsAwesome('');
       setBeginnerGuide('');

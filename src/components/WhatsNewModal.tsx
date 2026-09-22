@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useEffect, useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { X, Check, Sparkles, ExternalLink, Wrench, RefreshCw, Minus, ChevronDown } from 'lucide-react';

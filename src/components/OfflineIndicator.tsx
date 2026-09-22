@@ -1,7 +1,13 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState, useEffect } from 'react';
 import { WifiOff } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
 
 export const OfflineIndicator: React.FC = () => {
+  const { t } = useI18n();
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -28,7 +34,7 @@ export const OfflineIndicator: React.FC = () => {
       role="status"
     >
       <WifiOff className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-      <span>Offline mode. Cached local catalog active</span>
+      <span>{t('offline.banner')}</span>
     </div>
   );
 };

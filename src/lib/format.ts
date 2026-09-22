@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 /**
  * Small pure formatting helpers, kept dependency-free so they can be unit
  * tested (and reused) without pulling the Tauri download stack along.

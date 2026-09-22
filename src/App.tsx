@@ -1,3 +1,7 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -273,6 +277,12 @@ function AppShell() {
   // Selection helper shared by the Privacy Pack tab and the batch checkboxes.
   const handleAddIdsToBatch = (ids: string[]) => {
     setSelectedBatchAppIds((prev) => Array.from(new Set([...prev, ...ids])));
+  };
+
+  // Privacy tab picks stay in sync with the batch selection both ways:
+  // picking a replacement adds it, unpicking (or clearing a category) removes it.
+  const handleRemoveIdsFromBatch = (ids: string[]) => {
+    setSelectedBatchAppIds((prev) => prev.filter((id) => !ids.includes(id)));
   };
 
   // Real downloads for the whole batch selection: resolve the latest stable
@@ -719,6 +729,11 @@ function AppShell() {
         return;
       }
 
+      // Single-letter shortcuts below must never swallow the browser's own
+      // Ctrl/Cmd combos: Ctrl+A (select all), Ctrl+F (find in page), Ctrl+D
+      // (bookmark) used to open modals instead, on any focused element.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
       if (e.key === '/') {
         e.preventDefault();
         const searchInput = document.getElementById('app-search-input');
@@ -928,6 +943,7 @@ function AppShell() {
             apps={apps}
             onOpenDetail={(item) => setSelectedApp(item)}
             onAddToBatch={handleAddIdsToBatch}
+            onRemoveFromBatch={handleRemoveIdsFromBatch}
           />
         ) : filteredApps.length > 0 ? (
           viewMode === 'grid' ? (
@@ -966,10 +982,10 @@ function AppShell() {
           <div id="no-apps-empty-state" className="bg-slate-900 border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-10 text-center max-w-md mx-auto my-8">
             <SearchX className="w-8 h-8 text-slate-500 mx-auto mb-3" aria-hidden="true" />
             <h2 id="empty-state-title" className="text-sm font-semibold text-slate-100 mb-1">
-              No matching applications found
+              {t('empty.title')}
             </h2>
             <p id="empty-state-desc" className="text-xs text-slate-400 mb-4 leading-relaxed">
-              No software matched your current search or filter combination. Reset filters or add this tool to your library.
+              {t('empty.desc')}
             </p>
             <div id="empty-state-actions" className="flex items-center justify-center gap-2">
               <button
@@ -979,7 +995,7 @@ function AppShell() {
                 className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 px-3 py-1.5 rounded-md border border-slate-950/10 dark:border-white/[0.08]"
               >
                 <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Reset All Filters</span>
+                <span>{t('empty.reset')}</span>
               </button>
               <button
                 id="empty-add-app-btn"
@@ -990,7 +1006,7 @@ function AppShell() {
                 }}
                 className="text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded-md border border-sky-400"
               >
-                Add it yourself
+                {t('empty.add')}
               </button>
             </div>
           </div>

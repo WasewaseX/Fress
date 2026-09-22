@@ -1,6 +1,11 @@
+// Fress - a catalog of free and open-source software.
+// Copyright (c) 2026 WasewaseX and Fress contributors
+// SPDX-License-Identifier: MIT
+//
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem, Category, Platform } from '../types';
+import { formatStarCount } from '../lib/starFetch';
 import { 
   Search, 
   Terminal, 
@@ -298,7 +303,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           </span>
                         )}
                         <span className="text-[11px] text-slate-400 font-mono">
-                          ★ {(app.stars / 1000).toFixed(0)}k
+                          ★ {formatStarCount(app.stars)}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 truncate">{item.subtitle}</p>

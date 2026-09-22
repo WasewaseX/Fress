@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Fress - a catalog of free and open-source software.
+# Copyright (c) 2026 WasewaseX and Fress contributors
+# SPDX-License-Identifier: MIT
+#
 """Fetch REAL current star counts for every app in the Fress catalog.
 
 GitHub-hosted repos  -> api.github.com/repos/{owner}/{repo}        (stargazers_count)

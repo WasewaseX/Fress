@@ -115,7 +115,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: npm install
+      - run: npm ci
       - name: Decide updater signing flags
         # The Tauri updater artifacts (latest.json + .sig files) are only
         # built when the update key exists as a secret; without it the
@@ -338,7 +338,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: npm install
+      - run: npm ci
       - name: Decide updater signing flags
         id: updater
         shell: bash
@@ -478,7 +478,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-      - run: npm install
+      - run: npm ci
       - name: Decide updater signing flags
         id: updater
         env:
@@ -520,7 +520,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: npm install
+      - run: npm ci
       - name: Decide updater signing flags
         id: updater
         env:
@@ -584,7 +584,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: npm install
+      - run: npm ci
       - name: Decide updater signing flags
         id: updater
         env:
@@ -656,7 +656,7 @@ jobs:
           if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
             echo "ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* | sort -V | tail -1)" >> "$GITHUB_ENV"
           fi
-      - run: npm install
+      - run: npm ci
       - name: Restore the persistent signing keystore
         # Android refuses to update an installed app when the update is
         # signed with a different key, so a fresh keystore per release

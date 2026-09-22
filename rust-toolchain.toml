@@ -1,0 +1,9 @@
+# Pin the exact toolchain for every Rust build (local, CI, release).
+# rustup resolves this file from the working directory upward, so all
+# cargo invocations in the repo root and src-tauri use the same compiler.
+# Bump deliberately: the version must exist on static.rust-lang.org and
+# in dtolnay/rust-toolchain's cache.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

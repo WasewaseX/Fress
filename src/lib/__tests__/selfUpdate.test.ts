@@ -180,6 +180,57 @@ describe('pickOwnAsset — Android assets', () => {
       'Fress_1.0.4-alpha_arm64.apk'
     );
   });
+
+  // Regression matrix for "unknown device => universal ONLY" in the
+  // self-updater: the unmarked-apk gamble (score 4) used to be accepted
+  // BEFORE the unknown check, so an arch-less browser session could be
+  // handed Fress_1.0.7_release.apk whose ABI is precisely the unknown.
+  describe('unknown device => universal only (self-updater)', () => {
+    it('unknown + generic unmarked apk => null', () => {
+      androidUA();
+      expect(pickOwnAsset(release(['Fress_1.0.7_release.apk']), undefined)).toBeNull();
+    });
+
+    it('unknown + gradle split app-arm64-release.apk => null (not "universal" via ^app-)', () => {
+      androidUA();
+      expect(pickOwnAsset(release(['app-arm64-release.apk']), undefined)).toBeNull();
+    });
+
+    it('unknown + app-release.apk => null (unmarked, not classified universal)', () => {
+      androidUA();
+      expect(pickOwnAsset(release(['app-release.apk']), undefined)).toBeNull();
+    });
+
+    it('unknown + real universal apk => the universal apk', () => {
+      androidUA();
+      expect(pickOwnAsset(release(['Fress_1.0.7_universal.apk']), undefined)?.name).toBe(
+        'Fress_1.0.7_universal.apk'
+      );
+      expect(pickOwnAsset(release(['app-universal-release.apk']), undefined)?.name).toBe(
+        'app-universal-release.apk'
+      );
+    });
+
+    it('unknown + unmarked apk beside a real universal => universal wins', () => {
+      androidUA();
+      const pick = pickOwnAsset(
+        release(['Fress_1.0.7_release.apk', 'Fress_1.0.7_universal.apk']),
+        undefined
+      );
+      expect(pick?.name).toBe('Fress_1.0.7_universal.apk');
+    });
+
+    it('a KNOWN device may still gamble on an unmarked apk (below universal, below exact ABI)', () => {
+      androidUA();
+      expect(
+        pickOwnAsset(release(['Fress_1.0.7_release.apk', 'Fress_1.0.7_universal.apk']), 'x86_64')
+          ?.name
+      ).toBe('Fress_1.0.7_universal.apk');
+      expect(pickOwnAsset(release(['Fress_1.0.7_release.apk']), 'x86_64')?.name).toBe(
+        'Fress_1.0.7_release.apk'
+      );
+    });
+  });
 });
 
 describe('pickOwnAsset — Windows assets (setup is a bonus, never an early return)', () => {
@@ -469,10 +520,11 @@ describe('fetchFromApi — GitHub prerelease flag is a stability signal', () => 
       return new Response('unexpected', { status: 404 });
     });
 
-  it('the stable channel rejects a prerelease-flagged stable-looking tag (falls through to atom)', async () => {
+  it('the stable channel rejects a prerelease-flagged stable-looking tag (atom cannot help either)', async () => {
     vi.stubGlobal('fetch', apiWithFlaggedStable() as unknown as typeof fetch);
-    // The API path yields no acceptable release, so the check falls back to
-    // the atom feed - which has no such entry and returns null.
+    // The API path yields no acceptable release; the atom fallback refuses
+    // to serve Stable at all (no prerelease flag there), so the result is
+    // null and the UI links to the releases page instead of guessing.
     const r = await fetchOwnLatestRelease('stable');
     expect(r).toBeNull();
   });
@@ -522,10 +574,14 @@ describe('fetchOwnLatestRelease — atom fallback', () => {
     expect(r?.tag).toBe('v1.0.4-beta');
   });
 
-  it('the stable channel finds the stable release, not the newest prerelease', async () => {
+  it('the stable channel is NOT served from the atom feed at all (no prerelease flag there)', async () => {
+    // A stable-LOOKING atom tag cannot prove stability: a manual prerelease
+    // tagged v1.0.4 would have been served as a stable update when the API
+    // was down. Stable now requires API metadata - atom only ever serves
+    // Beta/Alpha, where the tag pattern is the channel contract.
     vi.stubGlobal('fetch', apiDownAtomUp() as unknown as typeof fetch);
     const r = await fetchOwnLatestRelease('stable');
-    expect(r?.tag).toBe('v1.0.3');
+    expect(r).toBeNull();
   });
 
   it('the alpha channel takes the newest entry', async () => {

@@ -105,8 +105,13 @@ export function androidAssetFlags(name: string): {
   const n = name.toLowerCase();
   const arm64 = /arm64|aarch64|v8a/.test(n);
   const x64 = /x86[_-]?64|amd64|x64/.test(n);
+  // "universal" must be a TOKEN, not a prefix: the old ^app- rule classified
+  // gradle's per-ABI splits (app-arm64-release.apk) as universal simply for
+  // starting with "app-", which handed unknown-ABI browsers a split they
+  // cannot install. app-universal-release.apk still matches via -universal-.
   return {
-    universal: /universal|^app-|all[-_.]?abis/.test(n),
+    universal:
+      /(^|[-_.])universal([-_.]|$)/.test(n) || /all[-_.]?abis/.test(n),
     arm64,
     arm32: !arm64 && /armeabi|arm32|v7a|(^|[^a-z0-9])arm([^a-z0-9]|$)/.test(n),
     x64,
@@ -152,21 +157,21 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       // androidAssetFlags above so the self-updater inherits every fix.
       const f = androidAssetFlags(n);
       const deviceAbi = androidDeviceAbi(arch);
+      // An unknown device (reduced-UA browser: no arch signal at all) gets
+      // universal ONLY. Not splits - a wrong-ABI APK fails to install - and
+      // not unmarked APKs either: "no ABI marker" is exactly the unknown we
+      // are trying to resolve, so accepting one before the device check
+      // would still gamble (Fress_1.0.7_release.apk would win). Universal
+      // or nothing; the UI links to the releases page when no universal
+      // exists. The unknown check MUST precede any unmarked acceptance.
+      if (deviceAbi === 'unknown') return f.universal ? s + 6 : -1;
       if (f.universal) s += 6; // runs everywhere
-      // An unknown device (reduced-UA browser: no arch signal at all) must
-      // never be gambled onto a split: a wrong-ABI APK fails to install.
-      // Refuse every ABI-marked file outright - universal or nothing, and
-      // the UI links to the releases page when no universal exists.
-      if (deviceAbi === 'unknown') {
-        if (f.arm64 || f.arm32 || f.x64 || f.x86) return -1;
-      } else {
-        // A matching ABI-specific APK slightly outranks universal (smaller
-        // download); a wrong-ABI APK loses to everything, including unmarked.
-        if (f.arm64) s += deviceAbi === 'arm64' ? 7 : -8;
-        if (f.arm32) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
-        if (f.x64) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
-        if (f.x86) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
-      }
+      // A matching ABI-specific APK slightly outranks universal (smaller
+      // download); a wrong-ABI APK loses to everything, including unmarked.
+      if (f.arm64) s += deviceAbi === 'arm64' ? 7 : -8;
+      if (f.arm32) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
+      if (f.x64) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
+      if (f.x86) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
       if (/fdroid/.test(n)) s += 1;
       break;
     }

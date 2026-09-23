@@ -504,6 +504,74 @@ async fn write_part_meta(part: &Path, url: &str, headers: &reqwest::header::Head
     }
 }
 
+/// Validate the `Content-Range` header of a single-range `206 Partial
+/// Content` answer against the offset we asked to resume from.
+///
+/// RFC 9110 section 15.3.7: a 206 for a single range MUST carry a
+/// `Content-Range: bytes N-M/T` (or `bytes N-M/*` when the total is
+/// unknown). Trusting a MISSING header used to be allowed, which let a
+/// broken or hostile server append bytes from an unknown offset - silent
+/// corruption of the assembled file. The rules are now strict:
+///   - the header MUST exist (enforced by the caller),
+///   - the unit MUST be `bytes` (case-insensitive),
+///   - the start N MUST equal `expected_start`,
+///   - the end M MUST parse and be >= N,
+///   - the total T, when present (not `*`), MUST be greater than M.
+/// Any violation refuses the resume instead of appending to the staging
+/// file; the download fails with a clear reason and the .part survives so
+/// a corrected server (or a fresh start) can still recover.
+fn validate_resume_content_range(header: &str, expected_start: u64) -> Result<(), String> {
+    let mut parts = header.split_whitespace();
+    let unit = parts
+        .next()
+        .ok_or_else(|| "Content-Range header is empty".to_string())?;
+    if !unit.eq_ignore_ascii_case("bytes") {
+        return Err(format!("unsupported Content-Range unit \"{}\"", unit));
+    }
+    let range = parts
+        .next()
+        .ok_or_else(|| "Content-Range carries no byte range".to_string())?;
+    let (range_part, total_part) = range
+        .split_once('/')
+        .ok_or_else(|| "Content-Range has no \"/\" separator".to_string())?;
+    let (start_s, end_s) = range_part
+        .split_once('-')
+        .ok_or_else(|| "Content-Range range has no \"-\" separator".to_string())?;
+    let start: u64 = start_s
+        .parse()
+        .map_err(|_| format!("Content-Range start \"{}\" is not a number", start_s))?;
+    let end: u64 = end_s
+        .parse()
+        .map_err(|_| format!("Content-Range end \"{}\" is not a number", end_s))?;
+    if start != expected_start {
+        return Err(format!(
+            "Server resumed at offset {} but the staging file ends at {}",
+            start, expected_start
+        ));
+    }
+    if end < start {
+        return Err(format!(
+            "Content-Range end {} precedes its start {}",
+            end, start
+        ));
+    }
+    if total_part != "*" {
+        let total: u64 = total_part.parse().map_err(|_| {
+            format!(
+                "Content-Range total \"{}\" is neither a number nor *",
+                total_part
+            )
+        })?;
+        if total <= end {
+            return Err(format!(
+                "Content-Range total {} is not larger than its end {}",
+                total, end
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn start_download(
     app: AppHandle,
@@ -756,22 +824,27 @@ async fn run_download(
     let resuming = first.status() == reqwest::StatusCode::PARTIAL_CONTENT && planned_resume_len > 0;
     let already_have = if resuming { planned_resume_len } else { 0 };
 
-    // A 206 that does not start exactly where the staging file ends would
-    // corrupt the assembled file. The header itself is optional (servers may
-    // answer a Range without Content-Range and keep the old trust), but an
-    // explicit WRONG offset is refused rather than appended to.
+    // A single-range 206 MUST carry a verifiable `Content-Range` (RFC 9110
+    // section 15.3.7). The old check only rejected an explicit WRONG offset:
+    // a missing or malformed header was silently trusted, so a broken or
+    // hostile server could append bytes from an unknown position onto the
+    // staging file. Validation is now strict - header present, unit bytes,
+    // start equal to the staging length, end and total sane - and any
+    // violation fails the download instead of appending.
     if resuming {
-        let start_ok = headers
+        let verdict = match headers
             .get(reqwest::header::CONTENT_RANGE)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split_whitespace().nth(1))
-            .and_then(|range| range.split('-').next())
-            .and_then(|start| start.parse::<u64>().ok())
-            .map(|start| start == planned_resume_len);
-        if start_ok == Some(false) {
-            return Err((
-                "Server resumed at the wrong offset; the partial download cannot be continued"
+        {
+            Some(h) => validate_resume_content_range(h, planned_resume_len),
+            None => Err(
+                "Server answered a partial body without Content-Range; the byte offset cannot be verified"
                     .to_string(),
+            ),
+        };
+        if let Err(reason) = verdict {
+            return Err((
+                format!("{}; the partial download cannot be continued", reason),
                 None,
             ));
         }
@@ -1071,4 +1144,75 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_resume_content_range;
+
+    #[test]
+    fn accepts_a_well_formed_range_at_the_right_offset() {
+        assert!(validate_resume_content_range("bytes 1024-2047/8192", 1024).is_ok());
+    }
+
+    #[test]
+    fn accepts_a_case_insensitive_unit() {
+        assert!(validate_resume_content_range("BYTES 1024-2047/8192", 1024).is_ok());
+    }
+
+    #[test]
+    fn accepts_an_unknown_total() {
+        // RFC 9110: the complete-length may be "*" when unknown.
+        assert!(validate_resume_content_range("bytes 0-0/*", 0).is_ok());
+    }
+
+    #[test]
+    fn accepts_a_single_byte_range() {
+        assert!(validate_resume_content_range("bytes 4095-4095/8192", 4095).is_ok());
+    }
+
+    #[test]
+    fn rejects_a_missing_range_after_the_unit() {
+        assert!(validate_resume_content_range("bytes", 1024).is_err());
+    }
+
+    #[test]
+    fn rejects_an_empty_header() {
+        assert!(validate_resume_content_range("", 1024).is_err());
+    }
+
+    #[test]
+    fn rejects_a_wrong_unit() {
+        assert!(validate_resume_content_range("items 1024-2047/8192", 1024).is_err());
+    }
+
+    #[test]
+    fn rejects_a_wrong_start_offset() {
+        // The exact corruption case: bytes appended from anywhere else.
+        assert!(validate_resume_content_range("bytes 512-2047/8192", 1024).is_err());
+    }
+
+    #[test]
+    fn rejects_a_missing_separator() {
+        assert!(validate_resume_content_range("bytes 1024/8192", 1024).is_err());
+        assert!(validate_resume_content_range("bytes 1024-2047", 1024).is_err());
+    }
+
+    #[test]
+    fn rejects_non_numeric_boundaries() {
+        assert!(validate_resume_content_range("bytes abc-2047/8192", 1024).is_err());
+        assert!(validate_resume_content_range("bytes 1024-xyz/8192", 1024).is_err());
+        assert!(validate_resume_content_range("bytes */8192", 1024).is_err()); // 416 shape, never valid on 206
+    }
+
+    #[test]
+    fn rejects_an_end_before_the_start() {
+        assert!(validate_resume_content_range("bytes 1024-512/8192", 1024).is_err());
+    }
+
+    #[test]
+    fn rejects_a_total_not_larger_than_the_end() {
+        assert!(validate_resume_content_range("bytes 1024-2047/2047", 1024).is_err());
+        assert!(validate_resume_content_range("bytes 1024-2047/0", 1024).is_err());
+    }
 }

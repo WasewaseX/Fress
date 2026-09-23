@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  androidAssetFlags,
   androidDeviceAbi,
   cleanVersion,
   parseGithubRepo,
@@ -131,6 +132,52 @@ describe('pickAsset — heuristic selection', () => {
       undefined
     );
     expect(pick).toBeNull();
+  });
+
+  // Regression matrix for "unknown device => universal ONLY": an unmarked
+  // apk used to be accepted before the unknown check, so a generic
+  // Fress_1.0.7_release.apk could win for a device whose ABI is exactly
+  // the unknown we needed to resolve.
+  describe('unknown device => universal only (never an unmarked gamble)', () => {
+    it('unknown + generic unmarked apk => null', () => {
+      expect(pickAsset([asset('Fress_1.0.7_release.apk')], 'android', undefined)).toBeNull();
+    });
+
+    it('unknown + gradle arm64 split named app-arm64-release.apk => null (never "universal" via ^app-)', () => {
+      // The old universal rule (/universal|^app-|/) classified this as
+      // universal just for starting with "app-".
+      expect(pickAsset([asset('app-arm64-release.apk')], 'android', undefined)).toBeNull();
+    });
+
+    it('unknown + app-release.apk => null unless explicitly classified universal', () => {
+      expect(pickAsset([asset('app-release.apk')], 'android', undefined)).toBeNull();
+      expect(androidAssetFlags('app-release.apk').universal).toBe(false);
+    });
+
+    it('unknown + real universal apk => the universal apk', () => {
+      expect(pickAsset([asset('Fress_1.0.7_universal.apk')], 'android', undefined)?.name).toBe(
+        'Fress_1.0.7_universal.apk'
+      );
+      // gradle's raw universal name still classifies as universal
+      expect(androidAssetFlags('app-universal-release.apk').universal).toBe(true);
+    });
+
+    it('unknown + unmarked apk beside a real universal => universal wins', () => {
+      const pick = pickAsset(
+        [asset('Fress_1.0.7_release.apk'), asset('Fress_1.0.7_universal.apk')],
+        'android',
+        undefined
+      );
+      expect(pick?.name).toBe('Fress_1.0.7_universal.apk');
+    });
+
+    it('a KNOWN device may still gamble on an unmarked apk (below universal, above nothing)', () => {
+      // Unmarked apks remain a deliberate low-ranked fallback for devices
+      // whose ABI is known - only the unknown path became universal-only.
+      expect(pickAsset([asset('Fress_1.0.7_release.apk')], 'android', 'x86_64')?.name).toBe(
+        'Fress_1.0.7_release.apk'
+      );
+    });
   });
 
   it('prefers appimage over deb/rpm on linux', () => {

@@ -216,7 +216,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const guessedName = nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
+      // A malformed %-escape (e.g. a URL containing a bare "%") makes
+      // decodeURIComponent throw - BEFORE the invoke try-block below is
+      // entered, so startDownload would reject with a raw URIError instead
+      // of the normal download-error path. A bad URL must degrade to the
+      // raw last segment, not crash the flow.
+      let guessedName: string | undefined;
+      try {
+        guessedName =
+          nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
+      } catch {
+        guessedName = nameHint || undefined;
+      }
 
       if (!isTauri()) {
         // Browser fallback (web preview / dev in a normal tab):

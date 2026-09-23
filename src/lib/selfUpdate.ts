@@ -238,23 +238,25 @@ export function pickOwnAsset(
       }
       case 'android': {
         if (!s.endsWith('.apk')) return -1;
+        const device = androidDeviceAbi(archHint);
         // Universal is release-required (CI fails without it) and runs on
         // every device, so it is the safe floor at 9.
         if (androidAssetFlags(s).universal) return 9;
+        // Browser mode usually cannot know the device ABI (reduced user
+        // agents carry no architecture). An unknown device gets universal
+        // ONLY - never an ABI-specific split it cannot install, and never
+        // an unmarked apk either: "no ABI marker" is exactly the unknown
+        // we are trying to resolve, so the unmarked gamble (score 4 below)
+        // must only apply once the device ABI is known. This check MUST
+        // precede the unmarked acceptance; with neither universal nor a
+        // known ABI match, pickOwnAsset returns null and the UI links to
+        // the releases page instead of downloading a guess.
+        if (device === 'unknown') return -Infinity;
         const abi = androidAssetAbi(s);
         if (!abi) return 4; // unmarked apk: a gamble, below universal
-        const device = androidDeviceAbi(archHint);
-        // Browser mode usually cannot know the device ABI (reduced user
-        // agents carry no architecture). An unknown device refuses every
-        // ABI-specific split outright - a wrong-ABI apk cannot install -
-        // so only universal (or the unmarked gamble above) is selectable;
-        // with neither, pickOwnAsset returns null and the UI links to the
-        // releases page instead of downloading a guess.
-        if (device === 'unknown') return -Infinity;
         if (abi === device) return 10; // exact ABI match: smaller than universal
         // arm64 devices can run armv7 apks; nothing else cross-runs.
-        if (device === 'arm64' && abi === 'arm') return 7;
-        return 2; // wrong ABI: never beats universal
+        return device === 'arm64' && abi === 'arm' ? 7 : 2; // wrong ABI: never beats universal
       }
       case 'mac': {
         const isDmg = s.endsWith('.dmg');
@@ -320,8 +322,8 @@ async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
     // The tag is not the only stability signal - GitHub's own prerelease
     // flag is. A manually published release with a stable-looking tag
     // ("v1.0.7") but prerelease=true must never surface on the Stable
-    // channel from the tag alone. (The atom fallback carries no flag, so
-    // the tag-derived stage stays the only signal there.)
+    // channel from the tag alone. (The atom fallback carries no flag at
+    // all, so for Stable it is not trusted either - see fetchFromAtom.)
     if (channel === 'stable' && r.prerelease) return false;
     return releaseMatchesChannel(r.tag_name.replace(/^v/i, ''), channel);
   });
@@ -336,6 +338,15 @@ async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
  * the releases page instead of starting a direct download.
  */
 async function fetchFromAtom(channel: UpdateChannel): Promise<OwnRelease> {
+  // The atom feed carries tags only - no draft flag, no prerelease flag.
+  // For Beta/Alpha the tag pattern is the channel contract, but Stable
+  // must not treat a stable-looking tag as proof of stability: a manual
+  // prerelease tagged "v1.0.7" would slip past releaseMatchesChannel and
+  // be served as a stable update. So Stable requires API metadata - no
+  // Atom-based stable candidates. The updater reports no update and the
+  // UI still links to the releases page; the cost is one session without
+  // an update notice while the API is down, not a wrong-channel install.
+  if (channel === 'stable') throw new Error('Atom feed cannot verify stable-channel releases');
   const res = await fetch(`https://github.com/${REPO}/releases.atom`);
   if (!res.ok) throw new Error(`Atom feed ${res.status}`);
   const xml = await res.text();

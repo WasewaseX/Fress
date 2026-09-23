@@ -344,4 +344,53 @@ describe('pickAssetDetailed — override and confidence', () => {
       expect(assetCompatibleWithDevice('Tool-2.1-setup.exe', 'windows', undefined)).toBe(true);
     });
   });
+
+  describe('hyphenated arch markers and CLI companions (v1.0.7-beta regressions)', () => {
+    const localSendAssets = [
+      'LocalSend-1.18.2-windows-x86-64-unsigned.exe',
+      'LocalSend-1.18.2-windows-x86-64.exe',
+      'LocalSend-1.18.2-windows-x86-64.zip',
+      'LocalSend-1.18.2-windows-arm-64.zip',
+      'LocalSend-CLI-1.18.2-windows-arm-64.exe',
+      'LocalSend-CLI-1.18.2-windows-x86-64.exe',
+      'LocalSend-1.18.2.dmg',
+    ].map((n) => asset(n));
+
+    it('on an ARM64 Windows host the real app wins over the CLI tool (was: CLI won)', () => {
+      // The reported bug: hyphenated "arm-64" evaded the arm64 regexes, so
+      // the CLI exe read as "unmarked + arm bonus" and beat the GUI app,
+      // whose "x86-64" name was even penalized as 32-bit.
+      expect(pickAsset(localSendAssets, 'windows', 'aarch64')?.name).toBe('LocalSend-1.18.2-windows-x86-64.exe');
+    });
+
+    it('on x86_64 Windows the signed installer wins over the unsigned one', () => {
+      expect(pickAsset(localSendAssets, 'windows', 'x86_64')?.name).toBe('LocalSend-1.18.2-windows-x86-64.exe');
+    });
+
+    it('-cli- companions are never the pick, but "client"/"click" are not CLI', () => {
+      const withCli = [asset('App-1.0-x64-setup.exe'), asset('App-CLI-1.0-x64.exe')];
+      expect(pickAsset(withCli, 'windows', 'x86_64')?.name).toBe('App-1.0-x64-setup.exe');
+      expect(pickAsset([asset('AppClient-1.0-x64-setup.exe')], 'windows', 'x86_64')?.name).toBe(
+        'AppClient-1.0-x64-setup.exe'
+      );
+    });
+
+    it('hyphenated arm-64 installers are hard-gated like arm64 (never served to x64)', () => {
+      expect(assetCompatibleWithDevice('Tool-1.0-arm-64-setup.exe', 'windows', 'x86_64')).toBe(false);
+      expect(pickAsset([asset('Tool-1.0-arm-64-setup.exe')], 'windows', 'x86_64')).toBeNull();
+      // ...and are correctly recognized on the ARM host (WoA emulation aside).
+      expect(pickAsset([asset('Tool-1.0-arm-64-setup.exe')], 'windows', 'aarch64')?.name).toBe(
+        'Tool-1.0-arm-64-setup.exe'
+      );
+    });
+
+    it('hyphenated x86-64 is 64-bit, not a 32-bit marker', () => {
+      // 32-bit Windows host cannot run it (it IS x64), an ARM64 host can.
+      expect(assetCompatibleWithDevice('Tool-1.0-x86-64-setup.exe', 'windows', 'x86')).toBe(false);
+      expect(assetCompatibleWithDevice('Tool-1.0-x86-64-setup.exe', 'windows', 'aarch64')).toBe(true);
+      // Android ABI classification agrees (v8a/arm-64 style names).
+      expect(androidAssetFlags('app-arm-64-release.apk').arm64).toBe(true);
+      expect(androidAssetFlags('app-arm-64-release.apk').arm32).toBe(false);
+    });
+  });
 });

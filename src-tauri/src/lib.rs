@@ -294,9 +294,60 @@ async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
     })
 }
 
+/// The architecture of the MACHINE, not of this process, on Windows.
+///
+/// `std::env::consts::ARCH` is decided at compile time: an x64 Fress build
+/// running under emulation on a Windows-on-ARM device reports "x86_64", and
+/// every downstream picker (self-updater, catalog resolver) then treats the
+/// whole machine as x64 - ARM64 users kept getting x64 installers even for
+/// apps that ship native ARM builds. GetNativeSystemInfo reports the native
+/// machine even when the process is emulated, which is exactly what the
+/// pickers need. Kernel32 is linked by the C runtime anyway, so this adds
+/// no dependency.
+#[cfg(target_os = "windows")]
+fn windows_machine_arch() -> Option<&'static str> {
+    #[repr(C)]
+    struct SystemInfo {
+        w_processor_architecture: u16,
+        w_reserved: u16,
+        dw_page_size: u32,
+        lp_minimum_application_address: *mut core::ffi::c_void,
+        lp_maximum_application_address: *mut core::ffi::c_void,
+        dw_active_processor_mask: usize,
+        dw_number_of_processors: u32,
+        dw_processor_type: u32,
+        dw_allocation_granularity: u32,
+        w_processor_level: u16,
+        w_processor_revision: u16,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetNativeSystemInfo(lp_system_info: *mut SystemInfo);
+    }
+    const PROCESSOR_ARCHITECTURE_INTEL: u16 = 0;
+    const PROCESSOR_ARCHITECTURE_AMD64: u16 = 9;
+    const PROCESSOR_ARCHITECTURE_ARM64: u16 = 12;
+    let mut si: SystemInfo = unsafe { core::mem::zeroed() };
+    // Always succeeds; the architecture field is filled from the native
+    // machine, never from the emulated process view.
+    unsafe { GetNativeSystemInfo(&mut si) };
+    match si.w_processor_architecture {
+        PROCESSOR_ARCHITECTURE_ARM64 => Some("aarch64"),
+        PROCESSOR_ARCHITECTURE_AMD64 => Some("x86_64"),
+        PROCESSOR_ARCHITECTURE_INTEL => Some("x86"),
+        _ => None,
+    }
+}
+
 /// Host CPU architecture ("x86_64" or "aarch64"), used to pick the right asset.
 #[tauri::command]
 fn host_arch() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(arch) = windows_machine_arch() {
+            return arch.to_string();
+        }
+    }
     std::env::consts::ARCH.to_string()
 }
 

@@ -187,7 +187,8 @@ const en: Dict = {
   'batchDL.started': 'Download started for {n} app(s).',
   'batchDL.weakNote': '{n} file(s) were auto-detected with low confidence - check the names in the download panel before running them.',
   'batchDL.skipped': '{n} app(s) have no direct download here.',
-  'batchDL.skippedHint': 'open their Guide for the official download page.',
+  'batchDL.skippedHint': 'nothing matched this device directly — the button opens their official download pages.',
+  'batchDL.openPages': 'Open official pages',
   'batchDL.nothing': 'Nothing to download yet — select some apps first.',
 
   // Batch install script modal
@@ -379,7 +380,8 @@ const fa: Dict = {
   'batchDL.started': 'دانلود برای {n} برنامه شروع شد.',
   'batchDL.weakNote': '{n} فایل با اطمینان پایین به‌طور خودکار تشخیص داده شدند - قبل از اجرا، نام‌ها را در پنل دانلود بررسی کنید.',
   'batchDL.skipped': '{n} برنامه دانلود مستقیم اینجا ندارند.',
-  'batchDL.skippedHint': 'صفحه رسمی دانلود در راهنمای آن‌هاست.',
+  'batchDL.skippedHint': 'هیچ فایل مستقیمی برای این دستگاه پیدا نشد — دکمه، صفحه رسمی دانلود آن‌ها را باز می‌کند.',
+  'batchDL.openPages': 'باز کردن صفحه‌های رسمی',
   'batchDL.nothing': 'چیزی برای دانلود نیست — اول چند برنامه انتخاب کنید.',
 
   // Batch install script modal
@@ -571,7 +573,8 @@ const es: Dict = {
   'batchDL.started': 'Descarga iniciada para {n} app(s).',
   'batchDL.weakNote': '{n} archivo(s) se detectaron con poca confianza: revisa los nombres en el panel de descargas antes de ejecutarlos.',
   'batchDL.skipped': '{n} app(s) no tienen descarga directa aquí.',
-  'batchDL.skippedHint': 'la página oficial de descarga está en su Guía.',
+  'batchDL.skippedHint': 'nada coincidió directamente con este dispositivo; el botón abre sus páginas oficiales de descarga.',
+  'batchDL.openPages': 'Abrir páginas oficiales',
   'batchDL.nothing': 'Nada para descargar todavía — selecciona primero algunas apps.',
 
   // Batch install script modal
@@ -763,7 +766,8 @@ const fr: Dict = {
   'batchDL.started': 'Téléchargement lancé pour {n} appli(s).',
   'batchDL.weakNote': "{n} fichier(s) détecté(s) avec peu de confiance - vérifiez les noms dans le panneau de téléchargement avant de les exécuter.",
   'batchDL.skipped': '{n} appli(s) n’ont pas de téléchargement direct ici.',
-  'batchDL.skippedHint': 'la page officielle de téléchargement est dans leur Guide.',
+  'batchDL.skippedHint': 'rien ne correspond directement à cet appareil — le bouton ouvre leurs pages officielles de téléchargement.',
+  'batchDL.openPages': 'Ouvrir les pages officielles',
   'batchDL.nothing': 'Rien à télécharger pour l’instant — sélectionnez d’abord des applis.',
 
   // Batch install script modal
@@ -955,7 +959,8 @@ const de: Dict = {
   'batchDL.started': 'Download für {n} App(s) gestartet.',
   'batchDL.weakNote': '{n} Datei(en) wurden mit geringer Sicherheit automatisch erkannt - Namen im Download-Panel vor dem Ausführen prüfen.',
   'batchDL.skipped': '{n} App(s) haben hier keinen direkten Download.',
-  'batchDL.skippedHint': 'die offizielle Downloadseite steht in ihrer Anleitung.',
+  'batchDL.skippedHint': 'nichts passt direkt zu diesem Gerät — die Schaltfläche öffnet die offiziellen Downloadseiten.',
+  'batchDL.openPages': 'Offizielle Seiten öffnen',
   'batchDL.nothing': 'Noch nichts zum Herunterladen — zuerst Apps auswählen.',
 
   // Batch install script modal

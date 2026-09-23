@@ -315,6 +315,7 @@ function AppShell() {
       let started = 0;
       let weakPicks = 0;
       const skipped: string[] = [];
+      const skippedApps: typeof selectedBatchApps = [];
       for (const app of selectedBatchApps) {
         const platform = guessUserPlatform(app);
         let url: string | null = null;
@@ -352,6 +353,7 @@ function AppShell() {
           started += 1;
         } else {
           skipped.push(app.name);
+          skippedApps.push(app);
         }
       }
       if (started > 0) {
@@ -363,8 +365,25 @@ function AppShell() {
         });
       }
       if (skipped.length > 0) {
+        // The old hint just said "open their Guide" - a dead end that read as
+        // a joke when the skipped apps were famous ones (LocalSend, AppFlowy).
+        // Now the toast carries an action that opens each skipped app's
+        // official download target (curated page, downloadUrl or releases
+        // page) directly in the browser, staggered so popup blockers keep up.
         toast.info(t('batchDL.skipped').replace('{n}', String(skipped.length)), {
           description: `${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''} — ${t('batchDL.skippedHint')}`,
+          action: {
+            label: t('batchDL.openPages'),
+            onClick: () => {
+              skippedApps.slice(0, 5).forEach((app, i) => {
+                const url =
+                  bestDownloadFor(app, guessUserPlatform(app))?.url ||
+                  app.websiteUrl ||
+                  app.downloadUrl;
+                if (url) setTimeout(() => void openExternal(url), i * 600);
+              });
+            },
+          },
         });
       }
       if (started === 0 && skipped.length === 0) {

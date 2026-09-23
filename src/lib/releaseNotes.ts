@@ -21,6 +21,18 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.7-beta',
+    date: '2026-09-24',
+    title: 'The Windows-on-ARM release: Fress now asks the machine what it runs',
+    items: [
+      'Windows on ARM64: the app used to report the emulated process architecture, so ARM64 machines were treated as x64 and kept getting x64 builds — of Fress and of every catalog app. The real machine architecture is detected now, and native ARM builds win when they exist.',
+      'Fixed: on ARM64 machines LocalSend resolved to its command-line companion instead of the app (its "arm-64" naming slipped past the classifiers). Hyphenated names like x86-64/arm-64 are understood now, and -CLI- companions can never win the pick again — verified against the live LocalSend release.',
+      'Fixed: batch-download skips are no longer a dead end. The toast now carries an "Open official pages" button that opens each skipped app\'s official download page directly (a skip is often just a brief GitHub rate limit on shared connections).',
+      'Recalled: the stale early "v1.0.0-beta" release (x64-only, the only one ever flagged stable) has been removed so "latest" links stop serving it. If you were on it, install this build once from the Releases page — the updater takes over from there.',
+      '5 new regression tests behind all of this (120 total).',
+    ],
+  },
+  {
     version: '1.0.6-beta',
     date: '2026-09-24',
     title: 'The first beta: Fress now ships from its permanent signing key, and downloads prove every byte they received',

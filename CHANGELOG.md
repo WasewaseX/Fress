@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.7-beta (2026-09-24) — the Windows-on-ARM release
+
+The fix release for what ARM64 Windows users were actually being handed: the wrong build of Fress, and — from the catalog — the wrong build of everything else too.
+
+**Recall: the stale `v1.0.0-beta` is gone.** A release tagged `v1.0.0-beta` (published 2026-09-13 by the pre-restart lineage) was the only release ever flagged *stable*, so GitHub's `/releases/latest` — and every "latest stable" link and script that trusts it — kept serving its ancient **x64-only** installers. A Windows-on-ARM machine following such a link got a two-generations-old x64 exe and no explanation; the in-app "wrong version downloaded" report traces back to exactly this. The release and its tag have been deleted (metadata archived). If you installed it: install the current build from the Releases page once — after that the in-app updater takes over. There is deliberately no stable-flagged release right now, so `/releases/latest` answers 404 until a true 1.0 stable ships; the in-app updater never depended on that endpoint.
+
+### Fixed
+- **Fress now asks the machine for its architecture on Windows, not the process.** `host_arch` returned `std::env::consts::ARCH`, which is decided at compile time: the x64 build running under emulation on Windows-on-ARM reported `x86_64`, so both the self-updater and the catalog resolver treated the whole machine as x64 and ARM64 users were never offered native ARM builds — of Fress or of catalog apps. `GetNativeSystemInfo` now reports the native machine (`aarch64` on WoA, whatever the process runs as).
+- **Hyphenated architecture names are understood.** The Windows, macOS and Linux classifiers only matched `x86_64`/`arm64`/`aarch64` — not LocalSend's `x86-64`/`arm-64` spelling. Its installer was scored as a 32-bit build (the `x86(?!_64)` lookahead reads `x86-64` as plain 32-bit x86: a −3 penalty and no x64 bonus at all).
+- **A `-CLI-` companion can no longer impersonate the app.** LocalSend ships `LocalSend-CLI-…-windows-arm-64.exe` next to the GUI installer; on an ARM64 host the CLI *won* the old scoring — its hyphenated `arm-64` read as an unmarked name and the bare `/arm/` rule rewarded it +4, while the real app was the penalized "32-bit" one. Assets with a `-cli-` token are now rejected before scoring ("client"/"click" are untouched — the token must end at a separator). Verified against the live LocalSend manifest: an ARM64 host gets the real app again.
+- **Batch-download skips stopped being a dead end.** The toast used to end with "open their Guide for the official download page." — for apps as famous as LocalSend and AppFlowy that reads as a joke, and the skip itself is often just a GitHub rate-limit blip on a shared IP. The toast now carries an **Open official pages** action that opens each skipped app's official download target in the browser (staggered, popup-blocker friendly), and the hint text says what actually happened. All five languages.
+- Android's ABI classification also recognizes hyphenated `arm-64` APK names now (guarded so it cannot double-classify as ARMv7).
+
+5 new regression tests behind all of this (120 total).
+
 ## 1.0.6-beta (2026-09-24) — the first beta
 
 The first beta release: the Android build signed with the project's permanent key, and the fourth audit round's findings — every byte a download writes is now accounted for before the file is called complete.

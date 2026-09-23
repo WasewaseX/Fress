@@ -71,6 +71,13 @@ export function cleanVersion(tag: string): string {
 const BAD_EXT = /\.(sig|blockmap|sha256|sha512|sha256sum|md5|txt|json|yaml|yml|pub|pem|sbom|zsync|bittorrent|xml|map|dSYM|apk\.idsig|idsig)$/i;
 /** Metadata / tooling artefacts shipped next to installers. */
 const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy/i;
+/** Command-line companions: repos like LocalSend ship "<App>-CLI-<v>-windows-arm-64.exe"
+ * next to the GUI installer, and on an ARM64 host the CLI used to WIN the
+ * scoring (hyphenated "arm-64" read as unmarked, bare /arm/ rewarded it) -
+ * users got a 2 MB console tool instead of the app. A -cli- token never
+ * names the GUI build ("client"/"click" do not match: the token must end at
+ * a separator or the string end). */
+const CLI_NAME = /(^|[^a-z0-9])cli([-_.0-9]|$)/i;
 
 /* ------------------------------------------------------------------ */
 /* Android ABI classification (shared with the self-updater)           */
@@ -103,7 +110,7 @@ export function androidAssetFlags(name: string): {
   x86: boolean;
 } {
   const n = name.toLowerCase();
-  const arm64 = /arm64|aarch64|v8a/.test(n);
+  const arm64 = /arm64|aarch64|arm[_-]?64|v8a/.test(n);
   const x64 = /x86[_-]?64|amd64|x64/.test(n);
   // "universal" must be a TOKEN, not a prefix: the old ^app- rule classified
   // gradle's per-ABI splits (app-arm64-release.apk) as universal simply for
@@ -183,9 +190,12 @@ export function assetCompatibleWithDevice(
     case 'windows': {
       // x86_64 Windows cannot run arm64 binaries (WoA emulates x64/x86, not
       // the reverse) and a 32-bit host runs neither arm64 nor x64. An
-      // ARM64 host runs everything through emulation.
-      const armAsset = /arm64|aarch64/.test(n);
-      const x64Asset = /x64|x86_64|amd64|win64/.test(n);
+      // ARM64 host runs everything through emulation. Hyphenated markers
+      // (LocalSend names its builds "x86-64"/"arm-64") must classify the
+      // same as their underscore siblings - the old regexes missed them,
+      // which let a CLI tool impersonate the app on ARM64 hosts.
+      const armAsset = /arm64|aarch64|arm[_-]?64/.test(n);
+      const x64Asset = /x64|x86[_-]?64|amd64|win64/.test(n);
       const hostIs32 = arch === 'x86' || arch === 'i686';
       if (armAsset && !x64Asset) return arch !== 'x86_64' && !hostIs32;
       if (x64Asset && !armAsset) return !hostIs32;
@@ -194,7 +204,7 @@ export function assetCompatibleWithDevice(
     case 'mac': {
       // Apple Silicon runs Intel dmgs through Rosetta 2; an Intel Mac has
       // no path to arm64-only builds.
-      const armAsset = /arm64|aarch64|apple[-_. ]?silicon/.test(n);
+      const armAsset = /arm64|aarch64|arm[_-]?64|apple[-_. ]?silicon/.test(n);
       const x64Asset = /x64|x86_64|intel/.test(n);
       if (armAsset && !x64Asset) return arch !== 'x86_64';
       return true;
@@ -205,7 +215,7 @@ export function assetCompatibleWithDevice(
       // both dead ends (the self-updater has refused these for ages). A
       // 32-bit x86 host additionally cannot run 64-bit-only builds.
       const armAsset = /arm|aarch64/.test(n);
-      const x64Asset = /x86_64|x64|amd64/.test(n);
+      const x64Asset = /x86[_-]?64|x64|amd64/.test(n);
       const hostIsArm = arch === 'aarch64' || arch === 'arm';
       const hostIs32 = arch === 'x86' || arch === 'i686';
       if (armAsset && !x64Asset) return !hostIs32 && arch !== 'x86_64';
@@ -258,8 +268,11 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       if (/unsigned/.test(n)) s -= 4;
       if (/portable/.test(n)) s -= 2;
       if (/arm64|arm/.test(n)) s += arch === 'aarch64' ? 4 : -5;
-      if (/win32|ia32|i686|32[-_.]?bit|x86(?!_64)/.test(n) && !/x64|x86_64|win64/.test(n)) s -= 3;
-      if (/x64|x86_64|amd64|win64/.test(n)) s += arch === 'aarch64' ? 0 : 3;
+      // The 32-bit marker must not swallow hyphenated 64-bit names:
+      // "x86-64" (LocalSend) matched x86(?!_64) and lost 3 points as if it
+      // were a 32-bit build, on top of missing the x64 bonus.
+      if (/win32|ia32|i686|32[-_.]?bit|x86(?![_-]?64)/.test(n) && !/x64|x86[_-]?64|win64/.test(n)) s -= 3;
+      if (/x64|x86[_-]?64|amd64|win64/.test(n)) s += arch === 'aarch64' ? 0 : 3;
       break;
     }
     case 'mac': {
@@ -289,7 +302,7 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       // (the self-updater has refused these for ages; the catalog used to
       // hand them over with a confident, non-weak score of 5).
       if (!assetCompatibleWithDevice(name, 'linux', arch)) return -1;
-      if (/x86_64|x64|amd64/.test(n)) s += arch === 'aarch64' ? -2 : 4;
+      if (/x86[_-]?64|x64|amd64/.test(n)) s += arch === 'aarch64' ? -2 : 4;
       if (/arm|aarch64/.test(n)) s += arch === 'aarch64' ? 4 : -5;
       if (/flatpak|snap/.test(n)) s -= 6;
       break;
@@ -333,7 +346,9 @@ export function pickAssetDetailed(
   arch: string | undefined,
   patterns?: Partial<Record<Platform, string>>
 ): AssetPick | null {
-  const usable = assets.filter((a) => !BAD_EXT.test(a.name) && !BAD_NAME.test(a.name));
+  const usable = assets.filter(
+    (a) => !BAD_EXT.test(a.name) && !BAD_NAME.test(a.name) && !CLI_NAME.test(a.name)
+  );
 
   const pattern = patterns?.[platform];
   if (pattern) {

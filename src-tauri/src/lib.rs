@@ -517,10 +517,15 @@ async fn write_part_meta(part: &Path, url: &str, headers: &reqwest::header::Head
 ///   - the start N MUST equal `expected_start`,
 ///   - the end M MUST parse and be >= N,
 ///   - the total T, when present (not `*`), MUST be greater than M.
+///
 /// Any violation refuses the resume instead of appending to the staging
 /// file; the download fails with a clear reason and the .part survives so
 /// a corrected server (or a fresh start) can still recover.
-fn validate_resume_content_range(header: &str, expected_start: u64) -> Result<(), String> {
+///
+/// On success returns the number of bytes the range promised
+/// (`end - start + 1`) so the caller can verify the body actually
+/// delivered that many bytes before declaring the download complete.
+fn validate_resume_content_range(header: &str, expected_start: u64) -> Result<u64, String> {
     let mut parts = header.split_whitespace();
     let unit = parts
         .next()
@@ -569,7 +574,7 @@ fn validate_resume_content_range(header: &str, expected_start: u64) -> Result<()
             ));
         }
     }
-    Ok(())
+    Ok(end - start + 1)
 }
 
 #[tauri::command]
@@ -778,6 +783,27 @@ async fn run_download(
                     resume_validator = m.etag.or(m.last_modified);
                 }
             }
+            // Byte-identity rule: staging bytes may only be resumed when
+            // their origin can still be PROVEN. With neither ETag nor
+            // Last-Modified in the sidecar (a validator-less server), a
+            // Range request would glue an old prefix onto a possibly
+            // changed remote suffix with nothing able to detect it -
+            // exactly the corruption the validator system exists to
+            // prevent. Unless a published checksum will verify the
+            // assembled file anyway (expected_sha256, which catches the
+            // mixture at completion), the only sound move is to discard
+            // the staging bytes and start over.
+            let checksum_will_verify = expected_sha256
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_some();
+            if planned_resume_len > 0 && resume_validator.is_none() && !checksum_will_verify {
+                let _ = tokio::fs::remove_file(&p).await;
+                let _ = tokio::fs::remove_file(meta_path_for(&p)).await;
+                planned_resume_len = 0;
+                resume_paths = None;
+            }
             // A missing staging file (deleted while stopped, or a stale path
             // carried past its lifetime) simply falls through to a fresh
             // download below, exactly like a resume without a .part.
@@ -807,6 +833,23 @@ async fn run_download(
         .map_err(|e| (format!("Connection failed: {}", e), None))?;
 
     if !first.status().is_success() {
+        // 416 on a resume attempt: the byte range we hold can no longer be
+        // satisfied (the remote file shrank or was replaced and the server
+        // does not honor If-Range). The staging bytes are worthless - the
+        // only sound remedy is a fresh download, so they are discarded and
+        // the failure is reported as resume-invalid (the UI offers Retry,
+        // never Resume, which would replay the same broken exchange).
+        if first.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && planned_resume_len > 0 {
+            if let Some((_, p)) = resume_paths.as_ref() {
+                let _ = tokio::fs::remove_file(p).await;
+                let _ = tokio::fs::remove_file(meta_path_for(p)).await;
+            }
+            return Err((
+                "Server reports the saved byte range is no longer valid (HTTP 416); the partial download was discarded"
+                    .to_string(),
+                Some("resume-invalid".to_string()),
+            ));
+        }
         return Err((format!("Server returned HTTP {}", first.status()), None));
     }
 
@@ -831,7 +874,7 @@ async fn run_download(
     // staging file. Validation is now strict - header present, unit bytes,
     // start equal to the staging length, end and total sane - and any
     // violation fails the download instead of appending.
-    if resuming {
+    let expected_range_len: Option<u64> = if resuming {
         let verdict = match headers
             .get(reqwest::header::CONTENT_RANGE)
             .and_then(|v| v.to_str().ok())
@@ -842,13 +885,25 @@ async fn run_download(
                     .to_string(),
             ),
         };
-        if let Err(reason) = verdict {
-            return Err((
-                format!("{}; the partial download cannot be continued", reason),
-                None,
-            ));
+        match verdict {
+            Ok(range_len) => Some(range_len),
+            Err(reason) => {
+                // The staging bytes cannot be resumed against a server that
+                // answers protocol-invalid partial content - discarding them
+                // makes the only offered remedy a fresh Retry.
+                if let Some((_, p)) = resume_paths.as_ref() {
+                    let _ = tokio::fs::remove_file(p).await;
+                    let _ = tokio::fs::remove_file(meta_path_for(p)).await;
+                }
+                return Err((
+                    format!("{}; the partial download was discarded", reason),
+                    Some("resume-invalid".to_string()),
+                ));
+            }
         }
-    }
+    } else {
+        None
+    };
 
     let name = requested_name
         .or_else(|| filename_from_headers(&final_url, &headers))
@@ -1026,6 +1081,31 @@ async fn run_download(
     file.flush().await.map_err(|e| (e.to_string(), None))?;
     drop(file);
 
+    // EOF is not completion: a connection that closed early used to look
+    // exactly like a finished download ("server said 10MB, delivered 7MB,
+    // Fress said done"). Compare what arrived against what the response
+    // promised - the Content-Range tail for a 206, the Content-Length for
+    // a full 200 body - and refuse to finalize a truncated file. The
+    // .part survives so Resume can fetch exactly the missing bytes.
+    let expected_downloaded: Option<u64> = match expected_range_len {
+        Some(range_len) => Some(already_have + range_len),
+        // No verifiable range: fall back to Content-Length on a full-body
+        // 200. A chunked 200 without Content-Length cannot be checked.
+        None if !resuming && remote_len > 0 => Some(remote_len),
+        None => None,
+    };
+    if let Some(expected) = expected_downloaded {
+        if downloaded != expected {
+            return Err((
+                format!(
+                    "Download cut short: received {} of {} bytes before the connection closed. Resume to fetch the remaining bytes.",
+                    downloaded, expected
+                ),
+                None,
+            ));
+        }
+    }
+
     let digest = hasher.finalize();
     let sha_hex: String = digest.iter().map(|b| format!("{:02x}", b)).collect();
 
@@ -1152,23 +1232,33 @@ mod tests {
 
     #[test]
     fn accepts_a_well_formed_range_at_the_right_offset() {
-        assert!(validate_resume_content_range("bytes 1024-2047/8192", 1024).is_ok());
+        // bytes 1024-2047 promises 2047 - 1024 + 1 = 1024 bytes.
+        assert_eq!(
+            validate_resume_content_range("bytes 1024-2047/8192", 1024),
+            Ok(1024)
+        );
     }
 
     #[test]
     fn accepts_a_case_insensitive_unit() {
-        assert!(validate_resume_content_range("BYTES 1024-2047/8192", 1024).is_ok());
+        assert_eq!(
+            validate_resume_content_range("BYTES 1024-2047/8192", 1024),
+            Ok(1024)
+        );
     }
 
     #[test]
     fn accepts_an_unknown_total() {
         // RFC 9110: the complete-length may be "*" when unknown.
-        assert!(validate_resume_content_range("bytes 0-0/*", 0).is_ok());
+        assert_eq!(validate_resume_content_range("bytes 0-0/*", 0), Ok(1));
     }
 
     #[test]
     fn accepts_a_single_byte_range() {
-        assert!(validate_resume_content_range("bytes 4095-4095/8192", 4095).is_ok());
+        assert_eq!(
+            validate_resume_content_range("bytes 4095-4095/8192", 4095),
+            Ok(1)
+        );
     }
 
     #[test]

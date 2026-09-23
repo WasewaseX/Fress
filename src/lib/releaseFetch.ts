@@ -142,6 +142,81 @@ export function androidDeviceAbi(arch?: string | undefined): DeviceAbi {
     'unknown';
 }
 
+/**
+ * The HARD architecture-compatibility constraint, shared by the heuristic
+ * scorer and the `assetPatterns` override path so the two can never
+ * disagree about what is impossible.
+ *
+ * Division of authority:
+ *   assetPatterns        = naming authority (WHICH file family is right)
+ *   this gate            = safety constraint (what can never be installed)
+ *   heuristic score      = preference ranking (tie breaker among the rest)
+ *
+ * An override may pin the naming; it may never declare an impossible
+ * architecture installable. Returns false only for PROVEN incompatibility:
+ * with an unknown host arch nothing is proven, so the gate stays open
+ * (except Android, where unknown means the universal-only contract).
+ */
+export function assetCompatibleWithDevice(
+  name: string,
+  platform: Platform,
+  arch: string | undefined
+): boolean {
+  const n = name.toLowerCase();
+  switch (platform) {
+    case 'android': {
+      const device = androidDeviceAbi(arch);
+      if (device === 'unknown') return androidAssetFlags(n).universal; // universal only, never a guess
+      if (androidAssetFlags(n).universal) return true;
+      const abi = androidAssetAbi(n);
+      if (!abi) return true; // unmarked: a gamble only a KNOWN device may take
+      // Runnable cross-ABI pairs: armv7 apks run on arm64 devices, and
+      // x86_64 devices keep 32-bit x86 compat. Everything else is a
+      // guaranteed install failure (arm64 on arm/32-bit, x64 on 32-bit,
+      // arm splits on x86 family, 64-bit splits on a 32-bit device).
+      return (
+        abi === device ||
+        (device === 'arm64' && abi === 'arm') ||
+        (device === 'x86_64' && abi === 'x86')
+      );
+    }
+    case 'windows': {
+      // x86_64 Windows cannot run arm64 binaries (WoA emulates x64/x86, not
+      // the reverse) and a 32-bit host runs neither arm64 nor x64. An
+      // ARM64 host runs everything through emulation.
+      const armAsset = /arm64|aarch64/.test(n);
+      const x64Asset = /x64|x86_64|amd64|win64/.test(n);
+      const hostIs32 = arch === 'x86' || arch === 'i686';
+      if (armAsset && !x64Asset) return arch !== 'x86_64' && !hostIs32;
+      if (x64Asset && !armAsset) return !hostIs32;
+      return true;
+    }
+    case 'mac': {
+      // Apple Silicon runs Intel dmgs through Rosetta 2; an Intel Mac has
+      // no path to arm64-only builds.
+      const armAsset = /arm64|aarch64|apple[-_. ]?silicon/.test(n);
+      const x64Asset = /x64|x86_64|intel/.test(n);
+      if (armAsset && !x64Asset) return arch !== 'x86_64';
+      return true;
+    }
+    case 'linux': {
+      // No usable cross-ISA emulation in a desktop context either way:
+      // x86_64 builds on ARM machines and arm builds on x86 machines are
+      // both dead ends (the self-updater has refused these for ages). A
+      // 32-bit x86 host additionally cannot run 64-bit-only builds.
+      const armAsset = /arm|aarch64/.test(n);
+      const x64Asset = /x86_64|x64|amd64/.test(n);
+      const hostIsArm = arch === 'aarch64' || arch === 'arm';
+      const hostIs32 = arch === 'x86' || arch === 'i686';
+      if (armAsset && !x64Asset) return !hostIs32 && arch !== 'x86_64';
+      if (x64Asset && !armAsset) return !hostIsArm && !hostIs32;
+      return true;
+    }
+    default:
+      return true;
+  }
+}
+
 function scoreAsset(name: string, platform: Platform, arch: string | undefined): number {
   const n = name.toLowerCase();
   let s = 0;
@@ -150,24 +225,20 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
     case 'android': {
       if (!n.endsWith('.apk')) return -1;
       if (/google[-_.]?play|playstore|play[-_.]?store/.test(n)) s -= 6; // Play flavor sideloads poorly
-      // ABI awareness. An APK built for one ABI does not install or run on
-      // a device of another: handing an arm64 file to an ARMv7 or x86_64
-      // device (exactly what the arch-blind scoring did) wastes the
-      // download and fails the install. Classification lives in
-      // androidAssetFlags above so the self-updater inherits every fix.
+      // HARD SAFETY GATE first (shared with the assetPatterns override
+      // path): a file the device provably cannot run is refused outright,
+      // whatever its score would have been. This includes unknown devices
+      // (universal only - "no ABI marker" is exactly the unknown, so an
+      // unmarked apk is a gamble we cannot resolve) and wrong-ABI splits,
+      // which used to stay pickable at negative scores when they were the
+      // only candidate. Ranking below applies only to compatible files.
+      if (!assetCompatibleWithDevice(name, 'android', arch)) return -1;
       const f = androidAssetFlags(n);
       const deviceAbi = androidDeviceAbi(arch);
-      // An unknown device (reduced-UA browser: no arch signal at all) gets
-      // universal ONLY. Not splits - a wrong-ABI APK fails to install - and
-      // not unmarked APKs either: "no ABI marker" is exactly the unknown we
-      // are trying to resolve, so accepting one before the device check
-      // would still gamble (Fress_1.0.7_release.apk would win). Universal
-      // or nothing; the UI links to the releases page when no universal
-      // exists. The unknown check MUST precede any unmarked acceptance.
-      if (deviceAbi === 'unknown') return f.universal ? s + 6 : -1;
       if (f.universal) s += 6; // runs everywhere
       // A matching ABI-specific APK slightly outranks universal (smaller
-      // download); a wrong-ABI APK loses to everything, including unmarked.
+      // download); armv7 apks are runnable on arm64 devices, hence the
+      // graded 2 instead of a refusal the gate already enforces elsewhere.
       if (f.arm64) s += deviceAbi === 'arm64' ? 7 : -8;
       if (f.arm32) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
       if (f.x64) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
@@ -179,6 +250,10 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       if (n.endsWith('.exe')) s += 6;
       else if (n.endsWith('.msi')) s += 4;
       else return -1;
+      // Gate: an x86_64 machine can never run an arm64-only installer (WoA
+      // emulates x64/x86, not the reverse) - previously it stayed pickable
+      // at a weak positive score when it was the only exe.
+      if (!assetCompatibleWithDevice(name, 'windows', arch)) return -1;
       if (/setup|installer|install/.test(n)) s += 2;
       if (/unsigned/.test(n)) s -= 4;
       if (/portable/.test(n)) s -= 2;
@@ -195,6 +270,9 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       } else {
         s += 4;
       }
+      // Gate: an Intel Mac cannot run an arm64-only dmg (Rosetta only
+      // translates the other direction); Apple Silicon runs Intel builds.
+      if (!assetCompatibleWithDevice(name, 'mac', arch)) return -1;
       if (/arm64|aarch64|apple[-_. ]?silicon/.test(n)) s += arch === 'aarch64' ? 6 : -7;
       if (/x64|x86_64|intel/.test(n)) s += arch === 'aarch64' ? -7 : 6;
       if (/universal/.test(n)) s += 3;
@@ -206,6 +284,11 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       else if (n.endsWith('.rpm')) s += 3;
       else if (/\.t(ar\.gz|gz|zst)$/.test(n)) s += 1;
       else return -1;
+      // Gate: no usable cross-ISA emulation in a desktop context, so an
+      // ARM machine gets nothing from x86_64-only releases and vice versa
+      // (the self-updater has refused these for ages; the catalog used to
+      // hand them over with a confident, non-weak score of 5).
+      if (!assetCompatibleWithDevice(name, 'linux', arch)) return -1;
       if (/x86_64|x64|amd64/.test(n)) s += arch === 'aarch64' ? -2 : 4;
       if (/arm|aarch64/.test(n)) s += arch === 'aarch64' ? 4 : -5;
       if (/flatpak|snap/.test(n)) s -= 6;
@@ -256,10 +339,20 @@ export function pickAssetDetailed(
   if (pattern) {
     try {
       const re = new RegExp(pattern, 'i');
-      const matches = usable.filter((a) => re.test(a.name));
+      // Architecture compatibility is a HARD constraint an override cannot
+      // bypass: the pattern is the naming authority - it says which file
+      // FAMILY is right - but it must never declare an impossible
+      // architecture installable (an Android pattern pinning a split name
+      // used to hand that file to an unknown-ABI browser even though the
+      // heuristic correctly refuses it). Incompatible matches are dropped;
+      // if none survive, fall through to the heuristic, which applies the
+      // very same gate (assetCompatibleWithDevice).
+      const matches = usable
+        .filter((a) => re.test(a.name))
+        .filter((a) => assetCompatibleWithDevice(a.name, platform, arch));
       if (matches.length > 0) {
-        // Among pattern matches the heuristic still breaks ties (x64 vs
-        // arm64 variants of the same pinned naming).
+        // Among surviving pattern matches the heuristic still breaks ties
+        // (x64 vs arm64 variants of the same pinned naming).
         let best = matches[0];
         let bestScore = -Infinity;
         for (const a of matches) {

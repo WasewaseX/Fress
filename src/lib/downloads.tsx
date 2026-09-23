@@ -173,6 +173,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         // pointless; the source itself must be retried.
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: false, sha256: undefined }));
         toast.error('Integrity check failed', { description: p.message });
+      } else if (p.kind === 'resume-invalid') {
+        // The server answered the resume in a way that cannot be trusted
+        // (protocol-invalid Content-Range, HTTP 416) and the staging bytes
+        // were discarded. Offering Resume would replay the same broken
+        // exchange - only a fresh Retry is sound.
+        applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: false }));
+        toast.error('Resume not possible', { description: p.message });
       } else {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: true }));
         toast.error('Download failed', { description: p.message });

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   androidAssetFlags,
   androidDeviceAbi,
+  assetCompatibleWithDevice,
   cleanVersion,
   parseGithubRepo,
   pickAsset,
@@ -245,5 +246,102 @@ describe('pickAssetDetailed — override and confidence', () => {
   it('a solid heuristic pick is not weak', () => {
     const res = pickAssetDetailed([asset('tool-2.1-x86_64.AppImage')], 'linux', 'x86_64');
     expect(res?.weak).toBe(false);
+  });
+
+  // Architecture compatibility is a HARD constraint that neither the
+  // heuristic nor an assetPatterns override can bypass: an override is the
+  // naming authority, never a license to declare an impossible
+  // architecture installable.
+  describe('hard architecture gate (heuristic AND override)', () => {
+    it('an override pinning an arm64 split cannot serve it to an unknown-ABI browser', () => {
+      // The override matches the split, but the gate drops it and the
+      // fall-through heuristic refuses it too => null (releases page).
+      const res = pickAssetDetailed(
+        [asset('Fress_1.0.7_arm64.apk')],
+        'android',
+        undefined,
+        { android: 'arm64' }
+      );
+      expect(res).toBeNull();
+    });
+
+    it('an override with a universal AND a split on an unknown device picks the universal', () => {
+      const res = pickAssetDetailed(
+        [asset('Fress_1.0.7_arm64.apk'), asset('Fress_1.0.7_universal.apk')],
+        'android',
+        undefined,
+        { android: 'apk$' }
+      );
+      expect(res?.matchedBy).toBe('override');
+      expect(res?.pick.name).toBe('Fress_1.0.7_universal.apk');
+    });
+
+    it('an override pinning a wrong-ABI split on a KNOWN device falls through to the right file', () => {
+      const res = pickAssetDetailed(
+        [asset('Tool_2.1_arm64.apk'), asset('Tool_2.1_x64.apk')],
+        'android',
+        'x86_64',
+        { android: 'arm64' }
+      );
+      // The arm64 override match is gate-dropped; nothing else matches the
+      // pattern, so the heuristic picks the x64 file.
+      expect(res?.matchedBy).toBe('heuristic');
+      expect(res?.pick.name).toBe('Tool_2.1_x64.apk');
+    });
+
+    it('an x86_64 Windows machine is never handed an arm64-only installer (heuristic)', () => {
+      // Used to stay pickable at a weak positive score when it was the
+      // only exe; now refused outright.
+      expect(pickAsset([asset('Tool-2.1-arm64-setup.exe')], 'windows', 'x86_64')).toBeNull();
+      // With a compatible exe present, the compatible one wins.
+      expect(
+        pickAsset([asset('Tool-2.1-arm64-setup.exe'), asset('Tool-2.1-x64-setup.exe')], 'windows', 'x86_64')?.name
+      ).toBe('Tool-2.1-x64-setup.exe');
+    });
+
+    it('a 32-bit Windows host gets nothing marked arm64 or x64', () => {
+      expect(pickAsset([asset('Tool-2.1-x64-setup.exe')], 'windows', 'x86')).toBeNull();
+      expect(pickAsset([asset('Tool-2.1-arm64-setup.exe')], 'windows', 'i686')).toBeNull();
+    });
+
+    it('an Intel Mac is never handed an arm64-only dmg; Apple Silicon keeps Rosetta for Intel builds', () => {
+      expect(pickAsset([asset('Tool-2.1-arm64.dmg')], 'mac', 'x86_64')).toBeNull();
+      expect(pickAsset([asset('Tool-2.1-intel.dmg')], 'mac', 'aarch64')?.name).toBe('Tool-2.1-intel.dmg');
+    });
+
+    it('an ARM64 Linux machine gets NOTHING from an x86_64-only release (heuristic, was confident pick)', () => {
+      // Used to score 7-2=5: confidently handed a non-runnable AppImage.
+      expect(pickAsset([asset('tool-2.1-x86_64.AppImage')], 'linux', 'aarch64')).toBeNull();
+      expect(pickAsset([asset('tool-2.1_amd64.deb')], 'linux', 'arm')).toBeNull();
+    });
+
+    it('an x86_64 Linux machine is never handed an arm build', () => {
+      expect(pickAsset([asset('tool-2.1-arm64.AppImage')], 'linux', 'x86_64')).toBeNull();
+    });
+
+    it('a 32-bit x86 Linux host cannot run 64-bit-only builds', () => {
+      expect(pickAsset([asset('tool-2.1-x86_64.AppImage')], 'linux', 'i686')).toBeNull();
+    });
+
+    it('compatible picks are unaffected by the gate', () => {
+      // x86 apks run on x86_64 devices (32-bit compat), armv7 apks run on
+      // arm64 devices, WoA runs x64 installers through emulation.
+      expect(pickAsset([asset('Tool_2.1_x86.apk')], 'android', 'x86_64')?.name).toBe('Tool_2.1_x86.apk');
+      expect(pickAsset([asset('Tool_2.1_arm.apk')], 'android', 'aarch64')?.name).toBe('Tool_2.1_arm.apk');
+      expect(pickAsset([asset('Tool-2.1-x64-setup.exe')], 'windows', 'aarch64')?.name).toBe(
+        'Tool-2.1-x64-setup.exe'
+      );
+    });
+
+    it('the gate is exported so tests and future callers share one source of truth', () => {
+      expect(assetCompatibleWithDevice('Fress_1.0.7_universal.apk', 'android', undefined)).toBe(true);
+      expect(assetCompatibleWithDevice('Fress_1.0.7_arm64.apk', 'android', undefined)).toBe(false);
+      expect(assetCompatibleWithDevice('Tool-2.1-arm64-setup.exe', 'windows', 'x86_64')).toBe(false);
+      expect(assetCompatibleWithDevice('Tool-2.1-x64-setup.exe', 'windows', 'x86_64')).toBe(true);
+      expect(assetCompatibleWithDevice('Tool-2.1-arm64.dmg', 'mac', 'x86_64')).toBe(false);
+      expect(assetCompatibleWithDevice('tool-2.1-x86_64.AppImage', 'linux', 'aarch64')).toBe(false);
+      // Unknown arch outside Android: nothing is proven, gate stays open.
+      expect(assetCompatibleWithDevice('Tool-2.1-setup.exe', 'windows', undefined)).toBe(true);
+    });
   });
 });

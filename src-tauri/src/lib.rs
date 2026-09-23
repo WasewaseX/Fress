@@ -433,6 +433,15 @@ fn part_path_for(dest: &Path) -> PathBuf {
     }
 }
 
+/// Inverse of part_path_for: the final destination a staging file belongs
+/// to. "dir/setup.exe.part" -> "dir/setup.exe"; anything not ending in
+/// ".part" has no destination.
+fn dest_for_part(part: &Path) -> Option<PathBuf> {
+    let name = part.file_name()?.to_string_lossy();
+    let stem = name.strip_suffix(".part")?;
+    part.parent().map(|p| p.join(stem))
+}
+
 #[tauri::command]
 async fn start_download(
     app: AppHandle,
@@ -484,16 +493,29 @@ async fn start_download(
             dir,
             resume: resume.unwrap_or(false),
             expected_sha256,
+            staging: None,
         };
         let mut attempt: u32 = 0;
+        // The staging file the last attempt opened, if any. An automatic
+        // retry continues THAT exact file instead of re-deriving a candidate
+        // name (which can drift onto a concurrent download's .part).
+        let mut resolved_staging: Option<PathBuf> = None;
         let result = loop {
-            let r = run_download(app_handle.clone(), id, plan.clone(), &mut cancel_rx).await;
+            let r = run_download(
+                app_handle.clone(),
+                id,
+                plan.clone(),
+                &mut cancel_rx,
+                &mut resolved_staging,
+            )
+            .await;
             match r {
                 Err((msg, kind))
                     if kind.as_deref() == Some("network") && attempt < MAX_AUTO_RETRIES =>
                 {
                     attempt += 1;
                     plan.resume = true; // pick up from the .part file
+                    plan.staging = resolved_staging.clone(); // ...the exact one we opened
                     tokio::time::sleep(Duration::from_secs(2 * u64::from(attempt))).await;
                     let _ = app_handle.emit(
                         "download-retrying",
@@ -541,6 +563,11 @@ struct DownloadPlan {
     dir: PathBuf,
     resume: bool,
     expected_sha256: Option<String>,
+    /// Exact staging (.part) path opened by the PREVIOUS attempt of this
+    /// download chain. Set by the retry loop in start_download so an
+    /// automatic retry reopens its own file instead of re-deriving a
+    /// candidate name; None on a fresh start_download call.
+    staging: Option<PathBuf>,
 }
 
 #[derive(Serialize, Clone)]
@@ -556,6 +583,7 @@ async fn run_download(
     id: u32,
     plan: DownloadPlan,
     cancel_rx: &mut mpsc::Receiver<()>,
+    staging_out: &mut Option<PathBuf>,
 ) -> Result<CompletePayload, (String, Option<String>)> {
     let DownloadPlan {
         url,
@@ -563,7 +591,10 @@ async fn run_download(
         dir,
         resume,
         expected_sha256,
+        staging,
     } = plan;
+    // The out-param describes THIS attempt only.
+    *staging_out = None;
     // NOTE: no whole-request timeout here. reqwest's Client::timeout covers
     // the entire body stream, so the old 30s limit killed every download
     // that took longer than half a minute (a slow 100MB installer). The
@@ -578,15 +609,34 @@ async fn run_download(
         .build()
         .map_err(|e| (e.to_string(), None))?;
 
-    // Plan the resume before the first request: only when the caller named
-    // the file (a retry always does) and a matching .part already exists.
+    // Resolve the resume target BEFORE the first request, in priority order:
+    //   1. the exact staging file the previous attempt of this download
+    //      chain opened (an automatic in-task retry),
+    //   2. the canonical <name>.part for the requested name (a deliberate
+    //      stop + manual Resume: the first attempt of a download always
+    //      reserves candidate 0's .part through create_new, so the mapping
+    //      name -> name.part is the ownership record itself).
+    // unique_path() must NOT be used here: it skips taken FINAL names, so
+    // when e.g. setup.exe already exists on disk a resumed download would
+    // drift onto "setup (1).exe.part" - possibly a concurrent download's
+    // staging file - instead of its own .part.
     let mut planned_resume_len: u64 = 0;
+    let mut resume_paths: Option<(PathBuf, PathBuf)> = None; // (dest, part)
     if resume {
-        if let Some(name) = requested_name.as_ref() {
-            let candidate = unique_path(&dir, name);
-            if let Ok(meta) = tokio::fs::metadata(part_path_for(&candidate)).await {
-                planned_resume_len = meta.len();
+        let probe: Option<PathBuf> = match staging.as_ref() {
+            Some(p) => Some(p.clone()),
+            None => requested_name.as_ref().map(|name| part_path_for(&dir.join(name))),
+        };
+        if let Some(p) = probe {
+            if let Ok(meta) = tokio::fs::metadata(&p).await {
+                if let Some(dest) = dest_for_part(&p) {
+                    planned_resume_len = meta.len();
+                    resume_paths = Some((dest, p));
+                }
             }
+            // A missing staging file (deleted while stopped, or a stale path
+            // carried past its lifetime) simply falls through to a fresh
+            // download below, exactly like a resume without a .part.
         }
     }
 
@@ -630,27 +680,24 @@ async fn run_download(
     // reservation - the winner keeps the name, the loser moves on to
     // "name (1).part". The final filename is only claimed by the rename at
     // completion, so nothing half-written ever looks finished.
-    let (dest, part, mut file) = if resuming {
-        // A retry continues its own staging file: the Range request was
-        // honored (206), so the part found for this name belongs to this
-        // download chain, not to a concurrent stranger.
-        let candidate = unique_path(&dir, &name);
-        let p = part_path_for(&candidate);
-        let f = tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(&p)
-            .await
-            .map_err(|e| (format!("Cannot reopen partial download: {}", e), None))?;
-        (candidate, p, f)
-    } else if planned_resume_len > 0 {
-        // The server ignored the Range and resends the whole body: truncate
-        // the part this retry chain reserved and start over in place.
-        let candidate = unique_path(&dir, &name);
-        let p = part_path_for(&candidate);
-        let f = tokio::fs::File::create(&p)
-            .await
-            .map_err(|e| (format!("Cannot write file: {}", e), None))?;
-        (candidate, p, f)
+    let (dest, part, mut file) = if let Some((candidate, p)) = resume_paths.as_ref() {
+        // Continuing our own staging file, resolved above from the exact
+        // path this chain owns. The server honored the Range (206): append
+        // to what we already have. It ignored the range and resends the
+        // whole body (200): truncate the same staging file and restart in
+        // place. Either way the file is ours - never a neighbor candidate's.
+        let f = if resuming {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(p)
+                .await
+                .map_err(|e| (format!("Cannot reopen partial download: {}", e), None))?
+        } else {
+            tokio::fs::File::create(p)
+                .await
+                .map_err(|e| (format!("Cannot write file: {}", e), None))?
+        };
+        (candidate.clone(), p.clone(), f)
     } else {
         // Fresh download: atomically reserve a staging file for ourselves.
         let mut reserved: Option<(PathBuf, PathBuf, tokio::fs::File)> = None;
@@ -678,6 +725,9 @@ async fn run_download(
             )
         })?
     };
+    // From here on this attempt owns `part`; record it so an automatic retry
+    // continues this exact file (see the staging carry in start_download).
+    *staging_out = Some(part.clone());
 
     let mut hasher = Sha256::new();
     // Seed the digest with the bytes from the earlier attempt so the final

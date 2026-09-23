@@ -101,11 +101,30 @@ jobs:
     needs: [version, create-release]
     runs-on: windows-latest
     env:
-      # true only when the Trusted Signing account is set in repo secrets.
-      # Secrets can't be read in a step-level if, so this goes through env.
-      FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
-      # true when a persistent publisher certificate (.pfx, base64) is set.
-      FRESS_PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_B64 != '' }}
+      # true only when ALL SIX Trusted Signing secrets are set. The signing
+      # action reads every one of them; a gate that tested only a subset
+      # would activate the path and then fail inside azure/trusted-signing
+      # with an opaque empty-input error. Secrets can't be read in a
+      # step-level if, so this goes through env.
+      FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ENDPOINT != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' && secrets.AZURE_CODESIGNING_PROFILE != '' }}
+      # true when the persistent publisher certificate is fully configured:
+      # importing the .pfx needs BOTH the key material and its password, so
+      # both must be present before this path activates.
+      FRESS_PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_B64 != '' && secrets.WINDOWS_PFX_PASSWORD != '' }}
+      # true when the Tauri updater signing key is set (updater artifacts).
+      FRESS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+
+      # Individual presence flags for the diagnostic step below, which
+      # explains exactly which secrets are missing when a signing path
+      # silently did NOT activate.
+      FRESS_AZ_1: ${{ secrets.AZURE_TENANT_ID != '' }}
+      FRESS_AZ_2: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      FRESS_AZ_3: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
+      FRESS_AZ_4: ${{ secrets.AZURE_CODESIGNING_ENDPOINT != '' }}
+      FRESS_AZ_5: ${{ secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+      FRESS_AZ_6: ${{ secrets.AZURE_CODESIGNING_PROFILE != '' }}
+      FRESS_PFX_1: ${{ secrets.WINDOWS_PFX_B64 != '' }}
+      FRESS_PFX_2: ${{ secrets.WINDOWS_PFX_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -116,37 +135,49 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Decide updater signing flags
-        # The Tauri updater artifacts (latest.json + .sig files) are only
-        # built when the update key exists as a secret; without it the
-        # release builds exactly as before. See CODE_SIGNING.md.
-        id: updater
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      - name: Diagnose partial signing configuration
+        # A gate that requires ALL secrets of a path must say WHICH are
+        # missing, or a half-configured repo silently falls back to the
+        # unsigned path with no hint why. This step only speaks up when at
+        # least one secret of a path is set but the path is not complete.
+        if: env.FRESS_SIGNING_CONFIGURED != 'true'
+        shell: pwsh
         run: |
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
-          else
-            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
-            echo "args=" >> "$GITHUB_OUTPUT"
-          fi
+          $azure = @('FRESS_AZ_1','FRESS_AZ_2','FRESS_AZ_3','FRESS_AZ_4','FRESS_AZ_5','FRESS_AZ_6')
+          $azureNames = @('AZURE_TENANT_ID','AZURE_CLIENT_ID','AZURE_CLIENT_SECRET','AZURE_CODESIGNING_ENDPOINT','AZURE_CODESIGNING_ACCOUNT','AZURE_CODESIGNING_PROFILE')
+          $missing = @()
+          for ($i = 0; $i -lt 6; $i++) {
+            if ([Environment]::GetEnvironmentVariable($azure[$i]) -ne 'true') { $missing += $azureNames[$i] }
+          }
+          if ($missing.Count -gt 0 -and $missing.Count -lt 6) {
+            Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Azure Trusted Signing is partially configured and will NOT run. Missing secrets: $($missing -join ', '). All six are required (see CODE_SIGNING.md)."
+          }
+          $pfxMissing = @()
+          if ($env:FRESS_PFX_1 -ne 'true') { $pfxMissing += 'WINDOWS_PFX_B64' }
+          if ($env:FRESS_PFX_2 -ne 'true') { $pfxMissing += 'WINDOWS_PFX_PASSWORD' }
+          if ($pfxMissing.Count -eq 1) {
+            Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: the persistent-certificate path is half-configured and will NOT run. Missing secret: $($pfxMissing -join ', '). Both WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD are required."
+          }
       - name: Build Windows installer (NSIS)
+        # Deliberately WITHOUT the Tauri updater key: updater signatures
+        # generated at build time describe the UNSIGNED exe, but Authenticode
+        # signing below rewrites the exe bytes afterwards and would silently
+        # invalidate them. The .sig files are regenerated over the FINAL
+        # binaries at the end of this job and latest.json is assembled by the
+        # updater-manifest job from those final signatures.
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
           # NSIS only here. WiX (MSI) rejects prerelease versions like
           # 1.0.1-alpha ("Product version must be major.minor.build"), and
           # with both targets in one invocation that failure killed the whole
           # step before the finished NSIS exe could be uploaded - which is
           # exactly how v1.0.1-alpha lost its x64 installer. The MSI is built
           # separately below with a numeric build version.
-          args: '--target x86_64-pc-windows-msvc --bundles nsis ${{ steps.updater.outputs.args }}'
+          args: '--target x86_64-pc-windows-msvc --bundles nsis'
       - name: Build Windows MSI with a numeric build version
         # WiX only accepts ProductVersion of the form major.minor.build, so
         # the MSI is built from a config override that strips the prerelease
@@ -374,6 +405,33 @@ jobs:
           gh release upload "${{ needs.version.outputs.tag }}" $zip --clobber --repo "${{ github.repository }}"
           Write-Host "Portable build uploaded: $zip"
 
+      - name: Generate the updater signature over the final installer
+        # Runs LAST so it signs the bytes that actually ship: when
+        # Authenticode is configured above, the installer in bundle/nsis is
+        # the signed one, and a build-time .sig would no longer match it
+        # (Authenticode rewrites the exe). Regenerating here keeps the
+        # updater chain valid in every configuration - signed or not. The
+        # latest.json manifest itself is assembled afterwards by the
+        # updater-manifest job from the .sig files this and the other jobs
+        # upload.
+        if: env.FRESS_UPDATER_KEY == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $bundle) { throw "installer exe not found for updater signing" }
+          npx tauri signer sign "$($bundle.FullName)"
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed with exit code $LASTEXITCODE" }
+          $sigPath = "$($bundle.FullName).sig"
+          if (-not (Test-Path $sigPath)) { throw "updater signature was not produced: $sigPath" }
+          Write-Host "Updater signature generated over the final installer: $(Split-Path -Leaf $sigPath)"
+          gh release upload "${{ needs.version.outputs.tag }}" $sigPath --clobber --repo "${{ github.repository }}"
+          Write-Host "Updater signature uploaded: $(Split-Path -Leaf $sigPath)"
+
   build-windows-arm64:
     # Native ARM64 builds for newer Windows-on-ARM devices: lighter and faster
     # than running the x64 build through emulation. Produced on every release
@@ -381,8 +439,20 @@ jobs:
     needs: [version, create-release]
     runs-on: windows-latest
     env:
-      FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
-      FRESS_PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_B64 != '' }}
+      # Same complete-credential gates as the x64 job: all six Trusted
+      # Signing secrets, or both .pfx secrets, or the path stays off.
+      FRESS_SIGNING_CONFIGURED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_CODESIGNING_ENDPOINT != '' && secrets.AZURE_CODESIGNING_ACCOUNT != '' && secrets.AZURE_CODESIGNING_PROFILE != '' }}
+      FRESS_PFX_CONFIGURED: ${{ secrets.WINDOWS_PFX_B64 != '' && secrets.WINDOWS_PFX_PASSWORD != '' }}
+      # true when the Tauri updater signing key is set (updater artifacts).
+      FRESS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      FRESS_AZ_1: ${{ secrets.AZURE_TENANT_ID != '' }}
+      FRESS_AZ_2: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      FRESS_AZ_3: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
+      FRESS_AZ_4: ${{ secrets.AZURE_CODESIGNING_ENDPOINT != '' }}
+      FRESS_AZ_5: ${{ secrets.AZURE_CODESIGNING_ACCOUNT != '' }}
+      FRESS_AZ_6: ${{ secrets.AZURE_CODESIGNING_PROFILE != '' }}
+      FRESS_PFX_1: ${{ secrets.WINDOWS_PFX_B64 != '' }}
+      FRESS_PFX_2: ${{ secrets.WINDOWS_PFX_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -397,28 +467,37 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Decide updater signing flags
-        id: updater
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      - name: Diagnose partial signing configuration
+        if: env.FRESS_SIGNING_CONFIGURED != 'true'
+        shell: pwsh
         run: |
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "args=--config updater-overrides.json" >> "$GITHUB_OUTPUT"
-          else
-            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
-            echo "args=" >> "$GITHUB_OUTPUT"
-          fi
+          $azure = @('FRESS_AZ_1','FRESS_AZ_2','FRESS_AZ_3','FRESS_AZ_4','FRESS_AZ_5','FRESS_AZ_6')
+          $azureNames = @('AZURE_TENANT_ID','AZURE_CLIENT_ID','AZURE_CLIENT_SECRET','AZURE_CODESIGNING_ENDPOINT','AZURE_CODESIGNING_ACCOUNT','AZURE_CODESIGNING_PROFILE')
+          $missing = @()
+          for ($i = 0; $i -lt 6; $i++) {
+            if ([Environment]::GetEnvironmentVariable($azure[$i]) -ne 'true') { $missing += $azureNames[$i] }
+          }
+          if ($missing.Count -gt 0 -and $missing.Count -lt 6) {
+            Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Azure Trusted Signing is partially configured and will NOT run. Missing secrets: $($missing -join ', '). All six are required (see CODE_SIGNING.md)."
+          }
+          $pfxMissing = @()
+          if ($env:FRESS_PFX_1 -ne 'true') { $pfxMissing += 'WINDOWS_PFX_B64' }
+          if ($env:FRESS_PFX_2 -ne 'true') { $pfxMissing += 'WINDOWS_PFX_PASSWORD' }
+          if ($pfxMissing.Count -eq 1) {
+            Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: the persistent-certificate path is half-configured and will NOT run. Missing secret: $($pfxMissing -join ', '). Both WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD are required."
+          }
       - name: Build Windows ARM64 installer (NSIS)
+        # Deliberately WITHOUT the Tauri updater key, same as the x64 job:
+        # the .sig is regenerated over the FINAL (Authenticode-signed)
+        # installer at the end of this job, and latest.json is assembled by
+        # the updater-manifest job afterwards.
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          includeUpdaterJson: true
-          args: '--target aarch64-pc-windows-msvc --bundles nsis ${{ steps.updater.outputs.args }}'
+          includeUpdaterJson: false
+          args: '--target aarch64-pc-windows-msvc --bundles nsis'
       - name: Sign the ARM64 installer with Azure Trusted Signing
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
         uses: azure/trusted-signing-action@v0
@@ -520,6 +599,27 @@ jobs:
           gh release upload "${{ needs.version.outputs.tag }}" $zip --clobber --repo "${{ github.repository }}"
           Write-Host "ARM64 portable build uploaded: $zip"
 
+      - name: Generate the updater signature over the final ARM64 installer
+        # Same rule as the x64 job: sign LAST, over the bytes that ship, so
+        # the updater signature always matches the uploaded installer.
+        if: env.FRESS_UPDATER_KEY == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Get-ChildItem "src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $bundle) { throw "ARM64 installer exe not found for updater signing" }
+          npx tauri signer sign "$($bundle.FullName)"
+          if ($LASTEXITCODE -ne 0) { throw "tauri signer sign failed with exit code $LASTEXITCODE" }
+          $sigPath = "$($bundle.FullName).sig"
+          if (-not (Test-Path $sigPath)) { throw "updater signature was not produced: $sigPath" }
+          Write-Host "Updater signature generated over the final ARM64 installer: $(Split-Path -Leaf $sigPath)"
+          gh release upload "${{ needs.version.outputs.tag }}" $sigPath --clobber --repo "${{ github.repository }}"
+          Write-Host "Updater signature uploaded: $(Split-Path -Leaf $sigPath)"
+
   build-linux:
     needs: [version, create-release]
     runs-on: ubuntu-22.04
@@ -565,8 +665,18 @@ jobs:
     env:
       # Unset secrets expand to empty strings, and an empty APPLE_CERTIFICATE
       # would still make the bundler attempt signing (it only checks presence).
-      # So the two build steps below are gated on this flag instead.
-      FRESS_APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      # So the build steps below are gated on this flag instead - and the flag
+      # requires the COMPLETE credential set: signing needs the P12 plus its
+      # password plus the identity name, notarization needs the Apple ID,
+      # its app-specific password and the team id. Activating the path with
+      # half of these would fail inside tauri-action with a confusing error.
+      FRESS_APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+      FRESS_APPLE_1: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      FRESS_APPLE_2: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+      FRESS_APPLE_3: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      FRESS_APPLE_4: ${{ secrets.APPLE_ID != '' }}
+      FRESS_APPLE_5: ${{ secrets.APPLE_PASSWORD != '' }}
+      FRESS_APPLE_6: ${{ secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -585,7 +695,36 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      - name: Diagnose partial Apple signing configuration
+        # Same rule as the Windows jobs: when the signed/notarized path did
+        # not activate, say exactly which of the six credentials are missing
+        # instead of quietly shipping an unsigned dmg.
+        if: env.FRESS_APPLE_CONFIGURED != 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          names=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+          flags=("$FRESS_APPLE_1" "$FRESS_APPLE_2" "$FRESS_APPLE_3" "$FRESS_APPLE_4" "$FRESS_APPLE_5" "$FRESS_APPLE_6")
+          missing=""
+          for i in 0 1 2 3 4 5; do
+            if [ "${flags[$i]}" != "true" ]; then
+              missing="${missing:+$missing, }${names[$i]}"
+            fi
+          done
+          count=$(echo "$missing" | awk -F', ' '{print NF}')
+          if [ "$count" -gt 0 ] && [ "$count" -lt 6 ]; then
+            echo "WARNING: Apple signing is partially configured and will NOT run. Missing secrets: $missing. All six are required (see CODE_SIGNING.md)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+          fi
       - name: Decide updater signing flags
+        # The Tauri updater artifacts (.app.tar.gz + .sig) are only built
+        # when the update key exists as a secret; without it the release
+        # builds exactly as before. macOS has no post-build binary mutation
+        # (Apple signing and notarization happen INSIDE the bundler, before
+        # the updater signature is computed), so unlike Windows these
+        # signatures are safe to generate at build time.
         id: updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -635,8 +774,15 @@ jobs:
     needs: [version, create-release]
     runs-on: macos-latest
     env:
-      # Same gate as the Apple Silicon job.
-      FRESS_APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      # Same complete-credential gate as the Apple Silicon job: all six
+      # secrets, or the build ships unsigned.
+      FRESS_APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+      FRESS_APPLE_1: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      FRESS_APPLE_2: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+      FRESS_APPLE_3: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      FRESS_APPLE_4: ${{ secrets.APPLE_ID != '' }}
+      FRESS_APPLE_5: ${{ secrets.APPLE_PASSWORD != '' }}
+      FRESS_APPLE_6: ${{ secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -651,7 +797,30 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      - name: Diagnose partial Apple signing configuration
+        if: env.FRESS_APPLE_CONFIGURED != 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          names=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+          flags=("$FRESS_APPLE_1" "$FRESS_APPLE_2" "$FRESS_APPLE_3" "$FRESS_APPLE_4" "$FRESS_APPLE_5" "$FRESS_APPLE_6")
+          missing=""
+          for i in 0 1 2 3 4 5; do
+            if [ "${flags[$i]}" != "true" ]; then
+              missing="${missing:+$missing, }${names[$i]}"
+            fi
+          done
+          count=$(echo "$missing" | awk -F', ' '{print NF}')
+          if [ "$count" -gt 0 ] && [ "$count" -lt 6 ]; then
+            echo "WARNING: Apple signing is partially configured and will NOT run. Missing secrets: $missing. All six are required (see CODE_SIGNING.md)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set - shipping without updater artifacts (latest.json). See CODE_SIGNING.md."
+          fi
       - name: Decide updater signing flags
+        # Same rationale as the Apple Silicon job: signatures are computed
+        # inside the bundler, after Apple signing, so they are valid at
+        # build time.
         id: updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -821,8 +990,111 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  updater-manifest:
+    # Assembles latest.json from the .sig files that are on the release AFTER
+    # every binary reached its final form. Two reasons this must not happen
+    # at build time:
+    #   1. Authenticode (Windows) signs the installer AFTER tauri-action's
+    #      build, rewriting the exe bytes; any updater signature generated at
+    #      build time would no longer match the shipped installer. The
+    #      Windows jobs therefore regenerate their .sig over the FINAL
+    #      binaries (last step of each job) and this job reads those.
+    #   2. tauri-action's own manifest points every platform at
+    #      releases/latest/download/<asset> - an alias that only resolves
+    #      for STABLE releases and 404s while Fress publishes prereleases.
+    #      The manifest assembled here uses the versioned download URLs,
+    #      which always resolve.
+    # Runs before the checksum pass so latest.json itself gets a SHA256SUMS
+    # entry like every other asset.
+    needs: [version, create-release, build-windows, build-windows-arm64, build-linux, build-macos-arm, build-macos-intel]
+    runs-on: ubuntu-latest
+    env:
+      FRESS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+    steps:
+      - name: Assemble latest.json from the final updater signatures
+        if: env.FRESS_UPDATER_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p sigs
+          # Only the small signature files are downloaded; artifact presence
+          # itself is verified through the release's asset list.
+          gh release download "$TAG" --dir sigs --pattern '*.sig' --clobber --repo "${{ github.repository }}"
+          gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq '.assets[].name' > assets.txt
+          python3 - <<'PY'
+          import json, os, sys
+          from datetime import datetime, timezone
+
+          version = os.environ["VERSION"]
+          tag = os.environ["TAG"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          names = set(open("assets.txt").read().split())
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+
+          def entry(asset: str) -> dict:
+              sig_path = os.path.join("sigs", asset + ".sig")
+              if not os.path.exists(sig_path):
+                  sys.exit(f"::error::{asset}.sig is on the release but was not downloaded; cannot embed its signature")
+              sig = open(sig_path).read().strip()
+              return {"signature": sig, "url": f"{base}/{asset}"}
+
+          # (platform key, bundle-suffixed key or None, asset name)
+          plans = [
+              ("windows-x86_64",  "windows-x86_64-nsis",  f"Fress_{version}_x64-setup.exe"),
+              ("windows-aarch64", "windows-aarch64-nsis", f"Fress_{version}_arm64-setup.exe"),
+              ("linux-x86_64",    "linux-x86_64-appimage", f"Fress_{version}_amd64.AppImage"),
+              (None,              "linux-x86_64-deb",     f"Fress_{version}_amd64.deb"),
+          ]
+          # The RPM follows the native RPM naming (Fress-<version>-<bld>.x86_64.rpm).
+          rpms = sorted(n for n in names if n.startswith(f"Fress-{version}-") and n.endswith(".x86_64.rpm"))
+          if rpms:
+              plans.append((None, "linux-x86_64-rpm", rpms[0]))
+          # darwin updater artifacts, when the bundler produced them
+          for n in sorted(names):
+              if n.endswith(".app.tar.gz") and n + ".sig" in names:
+                  if "aarch64" in n:
+                      plans.append(("darwin-aarch64", None, n))
+                  elif "x86_64" in n or "x64" in n:
+                      plans.append(("darwin-x86_64", None, n))
+
+          platforms = {}
+          skipped = []
+          for plain, suffixed, asset in plans:
+              if asset not in names or asset + ".sig" not in names:
+                  skipped.append(asset)
+                  continue
+              e = entry(asset)
+              if plain:
+                  platforms[plain] = e
+              if suffixed:
+                  platforms[suffixed] = e
+
+          missing = [k for k in ("windows-x86_64", "windows-aarch64", "linux-x86_64") if k not in platforms]
+          if missing:
+              sys.exit(f"::error::latest.json would be missing required platforms {missing}; "
+                       f"their .sig files are not on the release. Skipped assets: {skipped or 'none'}")
+
+          manifest = {
+              "version": version,
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          with open("latest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          print("latest.json platforms:", ", ".join(sorted(platforms)))
+          if skipped:
+              print("optional updater entries skipped (artifact or .sig absent):", ", ".join(skipped))
+          PY
+          python3 -c "import json; json.load(open('latest.json'))" # hard-validate the JSON
+          gh release upload "$TAG" latest.json --clobber --repo "${{ github.repository }}"
+          echo "latest.json uploaded: $(python3 -c "import json;print(len(json.load(open('latest.json'))['platforms']))") platform entries"
+
   checksums:
-    needs: [version, create-release, build-windows, build-windows-arm64, build-linux, build-macos-arm, build-macos-intel, build-android]
+    needs: [version, create-release, build-windows, build-windows-arm64, build-linux, build-macos-arm, build-macos-intel, build-android, updater-manifest]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

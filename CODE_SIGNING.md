@@ -175,10 +175,21 @@ one manual reinstall for everyone.
 ### What CI does with it
 
 - `updater-overrides.json` (repo root) turns on `bundle.createUpdaterArtifacts`
-  via `--config`, but only when the key secret exists (the `Decide updater
-  signing flags` step passes it to `tauri-action` conditionally).
-- `tauri-action` signs the updater bundles and uploads `latest.json` to the
-  release; the platform entries map to the signed artifacts automatically.
+  via `--config`, but only when the key secret exists. On macOS and Linux the
+  `tauri-action` builds pass it conditionally and sign the updater bundles at
+  build time - safe there, because nothing rewrites those binaries afterwards.
+- The Windows jobs build WITHOUT updater artifacts: Authenticode (Trusted
+  Signing or the .pfx) signs the installer AFTER the build, rewriting the exe
+  bytes, so a build-time `.sig` would no longer match the shipped installer.
+  Instead, the last step of each Windows job runs `npx tauri signer sign` over
+  the FINAL (signed or unsigned) installer and uploads that `.sig`.
+- The `updater-manifest` job then assembles `latest.json` from the `.sig`
+  files that are actually on the release - Windows entries from the
+  regenerated signatures, Linux entries from tauri-action's - and uploads it
+  before the checksum pass, so `SHA256SUMS.txt` covers the manifest too.
+  Its platform URLs use the versioned `releases/download/<tag>/<asset>` form,
+  not the `releases/latest/download/<asset>` alias, which only resolves for
+  stable releases and would 404 while Fress publishes prereleases.
 
 ### Remaining step: wire the in-app plugin
 
@@ -198,18 +209,21 @@ Two notes for when the runtime plugin gets wired:
   alias, which only resolves for STABLE releases. While Fress publishes
   alpha/beta prereleases, that alias 404s — use a per-channel manifest
   (a branch file or a tiny redirect service listing the newest
-  prerelease) or ship a stable release.
-- Signing a bundled exe afterwards (e.g. Authenticode) invalidates the
-  `.sig` files; re-run the updater bundle step over signed binaries.
+  prerelease) or ship a stable release. The per-release `latest.json`
+  assets themselves already use versioned URLs that always resolve.
 
-### Sequencing warning for later
+### Sequencing: Authenticode and the updater signatures
 
-If the Windows installers ever get Authenticode-signed **after** the build
-(SignPath or Azure Trusted Signing), the Authenticode step modifies the exe
-bytes and the minisign `.sig` produced by `tauri-action` no longer matches.
-In that setup the `.sig` files must be regenerated over the signed binaries
-(`npx tauri signer sign` on the signed file). Today no Authenticode signing is
-configured, so the signatures match what `tauri-action` uploads.
+Authenticode signing (SignPath, Azure Trusted Signing, or the .pfx) modifies
+the exe bytes, so any minisign `.sig` generated before it no longer matches
+the shipped installer. `release.yml` therefore orders the Windows pipeline
+build -> Authenticode sign -> `npx tauri signer sign` over the signed binary
+-> upload, with the `updater-manifest` job assembling `latest.json` last.
+This holds in every configuration - with or without a certificate - so the
+signatures on a release always describe the exact bytes published next to
+them. The same caution applies if you ever sign the Linux AppImage or rework
+the macOS flow outside the bundler: regenerate the `.sig` after anything that
+rewrites the artifact.
 
 ## macOS: signing and notarization
 

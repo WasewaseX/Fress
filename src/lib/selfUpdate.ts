@@ -21,6 +21,8 @@
  * note instead of a scary red toast.
  */
 
+import { getHostArch } from './releaseFetch';
+
 const REPO = 'WasewaseX/Fress';
 
 export interface OwnRelease {
@@ -191,15 +193,24 @@ function isJunkAsset(name: string): boolean {
   return /\.sig$|blockmap|checksum|sha256|latest\.json|symbols|\.zip$/i.test(name);
 }
 
-/** Pick the file a user on this platform actually needs. */
-export function pickOwnAsset(release: OwnRelease): { name: string; size: number; url: string } | null {
+/** Pick the file a user on this platform actually needs.
+ *
+ * `archHint` is the Tauri host_arch result ("x86_64"/"aarch64"/...) when
+ * available. A WebView user agent is not a reliable architecture signal
+ * (macOS WebKit claims "Intel" even on Apple Silicon), so the real host
+ * arch must be threaded in from the caller; the UA heuristic below is only
+ * the browser-mode fallback. */
+export function pickOwnAsset(
+  release: OwnRelease,
+  archHint?: string
+): { name: string; size: number; url: string } | null {
   const assets = (release.assets || []).filter((a) => !isJunkAsset(a.name));
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
   const platform =
     ua.includes('android') ? 'android' :
     ua.includes('mac os') || ua.includes('macintosh') ? 'mac' :
     ua.includes('linux') ? 'linux' : 'windows';
-  const isArmHost = /arm|aarch/i.test(ua);
+  const isArmHost = archHint ? archHint === 'aarch64' : /arm|aarch/i.test(ua);
   const score = (n: string): number => {
     const s = n.toLowerCase();
     switch (platform) {
@@ -216,14 +227,22 @@ export function pickOwnAsset(release: OwnRelease): { name: string; size: number;
       }
       case 'android':
         if (!s.endsWith('.apk')) return -1;
-        if (s.includes('universal')) return 10;
-        if (s.includes('arm64')) return 8;
+        if (s.includes('universal')) return 9;
+        if (/arm64|aarch64|v8a/.test(s)) return isArmHost ? 10 : 2;
+        if (/(^|[^a-z0-9])arm(?!64)([^a-z0-9]|$)|armeabi|v7a/.test(s)) return isArmHost ? 7 : 2;
+        if (/x86_64|amd64/.test(s)) return isArmHost ? 2 : 10;
         return 4;
-      case 'mac':
-        if (!s.endsWith('.dmg')) return -1;
-        if (s.includes('aarch64') || s.includes('arm64')) return isArmHost ? 10 : 6;
-        if (s.includes('x64') || s.includes('x86_64')) return isArmHost ? 6 : 10;
-        return 4;
+      case 'mac': {
+        const isDmg = s.endsWith('.dmg');
+        // .pkg is a usable fallback so a pkg-only release still offers a
+        // direct download instead of silently returning nothing; dmg stays
+        // the friendlier default (base 4 vs 1).
+        if (!isDmg && !s.endsWith('.pkg')) return -1;
+        let v = isDmg ? 4 : 1;
+        if (s.includes('aarch64') || s.includes('arm64')) v += isArmHost ? 6 : -7;
+        else if (s.includes('x64') || s.includes('x86_64')) v += isArmHost ? -7 : 6;
+        return v;
+      }
       case 'linux':
         if (s.endsWith('.appimage')) return 10;
         if (s.endsWith('.deb')) return 7;
@@ -233,8 +252,12 @@ export function pickOwnAsset(release: OwnRelease): { name: string; size: number;
         return -1;
     }
   };
+  // -Infinity, not 0: the catalog resolver starts at -Infinity, and a 0
+  // baseline silently dropped any release whose best candidate scored 0 or
+  // less (e.g. a pkg-only macOS release) - the updater reported "no file"
+  // while a perfectly usable download existed.
   let best: { name: string; size: number; url: string } | null = null;
-  let bestScore = 0;
+  let bestScore = -Infinity;
   for (const a of assets) {
     const s = score(a.name);
     if (s > bestScore) {
@@ -245,9 +268,12 @@ export function pickOwnAsset(release: OwnRelease): { name: string; size: number;
   return best;
 }
 
-/** Newest published release (drafts dropped, channel-filtered, SemVer order). */
+/** Newest published release (drafts dropped, channel-filtered, SemVer order).
+ * per_page=20 mirrors the catalog's recent-scan depth: per_page=10 used to
+ * be enough, but the release history grows and the newest matching release
+ * must never scroll out of the window. */
 async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=10`, {
+  const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=20`, {
     headers: { Accept: 'application/vnd.github+json' },
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
@@ -265,24 +291,35 @@ async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
  * Only carries the tag name, so assets stay empty; the header then links to
  * the releases page instead of starting a direct download.
  */
-async function fetchFromAtom(): Promise<OwnRelease> {
+async function fetchFromAtom(channel: UpdateChannel): Promise<OwnRelease> {
   const res = await fetch(`https://github.com/${REPO}/releases.atom`);
   if (!res.ok) throw new Error(`Atom feed ${res.status}`);
   const xml = await res.text();
-  // First <entry> is the newest release. The id looks like
-  // "tag:github.com,2008:Repository/123456/v1.0.1-alpha".
-  const entryMatch = xml.match(/<entry>[\s\S]*?<\/entry>/i);
-  const idMatch = entryMatch?.[0].match(/<id>[^<]*\/([^<]+)<\/id>/i);
-  const tag = idMatch?.[1]?.trim();
-  if (!tag) throw new Error('Atom feed has no release entries');
-  const updated = entryMatch?.[0].match(/<updated>([^<]+)<\/updated>/i)?.[1] || '';
-  return {
-    tag,
-    version: tag.replace(/^v/i, ''),
-    publishedAt: updated,
-    htmlUrl: `https://github.com/${REPO}/releases`,
-    assets: [],
-  };
+  // The feed carries the newest ~10 releases, newest first. Scanning ONLY
+  // the first entry broke channel selection: with 1.0.5-alpha newest and
+  // the user on the Beta channel, the alpha entry was rejected and the
+  // fallback gave up - even though 1.0.4-beta sat right below it. Scan
+  // every entry, filter by channel, keep the newest by SemVer.
+  const entries = xml.match(/<entry>[\s\S]*?<\/entry>/gi) || [];
+  const releases: OwnRelease[] = [];
+  for (const entry of entries) {
+    // The id looks like "tag:github.com,2008:Repository/123456/v1.0.1-alpha".
+    const idMatch = entry.match(/<id>[^<]*\/([^<]+)<\/id>/i);
+    const tag = idMatch?.[1]?.trim();
+    if (!tag) continue;
+    const updated = entry.match(/<updated>([^<]+)<\/updated>/i)?.[1] || '';
+    releases.push({
+      tag,
+      version: tag.replace(/^v/i, ''),
+      publishedAt: updated,
+      htmlUrl: `https://github.com/${REPO}/releases`,
+      assets: [],
+    });
+  }
+  const matching = releases.filter((r) => releaseMatchesChannel(r.version, channel));
+  if (matching.length === 0) throw new Error('Atom feed has no matching release');
+  matching.sort((a, b) => compareVersions(a.tag, b.tag));
+  return matching[matching.length - 1];
 }
 
 /** Newest published release on the channel, API first, atom feed fallback. */
@@ -291,9 +328,10 @@ export async function fetchOwnLatestRelease(channel: UpdateChannel = getUpdateCh
     return await fetchFromApi(channel);
   } catch {
     try {
-      const release = await fetchFromAtom();
-      if (!releaseMatchesChannel(release.version, channel)) return null;
-      return release;
+      // The channel filter now lives inside fetchFromAtom, so the fallback
+      // searches the whole feed for the newest matching release instead of
+      // giving up when only the newest entry misses the channel.
+      return await fetchFromAtom(channel);
     } catch {
       return null;
     }
@@ -334,7 +372,16 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateStat
     if (cmp <= 0) {
       return { kind: 'latest', version: release.version };
     }
-    const asset = pickOwnAsset(release);
+    // The Tauri host arch, not the WebView user agent: macOS WebKit claims
+    // "Intel" even on Apple Silicon, which handed Intel dmgs to M-series
+    // Macs. Same source of truth as the catalog resolver.
+    let arch: string | undefined;
+    try {
+      arch = await getHostArch();
+    } catch {
+      arch = undefined;
+    }
+    const asset = pickOwnAsset(release, arch);
     let expectedSha256: string | null = null;
     if (asset) {
       expectedSha256 = await fetchExpectedSha256(release, asset.name);

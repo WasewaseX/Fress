@@ -59,7 +59,23 @@ export function parseRepoUrl(url?: string): RepoKey | null {
 
 function readStore(key: string): Cache {
   try {
-    return JSON.parse(localStorage.getItem(key) || '{}') as Cache;
+    // Same defensive rule as favorites/custom apps: corrupted storage (an
+    // array, a string, junk entries) must degrade to an empty cache, never
+    // flow into the star-count rendering paths.
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Cache = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      const e = v as { n?: unknown; t?: unknown; e?: unknown } | null;
+      if (
+        e && typeof e === 'object' &&
+        typeof e.n === 'number' && Number.isFinite(e.n) &&
+        typeof e.t === 'number' && Number.isFinite(e.t)
+      ) {
+        out[k] = { n: e.n, t: e.t, ...(typeof e.e === 'string' ? { e: e.e } : {}) };
+      }
+    }
+    return out;
   } catch {
     return {};
   }
@@ -71,7 +87,13 @@ function readCache(): Cache {
 
 function readEtags(): Record<string, string> {
   try {
-    return JSON.parse(localStorage.getItem(ETAG_KEY) || '{}') as Record<string, string>;
+    const parsed: unknown = JSON.parse(localStorage.getItem(ETAG_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'string') out[k] = v;
+    }
+    return out;
   } catch {
     return {};
   }

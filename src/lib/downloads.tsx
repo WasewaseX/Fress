@@ -40,6 +40,14 @@ export interface DownloadItem {
 
 const DIR_KEY = 'fress.downloadDir';
 
+/** Local-only panel entries (browser fallback, "opened official page") have
+ * no Rust download id. Negative counting ids can never collide with the
+ * Rust side's positive ids - or with each other, which Date.now() could:
+ * several entries recorded in one burst (browser-mode batch download)
+ * produced duplicate React keys. */
+let localItemId = -1;
+const makeLocalItemId = (): number => localItemId--;
+
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
@@ -54,7 +62,11 @@ interface DownloadsContextValue {
   items: DownloadItem[];
   activeCount: number;
   downloadDir: string | null;
-  startDownload: (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean }) => Promise<void>;
+  startDownload: (
+    url: string,
+    nameHint?: string,
+    opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }
+  ) => Promise<void>;
   recordExternalOpen: (name: string, url: string) => void;
   cancel: (id: number) => void;
   retry: (id: number, resume?: boolean) => void;
@@ -72,10 +84,31 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
   const itemsRef = useRef<DownloadItem[]>([]);
   itemsRef.current = items;
+  /** Events that arrived for a download whose item was not inserted yet
+   * (the file can finish before start_download's invoke resolves). Keyed
+   * by id, drained by startDownload right after the item is inserted. */
+  const pendingEventsRef = useRef<Map<number, Array<(it: DownloadItem) => DownloadItem>>>(new Map());
 
   useEffect(() => {
     if (!isTauri()) return;
     let unlisteners: Array<() => void> = [];
+
+    /** Apply an event to a download item. If the item is not inserted yet
+     * (Rust emitted the event before start_download's invoke resolved and
+     * React state updated), buffer the update instead of dropping it -
+     * `setItems(prev => prev.map(...))` over a list without the item used
+     * to silently swallow fast-completing downloads. */
+    const applyItemUpdate = (id: number, fn: (it: DownloadItem) => DownloadItem): void => {
+      if (itemsRef.current.some((it) => it.id === id)) {
+        setItems((prev) => prev.map((it) => (it.id === id ? fn(it) : it)));
+      } else {
+        const queue = pendingEventsRef.current.get(id) ?? [];
+        queue.push(fn);
+        // Cap progress-event spam for items that never get inserted.
+        if (queue.length > 64) queue.shift();
+        pendingEventsRef.current.set(id, queue);
+      }
+    };
 
     invoke<string>('default_download_dir')
       .then((dir) => {
@@ -92,29 +125,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       'download-progress',
       (event) => {
         const p = event.payload;
-        setItems((prev) =>
-          prev.map((it) =>
-            it.id === p.id
-              ? {
-                  ...it,
-                  bytes: p.downloaded,
-                  total: p.total,
-                  speed: p.speed_bps,
-                  eta: p.eta_secs,
-                }
-              : it
-          )
-        );
+        applyItemUpdate(p.id, (it) => ({
+          ...it,
+          bytes: p.downloaded,
+          total: p.total,
+          speed: p.speed_bps,
+          eta: p.eta_secs,
+        }));
       }
     ).then((un) => unlisteners.push(un));
 
     listen<{ id: number; path: string; bytes: number; sha256: string; verified?: boolean }>('download-complete', (event) => {
       const p = event.payload;
-      setItems((prev) =>
-        prev.map((it) =>
-          it.id === p.id ? { ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, verified: p.verified === true ? true : undefined, total: p.bytes, speed: 0, eta: 0, canResume: false } : it
-        )
-      );
+      applyItemUpdate(p.id, (it) => ({ ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, verified: p.verified === true ? true : undefined, total: p.bytes, speed: 0, eta: 0, canResume: false }));
       const item = itemsRef.current.find((it) => it.id === p.id);
       if (p.verified === true) {
         toast.success(`Downloaded ${item?.name || 'file'}`, {
@@ -133,7 +156,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     listen<{ id: number; attempt: number; message: string }>('download-retrying', (event) => {
       const p = event.payload;
       const item = itemsRef.current.find((it) => it.id === p.id);
-      setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'active', canResume: false } : it)));
+      applyItemUpdate(p.id, (it) => ({ ...it, status: 'active', canResume: false }));
       toast.info(`Reconnecting ${item?.name || 'download'} (attempt ${p.attempt})`, {
         description: 'The connection dropped — continuing from where it stopped.',
       });
@@ -142,15 +165,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     listen<{ id: number; message: string; kind?: string }>('download-error', (event) => {
       const p = event.payload;
       if (p.message === 'Cancelled') {
-        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'cancelled', canResume: true } : it)));
+        applyItemUpdate(p.id, (it) => ({ ...it, status: 'cancelled', canResume: true }));
         toast.info('Download paused — use Resume to continue');
       } else if (p.kind === 'checksum') {
         // The file failed verification and was deleted on disk. A resume is
         // pointless; the source itself must be retried.
-        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'error', error: p.message, canResume: false, sha256: undefined } : it)));
+        applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: false, sha256: undefined }));
         toast.error('Integrity check failed', { description: p.message });
       } else {
-        setItems((prev) => prev.map((it) => (it.id === p.id ? { ...it, status: 'error', error: p.message, canResume: true } : it)));
+        applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: true }));
         toast.error('Download failed', { description: p.message });
       }
     }).then((un) => unlisteners.push(un));
@@ -160,8 +183,33 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Drain buffered download events after every commit. A completion/error
+  // event can race ahead of the item insertion in startDownload; once the
+  // item exists in committed state (this effect runs after that render),
+  // every buffered update is applied in arrival order. This covers every
+  // timing, including events that land between scheduling the insert and
+  // React actually committing it.
+  useEffect(() => {
+    const pending = pendingEventsRef.current;
+    if (pending.size === 0) return;
+    const queued = Array.from(pending.entries());
+    pending.clear();
+    setItems((prev) => {
+      let next = prev;
+      for (const [id, fns] of queued) {
+        next = next.map((it) => {
+          if (it.id !== id) return it;
+          let merged = it;
+          for (const fn of fns) merged = fn(merged);
+          return merged;
+        });
+      }
+      return next;
+    });
+  }, [items]);
+
   const startDownload = useCallback(
-    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean }) => {
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }) => {
       if (!url || !/^https?:\/\//i.test(url)) {
         toast.error('This link is not a direct download');
         return;
@@ -175,7 +223,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         window.open(url, '_blank', 'noopener,noreferrer');
         setItems((prev) => [
           {
-            id: Date.now(),
+            id: makeLocalItemId(),
             url,
             name: guessedName || url,
             dir: 'Browser downloads folder',
@@ -194,17 +242,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Resolve the target folder. If anything goes wrong we do NOT fail:
-      // a null directory makes the Rust side fall back to the platform's
-      // own Downloads folder. (The old retry-the-same-failing-call pattern
-      // could escape as an unhandled rejection: the click appeared to do
-      // absolutely nothing, not even a toast.)
+      // Resolve the target folder. An explicit `opts.dir` wins: resume and
+      // retry MUST look for the .part file where the ORIGINAL download put
+      // it, not in whatever folder happens to be selected now (changing
+      // the folder between a failure and a resume used to orphan the
+      // partial file). If anything goes wrong we do NOT fail: a null
+      // directory makes the Rust side fall back to the platform's own
+      // Downloads folder.
       let dir: string | null = null;
       try {
-        const saved = localStorage.getItem(DIR_KEY);
-        dir = saved || (await invoke<string>('default_download_dir'));
+        dir = opts?.dir || localStorage.getItem(DIR_KEY) || (await invoke<string>('default_download_dir'));
       } catch {
-        dir = null;
+        dir = opts?.dir || null;
       }
 
       try {
@@ -251,6 +300,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         void startDownload(item.url, item.name, {
           expectedSha256: item.expectedSha256,
           resume: resume || false,
+          // Retry the SAME download: it belongs to the folder it started
+          // in. Resume without this would hunt for the .part file in the
+          // currently selected folder and silently start over.
+          dir: item.dir || undefined,
         });
       }
     },
@@ -260,7 +313,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const recordExternalOpen = useCallback((name: string, url: string) => {
     setItems((prev) => [
       {
-        id: Date.now(),
+        id: makeLocalItemId(),
         url,
         name,
         dir: 'Official website',

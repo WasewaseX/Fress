@@ -208,4 +208,42 @@ describe('resolveGitHubDownload — recent-releases scan', () => {
     expect(r).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it('a confident pick in the scan outranks a weak pick in the latest release', async () => {
+    // The latest release only carries an odd low-confidence tarball; an
+    // older release has the real installer. Both resolution paths now run
+    // the same confidence rule, so the weak latest pick loses to the
+    // confident scan pick instead of short-circuiting the resolve.
+    const latest: FakeRelease = {
+      tag_name: 'v2.1.0',
+      name: 'Tool 2.1.0',
+      assets: [{ name: 'tool-2.1.0.tar.gz', size: 100, browser_download_url: 'https://example.com/t.tar.gz' }],
+    };
+    const older: FakeRelease = {
+      tag_name: 'v2.0.0',
+      name: 'Tool 2.0.0',
+      assets: [{ name: 'tool-2.0.0-x86_64.AppImage', size: 100, browser_download_url: 'https://example.com/app.AppImage' }],
+    };
+    vi.stubGlobal('fetch', ghApi(latest, [latest, older]));
+    const r = await resolveGitHubDownload(appInRepo(), 'linux');
+    expect(r?.filename).toBe('tool-2.0.0-x86_64.AppImage');
+    expect(r?.weak).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to the weak latest pick (flagged) when nothing confident exists', async () => {
+    // No release carries a confident match: the weak pick from the latest
+    // release is still a real download, so it is returned - flagged, so
+    // the UI shows the caution instead of pretending it is a sure thing.
+    const latest: FakeRelease = {
+      tag_name: 'v2.1.0',
+      name: 'Tool 2.1.0',
+      assets: [{ name: 'tool-2.1.0.tar.gz', size: 100, browser_download_url: 'https://example.com/t.tar.gz' }],
+    };
+    vi.stubGlobal('fetch', ghApi(latest, [latest]));
+    const r = await resolveGitHubDownload(appInRepo(), 'linux');
+    expect(r?.filename).toBe('tool-2.1.0.tar.gz');
+    expect(r?.weak).toBe(true);
+    vi.unstubAllGlobals();
+  });
 });

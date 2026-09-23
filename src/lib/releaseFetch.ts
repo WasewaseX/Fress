@@ -80,10 +80,27 @@ function scoreAsset(name: string, platform: Platform, arch: string): number {
     case 'android': {
       if (!n.endsWith('.apk')) return -1;
       if (/google[-_.]?play|playstore|play[-_.]?store/.test(n)) s -= 6; // Play flavor sideloads poorly
-      if (/universal|^app-|all[-_.]?abis/.test(n)) s += 6;
-      if (/arm64|aarch64|v8a/.test(n)) s += 5;
-      if (/armeabi|arm32|v7a/.test(n)) s += 1;
-      if (/x86_64/.test(n)) s += 0;
+      // ABI awareness. An APK built for one ABI does not install or run on
+      // a device of another: handing an arm64 file to an ARMv7 or x86_64
+      // device (exactly what the arch-blind scoring did) wastes the
+      // download and fails the install. host_arch on Android reports
+      // "aarch64", "arm" (32-bit), "i686" or "x86_64".
+      const deviceAbi =
+        arch === 'aarch64' ? 'arm64' :
+        arch === 'arm' ? 'arm' :
+        arch === 'i686' || arch === 'x86' ? 'x86' :
+        'x86_64';
+      if (/universal|^app-|all[-_.]?abis/.test(n)) s += 6; // runs everywhere
+      const arm64Asset = /arm64|aarch64|v8a/.test(n);
+      const arm32Asset = !arm64Asset && /armeabi|arm32|v7a|(^|[^a-z0-9])arm([^a-z0-9]|$)/.test(n);
+      const x64Asset = /x86[_-]?64|amd64/.test(n);
+      const x86Asset = !x64Asset && /x86(?!_64)|i[36]86/.test(n);
+      // A matching ABI-specific APK slightly outranks universal (smaller
+      // download); a wrong-ABI APK loses to everything, including unmarked.
+      if (arm64Asset) s += deviceAbi === 'arm64' ? 7 : -8;
+      if (arm32Asset) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
+      if (x64Asset) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
+      if (x86Asset) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
       if (/fdroid/.test(n)) s += 1;
       break;
     }
@@ -404,10 +421,18 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           } catch {
             latest = null;
           }
+          // Confidence is decided the same way on both paths now: a
+          // confident pick wins wherever it appears (latest first, then the
+          // recent scan); a weak pick from the latest release is only ever
+          // the last resort, returned flagged so the UI can caution.
+          let weakLatest: { detailed: AssetPick; rel: ReleaseInfo } | null = null;
           if (latest) {
             const detailed = pickAssetDetailed(latest.assets, platform, arch, app.assetPatterns);
             if (detailed) {
-              return toResolved(detailed, latest);
+              if (!detailed.weak) {
+                return toResolved(detailed, latest);
+              }
+              weakLatest = { detailed, rel: latest };
             }
           }
           // 2) Multi-stream repos (Obsidian publishes desktop and mobile
@@ -422,6 +447,12 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
             if (cPick && !cPick.weak) {
               return toResolved(cPick, candidate);
             }
+          }
+          // 3) Nothing confident anywhere. The latest release's low-
+          //    confidence pick is still better than no download at all,
+          //    and the weak flag makes the UI say so.
+          if (weakLatest) {
+            return toResolved(weakLatest.detailed, weakLatest.rel);
           }
           return null;
         } catch {

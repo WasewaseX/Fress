@@ -48,7 +48,7 @@ import {
   Square 
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import { sanitizeInstallCommand } from './lib/installCommands';
+import { sanitizeAppItem } from './lib/appValidation';
 import { bestDownloadFor } from './lib/appDownloads';
 import { guessUserPlatform, resolveGitHubDownload, resolveFdroidDownload } from './lib/releaseFetch';
 import { useI18n } from './lib/i18n';
@@ -188,21 +188,20 @@ function AppShell() {
     }
   }, []);
 
-  // Load custom apps from local storage. Saved commands pass through the
-  // same check as imports: an older version or tampered storage must not be
-  // able to put a script payload back into circulation.
+  // Load custom apps from local storage. Every entry passes through the
+  // runtime sanitizer (same one as imports): an older version, a corrupted
+  // write or tampered storage must not be able to put a malformed app -
+  // `platforms: null` crashed whole rendering paths - or a script payload
+  // back into circulation.
   const [apps, setApps] = useState<AppItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_CUSTOM_APPS);
       if (saved) {
-        const parsed = JSON.parse(saved) as AppItem[];
-        const cleaned = (Array.isArray(parsed) ? parsed : []).map((item) => ({
-          ...item,
-          wingetCommand: sanitizeInstallCommand('winget', item.wingetCommand) || undefined,
-          brewCommand: sanitizeInstallCommand('brew', item.brewCommand) || undefined,
-          flatpakCommand: sanitizeInstallCommand('flatpak', item.flatpakCommand) || undefined,
-          scoopCommand: sanitizeInstallCommand('scoop', item.scoopCommand) || undefined
-        }));
+        const parsed: unknown = JSON.parse(saved);
+        const cleaned = (Array.isArray(parsed) ? parsed : [])
+          .map((item) => sanitizeAppItem(item).app)
+          .filter((a): a is AppItem => a !== null)
+          .map((a) => ({ ...a, isCustom: true }));
         return [...INITIAL_APPS, ...cleaned];
       }
     } catch {
@@ -211,12 +210,17 @@ function AppShell() {
     return INITIAL_APPS;
   });
 
-  // Favorites
+  // Favorites. Corrupted storage (an object or a string where the array
+  // should be) used to flow straight into `favorites.includes(...)` calls
+  // and break the whole render - parse defensively, keep strings only.
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_FAVORITES);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed: unknown = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((f): f is string => typeof f === 'string');
+        }
       }
     } catch {
       // fallback
@@ -582,45 +586,33 @@ function AppShell() {
     let skippedCount = 0;
 
     for (const item of incomingApps) {
-      if (!item || typeof item !== 'object' || !item.name || typeof item.name !== 'string') {
+      // Full runtime validation: a backup can come from anyone. Every field
+      // is type-checked and whitelisted here - the old spread-anything path
+      // let `platforms: null` or `tags: "oops"` through and crashed the
+      // rendering/filtering code later. Install commands end up in
+      // generated batch scripts, so they are checked and anything that is
+      // not a plain install invocation is dropped instead of being stored.
+      const { app: clean, strippedCommands: stripped } = sanitizeAppItem(item);
+      if (!clean) {
         invalidCount++;
         continue;
       }
-      if (existingIds.has(item.id)) {
-        skippedCount++;
-        continue;
-      }
-      // A catalog backup can come from anyone. Install commands end up
-      // in generated batch scripts, so every command field is checked
-      // and anything that is not a plain install invocation is dropped
-      // instead of being stored.
-      const winget = sanitizeInstallCommand('winget', item.wingetCommand);
-      const brew = sanitizeInstallCommand('brew', item.brewCommand);
-      const flatpak = sanitizeInstallCommand('flatpak', item.flatpakCommand);
-      const scoop = sanitizeInstallCommand('scoop', item.scoopCommand);
-      const apt = sanitizeInstallCommand('apt', item.aptCommand);
-      strippedCommands += [
-        item.wingetCommand, item.brewCommand, item.flatpakCommand, item.scoopCommand, item.aptCommand
-      ].filter((raw, i) => raw && [winget, brew, flatpak, scoop, apt][i] === null).length;
+      strippedCommands += stripped;
 
       // Guard against the same application arriving twice under different
       // ids (renamed export, merged backups).
-      if (existingNames.has(item.name.trim().toLowerCase())) {
+      if (existingIds.has(clean.id)) {
+        skippedCount++;
+        continue;
+      }
+      if (existingNames.has(clean.name.toLowerCase())) {
         skippedCount++;
         continue;
       }
 
-      newCustoms.push({
-        ...item,
-        wingetCommand: winget || undefined,
-        brewCommand: brew || undefined,
-        flatpakCommand: flatpak || undefined,
-        scoopCommand: scoop || undefined,
-        aptCommand: apt || undefined,
-        isCustom: true
-      });
-      existingIds.add(item.id);
-      existingNames.add(item.name.trim().toLowerCase());
+      newCustoms.push({ ...clean, isCustom: true });
+      existingIds.add(clean.id);
+      existingNames.add(clean.name.toLowerCase());
     }
 
     const merged = [...apps, ...newCustoms];

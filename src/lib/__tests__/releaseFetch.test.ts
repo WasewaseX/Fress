@@ -60,12 +60,47 @@ describe('pickAsset — heuristic selection', () => {
     expect(pick?.name).toBe('Tool-2.1-arm64.dmg');
   });
 
-  it('prefers universal and arm64 apks over play-store flavors', () => {
+  it('prefers the device ABI apk over universal on arm64 (smaller, optimized)', () => {
     const pick = pickAsset(
       [asset('Tool_2.1_api26-arm64-v8a.apk'), asset('Tool_2.1_PlayStore.apk'), asset('Tool_2.1_universal.apk')],
       'android',
       'aarch64'
     );
+    expect(pick?.name).toBe('Tool_2.1_api26-arm64-v8a.apk');
+  });
+
+  it('never hands an arm64 apk to an x86_64 Android device (universal wins)', () => {
+    // The arch-blind scoring ranked arm64 (5) above everything except
+    // universal markers it happened to recognize - an x86_64 device got a
+    // file that cannot install.
+    const pick = pickAsset(
+      [asset('Tool_2.1_arm64-v8a.apk'), asset('Tool_2.1_universal.apk')],
+      'android',
+      'x86_64'
+    );
+    expect(pick?.name).toBe('Tool_2.1_universal.apk');
+  });
+
+  it('never hands an arm64 apk to an ARMv7 device (the arm split wins)', () => {
+    const pick = pickAsset(
+      [asset('Tool_2.1_arm64-v8a.apk'), asset('Fress_1.0.4-alpha_arm.apk')],
+      'android',
+      'arm'
+    );
+    expect(pick?.name).toBe('Fress_1.0.4-alpha_arm.apk');
+  });
+
+  it('picks the x86_64 apk on an x86_64 Android device, not arm64', () => {
+    const pick = pickAsset(
+      [asset('Tool_2.1_arm64-v8a.apk'), asset('Tool_2.1_x86_64.apk')],
+      'android',
+      'x86_64'
+    );
+    expect(pick?.name).toBe('Tool_2.1_x86_64.apk');
+  });
+
+  it('an arm64 device can still fall back to the universal apk', () => {
+    const pick = pickAsset([asset('Tool_2.1_universal.apk')], 'android', 'aarch64');
     expect(pick?.name).toBe('Tool_2.1_universal.apk');
   });
 

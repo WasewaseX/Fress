@@ -168,30 +168,50 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
     }));
   };
 
+  /** True when any category's CURRENT picks still select an alternative that
+   * maps to `catalogId`. The same app is the replacement in several
+   * categories (Proton Mail covers Mail and Contacts, Signal covers
+   * Messenger and Calls...), so a catalog id may only be pulled from the
+   * batch selection when the LAST category selecting it lets go. */
+  const stillSelectedAnywhere = (picksState: PicksState, catalogId: string): boolean =>
+    PRIVACY_PACK.some((c) => {
+      const p = picksState[c.id];
+      if (!p || p.a.length === 0) return false;
+      return c.alternatives.some((x) => x.catalogId === catalogId && p.a.includes(x.id));
+    });
+
   const toggleAlt = (cat: PpCategory, alt: PpAlternative) => {
-    setPicks((prev) => {
-      const cur = prev[cat.id] ?? { m: cat.mainstream[0].id, a: [] };
-      if (cur.a.includes(alt.id)) {
-        return { ...prev, [cat.id]: { ...cur, a: cur.a.filter((id) => id !== alt.id) } };
-      }
+    // Compute the next picks state synchronously: the batch add/remove below
+    // must reason about the state AFTER the toggle, not the stale snapshot.
+    const cur = picks[cat.id] ?? { m: cat.mainstream[0].id, a: [] };
+    const isPicked = cur.a.includes(alt.id);
+    let nextA: string[];
+    if (isPicked) {
+      nextA = cur.a.filter((id) => id !== alt.id);
+    } else {
       if (cur.a.length >= MAX_PICKS_PER_CATEGORY) {
         if (!warnedFullRef.current) {
           toast.info(t('pp.toastLimit'));
           warnedFullRef.current = true;
           window.setTimeout(() => { warnedFullRef.current = false; }, 2500);
         }
-        return prev;
+        return;
       }
-      return { ...prev, [cat.id]: { ...cur, a: [...cur.a, alt.id] } };
-    });
+      nextA = [...cur.a, alt.id];
+    }
+    const nextPicks: PicksState = { ...picks, [cat.id]: { m: cur.m, a: nextA } };
+    setPicks(nextPicks);
     // Selecting a replacement IS adding it to the batch download. Catalog
     // apps go straight into the selection bar - no separate "add picks to
     // selection" step for the user to discover (and miss). Deselecting
-    // removes it again, so the checkbox and the pick stay in sync.
+    // removes it again, but ONLY when no other category still selects the
+    // same app - unpicking Proton Mail for Mail used to yank it out from
+    // under Contacts, which still had it picked.
     if (alt.catalogId && byId.has(alt.catalogId)) {
-      const isPicked = picks[cat.id]?.a.includes(alt.id) ?? false;
       if (isPicked) {
-        onRemoveFromBatch([alt.catalogId]);
+        if (!stillSelectedAnywhere(nextPicks, alt.catalogId)) {
+          onRemoveFromBatch([alt.catalogId]);
+        }
       } else {
         onAddToBatch([alt.catalogId]);
         toast.success(`${alt.name} ${t('pp.toastAdded')}`);
@@ -200,13 +220,25 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
   };
 
   const clearCategory = (cat: PpCategory) => {
-    // Same sync rule as toggleAlt: unpicking removes from the batch selection.
-    const ids = (picks[cat.id]?.a ?? [])
+    // Same sync rule as toggleAlt, with the same duplicate-id guard: a
+    // catalog id leaves the batch only when no other category still picks it.
+    const pickedAlts = (picks[cat.id]?.a ?? [])
       .map((id) => cat.alternatives.find((x) => x.id === id))
-      .filter((x): x is PpAlternative => Boolean(x && x.catalogId && byId.has(x.catalogId)))
-      .map((x) => x.catalogId as string);
-    if (ids.length > 0) onRemoveFromBatch(Array.from(new Set(ids)));
-    setPicks((prev) => ({ ...prev, [cat.id]: { m: prev[cat.id]?.m ?? cat.mainstream[0].id, a: [] } }));
+      .filter((x): x is PpAlternative => Boolean(x));
+    const nextPicks: PicksState = {
+      ...picks,
+      [cat.id]: { m: picks[cat.id]?.m ?? cat.mainstream[0].id, a: [] },
+    };
+    const ids = Array.from(
+      new Set(
+        pickedAlts
+          .filter((x) => x.catalogId && byId.has(x.catalogId))
+          .map((x) => x.catalogId as string)
+          .filter((cid) => !stillSelectedAnywhere(nextPicks, cid))
+      )
+    );
+    if (ids.length > 0) onRemoveFromBatch(ids);
+    setPicks(nextPicks);
   };
 
   const totalPicks = Object.values(picks).reduce((n, p) => n + p.a.length, 0);

@@ -21,6 +21,21 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.5-alpha',
+    date: '2026-09-23',
+    title: 'The bug-hunt release: every confirmed finding from the second audit, fixed and regression-tested',
+    items: [
+      'Fixed: Android downloads now match your device. The old APK picker ignored the device architecture and could hand an x86_64 or ARMv7 phone an arm64 file that cannot install; matching split APKs also win over the bigger universal one now.',
+      'Fixed: the Privacy Pack no longer drops picks from other categories. Unpicking Proton Mail for Mail keeps it selected while Contacts still has it picked.',
+      'Fixed: Resume works after changing the download folder — it looks for the partial file in the folder the download started in, not wherever is selected now.',
+      'Fixed: imported backups are fully validated at runtime. A malformed backup (platforms: null, tags as a string…) can no longer crash the app, and unsafe package commands or non-http links in a shared backup are dropped.',
+      'Fixed: a macOS release that only ships a .pkg offers a direct download again, and the updater asks the operating system for the CPU architecture instead of trusting the user agent (which claims Intel on Apple Silicon).',
+      'Fixed: the offline update-check fallback now scans the whole release feed per channel instead of giving up when only the newest entry misses your channel.',
+      'Fixed: very fast downloads can no longer vanish from the download panel, and low-confidence asset picks follow one consistent rule with a visible caution instead of two contradictory ones.',
+      '34 new regression tests behind all of this (70 total).',
+    ],
+  },
+  {
     version: '1.0.4-alpha',
     date: '2026-09-23',
     title: 'Everything just works: picks download themselves, downloads heal themselves',

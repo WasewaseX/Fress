@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.5-alpha (2026-09-23)
+
+The bug-hunt release: a second, corrected audit of the whole resolve/download/update chain — every confirmed finding fixed, each with a regression test.
+
+### Fixed
+- **Android downloads match the device's ABI.** The catalog's APK scoring ignored the device architecture entirely, so an x86_64 or ARMv7 Android device could be handed an arm64 APK that cannot install. Split APKs now only win when they actually match the device (an arm64 device can still fall back to the universal APK; arm64 devices may run the armv7 APK; wrong-ABI files lose to everything) — and when a split APK does match, it outranks the universal one as the smaller download.
+- **The Privacy Pack no longer loses picks from other categories.** Proton Mail, Tuta, Nextcloud, Signal and Vaultwarden each cover two categories; unpicking Proton Mail for Mail removed it from the batch download even while Contacts still had it picked. A catalog app now only leaves the batch when the last category selecting it lets go.
+- **Resume works after changing the download folder.** Retry/Resume re-read the *currently selected* folder, so the `.part` file stayed behind in the original one. Retry now reuses the download's original folder.
+- **Imported backups are fully validated at runtime.** The old import checked only the name and then spread every other field into the app — a malformed backup could store `platforms: null` or `tags: "not-an-array"` and crash rendering and filtering later. Imports now pass through a whitelisting sanitizer (types checked, junk fields dropped, non-http(s) URLs and unsafe package commands rejected, invalid asset regexes discarded, text sizes capped); the localStorage custom-apps load path runs through the same sanitizer, and favorites validate their stored shape too.
+- **A macOS `.pkg`-only release offers a direct download again.** The self-updater's scorer started at 0 and treated `.pkg` as junk, so a release shipping only a `.pkg` reported "no file". `.pkg` is now a usable fallback (`.dmg` stays preferred), and the scorer starts at −∞ like the catalog resolver.
+- **The self-updater asks the operating system for the architecture.** It used the WebView user agent, which claims "Intel" on Apple Silicon; it now uses the same Tauri `host_arch` result as the catalog resolver.
+- **The Atom fallback understands update channels.** It read only the newest release entry, so a Beta-channel user got "no update" whenever the newest release was an alpha — even if a beta sat right below it. The fallback now scans the whole feed and picks the newest release matching the channel.
+- **Low-confidence asset picks follow one rule on both resolve paths.** The latest-release path used to return weak picks immediately while the recent-releases scan rejected them; now a confident pick wins wherever it appears, and the weak pick from the latest release is only the last resort — returned flagged, with the caution shown.
+- **Fast downloads can no longer vanish from the download panel.** A file finishing before the app finished registering it lost its completion event (and its entry). Events that arrive before the panel item exists are buffered and applied the moment it does.
+- Corrupted localStorage for the star-count cache degrades to an empty cache instead of feeding junk into the star display; browser-mode panel entries use collision-proof ids so a rapid batch can no longer create duplicate entries.
+
+### Changed
+- The updater's release-list window widened from 10 to 20 releases, mirroring the catalog's recent-scan depth.
+
 ## 1.0.4-alpha (2026-09-23)
 
 The "everything just works" release: picking a private app downloads it, the download button actually downloads, and downloads survive flaky connections without anyone pressing Resume.

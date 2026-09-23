@@ -905,6 +905,21 @@ jobs:
           echo "${ANDROID_KEYSTORE_B64}" | base64 -d > fress.keystore
           keytool -list -keystore fress.keystore -storepass fressandroid -alias fress >/dev/null \
             || { echo '::error::ANDROID_KEYSTORE_B64 is not a valid fress.keystore (alias fress, storepass fressandroid)'; exit 1; }
+          # Identity check: only THE permanent key may sign a release. The
+          # check above proves the secret's SHAPE (a keystore with that alias
+          # and password); this proves its IDENTITY, so a freshly generated
+          # keystore with the same alias and password can never sign a Fress
+          # release - that would silently break in-place updates for every
+          # installed device from the 1.0.6-beta signing baseline on.
+          # Certificate fingerprints are public by design (they ship inside
+          # every signed APK); pinning one here costs no secrecy.
+          EXPECTED_FP="b0fd578d669171af2830dcc91707d92267eea44f2a79651e2614d975e4cbdf27"
+          ACTUAL_FP=$(keytool -list -v -keystore fress.keystore -storepass fressandroid -alias fress \
+            | grep -m1 'SHA256:' | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-Z' 'a-z')
+          if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then
+            echo "::error::keystore certificate fingerprint mismatch: expected the permanent Fress key ($EXPECTED_FP), got ($ACTUAL_FP). ANDROID_KEYSTORE_B64 holds the wrong keystore; restore the backup before releasing."
+            exit 1
+          fi
       - name: Require the persistent signing keystore
         # v1.0.6-alpha was signed with a CI-generated throwaway keystore, so
         # its installs can never take a signature-locked update from a

@@ -8,3 +8,13 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Signing key material must never enter the public repository. The Android
+# keystore is generated and stored outside the repo (repository secret
+# ANDROID_KEYSTORE_B64 + private backup); a stray local keystore file in the
+# working tree must be impossible to commit by accident.
+*.keystore
+*.jks
+*.pfx
+*.pem
+*.key

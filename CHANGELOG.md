@@ -1,11 +1,13 @@
 # Changelog
 
-## 1.0.7-alpha (2026-09-24)
+## 1.0.6-beta (2026-09-24) — the first beta
 
-The signing-baseline release: the first Android build signed with the project's permanent key, and the fourth audit round's findings — every byte a download writes is now accounted for before the file is called complete.
+The first beta release: the Android build signed with the project's permanent key, and the fourth audit round's findings — every byte a download writes is now accounted for before the file is called complete.
+
+About the version number: a `v1.0.0-beta` already shipped in the project's early days, so re-using it would collide with published history — and a fresh 1.0.0 would be a SemVer *downgrade* from 1.0.6-alpha, which the self-updater would rightly refuse to offer. Continuing the beta line at the same 1.0.6 core means every installed alpha (1.0.6-alpha) and every old beta (up to 1.0.5-beta) is offered this release as a normal update: SemVer ranks `1.0.6-beta` above `1.0.6-alpha` at the same core, and above `1.0.5-beta` by core. No other versions ship in between.
 
 ### Migration (Android)
-- **v1.0.6-alpha users must uninstall before installing this release.** v1.0.6-alpha was signed with a CI-generated throwaway key whose private half was deliberately never kept — regenerating a keystore per release would trade one broken update for every future one. Android refuses a differently-signed update over an existing install ("App not installed"), so crossing to the permanent key takes one manual uninstall + reinstall. This is the last time such a step is needed: every release from 1.0.7 on is signed with the same permanent key and updates in place. Export a backup inside Fress before uninstalling — local data does not survive an uninstall.
+- **v1.0.6-alpha users must uninstall before installing this release.** v1.0.6-alpha was signed with a CI-generated throwaway key whose private half was deliberately never kept — regenerating a keystore per release would trade one broken update for every future one. Android refuses a differently-signed update over an existing install ("App not installed"), so crossing to the permanent key takes one manual uninstall + reinstall. This is the last time such a step is needed: every release from 1.0.6-beta on is signed with the same permanent key and updates in place. Export a backup inside Fress before uninstalling — local data does not survive an uninstall.
 
 ### Fixed
 - **A download can no longer be finalized short.** The streamed byte count was never compared with what the server promised, so a server that stopped sending 7 MB of a promised 10 MB still reported "completed" — and the file went straight to hashing and renaming with its missing bytes never noticed. The expected length is now derived from `Content-Range` on a resume (`end - start + 1`) and from `Content-Length` on a fresh download when present, and the download only finalizes when the received count matches.

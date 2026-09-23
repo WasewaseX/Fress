@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.7-alpha (2026-09-24)
+
+The signing-baseline release: the first Android build signed with the project's permanent key, and the fourth audit round's findings — every byte a download writes is now accounted for before the file is called complete.
+
+### Migration (Android)
+- **v1.0.6-alpha users must uninstall before installing this release.** v1.0.6-alpha was signed with a CI-generated throwaway key whose private half was deliberately never kept — regenerating a keystore per release would trade one broken update for every future one. Android refuses a differently-signed update over an existing install ("App not installed"), so crossing to the permanent key takes one manual uninstall + reinstall. This is the last time such a step is needed: every release from 1.0.7 on is signed with the same permanent key and updates in place. Export a backup inside Fress before uninstalling — local data does not survive an uninstall.
+
+### Fixed
+- **A download can no longer be finalized short.** The streamed byte count was never compared with what the server promised, so a server that stopped sending 7 MB of a promised 10 MB still reported "completed" — and the file went straight to hashing and renaming with its missing bytes never noticed. The expected length is now derived from `Content-Range` on a resume (`end - start + 1`) and from `Content-Length` on a fresh download when present, and the download only finalizes when the received count matches.
+- **Resumes validate the server's 206 answer strictly (RFC 9110 §15.3.7).** The old code accepted any 206 and wrote its body onto the staging file. A proxy that ignores `Range` headers and answers 206 with the file from byte 0 (or any wrong offset) would splice two different copies into one download. The new validator requires the `Content-Range` header to exist, use the `bytes` unit, start exactly at the staged byte count, and carry sane end/total values — anything else aborts the resume.
+- **Resume without a validator restarts from byte 0.** A `.part` file with no `ETag`/`Last-Modified` published for it used to send a bare `Range` request; HTTP allows the server to answer with bytes of a *different* version of the resource, producing old-prefix/new-suffix corruption that no later check can detect. The conservative rule now: a validator exists → `Range` + `If-Range`; no validator → the partial file is discarded and the download restarts cleanly.
+- **A protocol-invalid resume offers Retry, not Resume.** Strict-validator failures and HTTP 416 arrive with their own error kind, so the UI no longer offers a Resume button for a download that can never resume — Retry (restart from byte 0) is the choice it presents.
+- **Architecture is a hard gate for every asset pick, catalog overrides included.** `pickAssetDetailed` used to treat a catalog `assetPatterns` match as authoritative and return it before compatibility ran, so a mis-written override could hand a device a build it cannot run. The resolver now separates the three concerns cleanly: the pattern is the *naming authority* (what the file is called), the architecture gate is a *hard constraint* (whether this device can run it, applied to overrides and heuristics alike), and the score is only a *tiebreaker* between compatible files.
+- **An unrecognizable Android ABI is universal-only — in the browser too.** The catalog's browser fallback used to guess x86_64 when the WebView could not establish the device ABI; `getHostArch()` now returns "unknown" and Android treats it as universal-only, matching the self-updater's rule from the previous release.
+- **The offline Atom-feed fallback no longer answers Stable-channel update checks.** The Atom feed format carries no prerelease marker, so any entry it offered a Stable-channel user would silently be an alpha. The fallback now says so instead of answering; Beta/Alpha fallbacks are unchanged.
+- **A catalog link with broken percent-encoding no longer breaks the download click.** `decodeURIComponent` ran outside the error handling, so a URL containing a stray `%` threw before the download attempt and killed the click; it now falls through to the normal error path.
+
 ## 1.0.6-alpha (2026-09-23)
 
 Round three of the bug hunt: the auditor re-checked `main` after 1.0.5 and found six more issues — every one of them addressed.

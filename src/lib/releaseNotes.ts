@@ -21,6 +21,22 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.7-alpha',
+    date: '2026-09-24',
+    title: 'The signing baseline: first permanent-key Android build, and downloads now prove every byte they received',
+    items: [
+      'Android, coming from v1.0.6-alpha: this release is signed with the project\'s permanent key, and Android refuses a differently-signed update over an installed app. Uninstall the old build once, install this one, and every future update goes back to updating in place. Export a backup first — your picks and favorites do not survive an uninstall.',
+      'Fixed: a download can no longer be finalized short. The byte count received is checked against the length the server promised (Content-Length on a fresh download, Content-Range on a resume) before the file is declared complete — a connection that dies in the final stretch now ends in an error and a retry, not a silently truncated file.',
+      'Fixed: resuming validates the server\'s answer strictly (RFC 9110). A 206 response must carry a valid Content-Range that starts exactly where the staged file ends — a proxy that ignores the Range header can no longer splice two different copies of the file into one corrupted download.',
+      'Fixed: resume now requires a validator. If the server published no ETag/Last-Modified, the partial file is discarded and the download restarts from byte 0 — without a validator a Range request can legally return bytes of a different file version, which used to allow quiet corruption.',
+      'Fixed: a resume the server rejects at the protocol level (invalid 206, HTTP 416) offers Retry instead of Resume — retrying Resume could never succeed.',
+      'Fixed: architecture is a hard gate for every asset pick now, catalog overrides included. A per-app naming pattern decides what a file is called, never whether your device can run it — and a browser that cannot establish the device ABI is treated as universal-only on Android instead of guessing x86_64.',
+      'Fixed: an Android device whose ABI cannot be recognized is offered the universal APK only — never a split APK picked by name similarity.',
+      'Fixed: the offline Atom fallback no longer answers Stable-channel update checks (the feed cannot mark prereleases), and broken percent-encoding in a catalog link no longer breaks the download click.',
+      '11 new regression tests behind all of this (115 total).',
+    ],
+  },
+  {
     version: '1.0.6-alpha',
     date: '2026-09-23',
     title: 'Bug hunt round three: the self-updater learns every architecture, and two downloads can no longer trip over each other',

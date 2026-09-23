@@ -388,29 +388,34 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
     if !candidate.exists() {
         return candidate;
     }
-    let stem = PathBuf::from(name)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "download".into());
-    // The extension carries no leading dot here; the format string below adds
-    // its own, so "MyApp (1).exe" keeps a single dot and extension-less files
-    // become "MyApp (1)" without a stray trailing dot.
-    let ext = PathBuf::from(name)
-        .extension()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
     for i in 1..10_000u32 {
-        let candidate_name = if ext.is_empty() {
-            format!("{} ({})", stem, i)
-        } else {
-            format!("{} ({}).{}", stem, i, ext)
-        };
-        candidate = dir.join(candidate_name);
+        candidate = dir.join(numbered_name(name, i));
         if !candidate.exists() {
             break;
         }
     }
     candidate
+}
+
+/// "setup.exe", 3 -> "setup (3).exe"; extension-less names keep no dot.
+fn numbered_name(name: &str, i: u32) -> String {
+    if i == 0 {
+        return name.to_string();
+    }
+    let p = PathBuf::from(name);
+    let stem = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "download".into());
+    let ext = p
+        .extension()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if ext.is_empty() {
+        format!("{} ({})", stem, i)
+    } else {
+        format!("{} ({}).{}", stem, i, ext)
+    }
 }
 
 /// Staging file for an in-flight download. The final name only appears when
@@ -617,19 +622,61 @@ async fn run_download(
     let name = requested_name
         .or_else(|| filename_from_headers(&final_url, &headers))
         .unwrap_or_else(|| format!("fress-download-{}.bin", id));
-    let dest = unique_path(&dir, &name);
-    let part = part_path_for(&dest);
 
-    let mut file = if resuming {
-        tokio::fs::OpenOptions::new()
+    // Staging-file ownership. Two downloads racing on the same filename must
+    // never share one .part: both used to observe "setup.exe is free", both
+    // picked setup.exe.part, and both streamed bytes into the same staging
+    // file (batch downloads made this reachable). `create_new` is an atomic
+    // reservation - the winner keeps the name, the loser moves on to
+    // "name (1).part". The final filename is only claimed by the rename at
+    // completion, so nothing half-written ever looks finished.
+    let (dest, part, mut file) = if resuming {
+        // A retry continues its own staging file: the Range request was
+        // honored (206), so the part found for this name belongs to this
+        // download chain, not to a concurrent stranger.
+        let candidate = unique_path(&dir, &name);
+        let p = part_path_for(&candidate);
+        let f = tokio::fs::OpenOptions::new()
             .append(true)
-            .open(&part)
+            .open(&p)
             .await
-            .map_err(|e| (format!("Cannot reopen partial download: {}", e), None))?
+            .map_err(|e| (format!("Cannot reopen partial download: {}", e), None))?;
+        (candidate, p, f)
+    } else if planned_resume_len > 0 {
+        // The server ignored the Range and resends the whole body: truncate
+        // the part this retry chain reserved and start over in place.
+        let candidate = unique_path(&dir, &name);
+        let p = part_path_for(&candidate);
+        let f = tokio::fs::File::create(&p)
+            .await
+            .map_err(|e| (format!("Cannot write file: {}", e), None))?;
+        (candidate, p, f)
     } else {
-        tokio::fs::File::create(&part)
-            .await
-            .map_err(|e| (format!("Cannot write file: {}", e), None))?
+        // Fresh download: atomically reserve a staging file for ourselves.
+        let mut reserved: Option<(PathBuf, PathBuf, tokio::fs::File)> = None;
+        for i in 0..10_000u32 {
+            let candidate = dir.join(numbered_name(&name, i));
+            let p = part_path_for(&candidate);
+            match tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&p)
+                .await
+            {
+                Ok(f) => {
+                    reserved = Some((candidate, p, f));
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err((format!("Cannot write file: {}", e), None)),
+            }
+        }
+        reserved.ok_or_else(|| {
+            (
+                "Could not reserve a staging file for the download".to_string(),
+                None,
+            )
+        })?
     };
 
     let mut hasher = Sha256::new();
@@ -770,7 +817,14 @@ async fn run_download(
         None => None,
     };
 
-    // Only now does the file appear under its real name.
+    // Only now does the file appear under its real name. Re-check for a late
+    // collision: another file with this exact name may have appeared while
+    // the bytes were streaming, and rename silently replaces on Unix.
+    let dest = if dest.exists() {
+        unique_path(&dir, &name)
+    } else {
+        dest
+    };
     tokio::fs::rename(&part, &dest)
         .await
         .map_err(|e| (format!("Cannot finalize the download: {}", e), None))?;

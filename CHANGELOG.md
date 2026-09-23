@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.6-alpha (2026-09-23)
+
+Round three of the bug hunt: the auditor re-checked `main` after 1.0.5 and found six more issues — every one of them addressed.
+
+### Fixed
+- **The Windows self-updater architecture-matches every exe, portables included.** The scorer used to return a flat score for any exe without "setup" in its name *before* the architecture check ran, so on an ARM64 host two portable builds (x64 + arm64) tied and list order decided — and an x64 machine could be handed an arm64 portable. "setup" is now a score bonus and the architecture check applies to every exe; the x64 setup installer, the arm64 setup installer and both portables all pick correctly on either host. (The two setup installers themselves were never mis-picked — the arch check did run for them — this closes the portable gap with the same shape of fix.)
+- **The Linux self-updater refuses binaries that cannot run.** Scoring was format-only, so an ARM64 Linux machine was offered the amd64 AppImage and told to go download something it can never start (Linux has no emulation safety net). Linux assets are now architecture-aware: a matching build wins, an incompatible build is never chosen, and when a release ships nothing compatible the updater links to the releases page instead of silently downloading a broken binary. A 32-bit x86 host (no 64-bit-compatible asset) is refused too.
+- **A failed update check no longer suppresses automatic checks for 24 hours.** The startup check stamps the "last checked" timer unconditionally after the promise resolves — but a failed check resolves with `{ kind: 'error' }` rather than rejecting, so an offline launch or a rate-limited one burned the whole throttle window. The stamp is now written only after a check that actually completed; the next launch retries.
+- **The Android self-updater understands every ABI, not just arm-vs-not.** `archHint "arm"` (ARMv7) collapsed to "not ARM" and could be handed the x86_64 APK; x86/i686 devices had no representation at all. The updater now shares the exact classification with the catalog resolver (`androidAssetFlags`/`androidDeviceAbi`), recognizes CI's `Fress_*_x64.apk` as the x86_64 build, and prefers exact match > universal > cross-compatible armv7-on-arm64 > anything else.
+- **Two simultaneous downloads can no longer share one `.part` file.** `unique_path()` checked existence and moved on — two downloads of the same filename racing each other both observed "free" and both streamed into the same staging file (batch downloads made this reachable). The staging file is now reserved atomically with `create_new`: the winner keeps the name, the loser gets `name (1).part`, and the final filename is claimed only by the rename at completion (with a late-collision re-check, since Unix rename would silently overwrite).
+- **The MSI carries the publisher signature.** It was built, renamed and uploaded straight past every signing step — the only unsigned Windows artifact while the release notes claimed the installer was signed. The MSI now goes through Azure Trusted Signing (when configured) or the persistent PFX path, gets a hard signature check before upload, and ships honestly unsigned when no certificate is configured.
+
+### Changed
+- The platform filter validates its localStorage value against the known platform list — `fress_platform_filter = "banana"` now falls back to the device default instead of producing an invalid filter state.
+
 ## 1.0.5-alpha (2026-09-23)
 
 The bug-hunt release: a second, corrected audit of the whole resolve/download/update chain — every confirmed finding fixed, each with a regression test.

@@ -21,6 +21,20 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.6-alpha',
+    date: '2026-09-23',
+    title: 'Bug hunt round three: the self-updater learns every architecture, and two downloads can no longer trip over each other',
+    items: [
+      'Fixed: the Windows self-updater architecture-matches every exe now, portables included — an ARM64 machine can no longer be handed an x64 portable just because it sorted first.',
+      'Fixed: the Linux self-updater refuses binaries that cannot run. An ARM64 Linux machine used to be offered the amd64 AppImage; now a matching build wins and, when nothing compatible exists, you get the releases page instead of a download that can never start.',
+      'Fixed: a failed update check no longer suppresses automatic checks for 24 hours — offline launches used to burn the whole throttle window.',
+      'Fixed: the Android self-updater understands every ABI (ARMv7 and x86 devices included) using the exact same classification as the catalog downloader, and recognizes the x86_64 APK from its Fress_*_x64.apk name.',
+      'Fixed: two simultaneous downloads of the same filename can no longer write into the same .part staging file — each download now reserves its own, and the final name is claimed only when the file is complete.',
+      'Changed: the platform filter ignores corrupted saved values and falls back to your device default.',
+      '17 new regression tests behind all of this (85 total).',
+    ],
+  },
+  {
     version: '1.0.5-alpha',
     date: '2026-09-23',
     title: 'The bug-hunt release: every confirmed finding from the second audit, fixed and regression-tested',

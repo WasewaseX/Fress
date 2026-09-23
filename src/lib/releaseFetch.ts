@@ -72,6 +72,62 @@ const BAD_EXT = /\.(sig|blockmap|sha256|sha512|sha256sum|md5|txt|json|yaml|yml|p
 /** Metadata / tooling artefacts shipped next to installers. */
 const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy/i;
 
+/* ------------------------------------------------------------------ */
+/* Android ABI classification (shared with the self-updater)           */
+/* ------------------------------------------------------------------ */
+
+export type AndroidAbi = 'arm64' | 'arm' | 'x86' | 'x86_64';
+
+/**
+ * The one place that decides what ABI an APK filename carries. Both the
+ * catalog resolver and the self-updater call this, so the two pickers can
+ * never drift apart again (the updater used to collapse every host to
+ * arm-vs-not and mis-served ARMv7 and x86 Android devices).
+ *
+ * host_arch on Android reports "aarch64", "arm" (32-bit), "x86"/"i686" or
+ * "x86_64"; CI publishes the per-ABI splits as `Fress_*_arm64.apk`,
+ * `Fress_*_arm.apk`, `Fress_*_x64.apk` and `Fress_*_x86.apk` - "x64" IS an
+ * x86_64 marker here, same as on Windows.
+ */
+export function androidAssetFlags(name: string): {
+  universal: boolean;
+  arm64: boolean;
+  arm32: boolean;
+  x64: boolean;
+  x86: boolean;
+} {
+  const n = name.toLowerCase();
+  const arm64 = /arm64|aarch64|v8a/.test(n);
+  const x64 = /x86[_-]?64|amd64|x64/.test(n);
+  return {
+    universal: /universal|^app-|all[-_.]?abis/.test(n),
+    arm64,
+    arm32: !arm64 && /armeabi|arm32|v7a|(^|[^a-z0-9])arm([^a-z0-9]|$)/.test(n),
+    x64,
+    x86: !x64 && /x86(?!_64)|i[36]86/.test(n),
+  };
+}
+
+/** Single-ABI view of an APK name, in priority order (a fat APK that names
+ * several ABIs classifies as its first); null when nothing marks the ABI. */
+export function androidAssetAbi(name: string): AndroidAbi | null {
+  const f = androidAssetFlags(name);
+  if (f.arm64) return 'arm64';
+  if (f.arm32) return 'arm';
+  if (f.x64) return 'x86_64';
+  if (f.x86) return 'x86';
+  return null;
+}
+
+/** Map a Tauri host_arch value to the ABI family it runs. Unknown values
+ * fall through to x86_64, the overwhelmingly common desktop/AVD case. */
+export function androidDeviceAbi(arch?: string): AndroidAbi {
+  return arch === 'aarch64' ? 'arm64' :
+    arch === 'arm' ? 'arm' :
+    arch === 'i686' || arch === 'x86' ? 'x86' :
+    'x86_64';
+}
+
 function scoreAsset(name: string, platform: Platform, arch: string): number {
   const n = name.toLowerCase();
   let s = 0;
@@ -83,24 +139,17 @@ function scoreAsset(name: string, platform: Platform, arch: string): number {
       // ABI awareness. An APK built for one ABI does not install or run on
       // a device of another: handing an arm64 file to an ARMv7 or x86_64
       // device (exactly what the arch-blind scoring did) wastes the
-      // download and fails the install. host_arch on Android reports
-      // "aarch64", "arm" (32-bit), "i686" or "x86_64".
-      const deviceAbi =
-        arch === 'aarch64' ? 'arm64' :
-        arch === 'arm' ? 'arm' :
-        arch === 'i686' || arch === 'x86' ? 'x86' :
-        'x86_64';
-      if (/universal|^app-|all[-_.]?abis/.test(n)) s += 6; // runs everywhere
-      const arm64Asset = /arm64|aarch64|v8a/.test(n);
-      const arm32Asset = !arm64Asset && /armeabi|arm32|v7a|(^|[^a-z0-9])arm([^a-z0-9]|$)/.test(n);
-      const x64Asset = /x86[_-]?64|amd64/.test(n);
-      const x86Asset = !x64Asset && /x86(?!_64)|i[36]86/.test(n);
+      // download and fails the install. Classification lives in
+      // androidAssetFlags above so the self-updater inherits every fix.
+      const f = androidAssetFlags(n);
+      const deviceAbi = androidDeviceAbi(arch);
+      if (f.universal) s += 6; // runs everywhere
       // A matching ABI-specific APK slightly outranks universal (smaller
       // download); a wrong-ABI APK loses to everything, including unmarked.
-      if (arm64Asset) s += deviceAbi === 'arm64' ? 7 : -8;
-      if (arm32Asset) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
-      if (x64Asset) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
-      if (x86Asset) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
+      if (f.arm64) s += deviceAbi === 'arm64' ? 7 : -8;
+      if (f.arm32) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
+      if (f.x64) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
+      if (f.x86) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
       if (/fdroid/.test(n)) s += 1;
       break;
     }

@@ -21,7 +21,7 @@
  * note instead of a scary red toast.
  */
 
-import { getHostArch } from './releaseFetch';
+import { androidAssetAbi, androidAssetFlags, androidDeviceAbi, getHostArch } from './releaseFetch';
 
 const REPO = 'WasewaseX/Fress';
 
@@ -195,11 +195,15 @@ function isJunkAsset(name: string): boolean {
 
 /** Pick the file a user on this platform actually needs.
  *
- * `archHint` is the Tauri host_arch result ("x86_64"/"aarch64"/...) when
- * available. A WebView user agent is not a reliable architecture signal
- * (macOS WebKit claims "Intel" even on Apple Silicon), so the real host
- * arch must be threaded in from the caller; the UA heuristic below is only
- * the browser-mode fallback. */
+ * `archHint` is the Tauri host_arch result ("x86_64"/"aarch64"/"arm"/...)
+ * when available. A WebView user agent is not a reliable architecture
+ * signal (macOS WebKit claims "Intel" even on Apple Silicon), so the real
+ * host arch must be threaded in from the caller; the UA heuristic below is
+ * only the browser-mode fallback.
+ *
+ * Android ABI classification is shared with the catalog resolver
+ * (androidAssetFlags/androidDeviceAbi in releaseFetch.ts) so the two
+ * pickers cannot drift apart. */
 export function pickOwnAsset(
   release: OwnRelease,
   archHint?: string
@@ -210,28 +214,41 @@ export function pickOwnAsset(
     ua.includes('android') ? 'android' :
     ua.includes('mac os') || ua.includes('macintosh') ? 'mac' :
     ua.includes('linux') ? 'linux' : 'windows';
-  const isArmHost = archHint ? archHint === 'aarch64' : /arm|aarch/i.test(ua);
+  const isArmHost = archHint ? archHint === 'aarch64' || archHint === 'arm' : /arm|aarch/i.test(ua);
   const score = (n: string): number => {
     const s = n.toLowerCase();
     switch (platform) {
       case 'windows': {
         if (!s.endsWith('.exe')) return -1;
-        if (!s.includes('setup')) return 5;
+        // "setup" is a BONUS, never an early return: the architecture
+        // check below must apply to every exe, installer or portable. The
+        // previous shape (`if (!s.includes('setup')) return 5;`) exempted
+        // portable exes from arch matching entirely, so on an ARM host two
+        // portables (x64 + arm64) tied at 5 and list order decided.
+        let v = s.includes('setup') ? 5 : 0;
         // Architecture must match the host: an x64 machine must never be
         // handed the ARM64 installer just because it sorts earlier in the
         // asset list (regression caught by unit tests).
         const armAsset = s.includes('arm64') || s.includes('aarch64');
         const x64Asset = s.includes('x64') || s.includes('x86_64') || s.includes('amd64');
-        if (isArmHost) return armAsset ? 10 : x64Asset ? 6 : 4;
-        return x64Asset ? 10 : armAsset ? 3 : 7;
+        // x64 Windows-on-ARM still runs x64 installers through emulation,
+        // hence the graded 6 instead of a refusal.
+        if (isArmHost) return v + (armAsset ? 10 : x64Asset ? 6 : 4);
+        return v + (x64Asset ? 10 : armAsset ? 3 : 7);
       }
-      case 'android':
+      case 'android': {
         if (!s.endsWith('.apk')) return -1;
-        if (s.includes('universal')) return 9;
-        if (/arm64|aarch64|v8a/.test(s)) return isArmHost ? 10 : 2;
-        if (/(^|[^a-z0-9])arm(?!64)([^a-z0-9]|$)|armeabi|v7a/.test(s)) return isArmHost ? 7 : 2;
-        if (/x86_64|amd64/.test(s)) return isArmHost ? 2 : 10;
-        return 4;
+        // Universal is release-required (CI fails without it) and runs on
+        // every device, so it is the safe floor at 9.
+        if (androidAssetFlags(s).universal) return 9;
+        const abi = androidAssetAbi(s);
+        if (!abi) return 4; // unmarked apk: a gamble, below universal
+        const device = androidDeviceAbi(archHint);
+        if (abi === device) return 10; // exact ABI match: smaller than universal
+        // arm64 devices can run armv7 apks; nothing else cross-runs.
+        if (device === 'arm64' && abi === 'arm') return 7;
+        return 2; // wrong ABI: never beats universal
+      }
       case 'mac': {
         const isDmg = s.endsWith('.dmg');
         // .pkg is a usable fallback so a pkg-only release still offers a
@@ -243,11 +260,24 @@ export function pickOwnAsset(
         else if (s.includes('x64') || s.includes('x86_64')) v += isArmHost ? -7 : 6;
         return v;
       }
-      case 'linux':
-        if (s.endsWith('.appimage')) return 10;
-        if (s.endsWith('.deb')) return 7;
-        if (s.endsWith('.rpm')) return 5;
-        return -1;
+      case 'linux': {
+        const fmt = s.endsWith('.appimage') ? 10 : s.endsWith('.deb') ? 7 : s.endsWith('.rpm') ? 5 : -1;
+        if (fmt === -1) return -1;
+        const armAsset = s.includes('aarch64') || s.includes('arm64') || /(^|[^a-z0-9])arm([^a-z0-9]|$)/.test(s);
+        const x64Asset = s.includes('amd64') || s.includes('x86_64') || s.includes('x64');
+        const archLc = (archHint || '').toLowerCase();
+        const hostIs32 = archLc === 'x86' || archLc === 'i686';
+        // Linux has no emulation safety net (unlike Windows-on-ARM): an
+        // amd64 AppImage on an ARM64 host is a wasted download that cannot
+        // start. Refuse it outright - returning -Infinity for every asset
+        // makes pickOwnAsset return null and the UI links to the releases
+        // page instead of downloading something unusable.
+        if (isArmHost) return armAsset ? fmt : -Infinity;
+        if (hostIs32) return !armAsset && !x64Asset ? fmt : -Infinity;
+        if (x64Asset) return fmt;
+        if (armAsset) return -Infinity;
+        return fmt - 1; // untagged: selectable on the assumed-x86_64 host, below a tagged match
+      }
       default:
         return -1;
     }

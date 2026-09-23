@@ -27,7 +27,7 @@ import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider } from './lib/i18n';
 import { DownloadsProvider, useDownloads } from './lib/downloads';
 import { openExternal } from './lib/external';
-import { checkForUpdate, OwnRelease, getUpdateChannel, setUpdateChannel, UpdateChannel } from './lib/selfUpdate';
+import { checkForUpdate, OwnRelease, getUpdateChannel, setUpdateChannel, UpdateChannel, UpdateState } from './lib/selfUpdate';
 import pkg from '../package.json';
 
 import { INITIAL_APPS } from './data/appsData';
@@ -65,10 +65,19 @@ const STORAGE_KEY_PLATFORM = 'fress_platform_filter';
 const isAndroidDevice = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 const deviceDefaultPlatform: FilterState['platform'] = isAndroidDevice ? 'android' : 'all';
 
+/** Every value the platform filter is allowed to hold; anything else found
+ * in localStorage is treated as absent. */
+const VALID_PLATFORM_FILTERS = ['all', 'windows', 'mac', 'linux', 'web', 'android', 'ios'] as const;
+
 function initialPlatform(): FilterState['platform'] {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_PLATFORM);
-    if (saved) return saved as FilterState['platform'];
+    // Same localStorage-trust rule as everywhere else: a hand-edited or
+    // stale value ("banana") must not become filter state. Fall back to
+    // the device default instead.
+    if (saved && (VALID_PLATFORM_FILTERS as readonly string[]).includes(saved)) {
+      return saved as FilterState['platform'];
+    }
   } catch {
     // ignore
   }
@@ -111,8 +120,8 @@ function AppShell() {
     });
   };
 
-  const runUpdateCheck = async (announce: boolean) => {
-    if (updateChecking) return;
+  const runUpdateCheck = async (announce: boolean): Promise<UpdateState | null> => {
+    if (updateChecking) return null;
     setUpdateChecking(true);
     const res = await checkForUpdate(pkg.version);
     setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset, expectedSha256: res.expectedSha256 } : null);
@@ -133,11 +142,14 @@ function AppShell() {
       }
     }
     setUpdateChecking(false);
+    return res;
   };
 
   // Startup check, throttled to once a day so the GitHub API is not hammered.
-  // The throttle stamp is only saved AFTER the check finishes: a failed check
-  // (rate limit, offline) must not block every launch for the next 24 hours.
+  // The throttle stamp is only saved AFTER a check that actually completed:
+  // a failed check (rate limit, offline) returns { kind: 'error' } rather
+  // than throwing, so an unconditional .then() used to stamp the timer on
+  // failures too and suppressed every automatic check for the next 24h.
   useEffect(() => {
     try {
       const last = Number(localStorage.getItem('fress.last_update_check') || '0');
@@ -145,7 +157,8 @@ function AppShell() {
     } catch {
       return;
     }
-    void runUpdateCheck(false).then(() => {
+    void runUpdateCheck(false).then((res) => {
+      if (!res || res.kind === 'error') return; // let the next launch retry
       try {
         localStorage.setItem('fress.last_update_check', String(Date.now()));
       } catch {

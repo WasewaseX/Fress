@@ -182,6 +182,235 @@ describe('pickOwnAsset — Android assets', () => {
   });
 });
 
+describe('pickOwnAsset — Windows assets (setup is a bonus, never an early return)', () => {
+  const release = (names: string[]): OwnRelease => ({
+    tag: 'v1.0.5-alpha',
+    version: '1.0.5-alpha',
+    publishedAt: '2026-09-23T00:00:00Z',
+    htmlUrl: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.5-alpha',
+    assets: names.map((name) => ({ name, size: 1000, url: `https://example.com/${name}` })),
+  });
+
+  const windowsUA = () =>
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('an x64 machine picks the x64 installer even when the arm64 installer is listed first', () => {
+    windowsUA();
+    // Both setup files DO reach the arch check (the old suspicion that
+    // `return 5` short-circuits them is wrong: "x64-setup" contains
+    // "setup"). This locks that in forever.
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_arm64-setup.exe', 'Fress_1.0.5-alpha_x64-setup.exe']),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_x64-setup.exe');
+  });
+
+  it('a Windows-on-ARM machine picks the arm64 installer regardless of list order', () => {
+    windowsUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64-setup.exe', 'Fress_1.0.5-alpha_arm64-setup.exe']),
+        'aarch64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_arm64-setup.exe');
+  });
+
+  it('portable exes are architecture-matched too (they used to bypass the arch check entirely)', () => {
+    windowsUA();
+    // The old `if (!s.includes('setup')) return 5;` scored every portable an
+    // arch-blind 5: two portables tied and list order decided. That was the
+    // real bug behind the setup-early-return report.
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_arm64.exe', 'Fress_1.0.5-alpha_x64.exe']),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_x64.exe');
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.exe', 'Fress_1.0.5-alpha_arm64.exe']),
+        'aarch64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_arm64.exe');
+  });
+
+  it('a setup installer outranks a portable of the same architecture', () => {
+    windowsUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.exe', 'Fress_1.0.5-alpha_x64-setup.exe']),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_x64-setup.exe');
+  });
+
+  it('an x64 machine prefers an x64 portable over a wrong-arch installer', () => {
+    windowsUA();
+    // portable 0+10 beats arm64-setup 5+3: right-arch portable > wrong-arch
+    // installer, even though the installer is the friendlier format.
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_arm64-setup.exe', 'Fress_1.0.5-alpha_x64.exe']),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_x64.exe');
+  });
+});
+
+describe('pickOwnAsset — Linux assets (architecture-aware, refuses mismatches)', () => {
+  const release = (names: string[]): OwnRelease => ({
+    tag: 'v1.0.5-alpha',
+    version: '1.0.5-alpha',
+    publishedAt: '2026-09-23T00:00:00Z',
+    htmlUrl: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.5-alpha',
+    assets: names.map((name) => ({ name, size: 1000, url: `https://example.com/${name}` })),
+  });
+
+  const linuxUA = () =>
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('an x86_64 Linux machine gets the amd64 AppImage', () => {
+    linuxUA();
+    expect(
+      pickOwnAsset(
+        release([
+          'Fress_1.0.5-alpha_amd64.deb',
+          'Fress_1.0.5-alpha_amd64.AppImage',
+          'Fress_1.0.5-alpha_x86_64.rpm',
+        ]),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_amd64.AppImage');
+  });
+
+  it('an ARM64 Linux machine is offered NOTHING when only x86_64 builds exist', () => {
+    // The arch-blind scoring handed the amd64 AppImage to ARM hosts: a
+    // download that can never start (Linux has no emulation safety net).
+    // Refusing beats silently downloading the wrong binary.
+    linuxUA();
+    expect(
+      pickOwnAsset(
+        release([
+          'Fress_1.0.5-alpha_amd64.AppImage',
+          'Fress_1.0.5-alpha_amd64.deb',
+          'Fress_1.0.5-alpha_x86_64.rpm',
+        ]),
+        'aarch64'
+      )
+    ).toBeNull();
+  });
+
+  it('an ARM64 Linux machine gets an aarch64 build when one exists', () => {
+    linuxUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_amd64.AppImage', 'Fress_1.0.5-alpha_aarch64.AppImage']),
+        'aarch64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_aarch64.AppImage');
+  });
+
+  it('an x86_64 machine is never offered an arm build', () => {
+    linuxUA();
+    expect(pickOwnAsset(release(['Fress_1.0.5-alpha_aarch64.AppImage']), 'x86_64')).toBeNull();
+  });
+
+  it('a 32-bit x86 machine gets nothing it cannot run (64-bit-only releases)', () => {
+    linuxUA();
+    expect(pickOwnAsset(release(['Fress_1.0.5-alpha_amd64.AppImage']), 'i686')).toBeNull();
+  });
+
+  it('a tagged amd64 asset beats an untagged one on x86_64', () => {
+    linuxUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha.AppImage', 'Fress_1.0.5-alpha_amd64.AppImage']),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_amd64.AppImage');
+  });
+});
+
+describe('pickOwnAsset — Android assets (full ABI awareness, classification shared with the catalog)', () => {
+  const release = (names: string[]): OwnRelease => ({
+    tag: 'v1.0.5-alpha',
+    version: '1.0.5-alpha',
+    publishedAt: '2026-09-23T00:00:00Z',
+    htmlUrl: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.5-alpha',
+    assets: names.map((name) => ({ name, size: 1000, url: `https://example.com/${name}` })),
+  });
+
+  const androidUA = () =>
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36' });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('an ARMv7 Android device is never handed an x86_64 apk (archHint "arm" used to read as non-ARM)', () => {
+    androidUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.apk', 'Fress_1.0.5-alpha_arm.apk']),
+        'arm'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_arm.apk');
+    // No matching split -> the universal apk, never a wrong-ABI one.
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.apk', 'Fress_1.0.5-alpha_universal.apk']),
+        'arm'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_universal.apk');
+  });
+
+  it('an x86 Android device prefers the x86 apk, then universal, never x64', () => {
+    androidUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.apk', 'Fress_1.0.5-alpha_x86.apk']),
+        'x86'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_x86.apk');
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.apk', 'Fress_1.0.5-alpha_universal.apk']),
+        'x86'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_universal.apk');
+  });
+
+  it('CI asset naming: Fress_*_x64.apk IS the x86_64 build', () => {
+    androidUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_universal.apk', 'Fress_1.0.5-alpha_x64.apk']),
+        'x86_64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_x64.apk');
+  });
+
+  it('an arm64 device still falls back to universal over a wrong-ABI split', () => {
+    androidUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.apk', 'Fress_1.0.5-alpha_universal.apk']),
+        'aarch64'
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_universal.apk');
+  });
+});
+
 describe('fetchOwnLatestRelease — atom fallback', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

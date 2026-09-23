@@ -83,7 +83,7 @@ jobs:
             Only here, on the official GitHub Releases page of this repository, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer on any other site or file host, it is not ours.
 
             **Windows: antivirus warnings and "Unknown Publisher"**
-            The installer and the portable exe carry the project's persistent publisher signature when CI has the certificate configured; until that signature chains to a trusted root, Microsoft Defender's machine-learning heuristics can still flag clean downloads (for example `Trojan:Win32/Bearfoos.A!ml`). Verify the SHA256 against `SHA256SUMS.txt` — if it matches, the file is exactly what this repository built. Reporting false positives, certificate setup and long-term signing plans: `CODE_SIGNING.md` in the repository. The blue "Unknown publisher" warning appears until a trusted certificate is in place: **More info**, then **Run anyway**.
+            The installer, the MSI and the portable exe carry the project's persistent publisher signature when CI has the certificate configured; until that signature chains to a trusted root, Microsoft Defender's machine-learning heuristics can still flag clean downloads (for example `Trojan:Win32/Bearfoos.A!ml`). Verify the SHA256 against `SHA256SUMS.txt` — if it matches, the file is exactly what this repository built. Reporting false positives, certificate setup and long-term signing plans: `CODE_SIGNING.md` in the repository. The blue "Unknown publisher" warning appears until a trusted certificate is in place: **More info**, then **Run anyway**.
 
             **macOS: first launch**
             The dmg is signed and notarized when the Apple credentials are configured in CI (see `CODE_SIGNING.md`). Without them, macOS may refuse to open the app the first time: right-click the app icon and choose **Open**, then confirm. That only happens once.
@@ -172,8 +172,11 @@ jobs:
           if (-not $msi) { throw "MSI not found in bundle folder" }
           $finalName = "Fress_${version}_x64_en-US.msi"
           Copy-Item $msi.FullName $finalName -Force
-          gh release upload "${{ needs.version.outputs.tag }}" $finalName --clobber --repo "${{ github.repository }}"
-          Write-Host "MSI uploaded as $finalName"
+          # No upload here: the MSI joins the installer and the portable exe
+          # in getting a publisher signature first, then a dedicated step
+          # uploads it. (It used to be uploaded straight away and stayed the
+          # only unsigned Windows artifact.)
+          Write-Host "MSI staged in workspace root as $finalName (uploaded after signing)"
       - name: Sign with Azure Trusted Signing
         # Runs only when the signing account is configured. One-time setup
         # steps are in CODE_SIGNING.md.
@@ -188,6 +191,25 @@ jobs:
           certificate-profile-name: ${{ secrets.AZURE_CODESIGNING_PROFILE }}
           files-folder: ${{ github.workspace }}\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis
           files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Sign the MSI with Azure Trusted Signing
+        # The MSI is the third Windows artifact and used to be the only one
+        # that skipped signing entirely. It is staged at the workspace root
+        # by the build step above.
+        if: env.FRESS_SIGNING_CONFIGURED == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_CODESIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_CODESIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CODESIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}
+          files-folder-filter: msi
           files-folder-recurse: false
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
@@ -264,6 +286,18 @@ jobs:
           gh release upload "${{ needs.version.outputs.tag }}" $bundle.FullName --clobber --repo "${{ github.repository }}"
           Write-Host "Signed installer uploaded: $($bundle.Name)"
 
+          # Same treatment for the MSI staged by the build step above, so
+          # every Windows artifact carries the same publisher identity.
+          $msi = Get-ChildItem "Fress_*_x64_en-US.msi" | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found for signing" }
+          & $signtool.FullName sign /sha1 $cert.Thumbprint /fd SHA256 /td SHA256 `
+            /tr http://timestamp.digicert.com $msi.FullName
+          $msiSig = Get-AuthenticodeSignature $msi.FullName
+          Write-Host "MSI signature: $($msiSig.Status)"
+          if ($msiSig.Status -eq 'NotSigned' -or $msiSig.Status -eq 'HashMismatch') {
+            throw "MSI signing failed: $($msiSig.Status)"
+          }
+
       - name: No signing certificate configured
         # Shipping unsigned is honest: a random self-signed cert per release
         # proves nothing and builds no reputation. The warning keeps the gap
@@ -272,6 +306,28 @@ jobs:
         shell: pwsh
         run: |
           Add-Content $env:GITHUB_STEP_SUMMARY "WARNING: Windows binaries shipped unsigned. Configure WINDOWS_PFX_B64 and WINDOWS_PFX_PASSWORD secrets for a persistent publisher signature (see CODE_SIGNING.md)."
+
+      - name: Upload the MSI
+        # Runs in every signing configuration: by the time this step executes
+        # the file is either signed (Trusted Signing / PFX above) or the job
+        # has already failed its signature check. Without any certificate the
+        # MSI still ships, honestly unsigned like the other artifacts.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem "Fress_*_x64_en-US.msi" | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found for upload" }
+          if ($env:FRESS_SIGNING_CONFIGURED -eq 'true' -or $env:FRESS_PFX_CONFIGURED -eq 'true') {
+            $sig = Get-AuthenticodeSignature $msi.FullName
+            Write-Host "MSI signature before upload: $($sig.Status)"
+            if ($sig.Status -ne 'Valid') { throw "MSI reached upload without a valid signature: $($sig.Status)" }
+          } else {
+            Write-Host "No signing configured; uploading the unsigned MSI."
+          }
+          gh release upload "${{ needs.version.outputs.tag }}" $msi.FullName --clobber --repo "${{ github.repository }}"
+          Write-Host "MSI uploaded: $($msi.Name)"
 
       - name: Package the portable exe
         # A portable build is the bare app exe in a zip: no installer, no

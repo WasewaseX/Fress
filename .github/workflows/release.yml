@@ -97,6 +97,27 @@ jobs:
           # public: no half-populated release page users can stumble into.
           draft: true
 
+      - name: Bind the draft to its tag if GitHub left it untagged
+        # GitHub has a race where a draft created for an existing tag stays
+        # "untagged-<hash>" and is invisible to tag-based lookups: the gh CLI
+        # resolves drafts by their tag_name field (fixable), the raw by-tag
+        # API endpoint never resolves them at all. Seen once in production
+        # (v1.0.6-beta): the Windows jobs failed with "release not found".
+        # Re-binding the field right after creation keeps every later
+        # tag-based step working.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ID="${{ steps.create.outputs.id }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          CUR="$(gh api "repos/${{ github.repository }}/releases/$ID" --jq '.tag_name')"
+          if [ "$CUR" != "$TAG" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/releases/$ID" -f tag_name="$TAG" --jq '.tag_name'
+            echo "re-bound draft tag: $CUR -> $TAG"
+          else
+            echo "draft correctly bound to $TAG"
+          fi
+
   build-windows:
     needs: [version, create-release]
     runs-on: windows-latest
@@ -1048,7 +1069,19 @@ jobs:
           # Only the small signature files are downloaded; artifact presence
           # itself is verified through the release's asset list.
           gh release download "$TAG" --dir sigs --pattern '*.sig' --clobber --repo "${{ github.repository }}"
-          gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq '.assets[].name' > assets.txt
+          # Draft-proof release lookup: the raw by-tag endpoint
+          # (/releases/tags/<tag>) does not resolve draft releases, and every
+          # Fress release is a draft until verify-release publishes it. List
+          # releases and match the tag instead - that works for drafts and
+          # published releases alike. (The gh CLI commands above resolve
+          # drafts by tag_name field; this raw call must not use the
+          # by-tag endpoint.)
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .assets[].name" > assets.txt
+          if [ ! -s assets.txt ]; then
+            echo "::error::release $TAG not found or has no assets yet"
+            exit 1
+          fi
           python3 - <<'PY'
           import json, os, sys
           from datetime import datetime, timezone

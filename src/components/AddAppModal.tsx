@@ -232,7 +232,11 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       id: initialApp ? initialApp.id : `custom-${Date.now()}`,
       name: name.trim(),
       tagline: tagline.trim() || name.trim(),
-      websiteUrl: websiteUrl.trim() || githubUrl.trim() || '#',
+      // Empty string, never a "#" placeholder: AppDetailModal, TableView,
+      // CompareModal and the download options all treat a falsy websiteUrl
+      // as "no website", while "#" used to survive those guards and render
+      // a dead Official Website button.
+      websiteUrl: websiteUrl.trim() || githubUrl.trim() || '',
       githubUrl: githubUrl.trim() || undefined,
       gitlabUrl: gitlabUrl.trim() || undefined,
       category,

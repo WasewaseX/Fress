@@ -409,6 +409,79 @@ describe('pickOwnAsset — Android assets (full ABI awareness, classification sh
       )?.name
     ).toBe('Fress_1.0.5-alpha_universal.apk');
   });
+
+  it('a browser that cannot know the ABI (reduced UA) gets universal, never a split', () => {
+    // Modern Android browsers hide the CPU arch entirely ("Linux; Android
+    // 16; Pixel 9"), and the old browser fallback guessed x86_64 - handing
+    // ARM phones an x86_64-only apk that cannot install. archHint undefined
+    // is the browser-mode signal for "unknown".
+    androidUA();
+    expect(
+      pickOwnAsset(
+        release([
+          'Fress_1.0.5-alpha_x64.apk',
+          'Fress_1.0.5-alpha_arm64.apk',
+          'Fress_1.0.5-alpha_universal.apk',
+        ]),
+        undefined
+      )?.name
+    ).toBe('Fress_1.0.5-alpha_universal.apk');
+  });
+
+  it('an unknown-ABI browser with no universal apk is offered NOTHING (releases page), not a guess', () => {
+    androidUA();
+    expect(
+      pickOwnAsset(
+        release(['Fress_1.0.5-alpha_x64.apk', 'Fress_1.0.5-alpha_arm64.apk']),
+        undefined
+      )
+    ).toBeNull();
+  });
+});
+
+describe('fetchFromApi — GitHub prerelease flag is a stability signal', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** API whose releases list carries a stable-LOOKING tag (v1.0.7) that
+   * GitHub itself flags prerelease=true - the exact manual-release shape
+   * the tag-only filter used to trust. */
+  const apiWithFlaggedStable = () =>
+    vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('api.github.com')) {
+        return new Response(
+          JSON.stringify([
+            {
+              tag_name: 'v1.0.7',
+              name: '1.0.7',
+              draft: false,
+              prerelease: true,
+              published_at: '2026-09-22T00:00:00Z',
+              html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.7',
+              assets: [],
+            },
+          ]),
+          { status: 200 }
+        );
+      }
+      return new Response('unexpected', { status: 404 });
+    });
+
+  it('the stable channel rejects a prerelease-flagged stable-looking tag (falls through to atom)', async () => {
+    vi.stubGlobal('fetch', apiWithFlaggedStable() as unknown as typeof fetch);
+    // The API path yields no acceptable release, so the check falls back to
+    // the atom feed - which has no such entry and returns null.
+    const r = await fetchOwnLatestRelease('stable');
+    expect(r).toBeNull();
+  });
+
+  it('the alpha channel still sees the prerelease-flagged release', async () => {
+    vi.stubGlobal('fetch', apiWithFlaggedStable() as unknown as typeof fetch);
+    const r = await fetchOwnLatestRelease('alpha');
+    expect(r?.tag).toBe('v1.0.7');
+  });
 });
 
 describe('fetchOwnLatestRelease — atom fallback', () => {

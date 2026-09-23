@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  androidDeviceAbi,
   cleanVersion,
   parseGithubRepo,
   pickAsset,
@@ -102,6 +103,34 @@ describe('pickAsset — heuristic selection', () => {
   it('an arm64 device can still fall back to the universal apk', () => {
     const pick = pickAsset([asset('Tool_2.1_universal.apk')], 'android', 'aarch64');
     expect(pick?.name).toBe('Tool_2.1_universal.apk');
+  });
+
+  it('an unknown device ABI is not a disguised x86_64', () => {
+    expect(androidDeviceAbi(undefined)).toBe('unknown');
+    expect(androidDeviceAbi('')).toBe('unknown');
+    expect(androidDeviceAbi('weird')).toBe('unknown');
+    expect(androidDeviceAbi('aarch64')).toBe('arm64');
+    expect(androidDeviceAbi('x86_64')).toBe('x86_64');
+  });
+
+  it('a browser without arch info (reduced UA) gets universal, never a split it cannot install', () => {
+    // arch undefined = the browser fallback could not determine the ABI.
+    // The old x86_64 guess made ARM phones pick x86_64-only apks.
+    const pick = pickAsset(
+      [asset('App_1.0_arm64-v8a.apk'), asset('App_1.0_x86_64.apk'), asset('App_1.0_universal.apk')],
+      'android',
+      undefined
+    );
+    expect(pick?.name).toBe('App_1.0_universal.apk');
+  });
+
+  it('an unknown-ABI browser is offered nothing when only ABI splits exist (releases page instead)', () => {
+    const pick = pickAsset(
+      [asset('App_1.0_arm64-v8a.apk'), asset('App_1.0_x86_64.apk')],
+      'android',
+      undefined
+    );
+    expect(pick).toBeNull();
   });
 
   it('prefers appimage over deb/rpm on linux', () => {

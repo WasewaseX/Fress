@@ -136,19 +136,23 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                     </div>
                     <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">{app.tagline}</p>
                     <div className="flex items-center gap-1.5 mt-2">
-                      <a
-                        href={app.websiteUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
-                        className="text-[11px] text-sky-400 hover:underline inline-flex items-center gap-1"
-                      >
-                        <span>Website</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      {/* Guarded: custom apps may have no website at all
+                          (websiteUrl is '' in that case). */}
+                      {app.websiteUrl && (
+                        <a
+                          href={app.websiteUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
+                          className="text-[11px] text-sky-400 hover:underline inline-flex items-center gap-1"
+                        >
+                          <span>Website</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
                       {app.githubUrl && (
                         <>
-                          <span className="text-slate-600">·</span>
+                          {app.websiteUrl && <span className="text-slate-600">·</span>}
                           <a
                             href={app.githubUrl}
                             target="_blank"

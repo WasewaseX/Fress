@@ -309,11 +309,15 @@ struct DownloadRegistry {
 }
 
 fn sanitize_filename(name: &str) -> String {
+    // Unicode-aware on purpose: the RFC 5987 branch decodes UTF-8 ext-values
+    // (a Japanese PDF must not land on disk as "__.pdf"), so any letter or
+    // digit - any script - survives. Path separators are NEVER in the kept
+    // set, which is the whole security property: the result can be joined
+    // onto the download directory without escaping it.
     let cleaned: String = name
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '(' || c == ')'
-            {
+            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '(' || c == ')' {
                 c
             } else {
                 '_'
@@ -321,7 +325,10 @@ fn sanitize_filename(name: &str) -> String {
         })
         .collect();
     let trimmed = cleaned.trim_matches('_').trim().to_string();
-    if trimmed.is_empty() {
+    // "." and ".." survive the character filter (dots are legal name
+    // characters) but would make dir.join() walk up the directory tree, so
+    // they collapse to the safe default like any other empty result.
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
         "download.bin".to_string()
     } else {
         trimmed
@@ -332,6 +339,11 @@ fn filename_from_headers(
     url: &reqwest::Url,
     headers: &reqwest::header::HeaderMap,
 ) -> Option<String> {
+    // Every branch funnels through sanitize_filename() before returning:
+    // the value is joined onto the download directory, so a server-supplied
+    // name like "../../something" (or its percent-encoded form - the RFC
+    // 5987 branch decodes first) must never be able to escape the folder.
+    // sanitize_filename also collapses "."/".."/empty to a safe name.
     if let Some(cd) = headers.get(reqwest::header::CONTENT_DISPOSITION) {
         let cd = cd.to_str().ok()?;
         // attachment; filename="app.apk" or filename*=UTF-8''app.apk
@@ -341,21 +353,27 @@ fn filename_from_headers(
                 let name = name.trim_matches('"').trim_end_matches(';');
                 // RFC 5987 ext-values are percent-encoded; without decoding,
                 // a Japanese PDF would land on disk as a literal "%E6%97%A5...".
-                return Some(percent_decode(name));
+                return Some(sanitize_filename(&percent_decode(name)));
             }
         }
         if let Some(pos) = cd.find("filename=") {
             let rest = &cd[pos + 9..];
             let end = rest.find(';').unwrap_or(rest.len());
-            return Some(rest[..end].trim_matches('"').to_string());
+            return Some(sanitize_filename(rest[..end].trim_matches('"')));
         }
     }
-    // Fall back to the last URL path segment
+    // Fall back to the last URL path segment. Segments come percent-encoded;
+    // decode for a readable name, then sanitize like any other
+    // server-controlled value.
     let segment = url.path_segments()?.next_back()?.to_string();
-    if segment.is_empty() || !segment.contains('.') {
+    if segment.is_empty() {
+        return None;
+    }
+    let decoded = percent_decode(&segment);
+    if !decoded.contains('.') {
         None
     } else {
-        Some(segment)
+        Some(sanitize_filename(&decoded))
     }
 }
 
@@ -440,6 +458,50 @@ fn dest_for_part(part: &Path) -> Option<PathBuf> {
     let name = part.file_name()?.to_string_lossy();
     let stem = name.strip_suffix(".part")?;
     part.parent().map(|p| p.join(stem))
+}
+
+/// Sidecar for a staging file: the HTTP validators (ETag / Last-Modified)
+/// the origin served the staged bytes with. Written when the .part is
+/// created and consulted on resume so the `Range` request can also carry
+/// `If-Range` - without it, a server that replaced the file between
+/// sessions would answer the Range with the NEW file's tail and the result
+/// would be a silent old-prefix + new-suffix hybrid that only a checksum
+/// (when one exists) could ever catch.
+fn meta_path_for(part: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.meta", part.to_string_lossy()))
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct PartMeta {
+    url: String,
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+async fn read_part_meta(part: &Path) -> Option<PartMeta> {
+    let raw = tokio::fs::read_to_string(meta_path_for(part)).await.ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Persist the validators from `headers` for the staging file `part`.
+/// Failures are deliberately silent: a missing sidecar only means the next
+/// resume cannot send If-Range and behaves like before.
+async fn write_part_meta(part: &Path, url: &str, headers: &reqwest::header::HeaderMap) {
+    let get = |key: &str| -> Option<String> {
+        headers
+            .get(key)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let meta = PartMeta {
+        url: url.to_string(),
+        etag: get("etag"),
+        last_modified: get("last-modified"),
+    };
+    if let Ok(json) = serde_json::to_string(&meta) {
+        let _ = tokio::fs::write(meta_path_for(part), json).await;
+    }
 }
 
 #[tauri::command]
@@ -622,6 +684,9 @@ async fn run_download(
     // staging file - instead of its own .part.
     let mut planned_resume_len: u64 = 0;
     let mut resume_paths: Option<(PathBuf, PathBuf)> = None; // (dest, part)
+                                                             // HTTP validator (ETag / Last-Modified) the origin served the staged
+                                                             // bytes with, carried into an If-Range header on the resume request.
+    let mut resume_validator: Option<String> = None;
     if resume {
         let probe: Option<PathBuf> = match staging.as_ref() {
             Some(p) => Some(p.clone()),
@@ -633,7 +698,16 @@ async fn run_download(
             if let Ok(meta) = tokio::fs::metadata(&p).await {
                 if let Some(dest) = dest_for_part(&p) {
                     planned_resume_len = meta.len();
-                    resume_paths = Some((dest, p));
+                    resume_paths = Some((dest, p.clone()));
+                }
+            }
+            // The validator is only meaningful for the same resource the
+            // staging bytes came from: an ETag belongs to one URL, and
+            // reusing it against a different download target would compare
+            // unrelated identities.
+            if let Some(m) = read_part_meta(&p).await {
+                if m.url == url {
+                    resume_validator = m.etag.or(m.last_modified);
                 }
             }
             // A missing staging file (deleted while stopped, or a stale path
@@ -648,6 +722,16 @@ async fn run_download(
             reqwest::header::RANGE,
             format!("bytes={}-", planned_resume_len),
         );
+        // If-Range makes a changed remote file answer with a plain 200
+        // (full body) instead of a 206 tail - the 200 path below already
+        // truncates the staging file and restarts in place. Without the
+        // header, a replaced file would be silently glued together from an
+        // old prefix and a new suffix.
+        if let Some(v) = &resume_validator {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(v) {
+                request = request.header(reqwest::header::IF_RANGE, value);
+            }
+        }
     }
     let first = request
         .send()
@@ -667,9 +751,31 @@ async fn run_download(
         .unwrap_or(0);
 
     // 206 = the server honored the Range and we append; a plain 200 means it
-    // ignored the range (or there was nothing to resume) and we start over.
+    // ignored the range (or the If-Range validator no longer matches - the
+    // remote file changed) and we start over.
     let resuming = first.status() == reqwest::StatusCode::PARTIAL_CONTENT && planned_resume_len > 0;
     let already_have = if resuming { planned_resume_len } else { 0 };
+
+    // A 206 that does not start exactly where the staging file ends would
+    // corrupt the assembled file. The header itself is optional (servers may
+    // answer a Range without Content-Range and keep the old trust), but an
+    // explicit WRONG offset is refused rather than appended to.
+    if resuming {
+        let start_ok = headers
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split_whitespace().nth(1))
+            .and_then(|range| range.split('-').next())
+            .and_then(|start| start.parse::<u64>().ok())
+            .map(|start| start == planned_resume_len);
+        if start_ok == Some(false) {
+            return Err((
+                "Server resumed at the wrong offset; the partial download cannot be continued"
+                    .to_string(),
+                None,
+            ));
+        }
+    }
 
     let name = requested_name
         .or_else(|| filename_from_headers(&final_url, &headers))
@@ -730,6 +836,12 @@ async fn run_download(
     // From here on this attempt owns `part`; record it so an automatic retry
     // continues this exact file (see the staging carry in start_download).
     *staging_out = Some(part.clone());
+
+    // Persist the origin's validators for the resume path. On a 200 restart
+    // the previously stored validators are stale by definition - the fresh
+    // response's overwrite them. On a 206 they should be identical, and on a
+    // fresh download the sidecar is created for the first time.
+    write_part_meta(&part, &url, &headers).await;
 
     let mut hasher = Sha256::new();
     // Seed the digest with the bytes from the earlier attempt so the final
@@ -856,6 +968,7 @@ async fn run_download(
             let expected_norm = expected.trim_start_matches("0x").to_lowercase();
             if expected_norm != sha_hex {
                 let _ = tokio::fs::remove_file(&part).await;
+                let _ = tokio::fs::remove_file(meta_path_for(&part)).await;
                 return Err((
                     format!(
                         "Integrity check failed: the file hashes to {} but the publisher published {}. It was deleted. Re-download from the official source.",
@@ -880,6 +993,9 @@ async fn run_download(
     tokio::fs::rename(&part, &dest)
         .await
         .map_err(|e| (format!("Cannot finalize the download: {}", e), None))?;
+    // The staging file is gone; its validator sidecar has no reason to
+    // outlive it.
+    let _ = tokio::fs::remove_file(meta_path_for(&part)).await;
 
     Ok(CompletePayload {
         id,

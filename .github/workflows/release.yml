@@ -905,14 +905,24 @@ jobs:
           echo "${ANDROID_KEYSTORE_B64}" | base64 -d > fress.keystore
           keytool -list -keystore fress.keystore -storepass fressandroid -alias fress >/dev/null \
             || { echo '::error::ANDROID_KEYSTORE_B64 is not a valid fress.keystore (alias fress, storepass fressandroid)'; exit 1; }
-      - name: Generate a signing keystore (no persistent secret configured)
+      - name: Require the persistent signing keystore
+        # v1.0.6-alpha was signed with a CI-generated throwaway keystore, so
+        # its installs can never take a signature-locked update from a
+        # different key. Minting ANOTHER throwaway per release would lock
+        # every future install out the same way, so from here on a release
+        # without the persistent keystore FAILS LOUDLY instead of silently
+        # generating a temporary identity.
+        #
+        # One-time setup (local machine):
+        #   keytool -genkeypair -v -keystore fress.keystore -alias fress \
+        #     -keyalg RSA -keysize 2048 -validity 10000 \
+        #     -storepass fressandroid -keypass fressandroid \
+        #     -dname "CN=Fress, OU=Fress, O=Fress, L=Internet, ST=Internet, C=US"
+        #   base64 -w0 fress.keystore   # paste as the ANDROID_KEYSTORE_B64 secret
         if: env.FRESS_KEYSTORE_CONFIGURED != 'true'
         run: |
-          echo "::warning::Generating a fresh Android keystore. Users cannot update over a previous install (signature mismatch). Store ANDROID_KEYSTORE_B64 as a repository secret to keep the same key."
-          keytool -genkey -v -keystore fress.keystore -alias fress \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass fressandroid -keypass fressandroid \
-            -dname "CN=Fress, OU=Fress, O=Fress, L=Internet, ST=Internet, C=US"
+          echo '::error::ANDROID_KEYSTORE_B64 is not configured, so the Android build cannot proceed. Releases must never be signed with a freshly generated keystore: a changed signing key breaks in-place updates for every installed device. Generate the keystore ONCE locally, store it base64-encoded as the ANDROID_KEYSTORE_B64 secret (alias fress, storepass fressandroid - see the comments above), then re-run this job.'
+          exit 1
       - name: Build Android APKs (per-ABI splits + universal)
         env:
           TAURI_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/fress.keystore

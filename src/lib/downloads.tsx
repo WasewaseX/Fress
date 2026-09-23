@@ -5,6 +5,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { dirname } from '@tauri-apps/api/path';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
@@ -343,7 +344,18 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const target = path || downloadDir;
     if (!target) return;
     if (path) {
-      revealItemInDir(path).catch(() => openPath(target).catch(() => toast.error('Could not open the folder')));
+      // Reveal the file inside its folder. When the reveal fails (Windows
+      // builds without the explorer integration), fall back to opening the
+      // file's CONTAINING folder - the old fallback opened `path` itself,
+      // which just launched the downloaded file instead of showing where
+      // it lives.
+      revealItemInDir(path).catch(async () => {
+        try {
+          await openPath(await dirname(path));
+        } catch {
+          toast.error('Could not open the folder');
+        }
+      });
     } else {
       openPath(target).catch(() => toast.error('Could not open the folder'));
     }

@@ -78,6 +78,12 @@ const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|
 
 export type AndroidAbi = 'arm64' | 'arm' | 'x86' | 'x86_64';
 
+/** What the runtime actually knows about the device. "unknown" is NOT a
+ * synonym for x86_64: guessing x86_64 for a browser on a reduced user agent
+ * is exactly what made ARM phones get handed x86_64-only APKs they cannot
+ * install. Unknown devices fall back to universal APKs instead. */
+export type DeviceAbi = AndroidAbi | 'unknown';
+
 /**
  * The one place that decides what ABI an APK filename carries. Both the
  * catalog resolver and the self-updater call this, so the two pickers can
@@ -119,16 +125,19 @@ export function androidAssetAbi(name: string): AndroidAbi | null {
   return null;
 }
 
-/** Map a Tauri host_arch value to the ABI family it runs. Unknown values
- * fall through to x86_64, the overwhelmingly common desktop/AVD case. */
-export function androidDeviceAbi(arch?: string): AndroidAbi {
+/** Map a Tauri host_arch value (or a browser's best-effort arch signal) to
+ * the ABI family it runs. Only EXACT arch values map to an ABI; anything
+ * else - including the empty signal a reduced user agent gives - is
+ * "unknown", and the scorers treat unknown as "universal APK only". */
+export function androidDeviceAbi(arch?: string | undefined): DeviceAbi {
   return arch === 'aarch64' ? 'arm64' :
     arch === 'arm' ? 'arm' :
     arch === 'i686' || arch === 'x86' ? 'x86' :
-    'x86_64';
+    arch === 'x86_64' ? 'x86_64' :
+    'unknown';
 }
 
-function scoreAsset(name: string, platform: Platform, arch: string): number {
+function scoreAsset(name: string, platform: Platform, arch: string | undefined): number {
   const n = name.toLowerCase();
   let s = 0;
 
@@ -144,12 +153,20 @@ function scoreAsset(name: string, platform: Platform, arch: string): number {
       const f = androidAssetFlags(n);
       const deviceAbi = androidDeviceAbi(arch);
       if (f.universal) s += 6; // runs everywhere
-      // A matching ABI-specific APK slightly outranks universal (smaller
-      // download); a wrong-ABI APK loses to everything, including unmarked.
-      if (f.arm64) s += deviceAbi === 'arm64' ? 7 : -8;
-      if (f.arm32) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
-      if (f.x64) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
-      if (f.x86) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
+      // An unknown device (reduced-UA browser: no arch signal at all) must
+      // never be gambled onto a split: a wrong-ABI APK fails to install.
+      // Refuse every ABI-marked file outright - universal or nothing, and
+      // the UI links to the releases page when no universal exists.
+      if (deviceAbi === 'unknown') {
+        if (f.arm64 || f.arm32 || f.x64 || f.x86) return -1;
+      } else {
+        // A matching ABI-specific APK slightly outranks universal (smaller
+        // download); a wrong-ABI APK loses to everything, including unmarked.
+        if (f.arm64) s += deviceAbi === 'arm64' ? 7 : -8;
+        if (f.arm32) s += deviceAbi === 'arm' ? 7 : deviceAbi === 'arm64' ? 2 : -8; // arm64 devices run armv7 apks
+        if (f.x64) s += deviceAbi === 'x86_64' ? 7 : deviceAbi === 'x86' ? -2 : -8;
+        if (f.x86) s += deviceAbi === 'x86' ? 7 : deviceAbi === 'x86_64' ? 2 : -8;
+      }
       if (/fdroid/.test(n)) s += 1;
       break;
     }
@@ -195,7 +212,7 @@ function scoreAsset(name: string, platform: Platform, arch: string): number {
   return s;
 }
 
-export function pickAsset(assets: ReleaseAsset[], platform: Platform, arch: string): ReleaseAsset | null {
+export function pickAsset(assets: ReleaseAsset[], platform: Platform, arch: string | undefined): ReleaseAsset | null {
   return pickAssetDetailed(assets, platform, arch)?.pick ?? null;
 }
 
@@ -225,7 +242,7 @@ export interface AssetPick {
 export function pickAssetDetailed(
   assets: ReleaseAsset[],
   platform: Platform,
-  arch: string,
+  arch: string | undefined,
   patterns?: Partial<Record<Platform, string>>
 ): AssetPick | null {
   const usable = assets.filter((a) => !BAD_EXT.test(a.name) && !BAD_NAME.test(a.name));
@@ -399,20 +416,27 @@ async function getFdroid(pkg: string): Promise<FdroidInfo> {
 /* Host architecture (cached)                                          */
 /* ------------------------------------------------------------------ */
 
-let archPromise: Promise<string> | null = null;
+let archPromise: Promise<string | undefined> | null = null;
 
-export function getHostArch(): Promise<string> {
+/** The host architecture when the runtime actually knows it:
+ * - Tauri: the real host_arch from Rust (never a WebView guess).
+ * - Browser: 'aarch64' only on a UA that positively names ARM; otherwise
+ *   undefined. Modern UA reduction hides the CPU arch (MDN's own Android
+ *   example is "Linux; Android 16; Pixel 9"), and the old x86_64 guess
+ *   here made ARM-phone browsers pick x86_64-only APKs that cannot
+ *   install. Callers treat undefined as "unknown, be conservative". */
+export function getHostArch(): Promise<string | undefined> {
   if (!archPromise) {
     archPromise = (async () => {
       if (!isTauri()) {
         // typeof guard: Node 20 (CI) has no global navigator.
         const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
-        return /arm|aarch/i.test(ua) ? 'aarch64' : 'x86_64';
+        return /arm|aarch/i.test(ua) ? 'aarch64' : undefined;
       }
       try {
-        return (await invoke<string>('host_arch')) || 'x86_64';
+        return (await invoke<string>('host_arch')) || undefined;
       } catch {
-        return 'x86_64';
+        return undefined;
       }
     })();
   }

@@ -244,6 +244,13 @@ export function pickOwnAsset(
         const abi = androidAssetAbi(s);
         if (!abi) return 4; // unmarked apk: a gamble, below universal
         const device = androidDeviceAbi(archHint);
+        // Browser mode usually cannot know the device ABI (reduced user
+        // agents carry no architecture). An unknown device refuses every
+        // ABI-specific split outright - a wrong-ABI apk cannot install -
+        // so only universal (or the unmarked gamble above) is selectable;
+        // with neither, pickOwnAsset returns null and the UI links to the
+        // releases page instead of downloading a guess.
+        if (device === 'unknown') return -Infinity;
         if (abi === device) return 10; // exact ABI match: smaller than universal
         // arm64 devices can run armv7 apks; nothing else cross-runs.
         if (device === 'arm64' && abi === 'arm') return 7;
@@ -308,9 +315,16 @@ async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
   const raw = (await res.json()) as RawRelease[];
-  const published = (raw || []).filter(
-    (r) => !r.draft && releaseMatchesChannel(r.tag_name.replace(/^v/i, ''), channel)
-  );
+  const published = (raw || []).filter((r) => {
+    if (r.draft) return false;
+    // The tag is not the only stability signal - GitHub's own prerelease
+    // flag is. A manually published release with a stable-looking tag
+    // ("v1.0.7") but prerelease=true must never surface on the Stable
+    // channel from the tag alone. (The atom fallback carries no flag, so
+    // the tag-derived stage stays the only signal there.)
+    if (channel === 'stable' && r.prerelease) return false;
+    return releaseMatchesChannel(r.tag_name.replace(/^v/i, ''), channel);
+  });
   if (published.length === 0) throw new Error('No published releases');
   published.sort((a, b) => compareVersions(a.tag_name, b.tag_name));
   return mapRelease(published[published.length - 1]);

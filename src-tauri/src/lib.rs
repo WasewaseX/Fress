@@ -625,7 +625,9 @@ async fn run_download(
     if resume {
         let probe: Option<PathBuf> = match staging.as_ref() {
             Some(p) => Some(p.clone()),
-            None => requested_name.as_ref().map(|name| part_path_for(&dir.join(name))),
+            None => requested_name
+                .as_ref()
+                .map(|name| part_path_for(&dir.join(name))),
         };
         if let Some(p) = probe {
             if let Ok(meta) = tokio::fs::metadata(&p).await {

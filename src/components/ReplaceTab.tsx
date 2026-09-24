@@ -247,7 +247,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
     if (!maxPrivacyCombo) return;
     const ids = maxPrivacyCombo.appIds.filter((id) => byId.has(id));
     onAddToBatch(ids);
-    toast.success(`${ids.length} × "${maxPrivacyCombo.name}" — ${t('pp.toastAdded')}`);
+    toast.success(`${ids.length} × "${maxPrivacyCombo.name}" ${t('pp.toastAdded')}`);
   };
 
   const LEVEL_INFO: Record<PpLevel, { label: string; blurb: string }> = {

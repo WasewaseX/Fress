@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { sanitizeAppItem } from '../appValidation';
 
-describe('sanitizeAppItem — trust-boundary validation for imported apps', () => {
+describe('sanitizeAppItem, trust-boundary validation for imported apps', () => {
   it('rejects non-objects and entries without a usable name', () => {
     expect(sanitizeAppItem(null).app).toBeNull();
     expect(sanitizeAppItem('nope').app).toBeNull();

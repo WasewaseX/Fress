@@ -159,7 +159,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const item = itemsRef.current.find((it) => it.id === p.id);
       applyItemUpdate(p.id, (it) => ({ ...it, status: 'active', canResume: false }));
       toast.info(`Reconnecting ${item?.name || 'download'} (attempt ${p.attempt})`, {
-        description: 'The connection dropped — continuing from where it stopped.',
+        description: 'The connection dropped. Continuing from where it stopped.',
       });
     }).then((un) => unlisteners.push(un));
 
@@ -167,7 +167,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const p = event.payload;
       if (p.message === 'Cancelled') {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'cancelled', canResume: true }));
-        toast.info('Download paused — use Resume to continue');
+        toast.info('Download paused. Use Resume to continue');
       } else if (p.kind === 'checksum') {
         // The file failed verification and was deleted on disk. A resume is
         // pointless; the source itself must be retried.

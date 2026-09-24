@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 //
 /**
- * Catalog validator — the quality gate for the heart of Fress.
+ * Catalog validator, the quality gate for the heart of Fress.
  *
  * The catalog is curated by hand and grows by pull requests. This script
  * catches the mistakes hands make before users ever see them: duplicate
@@ -149,8 +149,8 @@ for (const app of apps) {
   }
   if (app.githubUrl && app.platforms?.length === 1 && app.platforms[0] !== 'web') {
     // A GitHub-hosted project that claims exactly one desktop platform is
-    // suspicious but not always wrong — flag it for a human look.
-    warn(label, `single-platform app (${app.platforms[0]}) — double-check the other platforms really are unsupported`);
+    // suspicious but not always wrong; flag it for a human look.
+    warn(label, `single-platform app (${app.platforms[0]}): double-check the other platforms really are unsupported`);
   }
 
   if (!VALID_CATEGORIES.includes(app.category)) err(label, `unknown category: ${app.category}`);

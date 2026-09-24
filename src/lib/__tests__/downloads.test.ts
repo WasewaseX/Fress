@@ -33,7 +33,7 @@ describe('formatSpeed / formatEta', () => {
   });
 });
 
-describe('pickOwnAsset — Fress picking its own update file', () => {
+describe('pickOwnAsset, Fress picking its own update file', () => {
   const release = (names: string[]): OwnRelease => ({
     tag: 'v1.0.2-alpha',
     version: '1.0.2-alpha',

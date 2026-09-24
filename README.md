@@ -64,7 +64,7 @@ Releases are tagged. Every release ships installers for all platforms, built by 
 | Linux | `Fress_*_amd64.AppImage`, `.deb`, `.rpm` |
 | Android | `Fress_*_universal.apk`, `Fress_*_arm64.apk` |
 
-**Fress is distributed only through this repository's GitHub Releases page**, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer anywhere else — a file host, a mirror, a "download site" — it is not ours.
+**Fress is distributed only through this repository's GitHub Releases page**, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer anywhere else (a file host, a mirror, a "download site"), it is not ours.
 
 Every release includes a `SHA256SUMS.txt` covering all assets. Verify before running:
 

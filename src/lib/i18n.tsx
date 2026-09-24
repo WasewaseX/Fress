@@ -66,7 +66,7 @@ const en: Dict = {
   'card.badge.trending': 'Popular',
   'card.badge.custom': 'Custom',
   'card.offlineReady': 'Works offline',
-  'offline.banner': 'Offline — showing the cached catalog',
+  'offline.banner': 'Offline. Showing the cached catalog',
   'card.portable': 'Portable',
   'detail.overview': 'About',
   'detail.whyItsAwesome': 'Why we listed it',
@@ -146,7 +146,7 @@ const en: Dict = {
 
   // Privacy Pack tab
   'pp.title': 'Privacy Pack',
-  'pp.subtitle': 'Friendlier alternatives to the apps you use now — checked by hand, strongest options first.',
+  'pp.subtitle': 'Friendlier alternatives to the apps you use now. Checked by hand, strongest options first.',
   'pp.about': 'About this list',
   'pp.aboutList': 'The categories and options come from',
   'pp.categories': 'categories',
@@ -187,9 +187,9 @@ const en: Dict = {
   'batchDL.started': 'Download started for {n} app(s).',
   'batchDL.weakNote': '{n} file(s) were auto-detected with low confidence - check the names in the download panel before running them.',
   'batchDL.skipped': '{n} app(s) have no direct download here.',
-  'batchDL.skippedHint': 'nothing matched this device directly — the button opens their official download pages.',
+  'batchDL.skippedHint': 'no direct download matched this device, so the button opens their official download pages instead.',
   'batchDL.openPages': 'Open official pages',
-  'batchDL.nothing': 'Nothing to download yet — select some apps first.',
+  'batchDL.nothing': 'Nothing to download yet. Select some apps first.',
 
   // Batch install script modal
   'bs.title': 'Install script generator',
@@ -202,7 +202,7 @@ const en: Dict = {
   'bs.copied': 'Copied!',
   'bs.downloadFile': 'Download file',
   'bs.safeNote': 'Every command is a plain single install invocation, checked before the script is written.',
-  'bs.skipNote': '{s} of {m} selected apps have no {mgr} package — they are not in this script.',
+  'bs.skipNote': '{s} of {m} selected apps have no {mgr} package, so they are not in this script.',
   'bs.tab.wingetPs': 'PowerShell (winget)',
   'bs.tab.brew': 'macOS / Linux (brew)',
   'bs.tab.brewfile': 'Brewfile',
@@ -259,7 +259,7 @@ const fa: Dict = {
   'card.badge.trending': 'پرطرفدار',
   'card.badge.custom': 'سفارشی',
   'card.offlineReady': 'آفلاین کار می‌کند',
-  'offline.banner': 'آفلاین — نمایش کاتالوگ ذخیره‌شده',
+  'offline.banner': 'آفلاین؛ نمایش کاتالوگ ذخیره‌شده',
   'card.portable': 'قابل حمل',
   'detail.overview': 'معرفی',
   'detail.whyItsAwesome': 'چرا عالی است',
@@ -339,7 +339,7 @@ const fa: Dict = {
 
   // Privacy Pack tab
   'pp.title': 'بسته حریم خصوصی',
-  'pp.subtitle': 'جایگزین‌های امن‌تر برای برنامه‌هایی که الان استفاده می‌کنید — دستی بررسی شده، قوی‌ترین‌ها اول.',
+  'pp.subtitle': 'جایگزین‌های امن‌تر برای برنامه‌هایی که الان استفاده می‌کنید؛ دستی بررسی شده و قوی‌ترین‌ها اول.',
   'pp.about': 'درباره این فهرست',
   'pp.aboutList': 'دسته‌ها و گزینه‌ها برگرفته از',
   'pp.categories': 'دسته',
@@ -380,9 +380,9 @@ const fa: Dict = {
   'batchDL.started': 'دانلود برای {n} برنامه شروع شد.',
   'batchDL.weakNote': '{n} فایل با اطمینان پایین به‌طور خودکار تشخیص داده شدند - قبل از اجرا، نام‌ها را در پنل دانلود بررسی کنید.',
   'batchDL.skipped': '{n} برنامه دانلود مستقیم اینجا ندارند.',
-  'batchDL.skippedHint': 'هیچ فایل مستقیمی برای این دستگاه پیدا نشد — دکمه، صفحه رسمی دانلود آن‌ها را باز می‌کند.',
+  'batchDL.skippedHint': 'هیچ فایل مستقیمی برای این دستگاه پیدا نشد؛ بنابراین دکمه، صفحه رسمی دانلود آن‌ها را باز می‌کند.',
   'batchDL.openPages': 'باز کردن صفحه‌های رسمی',
-  'batchDL.nothing': 'چیزی برای دانلود نیست — اول چند برنامه انتخاب کنید.',
+  'batchDL.nothing': 'چیزی برای دانلود نیست؛ اول چند برنامه انتخاب کنید.',
 
   // Batch install script modal
   'bs.title': 'سازنده اسکریپت نصب',
@@ -395,7 +395,7 @@ const fa: Dict = {
   'bs.copied': 'کپی شد!',
   'bs.downloadFile': 'دانلود فایل',
   'bs.safeNote': 'هر دستور یک فراخوان نصب ساده است که پیش از نوشتن اسکریپت بررسی می‌شود.',
-  'bs.skipNote': '{s} از {m} برنامه انتخابی بسته {mgr} ندارند — در این اسکریپت نیستند.',
+  'bs.skipNote': '{s} از {m} برنامه انتخابی بسته {mgr} ندارند و در این اسکریپت نیستند.',
   'bs.tab.wingetPs': 'پاورشل (winget)',
   'bs.tab.brew': 'مک/لینوکس (brew)',
   'bs.tab.brewfile': 'Brewfile',
@@ -452,7 +452,7 @@ const es: Dict = {
   'card.badge.trending': 'Tendencia',
   'card.badge.custom': 'Personalizado',
   'card.offlineReady': 'Funciona sin conexión',
-  'offline.banner': 'Sin conexión — mostrando el catálogo guardado',
+  'offline.banner': 'Sin conexión. Mostrando el catálogo guardado',
   'card.portable': 'Portable',
   'detail.overview': 'Resumen',
   'detail.whyItsAwesome': 'Por qué es genial',
@@ -575,7 +575,7 @@ const es: Dict = {
   'batchDL.skipped': '{n} app(s) no tienen descarga directa aquí.',
   'batchDL.skippedHint': 'nada coincidió directamente con este dispositivo; el botón abre sus páginas oficiales de descarga.',
   'batchDL.openPages': 'Abrir páginas oficiales',
-  'batchDL.nothing': 'Nada para descargar todavía — selecciona primero algunas apps.',
+  'batchDL.nothing': 'Nada para descargar todavía. Selecciona primero algunas apps.',
 
   // Batch install script modal
   'bs.title': 'Generador de script de instalación',
@@ -588,7 +588,7 @@ const es: Dict = {
   'bs.copied': '¡Copiado!',
   'bs.downloadFile': 'Descargar archivo',
   'bs.safeNote': 'Cada comando es una invocación de instalación simple, comprobada antes de escribir el script.',
-  'bs.skipNote': '{s} de {m} apps seleccionadas no tienen paquete de {mgr} — no están en este script.',
+  'bs.skipNote': '{s} de {m} apps seleccionadas no tienen paquete de {mgr}, así que no están en este script.',
   'bs.tab.wingetPs': 'PowerShell (winget)',
   'bs.tab.brew': 'macOS / Linux (brew)',
   'bs.tab.brewfile': 'Brewfile',
@@ -645,7 +645,7 @@ const fr: Dict = {
   'card.badge.trending': 'Tendance',
   'card.badge.custom': 'Personnalisé',
   'card.offlineReady': 'Hors ligne',
-  'offline.banner': 'Hors ligne — catalogue en cache affiché',
+  'offline.banner': 'Hors ligne. Catalogue en cache affiché',
   'card.portable': 'Portable',
   'detail.overview': 'Présentation',
   'detail.whyItsAwesome': 'Pourquoi c’est génial',
@@ -766,9 +766,9 @@ const fr: Dict = {
   'batchDL.started': 'Téléchargement lancé pour {n} appli(s).',
   'batchDL.weakNote': "{n} fichier(s) détecté(s) avec peu de confiance - vérifiez les noms dans le panneau de téléchargement avant de les exécuter.",
   'batchDL.skipped': '{n} appli(s) n’ont pas de téléchargement direct ici.',
-  'batchDL.skippedHint': 'rien ne correspond directement à cet appareil — le bouton ouvre leurs pages officielles de téléchargement.',
+  'batchDL.skippedHint': 'rien ne correspond directement à cet appareil, donc le bouton ouvre leurs pages officielles de téléchargement.',
   'batchDL.openPages': 'Ouvrir les pages officielles',
-  'batchDL.nothing': 'Rien à télécharger pour l’instant — sélectionnez d’abord des applis.',
+  'batchDL.nothing': 'Rien à télécharger pour l’instant. Sélectionnez d’abord des applis.',
 
   // Batch install script modal
   'bs.title': 'Générateur de script d’installation',
@@ -781,7 +781,7 @@ const fr: Dict = {
   'bs.copied': 'Copié !',
   'bs.downloadFile': 'Télécharger le fichier',
   'bs.safeNote': 'Chaque commande est un simple appel d’installation, vérifié avant l’écriture du script.',
-  'bs.skipNote': '{s} sur {m} applis sélectionnées n’ont pas de paquet {mgr} — elles ne sont pas dans ce script.',
+  'bs.skipNote': '{s} sur {m} applis sélectionnées n’ont pas de paquet {mgr}, elles ne sont donc pas dans ce script.',
   'bs.tab.wingetPs': 'PowerShell (winget)',
   'bs.tab.brew': 'macOS / Linux (brew)',
   'bs.tab.brewfile': 'Brewfile',
@@ -838,7 +838,7 @@ const de: Dict = {
   'card.badge.trending': 'Im Trend',
   'card.badge.custom': 'Benutzerdefiniert',
   'card.offlineReady': 'Offline nutzbar',
-  'offline.banner': 'Offline — gespeicherter Katalog wird angezeigt',
+  'offline.banner': 'Offline. Gespeicherter Katalog wird angezeigt',
   'card.portable': 'Portabel',
   'detail.overview': 'Überblick',
   'detail.whyItsAwesome': 'Warum es großartig ist',
@@ -918,7 +918,7 @@ const de: Dict = {
 
   // Privacy Pack tab
   'pp.title': 'Privacy-Paket',
-  'pp.subtitle': 'Freundlichere Alternativen zu den Apps, die Sie nutzen — von Hand geprüft, die stärksten zuerst.',
+  'pp.subtitle': 'Freundlichere Alternativen zu den Apps, die Sie nutzen. Von Hand geprüft, die stärksten zuerst.',
   'pp.about': 'Über diese Liste',
   'pp.aboutList': 'Die Kategorien und Optionen stammen aus',
   'pp.categories': 'Kategorien',
@@ -959,9 +959,9 @@ const de: Dict = {
   'batchDL.started': 'Download für {n} App(s) gestartet.',
   'batchDL.weakNote': '{n} Datei(en) wurden mit geringer Sicherheit automatisch erkannt - Namen im Download-Panel vor dem Ausführen prüfen.',
   'batchDL.skipped': '{n} App(s) haben hier keinen direkten Download.',
-  'batchDL.skippedHint': 'nichts passt direkt zu diesem Gerät — die Schaltfläche öffnet die offiziellen Downloadseiten.',
+  'batchDL.skippedHint': 'nichts passt direkt zu diesem Gerät, daher öffnet die Schaltfläche die offiziellen Downloadseiten.',
   'batchDL.openPages': 'Offizielle Seiten öffnen',
-  'batchDL.nothing': 'Noch nichts zum Herunterladen — zuerst Apps auswählen.',
+  'batchDL.nothing': 'Noch nichts zum Herunterladen. Zuerst Apps auswählen.',
 
   // Batch install script modal
   'bs.title': 'Installationsskript-Generator',
@@ -974,7 +974,7 @@ const de: Dict = {
   'bs.copied': 'Kopiert!',
   'bs.downloadFile': 'Datei herunterladen',
   'bs.safeNote': 'Jeder Befehl ist ein einfacher einzelner Installationsaufruf, vor dem Schreiben geprüft.',
-  'bs.skipNote': '{s} von {m} ausgewählten Apps haben kein {mgr}-Paket — sie sind nicht in diesem Skript.',
+  'bs.skipNote': '{s} von {m} ausgewählten Apps haben kein {mgr}-Paket und sind daher nicht in diesem Skript.',
   'bs.tab.wingetPs': 'PowerShell (winget)',
   'bs.tab.brew': 'macOS / Linux (brew)',
   'bs.tab.brewfile': 'Brewfile',

@@ -9,8 +9,8 @@ for by a certificate authority it already trusts.
 
 - No signature at all: Windows says "Unknown Publisher".
 - A self-signed signature (what CI applies today): still "Unknown Publisher",
-  because the certificate vouches for itself. No build flag or setting changes
-  this. The warning is Windows doing its job.
+ because the certificate vouches for itself. No build flag or setting changes
+ this. The warning is Windows doing its job.
 
 The warning goes away when the installer is signed with a certificate that
 chains to a root Windows already trusts. There is a free way to get there.
@@ -21,7 +21,7 @@ The [SignPath Foundation](https://signpath.org) signs binaries for open-source
 projects at no cost. Two things worth knowing:
 
 - No personal identification is required. They verify that binaries were built
-  from this repository, not who you are.
+ from this repository, not who you are.
 - There are no fees for open-source projects, including re-issues.
 
 One trade-off: the certificate is issued to SignPath Foundation, so Windows
@@ -41,33 +41,33 @@ Fress meets their published conditions:
 ### Steps
 
 1. Apply at [signpath.org/apply](https://signpath.org/apply) with the
-   repository URL `https://github.com/WasewaseX/Fress`.
+ repository URL `https://github.com/WasewaseX/Fress`.
 2. Wait for their review (a few days to a couple of weeks).
 3. After approval you get a SignPath.io organization. From its dashboard
-   collect the API token, organization ID, project ID, and signing policy ID.
+ collect the API token, organization ID, project ID, and signing policy ID.
 4. Add them as repository secrets under **Settings -> Secrets and variables ->
-   Actions**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORG_ID`, `SIGNPATH_PROJECT_ID`,
-   `SIGNPATH_SIGNING_POLICY_ID`.
+ Actions**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORG_ID`, `SIGNPATH_PROJECT_ID`,
+ `SIGNPATH_SIGNING_POLICY_ID`.
 5. The Windows build job then signs the installer through their service
-   (`submit-signing-request` GitHub Action; the key stays on their HSM), and
-   the signed installer is uploaded to the release with the next version tag.
+ (`submit-signing-request` GitHub Action; the key stays on their HSM), and
+ the signed installer is uploaded to the release with the next version tag.
 
 ### The persistent publisher certificate (current CI default)
 
-CI no longer generates a throwaway self-signed certificate per release — a
+CI no longer generates a throwaway self-signed certificate per release, a
 fresh identity every build proves nothing and accumulates no reputation with
 Defender or SmartScreen. Instead, one certificate is provided as repository
 secrets and reused for every release:
 
-- `WINDOWS_PFX_B64` — the `.pfx` (certificate + private key), base64-encoded
-- `WINDOWS_PFX_PASSWORD` — the .pfx export password
+- `WINDOWS_PFX_B64`, the `.pfx` (certificate + private key), base64-encoded
+- `WINDOWS_PFX_PASSWORD`, the .pfx export password
 
 Creating one on your own machine (run once, keep the .pfx backed up):
 
 ```powershell
 $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Fress" `
-  -KeyUsage DigitalSignature -KeySpec Signature -KeyAlgorithm RSA -KeyLength 3072 `
-  -NotAfter (Get-Date).AddYears(5) -CertStoreLocation "Cert:\CurrentUser\My"
+ -KeyUsage DigitalSignature -KeySpec Signature -KeyAlgorithm RSA -KeyLength 3072 `
+ -NotAfter (Get-Date).AddYears(5) -CertStoreLocation "Cert:\CurrentUser\My"
 $pwd = ConvertTo-SecureString -String "your-export-password" -Force -AsPlainText
 Export-PfxCertificate -Cert $cert -FilePath "fress-sign.pfx" -Password $pwd
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("fress-sign.pfx")) | Set-Clipboard
@@ -77,7 +77,7 @@ Then set `WINDOWS_PFX_B64` to the clipboard contents and `WINDOWS_PFX_PASSWORD`
 to the export password. Every Windows build (x64 + ARM64, installer +
 portable) is then signed with the same publisher identity.
 
-Honesty note: a self-signed publisher still shows "Unknown publisher" — only
+Honesty note: a self-signed publisher still shows "Unknown publisher", only
 a certificate chaining to a trusted root (SignPath Foundation below, Azure
 Trusted Signing, or a paid CA) removes it. What the persistent signature does
 buy: identical publisher across releases, tamper evidence, and a stable
@@ -98,7 +98,7 @@ over the .pfx path.
 ### Antivirus false positives (Trojan:Win32/Bearfoos.A!ml)
 
 Microsoft Defender's machine-learning heuristics flag clean, low-reputation
-Windows binaries — unsigned installers that download other installers are a
+Windows binaries, unsigned installers that download other installers are a
 classic trigger, and release builds were additionally stripped (`strip = true`
 in Cargo.toml), which makes them look even more packer-like. Countermeasures
 in place: release builds are unstripped, the signature is persistent, Fress is
@@ -122,7 +122,7 @@ Fress ships two update paths. Today the app checks GitHub Releases itself,
 downloads the matching installer and verifies its SHA256 against
 `SHA256SUMS.txt` (see `src/lib/selfUpdate.ts`). The second path is the Tauri
 updater: a signed `latest.json` manifest plus `.sig` signatures that a future
-in-app updater verifies with minisign before installing anything — a bad or
+in-app updater verifies with minisign before installing anything, a bad or
 tampered download is refused and the old version keeps running (rollback).
 
 The release pipeline is already wired for it: every `tauri-action` build in
@@ -139,7 +139,7 @@ Current status at a glance:
 | Private key | `TAURI_SIGNING_PRIVATE_KEY` secret (backup in the private `fress-state` repo, `updater-key-backup/`) |
 | Key password | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret (same backup) |
 | Public key | `fress-updater.key.pub` in this repo, also recorded below |
-| In-app updater plugin | not wired yet — the remaining step |
+| In-app updater plugin | not wired yet, the remaining step |
 
 Public key (safe to distribute; embed it in `tauri.conf.json` when the
 updater plugin gets wired):
@@ -169,27 +169,27 @@ secrets under **Settings -> Secrets and variables -> Actions**:
 
 Back the key up with the same care as the Windows `.pfx` and the Android
 keystore. If it is lost, a new key can be generated, but already-installed
-updaters will not trust artifacts signed by the new key — that migration needs
+updaters will not trust artifacts signed by the new key, that migration needs
 one manual reinstall for everyone.
 
 ### What CI does with it
 
 - `updater-overrides.json` (repo root) turns on `bundle.createUpdaterArtifacts`
-  via `--config`, but only when the key secret exists. On macOS and Linux the
-  `tauri-action` builds pass it conditionally and sign the updater bundles at
-  build time - safe there, because nothing rewrites those binaries afterwards.
+ via `--config`, but only when the key secret exists. On macOS and Linux the
+ `tauri-action` builds pass it conditionally and sign the updater bundles at
+ build time - safe there, because nothing rewrites those binaries afterwards.
 - The Windows jobs build WITHOUT updater artifacts: Authenticode (Trusted
-  Signing or the .pfx) signs the installer AFTER the build, rewriting the exe
-  bytes, so a build-time `.sig` would no longer match the shipped installer.
-  Instead, the last step of each Windows job runs `npx tauri signer sign` over
-  the FINAL (signed or unsigned) installer and uploads that `.sig`.
+ Signing or the .pfx) signs the installer AFTER the build, rewriting the exe
+ bytes, so a build-time `.sig` would no longer match the shipped installer.
+ Instead, the last step of each Windows job runs `npx tauri signer sign` over
+ the FINAL (signed or unsigned) installer and uploads that `.sig`.
 - The `updater-manifest` job then assembles `latest.json` from the `.sig`
-  files that are actually on the release - Windows entries from the
-  regenerated signatures, Linux entries from tauri-action's - and uploads it
-  before the checksum pass, so `SHA256SUMS.txt` covers the manifest too.
-  Its platform URLs use the versioned `releases/download/<tag>/<asset>` form,
-  not the `releases/latest/download/<asset>` alias, which only resolves for
-  stable releases and would 404 while Fress publishes prereleases.
+ files that are actually on the release - Windows entries from the
+ regenerated signatures, Linux entries from tauri-action's - and uploads it
+ before the checksum pass, so `SHA256SUMS.txt` covers the manifest too.
+ Its platform URLs use the versioned `releases/download/<tag>/<asset>` form,
+ not the `releases/latest/download/<asset>` alias, which only resolves for
+ stable releases and would 404 while Fress publishes prereleases.
 
 ### Remaining step: wire the in-app plugin
 
@@ -206,11 +206,11 @@ each release simply wait for it.
 Two notes for when the runtime plugin gets wired:
 
 - The endpoint points at GitHub's `releases/latest/download/latest.json`
-  alias, which only resolves for STABLE releases. While Fress publishes
-  alpha/beta prereleases, that alias 404s — use a per-channel manifest
-  (a branch file or a tiny redirect service listing the newest
-  prerelease) or ship a stable release. The per-release `latest.json`
-  assets themselves already use versioned URLs that always resolve.
+ alias, which only resolves for STABLE releases. While Fress publishes
+ alpha/beta prereleases, that alias 404s, use a per-channel manifest
+ (a branch file or a tiny redirect service listing the newest
+ prerelease) or ship a stable release. The per-release `latest.json`
+ assets themselves already use versioned URLs that always resolve.
 
 ### Sequencing: Authenticode and the updater signatures
 
@@ -235,9 +235,9 @@ A fully quiet first launch needs two things, and both come from an Apple
 Developer account (USD 99 per year, the only paid piece of the macOS path):
 
 1. A **Developer ID Application** certificate, which signs the app so macOS
-   knows who built it.
+ knows who built it.
 2. A **notarization** pass, where Apple scans the signed app and staples an
-   approval ticket to it.
+ approval ticket to it.
 
 The release workflow already carries the wiring: when the following secrets
 exist on the repo, `tauri-action` signs both dmg builds and notarizes them

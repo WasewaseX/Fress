@@ -34,7 +34,7 @@ describe('parseVersion', () => {
   });
 });
 
-describe('compareVersions — the old code treated these all as [1,0,1]', () => {
+describe('compareVersions, the old code treated these all as [1,0,1]', () => {
   it('ranks stable above every prerelease of the same version', () => {
     expect(compareVersions('1.0.1', '1.0.1-alpha')).toBe(1);
     expect(compareVersions('1.0.1', '1.0.1-beta')).toBe(1);
@@ -96,7 +96,7 @@ describe('releaseMatchesChannel', () => {
   });
 });
 
-describe('pickOwnAsset — macOS assets', () => {
+describe('pickOwnAsset, macOS assets', () => {
   const release = (names: string[]): OwnRelease => ({
     tag: 'v1.0.4-alpha',
     version: '1.0.4-alpha',
@@ -148,7 +148,7 @@ describe('pickOwnAsset — macOS assets', () => {
   });
 });
 
-describe('pickOwnAsset — Android assets', () => {
+describe('pickOwnAsset, Android assets', () => {
   const release = (names: string[]): OwnRelease => ({
     tag: 'v1.0.4-alpha',
     version: '1.0.4-alpha',
@@ -233,7 +233,7 @@ describe('pickOwnAsset — Android assets', () => {
   });
 });
 
-describe('pickOwnAsset — Windows assets (setup is a bonus, never an early return)', () => {
+describe('pickOwnAsset, Windows assets (setup is a bonus, never an early return)', () => {
   const release = (names: string[]): OwnRelease => ({
     tag: 'v1.0.5-alpha',
     version: '1.0.5-alpha',
@@ -314,7 +314,7 @@ describe('pickOwnAsset — Windows assets (setup is a bonus, never an early retu
   });
 });
 
-describe('pickOwnAsset — Linux assets (architecture-aware, refuses mismatches)', () => {
+describe('pickOwnAsset, Linux assets (architecture-aware, refuses mismatches)', () => {
   const release = (names: string[]): OwnRelease => ({
     tag: 'v1.0.5-alpha',
     version: '1.0.5-alpha',
@@ -392,7 +392,7 @@ describe('pickOwnAsset — Linux assets (architecture-aware, refuses mismatches)
   });
 });
 
-describe('pickOwnAsset — Android assets (full ABI awareness, classification shared with the catalog)', () => {
+describe('pickOwnAsset, Android assets (full ABI awareness, classification shared with the catalog)', () => {
   const release = (names: string[]): OwnRelease => ({
     tag: 'v1.0.5-alpha',
     version: '1.0.5-alpha',
@@ -490,7 +490,7 @@ describe('pickOwnAsset — Android assets (full ABI awareness, classification sh
   });
 });
 
-describe('fetchFromApi — GitHub prerelease flag is a stability signal', () => {
+describe('fetchFromApi, GitHub prerelease flag is a stability signal', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -536,7 +536,7 @@ describe('fetchFromApi — GitHub prerelease flag is a stability signal', () => 
   });
 });
 
-describe('fetchOwnLatestRelease — atom fallback', () => {
+describe('fetchOwnLatestRelease, atom fallback', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

@@ -67,10 +67,10 @@ afterEach(() => {
 });
 
 /* ------------------------------------------------------------------ */
-/* getDownloadOptions — fallback ordering                              */
+/* getDownloadOptions, fallback ordering                              */
 /* ------------------------------------------------------------------ */
 
-describe('getDownloadOptions — fallback ordering', () => {
+describe('getDownloadOptions, fallback ordering', () => {
   it('offers the official download page before the forge releases page', () => {
     const app = makeApp({ downloadUrl: 'https://example.com/download' });
     const options = getDownloadOptions(app, 'windows');
@@ -105,10 +105,10 @@ describe('getDownloadOptions — fallback ordering', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* resolveGitHubDownload — recent-releases scan                        */
+/* resolveGitHubDownload, recent-releases scan                        */
 /* ------------------------------------------------------------------ */
 
-describe('resolveGitHubDownload — recent-releases scan', () => {
+describe('resolveGitHubDownload, recent-releases scan', () => {
   // The resolver caches per repo|platform for the whole session, so every
   // test uses its own repo slug to stay independent.
   let n = 0;

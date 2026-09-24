@@ -25,7 +25,7 @@ const ETAG_KEY = 'fress.stars.etags.v1';
 const TTL_MS = 6 * 60 * 60 * 1000;
 // Cache entries survive well past the refresh TTL: eviction only kicks in
 // when the store grows past 300 repos, and then drops entries older than
-// 30 days (a deliberate, distinct constant — not a multiple of TTL_MS).
+// 30 days (a deliberate, distinct constant, not a multiple of TTL_MS).
 const MAX_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface CacheEntry { n: number; t: number; e?: string }
@@ -152,7 +152,7 @@ async function fetchStars(repo: RepoKey): Promise<number | null> {
 
       // Out of quota (or throttled): back off until GitHub says the hourly
       // quota resets, or one hour when no reset header is present. The
-      // stored number stays on screen in the meantime — release-synced,
+      // stored number stays on screen in the meantime, release-synced,
       // never invented. The pause expires on its own, so a session left
       // open resumes live fetches without a restart.
       if (res.status === 403 || res.status === 429) {

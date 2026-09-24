@@ -35,7 +35,7 @@ describe('cleanVersion', () => {
   });
 });
 
-describe('pickAsset — heuristic selection', () => {
+describe('pickAsset, heuristic selection', () => {
   it('picks the x64 setup exe on x86_64 Windows, not the arm64 one', () => {
     const pick = pickAsset(
       [asset('Tool-2.1-arm64-setup.exe'), asset('Tool-2.1-x64-setup.exe'), asset('Tool-2.1.msi')],
@@ -206,7 +206,7 @@ describe('pickAsset — heuristic selection', () => {
   });
 });
 
-describe('pickAssetDetailed — override and confidence', () => {
+describe('pickAssetDetailed, override and confidence', () => {
   it('an assetPatterns override outranks the heuristic', () => {
     const res = pickAssetDetailed(
       [asset('weird-name-x64.zip'), asset('ToolSetup.exe'), asset('ToolSetup.arm64.exe')],

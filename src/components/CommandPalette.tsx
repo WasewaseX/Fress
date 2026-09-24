@@ -164,7 +164,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   }, [query, apps, viewMode]);
 
   // The selection can go stale when the list shrinks under it (the apps
-  // array updates while the palette is open — live stars, a fresh import).
+  // array updates while the palette is open: live stars, a fresh import).
   // Clamping keeps Enter and the highlight on a real row in every case;
   // typing already resets the index in the input's onChange.
   const activeIndex = Math.min(selectedIndex, Math.max(0, filteredItems.length - 1));

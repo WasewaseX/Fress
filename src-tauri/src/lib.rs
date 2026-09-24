@@ -179,10 +179,7 @@ async fn fetch_recent_releases(
     let include_flagged = include_flagged.unwrap_or(false);
     Ok(list
         .iter()
-        .filter(|r| {
-            include_flagged
-                || r.get("prerelease").and_then(|v| v.as_bool()) != Some(true)
-        })
+        .filter(|r| include_flagged || r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
         .filter_map(|r| parse_gh_release(r, &repo))
         .collect())
 }

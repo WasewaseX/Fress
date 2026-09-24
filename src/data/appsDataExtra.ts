@@ -685,6 +685,10 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Otter.ai / Rev',
     architectures: ['x86_64'],
     offlineReady: true,
+    // The release also carries Library.zip, WhisperPS.zip and cli.zip; pin
+    // the actual desktop app archive or an alphabetical tie hands the user
+    // the models library instead of the program.
+    assetPatterns: { windows: '^WhisperDesktop\\.zip$' },
     addedAt: '2025-09-22'
   },
   {
@@ -711,6 +715,11 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Gmail / Outlook',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
+    // One repo, many products: tutanota-release (web), tutanota-desktop-
+    // release (installers), tutanota-android-release (apk) and the calendar
+    // streams. Pin the stream per platform or the picker grabs nothing
+    // (desktop) or the wrong product's apk (calendar).
+    tagPatterns: { windows: '^tutanota-desktop-', mac: '^tutanota-desktop-', linux: '^tutanota-desktop-', android: '^tutanota-android-' },
     addedAt: '2026-09-21'
   },
   {
@@ -763,6 +772,10 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Photos / Apple iCloud Photos',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
+    // ente-io/ente releases photos, auth, locker and Ensu from one repo.
+    // Without the '^photos-' stream pin the desktop picker served Ensu
+    // installers (a different product) and android grabbed Ensu's apk.
+    tagPatterns: { windows: '^photos-', mac: '^photos-', linux: '^photos-', android: '^photos-' },
     addedAt: '2026-09-21'
   },
   {
@@ -790,6 +803,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Authenticator / Authy',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
+    // Same shared repo as Ente Photos; only the auth-v* stream is this app.
+    tagPatterns: { windows: '^auth-', mac: '^auth-', linux: '^auth-', android: '^auth-' },
     addedAt: '2026-09-21'
   },
   {

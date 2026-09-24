@@ -133,7 +133,11 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
 /// hands back enough recent releases for the frontend to scan them in order
 /// and find the stream that actually carries the platform's installer.
 #[tauri::command]
-async fn fetch_recent_releases(repo: String, count: Option<u32>) -> Result<Vec<GhRelease>, String> {
+async fn fetch_recent_releases(
+    repo: String,
+    count: Option<u32>,
+    include_flagged: Option<bool>,
+) -> Result<Vec<GhRelease>, String> {
     let repo = repo.trim().trim_matches('/').to_string();
     if repo.is_empty() {
         return Err("No GitHub repository configured".into());
@@ -168,10 +172,17 @@ async fn fetch_recent_releases(repo: String, count: Option<u32>) -> Result<Vec<G
         .as_array()
         .ok_or_else(|| "Unexpected GitHub response".to_string())?;
     // GitHub returns prereleases here too; the frontend picks assets only
-    // from entries the caller marks stable, so filter them out at the source.
+    // from entries the caller marks stable, so filter them out at the
+    // source. An app entry may vouch for a repo that flags its own stable
+    // builds as prereleases (DevToys has never shipped an unflagged
+    // release) - include_flagged bypasses the filter for that repo only.
+    let include_flagged = include_flagged.unwrap_or(false);
     Ok(list
         .iter()
-        .filter(|r| r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
+        .filter(|r| {
+            include_flagged
+                || r.get("prerelease").and_then(|v| v.as_bool()) != Some(true)
+        })
         .filter_map(|r| parse_gh_release(r, &repo))
         .collect())
 }

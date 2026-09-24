@@ -58,6 +58,18 @@ export interface AppItem {
    * outranks the heuristic asset picker entirely. Example:
    *   assetPatterns: { windows: 'myapp-.*?-win64(-portable)?\\.zip' } */
   assetPatterns?: Partial<Record<Platform, string>>;
+  /** Per-platform release-tag regexes for repos that publish several
+   * products from one repo under different tag prefixes (Ente ships photos,
+   * auth, locker and Ensu from ente-io/ente; Tuta splits desktop, android
+   * and calendar streams). Without a pattern here, the asset picker can
+   * grab a DIFFERENT product's installer just because it carries the right
+   * file extension. Example: tagPatterns: { android: '^photos-' } */
+  tagPatterns?: Partial<Record<Platform, string>>;
+  /** Some projects flag their own stable releases as prerelease on GitHub
+   * (DevToys does this for every release), which makes the stable-only
+   * resolver see an empty release list. Set true only for repos verified
+   * to mislabel their stable builds. */
+  includeFlaggedReleases?: boolean;
   addedAt: string;
   isCustom?: boolean;
 }

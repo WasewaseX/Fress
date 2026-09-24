@@ -22,7 +22,7 @@ import {
 import { bestDownloadFor } from '../lib/appDownloads';
 import { useDownloads } from '../lib/downloads';
 import { openExternal } from '../lib/external';
-import { resolveGitHubDownload, resolveFdroidDownload, guessUserPlatform } from '../lib/releaseFetch';
+import { resolveDownloadFor, guessUserPlatform } from '../lib/releaseFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { toast } from 'sonner';
 import { useI18n } from '../lib/i18n';
@@ -373,19 +373,12 @@ export const AppCard: React.FC<AppCardProps> = ({
               void (async () => {
                 setResolving(true);
                 try {
-                  // 1) Live-resolve the latest STABLE file for this platform from GitHub Releases
-                  const resolved = await resolveGitHubDownload(app, platform);
+                  // Confidence order lives in resolveDownloadFor: confident
+                  // GitHub pick, then the F-Droid package, then a weak pick.
+                  const resolved = await resolveDownloadFor(app, platform);
                   if (resolved) {
                     void startDownload(resolved.url, resolved.filename);
                     return;
-                  }
-                  // 2) Android: try the app's F-Droid package next
-                  if (platform === 'android' && app.fdroidId) {
-                    const fd = await resolveFdroidDownload(app.fdroidId);
-                    if (fd) {
-                      void startDownload(fd.url, fd.filename);
-                      return;
-                    }
                   }
                   // 3) Curated targets: direct links stream in the app
                   const target = bestDownloadFor(app, platform);
@@ -403,7 +396,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                     // window instead of downloading".
                     recordExternalOpen(`${app.name}: ${target.label}`, target.url);
                     toast.info(`Opening the official download page for ${app.name}`, {
-                      description: `${target.label} — it opens in your browser.`,
+                      description: `${target.label} opens in your browser.`,
                     });
                     void openExternal(target.url);
                   }

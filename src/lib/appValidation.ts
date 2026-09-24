@@ -130,6 +130,25 @@ export function sanitizeAppItem(raw: unknown): SanitizedApp {
     if (Object.keys(out).length > 0) assetPatterns = out;
   }
 
+  // tagPatterns: per-platform release-tag regexes, validated exactly like
+  // assetPatterns. A broken regex must never throw inside the resolve path.
+  let tagPatterns: Partial<Record<Platform, string>> | undefined;
+  if (r.tagPatterns && typeof r.tagPatterns === 'object' && !Array.isArray(r.tagPatterns)) {
+    const out: Partial<Record<Platform, string>> = {};
+    for (const [k, v] of Object.entries(r.tagPatterns as Record<string, unknown>)) {
+      if (!(PLATFORMS as string[]).includes(k)) continue;
+      if (typeof v !== 'string' || v.length === 0 || v.length > MAX_PATTERN_LEN) continue;
+      try {
+        // eslint-disable-next-line no-new
+        new RegExp(v, 'i');
+        out[k as Platform] = v;
+      } catch {
+        // invalid pattern dropped; the validator flags authoring mistakes
+      }
+    }
+    if (Object.keys(out).length > 0) tagPatterns = out;
+  }
+
   // Install commands get the same treatment as always: only plain
   // "<manager> install <package>" invocations survive.
   const cmdRaw = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
@@ -187,6 +206,8 @@ export function sanitizeAppItem(raw: unknown): SanitizedApp {
     offlineReady: typeof r.offlineReady === 'boolean' ? r.offlineReady : undefined,
     lastVerifiedAt,
     assetPatterns,
+    tagPatterns,
+    includeFlaggedReleases: typeof r.includeFlaggedReleases === 'boolean' ? r.includeFlaggedReleases : undefined,
     addedAt,
     isCustom: r.isCustom === true ? true : undefined,
   };

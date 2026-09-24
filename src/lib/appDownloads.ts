@@ -134,6 +134,15 @@ const CURATED: Record<string, CuratedEntry> = {
   'f-droid': {
     android: [{ kind: 'direct', label: 'F-Droid .apk (direct)', url: 'https://f-droid.org/F-Droid.apk', note: 'Official client installer' }],
   },
+  bitwarden: {
+    // The desktop installers live on the bitwarden/clients repo under
+    // desktop-v* tags, which a single githubUrl cannot reach; these vault
+    // aliases always redirect to the current release (verified: exe, dmg,
+    // AppImage).
+    windows: [{ kind: 'direct', label: 'Bitwarden for Windows', url: 'https://vault.bitwarden.com/download/?app=desktop&platform=windows', note: 'Official installer, always the current release' }],
+    mac: [{ kind: 'direct', label: 'Bitwarden for macOS', url: 'https://vault.bitwarden.com/download/?app=desktop&platform=macos', note: 'Universal .dmg, always the current release' }],
+    linux: [{ kind: 'direct', label: 'Bitwarden for Linux', url: 'https://vault.bitwarden.com/download/?app=desktop&platform=linux', note: 'AppImage, always the current release' }],
+  },
   sumatra: {
     windows: [{ kind: 'page', label: 'Download installer or portable', url: 'https://www.sumatrapdfreader.org/download-free-pdf-viewer' }],
   },

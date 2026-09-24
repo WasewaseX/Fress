@@ -50,7 +50,7 @@ import {
 import { Toaster, toast } from 'sonner';
 import { sanitizeAppItem } from './lib/appValidation';
 import { bestDownloadFor } from './lib/appDownloads';
-import { guessUserPlatform, resolveGitHubDownload, resolveFdroidDownload } from './lib/releaseFetch';
+import { guessUserPlatform, resolveDownloadFor } from './lib/releaseFetch';
 import { useI18n } from './lib/i18n';
 
 const STORAGE_KEY_CUSTOM_APPS = 'fress_custom_items';
@@ -321,7 +321,9 @@ function AppShell() {
         let url: string | null = null;
         let name = app.name;
         try {
-          const resolved = await resolveGitHubDownload(app, platform);
+          // Confidence order lives in resolveDownloadFor: confident GitHub
+          // pick, then the F-Droid package, then a flagged weak pick.
+          const resolved = await resolveDownloadFor(app, platform);
           if (resolved) {
             url = resolved.url;
             name = resolved.filename;
@@ -329,17 +331,6 @@ function AppShell() {
           }
         } catch {
           url = null;
-        }
-        if (!url && platform === 'android' && app.fdroidId) {
-          try {
-            const fd = await resolveFdroidDownload(app.fdroidId);
-            if (fd) {
-              url = fd.url;
-              name = fd.filename;
-            }
-          } catch {
-            url = null;
-          }
         }
         if (!url) {
           const target = bestDownloadFor(app, platform);
@@ -371,7 +362,7 @@ function AppShell() {
         // official download target (curated page, downloadUrl or releases
         // page) directly in the browser, staggered so popup blockers keep up.
         toast.info(t('batchDL.skipped').replace('{n}', String(skipped.length)), {
-          description: `${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''} — ${t('batchDL.skippedHint')}`,
+          description: `${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''}: ${t('batchDL.skippedHint')}`,
           action: {
             label: t('batchDL.openPages'),
             onClick: () => {

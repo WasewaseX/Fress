@@ -257,8 +257,17 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       break;
     }
     case 'windows': {
+      // A file tagged for another OS is never the Windows build. The zip
+      // tier made this reachable: syncthing-macos-amd64.zip otherwise ties
+      // with syncthing-windows-amd64.zip (same extension, same arch token)
+      // and alphabetical order hands the user the macOS build.
+      if (/macos|darwin|linux|android|[-_.]mac[-_.]/.test(n)) return -1;
       if (n.endsWith('.exe')) s += 6;
       else if (n.endsWith('.msi')) s += 4;
+      // Self-contained archive builds are the ONLY distribution some
+      // projects ship (Syncthing, Whisper Desktop, LosslessCut). Below any
+      // installer: when a repo publishes both, the installer should win.
+      else if (n.endsWith('.zip') || n.endsWith('.7z')) s += 2;
       else return -1;
       // Gate: an x86_64 machine can never run an arm64-only installer (WoA
       // emulates x64/x86, not the reverse) - previously it stayed pickable
@@ -272,13 +281,21 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       // "x86-64" (LocalSend) matched x86(?!_64) and lost 3 points as if it
       // were a 32-bit build, on top of missing the x64 bonus.
       if (/win32|ia32|i686|32[-_.]?bit|x86(?![_-]?64)/.test(n) && !/x64|x86[_-]?64|win64/.test(n)) s -= 3;
+      // Builds kept around for old Windows only (KeePassXC names them
+      // "LegacyWindows") must lose to the current installer every time.
+      if (/legacy/.test(n)) s -= 6;
       if (/x64|x86[_-]?64|amd64|win64/.test(n)) s += arch === 'aarch64' ? 0 : 3;
       break;
     }
     case 'mac': {
+      // Same cross-OS guard as Windows: devtoys_linux_x64_portable.zip
+      // otherwise becomes a "mac build" the moment zips are scoreable.
+      if (/linux|android|windows|[-_.]win(32|64)?[-_.0-9]|[-_.]win$/.test(n)) return -1;
       if (!n.endsWith('.dmg')) {
-        // .pkg is an acceptable macOS fallback but dmg is friendlier
+        // .pkg is an acceptable macOS fallback but dmg is friendlier; .zip
+        // is the only distribution some projects ship (Syncthing, DevToys).
         if (n.endsWith('.pkg')) s += 0;
+        else if (n.endsWith('.zip')) s += 1;
         else return -1;
       } else {
         s += 4;
@@ -292,10 +309,18 @@ function scoreAsset(name: string, platform: Platform, arch: string | undefined):
       break;
     }
     case 'linux': {
+      // Cross-OS guard: ollama-darwin.tgz used to be the last-resort pick
+      // for Linux hosts; a darwin/macos/windows name is never a Linux build.
+      if (/macos|darwin|[-_.]mac[-_.]|windows|[-_.]win(32|64)?[-_.0-9]|android/.test(n)) return -1;
       if (n.endsWith('.appimage')) s += 7;
       else if (n.endsWith('.deb')) s += 5;
       else if (n.endsWith('.rpm')) s += 3;
-      else if (/\.t(ar\.gz|gz|zst)$/.test(n)) s += 1;
+      // The \.t prefix trick covers .tar.gz / .tgz / .tar.zst / .tzst /
+      // .tar.xz / .txz / .tar.bz2 / .tbz2 in one regex. Ollama moved its
+      // Linux build from .tgz to .tar.zst and 7-Zip ships .tar.xz; the old
+      // regex only knew tar.gz, so those builds scored -1 and a WRONG
+      // archive (ollama-darwin.tgz) became the pick for Linux.
+      else if (/\.t(ar\.)?(gz|zst|xz|bz2)$/.test(n)) s += 1;
       else return -1;
       // Gate: no usable cross-ISA emulation in a desktop context, so an
       // ARM machine gets nothing from x86_64-only releases and vice versa
@@ -457,9 +482,13 @@ interface GhReleaseListRaw {
   assets: { name: string; size: number; browser_download_url: string }[];
 }
 
-async function getRecentReleases(repo: string, count: number): Promise<ReleaseInfo[]> {
+async function getRecentReleases(
+  repo: string,
+  count: number,
+  includeFlagged = false
+): Promise<ReleaseInfo[]> {
   if (isTauri()) {
-    const r = await invoke<GhReleaseRaw[]>('fetch_recent_releases', { repo, count });
+    const r = await invoke<GhReleaseRaw[]>('fetch_recent_releases', { repo, count, includeFlagged });
     return (r || []).map((rel) => ({
       tag: rel.tag,
       name: rel.name,
@@ -476,19 +505,22 @@ async function getRecentReleases(repo: string, count: number): Promise<ReleaseIn
   if (resp.status === 403 || resp.status === 429) throw new Error('GitHub rate limit reached');
   if (!resp.ok) throw new Error(`GitHub HTTP ${resp.status}`);
   const d: GhReleaseListRaw[] = await resp.json();
-  return (Array.isArray(d) ? d : [])
-    .filter((r) => r.prerelease !== true)
-    .map((r) => ({
-      tag: r.tag_name || '',
-      name: r.name || r.tag_name || '',
-      publishedAt: r.published_at || '',
-      htmlUrl: r.html_url || `https://github.com/${repo}/releases`,
-      assets: (r.assets || []).map((a) => ({
-        name: a.name,
-        size: a.size,
-        downloadUrl: a.browser_download_url,
-      })),
-    }));
+  const list = Array.isArray(d) ? d : [];
+  // Some projects flag their own stable builds as prereleases (DevToys has
+  // never shipped an unflagged release). Only a catalog entry that vouches
+  // for that repo may include them.
+  const stable = includeFlagged ? list : list.filter((r) => r.prerelease !== true);
+  return stable.map((r) => ({
+    tag: r.tag_name || '',
+    name: r.name || r.tag_name || '',
+    publishedAt: r.published_at || '',
+    htmlUrl: r.html_url || `https://github.com/${repo}/releases`,
+    assets: (r.assets || []).map((a) => ({
+      name: a.name,
+      size: a.size,
+      downloadUrl: a.browser_download_url,
+    })),
+  }));
 }
 
 export interface FdroidInfo {
@@ -591,11 +623,31 @@ function cacheSet(
 export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
   const repo = parseGithubRepo(app.githubUrl);
   if (!repo || platform === 'web' || platform === 'ios') return Promise.resolve(null);
-  const key = `${repo}|${platform}`;
+  // The cache key must carry everything that changes WHAT is fetched, not
+  // just what is picked: two apps can share one repo while using different
+  // tag-stream filters (Ente Photos and Ente Auth both live on ente-io/
+  // ente), and a flagged-releases entry fetches a different release list.
+  const key = `${repo}|${platform}|${app.tagPatterns?.[platform] ?? ''}|${app.includeFlaggedReleases ? 'flagged' : ''}`;
   if (!ghCache.has(key)) {
     const p = (async () => {
         try {
           const arch = await getHostArch();
+          // Tag-stream filter: repos that ship several products from one
+          // repo under different tag prefixes (Ente: photos/auth/locker/
+          // Ensu; Tuta: desktop/android/calendar). Without it the picker
+          // can serve a DIFFERENT product's installer that merely carries
+          // the right file extension. An invalid pattern must not kill the
+          // download path, so a failed compile just disables the filter.
+          let tagRe: RegExp | null = null;
+          const tagSrc = app.tagPatterns?.[platform];
+          if (tagSrc) {
+            try {
+              tagRe = new RegExp(tagSrc, 'i');
+            } catch {
+              tagRe = null;
+            }
+          }
+          const tagOk = (tag: string): boolean => (tagRe ? tagRe.test(tag) : true);
           // 1) The cheapest correct answer: the repo's single latest stable
           //    release. This is where every well-behaved project resolves.
           //    A 404 here (repos with only prereleases, or release-less
@@ -607,6 +659,9 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           } catch {
             latest = null;
           }
+          // A latest release from the wrong product stream is worse than
+          // none: drop it and let the scan find the right stream.
+          if (latest && !tagOk(latest.tag)) latest = null;
           // Confidence is decided the same way on both paths now: a
           // confident pick wins wherever it appears (latest first, then the
           // recent scan); a weak pick from the latest release is only ever
@@ -627,18 +682,35 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           //    stream, so the platform's installer seems not to exist. Scan
           //    the recent stable releases in order instead - the first one
           //    carrying a confident match for this platform wins.
-          const recent = await getRecentReleases(repo, RECENT_RELEASES_COUNT);
+          const recent = await getRecentReleases(
+            repo,
+            RECENT_RELEASES_COUNT,
+            app.includeFlaggedReleases === true
+          );
+          // Unmarked or odd-extension files never win the scan while a
+          // confident pick exists, but they beat a dead end: remember the
+          // newest weak pick (Tuta's unmarked android apk, SimpleX's stable
+          // apks) and fall back to it, flagged, when nothing confident
+          // surfaced anywhere.
+          let weakScan: { detailed: AssetPick; rel: ReleaseInfo } | null = null;
           for (const candidate of recent) {
+            if (!tagOk(candidate.tag)) continue;
             const cPick = pickAssetDetailed(candidate.assets, platform, arch, app.assetPatterns);
             if (cPick && !cPick.weak) {
               return toResolved(cPick, candidate);
             }
+            if (cPick && !weakScan) {
+              weakScan = { detailed: cPick, rel: candidate };
+            }
           }
-          // 3) Nothing confident anywhere. The latest release's low-
-          //    confidence pick is still better than no download at all,
-          //    and the weak flag makes the UI say so.
+          // 3) Nothing confident anywhere. A low-confidence pick is still
+          //    better than no download at all, and the weak flag makes the
+          //    UI say so.
           if (weakLatest) {
             return toResolved(weakLatest.detailed, weakLatest.rel);
+          }
+          if (weakScan) {
+            return toResolved(weakScan.detailed, weakScan.rel);
           }
           return null;
         } catch {
@@ -691,6 +763,31 @@ export function resolveFdroidDownload(pkgId: string): Promise<ResolvedDownload |
 
 export function fdroidPageUrl(pkgId: string): string {
   return `https://f-droid.org/packages/${pkgId.trim()}/`;
+}
+
+/**
+ * One-stop resolution for the one-click button and the batch downloader.
+ * Confidence order:
+ *   1. A confident GitHub pick (properly named for this platform and arch).
+ *   2. The app's F-Droid package on Android. A weak GitHub pick (no arch
+ *      marker, odd name) must not preempt it: F-Droid builds update
+ *      consistently among themselves, while a generic GitHub apk can be
+ *      the wrong signing flavor for an existing install.
+ *   3. The weak GitHub pick as a last resort, flagged so the UI cautions.
+ *   4. null, so the caller can fall back to curated targets and pages.
+ */
+export async function resolveDownloadFor(
+  app: AppItem,
+  platform: Platform
+): Promise<ResolvedDownload | null> {
+  const gh = await resolveGitHubDownload(app, platform);
+  const fdAllowed = platform === 'android' && !!app.fdroidId;
+  if (gh && (!gh.weak || !fdAllowed)) return gh;
+  if (fdAllowed && app.fdroidId) {
+    const fd = await resolveFdroidDownload(app.fdroidId);
+    if (fd) return fd;
+  }
+  return gh ?? null;
 }
 
 export function playStoreUrl(pkgId: string): string {

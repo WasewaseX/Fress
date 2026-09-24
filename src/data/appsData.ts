@@ -128,14 +128,14 @@ const BASE_APPS: AppItem[] = [
     description: 'A secure and open source password management solution for storing credentials, credit card details, and private secure notes with end-to-end encryption.',
     whyItsAwesome: 'Works everywhere: browser extensions and mobile apps included. Open source and audited by independent cryptography researchers.',
     beginnerGuide: 'Install the browser extension. When signing up on any website, Bitwarden will generate a secure random password and save it automatically.',
-    githubUrl: 'https://github.com/bitwarden/server',
+    githubUrl: 'https://github.com/bitwarden/clients',
     websiteUrl: 'https://bitwarden.com',
     downloadUrl: 'https://bitwarden.com/download',
     category: 'Privacy & Security',
     platforms: ['windows', 'mac', 'linux', 'web', 'android', 'ios'],
     playStoreId: 'com.x8bit.bitwarden',
     license: 'AGPL-3.0',
-    stars: 20129,
+    stars: 13832,
     beginnerRating: 'Super Beginner Friendly',
     isOwnerPick: false,
     isTrendingToday: false,
@@ -148,6 +148,9 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
+    // The clients repo releases browser, cli, web and desktop builds from
+    // one repo; only the desktop-v* tags carry the installers.
+    tagPatterns: { windows: '^desktop-', mac: '^desktop-', linux: '^desktop-' },
     addedAt: '2025-01-20'
   },
   {
@@ -287,6 +290,10 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
+    // Every release on this repo is flagged prerelease, including the
+    // stable 2.x builds the website links to. Without vouching for the
+    // repo here, the stable-only resolver sees an empty release list.
+    includeFlaggedReleases: true,
     addedAt: '2025-02-10'
   },
   {
@@ -565,6 +572,10 @@ const BASE_APPS: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
+    // The release also carries GPU-specific forks of the Linux tarball
+    // (-mlx, -rocm) and Jetson builds of the arm64 one. The [^-]+ pin keeps
+    // the plain per-arch tarball ahead of those variants.
+    assetPatterns: { linux: '^ollama-linux-[^-]+\\.tar\\.zst$' },
     addedAt: '2025-02-20'
   },
   {

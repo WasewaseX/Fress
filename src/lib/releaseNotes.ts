@@ -27,6 +27,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     items: [
       'Batch downloads no longer stampede your bandwidth: three transfers run at a time and the rest wait in a visible queue with cancel buttons, draining automatically.',
       'Resolved download links are remembered for a few hours, so the shared GitHub rate limit stops punishing repeat visits and batches. The detail modal now says honestly when a lookup failed because of that limit.',
+      'The download panel survives an app restart now: a download interrupted by a reboot comes back resumable with one click, and finished entries stay listed.',
       'Ten Android apps (Obsidian, Mastodon, Mullvad, Aegis, the Fossify apps and friends) resolve to their real APK with confidence instead of a flagged guess, and Jellyfin and LibreWolf resolve again after their catalog entries pointed at dead repositories.',
     ],
   },

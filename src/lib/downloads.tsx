@@ -11,6 +11,7 @@ import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
 import { formatBytes, formatSpeed, formatEta } from './format';
 import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
+import { serializeItems, deserializeItems, DOWNLOAD_ITEMS_KEY } from './downloadItemsStore';
 
 export { formatBytes, formatSpeed, formatEta };
 
@@ -82,8 +83,29 @@ interface DownloadsContextValue {
 const DownloadsContext = createContext<DownloadsContextValue | null>(null);
 
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = useState<DownloadItem[]>([]);
+  // The panel survives restarts: completed/failed entries come back (the
+  // .part files and finished files are on disk), and a download that was
+  // mid-flight when the app closed is restored as resumable, because that
+  // is exactly what it is. Ids are re-assigned to fresh negatives so they
+  // can never collide with the Rust side's ids, which restart at 0.
+  const [items, setItems] = useState<DownloadItem[]>(() => {
+    try {
+      return deserializeItems(localStorage.getItem(DOWNLOAD_ITEMS_KEY)).map((it) => ({
+        ...it,
+        id: makeLocalItemId(),
+      }));
+    } catch {
+      return [];
+    }
+  });
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem(DOWNLOAD_ITEMS_KEY, serializeItems(items));
+    } catch {
+      // Storage full/blocked: the panel simply forgets on close.
+    }
+  }, [items]);
   const itemsRef = useRef<DownloadItem[]>([]);
   itemsRef.current = items;
   /** Downloads waiting for a free slot (max MAX_CONCURRENT_DOWNLOADS run at

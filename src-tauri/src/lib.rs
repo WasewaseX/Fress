@@ -290,8 +290,7 @@ const FETCH_TEXT_BODY_CAP: u64 = 2 * 1024 * 1024;
 
 #[tauri::command]
 async fn fetch_text(url: String) -> Result<TextFetch, String> {
-    let parsed = reqwest::Url::parse(url.trim())
-        .map_err(|_| "Not a valid URL".to_string())?;
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "Not a valid URL".to_string())?;
     if parsed.scheme() != "https" {
         return Err("Only https URLs are allowed".into());
     }
@@ -336,7 +335,13 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
         }
         String::from_utf8_lossy(&buf).into_owned()
     };
-    Ok(TextFetch { status, final_url, content_length, body, truncated })
+    Ok(TextFetch {
+        status,
+        final_url,
+        content_length,
+        body,
+        truncated,
+    })
 }
 
 /// Resolves the suggested stable package version from the F-Droid index.

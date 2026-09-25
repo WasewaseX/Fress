@@ -112,7 +112,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                         ? 'bg-emerald-500'
                         : item.status === 'error'
                           ? 'bg-rose-500'
-                          : item.status === 'cancelled'
+                          : item.status === 'cancelled' || item.status === 'queued'
                             ? 'bg-slate-500'
                             : 'bg-sky-500'
                     }`}
@@ -153,6 +153,11 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
 
                 <div className="flex items-center gap-1.5">
                   {item.status === 'active' && (
+                    <PanelButton onClick={() => cancel(item.id)} icon={<MinusCircle className="w-3 h-3" />} label={t('downloads.cancel')} />
+                  )}
+                  {item.status === 'queued' && (
+                    // Waiting for a free slot: nothing runs yet, so cancel is
+                    // just removing it from the line.
                     <PanelButton onClick={() => cancel(item.id)} icon={<MinusCircle className="w-3 h-3" />} label={t('downloads.cancel')} />
                   )}
                   {(item.status === 'error' || item.status === 'cancelled') && item.canResume && (
@@ -224,6 +229,9 @@ function StatusChip({ status, error, verified }: { status: string; error?: strin
   }
   if (status === 'browser') {
     return <span className="shrink-0 text-[11px] font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded">{t('downloads.openedInBrowser')}</span>;
+  }
+  if (status === 'queued') {
+    return <span className="shrink-0 text-[11px] font-medium bg-slate-500/15 text-slate-300 border border-slate-500/30 px-1.5 py-0.5 rounded">{t('downloads.queued')}</span>;
   }
   if (status === 'completed') {
     return (

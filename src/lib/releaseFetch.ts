@@ -603,6 +603,75 @@ const fdCache = new Map<string, Promise<ResolvedDownload | null>>();
  */
 const FAIL_TTL_MS = 30_000;
 
+/**
+ * Why the last resolution for a repo|platform returned nothing, when the
+ * reason is actionable (rate limit vs the honest "no stable build here").
+ * The UI reads this instead of showing a generic failure for what is often
+ * just GitHub's unauthenticated quota being exhausted.
+ */
+const resolveErrors = new Map<string, string>();
+
+/** The last actionable failure for a repo|platform lookup, or null. */
+export function peekResolveError(app: AppItem, platform: Platform): string | null {
+  const repo = parseGithubRepo(app.githubUrl);
+  if (!repo) return null;
+  return resolveErrors.get(`${repo}|${platform}`) ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Persistent resolver cache (localStorage)                            */
+/* ------------------------------------------------------------------ */
+/**
+ * GitHub's unauthenticated REST quota is 60 requests/hour PER IP. A batch
+ * download over the catalog spends it in minutes, and every app launch used
+ * to re-spend it again. Resolved downloads are cached to localStorage with
+ * a TTL: successes 6 hours (a project's "latest stable" rarely changes
+ * faster), failures 5 minutes. The store is capped so it can never grow
+ * without bound, and every cache partition includes the host arch + the
+ * app's stream filters, so a different vouching can never read a stale hit.
+ */
+const CACHE_KEY = 'fress.resolveCache.v1';
+const SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
+const FAIL_PERSIST_TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 300;
+
+interface CacheEntry { t: number; url: string | null; hit: ResolvedDownload | null }
+
+function loadPersisted(key: string): ResolvedDownload | null | undefined {
+  try {
+    if (typeof localStorage === 'undefined') return undefined;
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return undefined;
+    const store = JSON.parse(raw) as Record<string, CacheEntry>;
+    const e = store[key];
+    if (!e) return undefined;
+    const ttl = e.url === null ? FAIL_PERSIST_TTL_MS : SUCCESS_TTL_MS;
+    if (Date.now() - e.t > ttl) return undefined;
+    return e.hit;
+  } catch {
+    return undefined;
+  }
+}
+
+function persist(key: string, hit: ResolvedDownload | null): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(CACHE_KEY);
+    const store = (raw ? JSON.parse(raw) : {}) as Record<string, CacheEntry>;
+    const entries = Object.entries(store);
+    if (entries.length >= CACHE_MAX_ENTRIES) {
+      entries
+        .sort((a, b) => a[1].t - b[1].t)
+        .slice(0, Math.floor(CACHE_MAX_ENTRIES / 4))
+        .forEach(([k]) => delete store[k]);
+    }
+    store[key] = { t: Date.now(), url: hit?.url ?? null, hit };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(store));
+  } catch {
+    // Storage full/blocked: the in-memory cache still covers the session.
+  }
+}
+
 function cacheSet(
   cache: Map<string, Promise<ResolvedDownload | null>>,
   key: string,
@@ -627,11 +696,18 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
   // just what is picked: two apps can share one repo while using different
   // tag-stream filters (Ente Photos and Ente Auth both live on ente-io/
   // ente), and a flagged-releases entry fetches a different release list.
+  // (The persistent store additionally partitions by host arch, resolved
+  // inside the async closure below: the same repo+platform resolves
+  // DIFFERENT files on x64 vs ARM64 hosts.)
   const key = `${repo}|${platform}|${app.tagPatterns?.[platform] ?? ''}|${app.includeFlaggedReleases ? 'flagged' : ''}`;
   if (!ghCache.has(key)) {
     const p = (async () => {
         try {
           const arch = await getHostArch();
+          const persistKey = `${key}|${arch ?? 'u'}`;
+          // Persistent hit first: no network, no quota.
+          const cached = loadPersisted(persistKey);
+          if (cached !== undefined) return cached;
           // Tag-stream filter: repos that ship several products from one
           // repo under different tag prefixes (Ente: photos/auth/locker/
           // Ensu; Tuta: desktop/android/calendar). Without it the picker
@@ -656,8 +732,10 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           let latest: ReleaseInfo | null = null;
           try {
             latest = await getLatestRelease(repo);
-          } catch {
+          } catch (e) {
             latest = null;
+            const msg = (e as Error).message || '';
+            if (/rate limit/i.test(msg)) resolveErrors.set(key, msg);
           }
           // A latest release from the wrong product stream is worse than
           // none: drop it and let the scan find the right stream.
@@ -671,7 +749,9 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
             const detailed = pickAssetDetailed(latest.assets, platform, arch, app.assetPatterns);
             if (detailed) {
               if (!detailed.weak) {
-                return toResolved(detailed, latest);
+                const hit = toResolved(detailed, latest);
+                persist(persistKey, hit);
+                return hit;
               }
               weakLatest = { detailed, rel: latest };
             }
@@ -697,7 +777,9 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
             if (!tagOk(candidate.tag)) continue;
             const cPick = pickAssetDetailed(candidate.assets, platform, arch, app.assetPatterns);
             if (cPick && !cPick.weak) {
-              return toResolved(cPick, candidate);
+              const hit = toResolved(cPick, candidate);
+              persist(persistKey, hit);
+              return hit;
             }
             if (cPick && !weakScan) {
               weakScan = { detailed: cPick, rel: candidate };
@@ -707,13 +789,20 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           //    better than no download at all, and the weak flag makes the
           //    UI say so.
           if (weakLatest) {
-            return toResolved(weakLatest.detailed, weakLatest.rel);
+            const hit = toResolved(weakLatest.detailed, weakLatest.rel);
+            persist(persistKey, hit);
+            return hit;
           }
           if (weakScan) {
-            return toResolved(weakScan.detailed, weakScan.rel);
+            const hit = toResolved(weakScan.detailed, weakScan.rel);
+            persist(persistKey, hit);
+            return hit;
           }
+          persist(persistKey, null);
           return null;
-        } catch {
+        } catch (e) {
+          const msg = (e as Error).message || '';
+          if (/rate limit/i.test(msg)) resolveErrors.set(key, msg);
           return null;
         }
       })();

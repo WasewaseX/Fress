@@ -33,6 +33,7 @@ import {
   fdroidPageUrl,
   playStoreUrl,
   githubFetchSupported,
+  peekResolveError,
   ResolvedDownload,
 } from '../lib/releaseFetch';
 import { useI18n } from '../lib/i18n';
@@ -118,7 +119,14 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
     }
   };
 
-  const secondary = options.filter((o) => !(gh && o.label === 'GitHub Releases'));
+  // When the resolver came back empty because GitHub rate-limited this
+  // network, say so: "no auto download" would be a lie about the app while
+  // the truth is about the network's shared API quota.
+  const rateLimited = ghState === 'none' && /rate limit/i.test(peekResolveError(app, platform) || '');
+
+  // The forge fallback link stays visible while the primary pick is only a
+  // weak guess: a questionable file deserves an obvious alternative.
+  const secondary = options.filter((o) => !(gh && !gh.weak && o.label === 'GitHub Releases'));
 
   return (
     <div id="detail-download-box" className="border border-sky-500/25 rounded-lg p-3 bg-sky-500/5">
@@ -190,7 +198,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
               className="text-[11px] text-slate-400 leading-snug px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04]"
               role="status"
             >
-              {t('detail.noAutoDownload')}
+              {rateLimited ? t('detail.rateLimited') : t('detail.noAutoDownload')}
             </p>
           )}
           {wantGh && ghState === 'loading' && (
@@ -385,7 +393,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
               {tx.tagline}
             </p>
             <p className="text-[11px] text-slate-500 mt-1 font-mono">
-              Added {app.addedAt} · links checked when listed
+              {t('detail.metaLine').replace('{d}', app.addedAt)}
             </p>
           </div>
 

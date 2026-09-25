@@ -388,10 +388,23 @@ fn sanitize_filename(name: &str) -> String {
     // characters) but would make dir.join() walk up the directory tree, so
     // they collapse to the safe default like any other empty result.
     if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
-        "download.bin".to_string()
-    } else {
-        trimmed
+        return "download.bin".to_string();
     }
+    // Windows reserve device names: "CON", "NUL", "COM1".."COM9",
+    // "LPT1".."LPT9" cannot be file names. The rule applies to the name up
+    // to the FIRST dot ("NUL.tar.gz" is reserved just like "NUL"), and a
+    // server-supplied Content-Disposition must never be able to trigger a
+    // finalize-time failure, so they collapse to the safe default too.
+    let first_segment = trimmed.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(first_segment.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+        | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+        | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    );
+    if reserved {
+        return "download.bin".to_string();
+    }
+    trimmed
 }
 
 fn filename_from_headers(

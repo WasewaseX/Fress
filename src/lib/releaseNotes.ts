@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.1-beta',
+    date: '2026-09-25',
+    title: 'Downloads queue politely, and the resolver remembers',
+    items: [
+      'Batch downloads no longer stampede your bandwidth: three transfers run at a time and the rest wait in a visible queue with cancel buttons, draining automatically.',
+      'Resolved download links are remembered for a few hours, so the shared GitHub rate limit stops punishing repeat visits and batches. The detail modal now says honestly when a lookup failed because of that limit.',
+      'Ten Android apps (Obsidian, Mastodon, Mullvad, Aegis, the Fossify apps and friends) resolve to their real APK with confidence instead of a flagged guess, and Jellyfin and LibreWolf resolve again after their catalog entries pointed at dead repositories.',
+    ],
+  },
+  {
     version: '1.0.0-beta',
     date: '2026-09-24',
     title: 'The first real release: direct downloads for (almost) everything',

@@ -10,10 +10,11 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
 import { formatBytes, formatSpeed, formatEta } from './format';
+import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
 
 export { formatBytes, formatSpeed, formatEta };
 
-export type DownloadStatus = 'active' | 'completed' | 'error' | 'cancelled' | 'browser' | 'page';
+export type DownloadStatus = 'active' | 'queued' | 'completed' | 'error' | 'cancelled' | 'browser' | 'page';
 
 export interface DownloadItem {
   id: number;
@@ -85,10 +86,50 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
   const itemsRef = useRef<DownloadItem[]>([]);
   itemsRef.current = items;
+  /** Downloads waiting for a free slot (max MAX_CONCURRENT_DOWNLOADS run at
+   * once). FIFO; entries carry everything startDownload received so a
+   * promotion is a plain re-dispatch. */
+  const queueRef = useRef<DownloadQueue>(new DownloadQueue());
+  /** Re-entrancy guard: promotions run from event handlers; while one
+   * promotion is dispatching, the others must wait their turn. */
+  const promotingRef = useRef(false);
+  /** Authoritative count of in-flight Rust transfers. itemsRef can be stale
+   * between two rapid startDownload calls (React has not committed yet),
+   * which would let a batch overshoot the limit; this counter is updated at
+   * the exact moments a slot is taken (start succeeded) and freed (Rust
+   * reported completion/error/cancel). */
+  const activeSlotsRef = useRef(0);
   /** Events that arrived for a download whose item was not inserted yet
    * (the file can finish before start_download's invoke resolves). Keyed
    * by id, drained by startDownload right after the item is inserted. */
   const pendingEventsRef = useRef<Map<number, Array<(it: DownloadItem) => DownloadItem>>>(new Map());
+
+  /** How many Rust downloads are transferring right now. */
+  const activeTauriCount = (): number => activeSlotsRef.current;
+
+  /** Start the next queued download(s) while slots are free. Called after
+   * every state change that can free a slot: completion, error, cancel,
+   * and a failed start. */
+  const promoteQueued = useCallback((): void => {
+    if (promotingRef.current) return;
+    promotingRef.current = true;
+    const pump = async (): Promise<void> => {
+      try {
+        while (queueRef.current.size > 0 && activeTauriCount() < MAX_CONCURRENT_DOWNLOADS) {
+          const next = queueRef.current.shift();
+          if (!next) break;
+          // The queued placeholder item (negative local id) is replaced by
+          // the real item startDownload creates for the Rust transfer.
+          setItems((prev) => prev.filter((it) => !(it.status === 'queued' && it.url === next.url)));
+          await startTauriDownload(next.url, next.name, next.opts);
+        }
+      } finally {
+        promotingRef.current = false;
+      }
+    };
+    void pump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -140,6 +181,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const p = event.payload;
       applyItemUpdate(p.id, (it) => ({ ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, verified: p.verified === true ? true : undefined, total: p.bytes, speed: 0, eta: 0, canResume: false }));
       const item = itemsRef.current.find((it) => it.id === p.id);
+      activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
       if (p.verified === true) {
         toast.success(`Downloaded ${item?.name || 'file'}`, {
           description: `SHA-256 verified against the published checksum. ${p.path}`,
@@ -149,6 +191,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           description: p.path,
         });
       }
+      promoteQueued();
     }).then((un) => unlisteners.push(un));
 
     // The Rust side resumes automatically after a dropped connection. A quiet
@@ -165,6 +208,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
     listen<{ id: number; message: string; kind?: string }>('download-error', (event) => {
       const p = event.payload;
+      // Every terminal Rust state (cancelled, failed, checksum-mismatch)
+      // frees the slot this transfer occupied.
+      activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
       if (p.message === 'Cancelled') {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'cancelled', canResume: true }));
         toast.info('Download paused. Use Resume to continue');
@@ -184,6 +230,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: true }));
         toast.error('Download failed', { description: p.message });
       }
+      // A finished (or failed) transfer frees a slot for the next in line.
+      promoteQueued();
     }).then((un) => unlisteners.push(un));
 
     return () => {
@@ -216,13 +264,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     });
   }, [items]);
 
-  const startDownload = useCallback(
-    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }) => {
-      if (!url || !/^https?:\/\//i.test(url)) {
-        toast.error('This link is not a direct download');
-        return;
-      }
-
+  /** The direct invoke path: hand one download to Rust and insert its item.
+   * No queue logic here - callers above decide WHEN this may run. */
+  const startTauriDownload = useCallback(
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }): Promise<void> => {
       // A malformed %-escape (e.g. a URL containing a bare "%") makes
       // decodeURIComponent throw - BEFORE the invoke try-block below is
       // entered, so startDownload would reject with a raw URIError instead
@@ -234,31 +279,6 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
       } catch {
         guessedName = nameHint || undefined;
-      }
-
-      if (!isTauri()) {
-        // Browser fallback (web preview / dev in a normal tab):
-        // open a NEW tab, record it in the panel, explain. Never navigate away.
-        window.open(url, '_blank', 'noopener,noreferrer');
-        setItems((prev) => [
-          {
-            id: makeLocalItemId(),
-            url,
-            name: guessedName || url,
-            dir: 'Browser downloads folder',
-            bytes: 0,
-            total: 0,
-            speed: 0,
-            eta: 0,
-            status: 'browser',
-            startedAt: Date.now(),
-          },
-          ...prev,
-        ]);
-        toast.info('Opened the download in a new browser tab', {
-          description: 'The Fress desktop app adds a download manager with live progress and SHA-256 verification.',
-        });
-        return;
       }
 
       // Resolve the target folder. An explicit `opts.dir` wins: resume and
@@ -283,6 +303,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           expectedSha256: opts?.expectedSha256 || null,
           resume: opts?.resume || false,
         });
+        activeSlotsRef.current += 1;
         setItems((prev) => [
           {
             id,
@@ -299,17 +320,114 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           },
           ...prev,
         ]);
-        toast.info('Download started', { description: guessedName || url });
       } catch (e) {
         toast.error('Could not start download', { description: String(e) });
+        throw e;
       }
     },
     []
   );
 
+  const startDownload = useCallback(
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }) => {
+      if (!url || !/^https?:\/\//i.test(url)) {
+        toast.error('This link is not a direct download');
+        return;
+      }
+
+      if (!isTauri()) {
+        // Browser fallback (web preview / dev in a normal tab):
+        // open a NEW tab, record it in the panel, explain. Never navigate away.
+        let guessedName: string | undefined;
+        try {
+          guessedName =
+            nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
+        } catch {
+          guessedName = nameHint || undefined;
+        }
+        window.open(url, '_blank', 'noopener,noreferrer');
+        setItems((prev) => [
+          {
+            id: makeLocalItemId(),
+            url,
+            name: guessedName || url,
+            dir: 'Browser downloads folder',
+            bytes: 0,
+            total: 0,
+            speed: 0,
+            eta: 0,
+            status: 'browser',
+            startedAt: Date.now(),
+          },
+          ...prev,
+        ]);
+        toast.info('Opened the download in a new browser tab', {
+          description: 'The Fress desktop app adds a download manager with live progress and SHA-256 verification.',
+        });
+        return;
+      }
+
+      // Concurrency gate: at most MAX_CONCURRENT_DOWNLOADS transfer at
+      // once. Everything else waits in a FIFO queue shown in the manager.
+      // A batch of thirty used to start thirty parallel streams that fought
+      // for bandwidth; now each one gets a real share and the queue drains
+      // automatically as slots free up.
+      if (activeTauriCount() >= MAX_CONCURRENT_DOWNLOADS) {
+        let guessedName: string | undefined;
+        try {
+          guessedName =
+            nameHint || decodeURIComponent(url.split('/').pop()?.split('?')[0] || '') || undefined;
+        } catch {
+          guessedName = nameHint || undefined;
+        }
+        const payload: QueuedDownload = { url, name: nameHint, opts };
+        if (queueRef.current.push(payload)) {
+          setItems((prev) => [
+            {
+              id: makeLocalItemId(),
+              url,
+              name: guessedName || 'download',
+              dir: 'Queued',
+              bytes: 0,
+              total: 0,
+              speed: 0,
+              eta: 0,
+              status: 'queued',
+              expectedSha256: opts?.expectedSha256,
+              startedAt: Date.now(),
+            },
+            ...prev,
+          ]);
+        }
+        return;
+      }
+
+      try {
+        await startTauriDownload(url, nameHint, opts);
+        // Only a transfer that actually started announces itself; queued
+        // entries are visible in the manager and would only spam toasts.
+        toast.info('Download started', { description: nameHint || url });
+      } catch {
+        // The start failed; the error toast is already up. A slot may have
+        // been conceptually freed (nothing is running in its place).
+        promoteQueued();
+      }
+    },
+    [startTauriDownload, promoteQueued]
+  );
+
   const cancel = useCallback((id: number) => {
-    invoke('cancel_download', { id }).catch(() => undefined);
-  }, []);
+    const item = itemsRef.current.find((it) => it.id === id);
+    if (item && item.status === 'queued') {
+      // Still waiting: no Rust transfer exists yet. Drop it from the line.
+      queueRef.current.removeWhere((q) => q.url === item.url);
+      setItems((prev) => prev.filter((it) => it.id !== id));
+      return;
+    }
+    invoke('cancel_download', { id })
+      .catch(() => undefined)
+      .finally(() => promoteQueued());
+  }, [promoteQueued]);
 
   const retry = useCallback(
     (id: number, resume?: boolean) => {
@@ -348,7 +466,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearFinished = useCallback(() => {
-    setItems((prev) => prev.filter((it) => it.status === 'active'));
+    setItems((prev) => prev.filter((it) => it.status === 'active' || it.status === 'queued'));
   }, []);
 
   const openFile = useCallback((path: string) => {

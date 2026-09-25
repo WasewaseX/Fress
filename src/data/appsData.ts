@@ -134,6 +134,10 @@ const BASE_APPS: AppItem[] = [
     downloadUrl: 'https://bitwarden.com/download',
     category: 'Privacy & Security',
     platforms: ['windows', 'mac', 'linux', 'web', 'android', 'ios'],
+    // The Android APK is published from its own repo; desktop stays on the
+    // vault-alias curated direct links below.
+    repoOverrides: { android: 'bitwarden/android' },
+    assetPatterns: { android: 'com\\.x8bit\\.bitwarden\\.apk$' },
     playStoreId: 'com.x8bit.bitwarden',
     license: 'AGPL-3.0',
     stars: 13832,
@@ -641,12 +645,17 @@ const BASE_APPS: AppItem[] = [
     tagline: 'Continuous decentralized file synchronization',
     description: 'An open-source peer-to-peer file synchronization tool that synchronizes files between two or more computers and Android devices in real time, securely and encrypted.',
     whyItsAwesome: 'Your data belongs to you alone. No central server can be compromised or snooped on. Works locally or across the internet with zero cloud subscription fees.',
-    beginnerGuide: 'Install Syncthing on desktop and Android. Scan the QR code to pair devices, choose which folders to sync, and files update automatically.',
+    beginnerGuide: 'Install Syncthing on desktop and Android. On Android use the community Syncthing-Fork app, the build the Syncthing team now recommends since they retired their own Android app. Scan the QR code to pair devices, choose which folders to sync, and files update automatically.',
     githubUrl: 'https://github.com/syncthing/syncthing',
     websiteUrl: 'https://syncthing.net',
     downloadUrl: 'https://syncthing.net/downloads',
     category: 'Utilities & System',
     platforms: ['windows', 'mac', 'linux', 'android'],
+    // The official Android app was retired in December 2024; the Syncthing
+    // team points Android users to the maintained Syncthing-Fork.
+    repoOverrides: { android: 'Catfriend1/syncthing-android' },
+    assetPatterns: { android: 'syncthingfork_release_v[\\d.]+\\.apk$' },
+    fdroidId: 'com.github.catfriend1.syncthingfork',
     license: 'MPL-2.0',
     stars: 88529,
     beginnerRating: 'Quick Learning Curve',

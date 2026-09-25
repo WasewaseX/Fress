@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.2-beta (2026-09-26): every entry downloads, no "go look it up" left
+
+The catalog-wide download audit finished the job the earlier rounds started: every app, on every platform it claims, now hands you a real file (or, where a project genuinely ships no binary, its official package channel). Fifty-two desktop rows and seven Android rows used to dead-end in a download page; they resolve to exact installers now, read live from each project's own manifest infrastructure.
+
+### Added
+- **A third resolver source: the vendor's own download infrastructure.** Projects that distribute outside GitHub resolve through their own manifests now, not through a marketing page: Tor's per-platform update manifests (Windows, macOS, Linux and every Android ABI), Signal's electron-updater feeds with exact sizes plus its Android `latest.json`, Proton Mail's `version.json` (the Stable channel, never Early Access), Zotero's stable download endpoint, GIMP's official `gimp_versions.json`, Blender's, Krita's and Kdenlive's mirror directory indexes, LibreOffice's stable tree, Nextcloud's desktop CDN, Element's installer directory, LibreWolf's GitLab releases, SumatraPDF's download page and Inkscape's Windows installer via its winget manifest. Every pick was verified live against the real endpoints, and the picks re-resolve on every release, so nothing rots.
+- **Per-platform repository overrides.** Projects whose downloads live in a different repo than their front page now say so in the catalog: Ente Photos' desktop app comes from `ente/photos-desktop` (which also kills the wrong-app Ensu pick for good), Bitwarden's Android APK from `bitwarden/android`, Home Assistant's companion app from `home-assistant/android`, Proton VPN's macOS and Android builds from their own repos, and Element's Android app from `element-hq/element-x-android`.
+- **Honest platform claims.** LibreTranslate is server software (pip and Docker) and claims no desktop platforms; Cake Wallet publishes no macOS build and Proton VPN has no downloadable Linux installer, so neither claims those platforms. Where a project ships no binary at all for Linux (VLC, GIMP, Krita, HandBrake, Inkscape, Element), the download button offers the project's official Flatpak build on Flathub instead of pretending a tarball exists.
+- **A hard, allowlisted text-fetch command.** The desktop app reads vendor manifests through a new Rust command that speaks https only, talks to exactly the allowlisted project hosts, and never pulls more than 2 MB, so a manifest fetch can never become a proxy or a memory hazard.
+
+### Fixed
+- **Linux users were handed source code.** HandBrake publishes no Linux binary in its GitHub releases, and the resolver's only candidate was the source tarball; a `-src-`/`-source-` name is now excluded everywhere as a matter of rule.
+- **The Tor Android manifest was keyed by the wrong name** (`arm64` where the host reports `aarch64`), so the per-ABI lookup missed; Android devices get their exact APK now.
+- **The Syncthing Android entry still pointed at the retired official app.** The Syncthing team retired their Android app in December 2024; Android now resolves to the maintained Syncthing-Fork they recommend, on GitHub and on F-Droid.
+- **Cake Wallet's Windows row** resolved from a stale old release and its Linux tarball carried a weak-guess flag; both are pinned to their real naming now, and the catalog no longer claims a macOS build that was never published.
+- **The batch-download skip toast** reads like help instead of a dead end: the few apps without a device file say so plainly and open their official page with the right pick one tap away.
+- **Vendor lookups survive hiccups.** Manifest reads retry once on transient failures, and GitLab's occasional HTML challenge pages no longer turn into a failed download.
+
+
+
 ## 1.0.1-beta (2026-09-25): the download queue and the rate-limit truce
 
 The first release on top of 1.0.0: a second, independent download-component audit was reconciled with the 1.0.0 work, keeping the best of both. The download manager now queues instead of stampeding, the resolver remembers what it already found so GitHub's rate limit stops biting, and the UI says honestly when a lookup failed because of the network instead of implying the app has no download.

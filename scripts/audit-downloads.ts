@@ -55,9 +55,12 @@ async function main() {
       }
       if (!outcome) {
         // Same fallback the batch downloader uses: a curated DIRECT link
-        // still counts as a real download; a page means "opens in browser".
+        // still counts as a real download; a package channel (Flatpak repo
+        // for apps with no upstream binary) is the official install path;
+        // a page means "opens in browser".
         const target = bestDownloadFor(app, platform);
         if (target?.kind === 'direct') outcome = 'CURATED-DIRECT ' + target.url;
+        else if (target?.kind === 'package') outcome = 'PACKAGE ' + target.url;
         else outcome = 'SKIP';
       }
       rows.push(`${app.id.padEnd(24)} ${platform.padEnd(8)} ${outcome}`);
@@ -65,7 +68,8 @@ async function main() {
   }
   console.log(rows.join('\n'));
   const skips = rows.filter((r) => r.includes('SKIP'));
-  console.log(`\n== ${rows.length} rows, ${skips.length} skips ==`);
+  const packages = rows.filter((r) => r.includes('PACKAGE'));
+  console.log(`\n== ${rows.length} rows, ${skips.length} skips, ${packages.length} package-channel rows ==`);
 }
 
 main();

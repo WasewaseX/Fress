@@ -427,6 +427,9 @@ export const EXTRA_APPS_2: AppItem[] = [
     downloadUrl: 'https://www.home-assistant.io/installation/',
     category: 'Utilities & System',
     platforms: ['web', 'android', 'ios'],
+    // The companion app publishes its APKs from a dedicated repo.
+    repoOverrides: { android: 'home-assistant/android' },
+    assetPatterns: { android: 'app-full-release\\.apk$' },
     playStoreId: 'io.homeassistant.companion.android',
     license: 'Apache-2.0',
     stars: 90411,
@@ -538,6 +541,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     downloadUrl: 'https://appflowy.io/download',
     category: 'Productivity & Office',
     platforms: ['windows', 'mac', 'linux', 'android', 'ios'],
+    assetPatterns: { android: 'AppFlowy-.+\\.apk$' },
     license: 'AGPL-3.0',
     stars: 76599,
     beginnerRating: 'Super Beginner Friendly',
@@ -762,6 +766,15 @@ export const EXTRA_APPS_2: AppItem[] = [
     downloadUrl: 'https://ente.io/download',
     category: 'Media, Audio & Video',
     platforms: ['windows', 'mac', 'linux', 'web', 'android', 'ios'],
+    // The Android APK ships from ente-io/ente under photos-* tags; the
+    // desktop app is a separate repo with its own installers.
+    repoOverrides: { windows: 'ente/photos-desktop', mac: 'ente/photos-desktop', linux: 'ente/photos-desktop' },
+    assetPatterns: {
+      android: 'ente-photos-.+\\.apk$',
+      windows: 'ente-[\\d.]+-x64\\.exe$',
+      mac: 'ente-[\\d.]+-universal\\.dmg$',
+      linux: 'ente-[\\d.]+-x86_64\\.AppImage$',
+    },
     playStoreId: 'io.ente.photos',
     license: 'AGPL-3.0',
     stars: 28995,
@@ -774,10 +787,10 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Photos / Apple iCloud Photos',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
-    // ente-io/ente releases photos, auth, locker and Ensu from one repo.
-    // Without the '^photos-' stream pin the desktop picker served Ensu
-    // installers (a different product) and android grabbed Ensu's apk.
-    tagPatterns: { windows: '^photos-', mac: '^photos-', linux: '^photos-', android: '^photos-' },
+    // The desktop repos and the mobile repo use plain v tags; the '^photos-'
+    // pin below only reaches the entries still resolved on ente-io/ente
+    // (Android). The repoOverrides above point desktop at its own repo.
+    tagPatterns: { android: '^photos-' },
     addedAt: '2026-09-21'
   },
   {
@@ -926,7 +939,12 @@ export const EXTRA_APPS_2: AppItem[] = [
     websiteUrl: 'https://protonvpn.com',
     downloadUrl: 'https://protonvpn.com/download',
     category: 'Privacy & Security',
-    platforms: ['windows', 'mac', 'linux', 'android'],
+    // Linux ships through Proton's own apt/rpm repository (no downloadable
+    // installer file), so the linux platform is not claimed here.
+    platforms: ['windows', 'mac', 'android'],
+    // macOS and Android builds live in their own repos, not win-app.
+    repoOverrides: { mac: 'ProtonVPN/mac-app', android: 'ProtonVPN/android-app' },
+    assetPatterns: { android: 'production-vanilla-direct-release\\.apk$' },
     license: 'GPL-3.0',
     stars: 2527,
     beginnerRating: 'Super Beginner Friendly',
@@ -935,7 +953,6 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['vpn', 'swiss', 'no-logs', 'audited'],
     wingetCommand: 'winget install Proton.ProtonVPN',
     brewCommand: 'brew install --cask protonvpn',
-    flatpakCommand: 'flatpak install flathub com.protonvpn.www',
     proprietaryAlternative: 'ExpressVPN / Surfshark',
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
@@ -954,6 +971,11 @@ export const EXTRA_APPS_2: AppItem[] = [
     downloadUrl: 'https://element.io/download',
     category: 'Privacy & Security',
     platforms: ['windows', 'mac', 'linux', 'android', 'ios'],
+    // Desktop installers are served from packages.element.io (resolved by
+    // the official-resolver layer); the Android app is Element X, a repo of
+    // its own with the F-Droid-signed builds.
+    repoOverrides: { android: 'element-hq/element-x-android' },
+    assetPatterns: { android: 'app-fdroid-.+-release-signed\\.apk$' },
     license: 'AGPL-3.0',
     stars: 1482,
     beginnerRating: 'Quick Learning Curve',
@@ -1061,7 +1083,9 @@ export const EXTRA_APPS_2: AppItem[] = [
     websiteUrl: 'https://libretranslate.com',
     downloadUrl: 'https://github.com/LibreTranslate/LibreTranslate#install-and-run',
     category: 'Productivity & Office',
-    platforms: ['windows', 'mac', 'linux', 'web'],
+    // Server software: pip and Docker are the official install methods; no
+    // desktop binaries exist, so no desktop platform is claimed.
+    platforms: ['web'],
     license: 'AGPL-3.0',
     stars: 16693,
     beginnerRating: 'Advanced / Power User',
@@ -1164,7 +1188,10 @@ export const EXTRA_APPS_2: AppItem[] = [
     websiteUrl: 'https://cakewallet.com',
     downloadUrl: 'https://cakewallet.com/downloads/',
     category: 'Privacy & Security',
-    platforms: ['android', 'windows', 'mac', 'linux'],
+    // No macOS build is published anywhere by Cake Wallet; the platform is
+    // not claimed.
+    platforms: ['android', 'windows', 'linux'],
+    assetPatterns: { linux: 'Cake_Wallet_v[\\d.]+_Linux\\.tar\\.xz$' },
     playStoreId: 'com.cakewallet.cake_wallet',
     license: 'MIT',
     stars: 1926,

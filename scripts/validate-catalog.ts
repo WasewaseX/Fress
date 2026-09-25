@@ -207,6 +207,23 @@ for (const app of apps) {
     err(label, `lastVerifiedAt must be YYYY-MM-DD, got: ${app.lastVerifiedAt}`);
   }
 
+  // Per-platform release repos: must be an "owner/repo" GitHub path and
+  // only for platforms the app supports, exactly like the pattern checks.
+  if (app.repoOverrides) {
+    for (const [plat, repo] of Object.entries(app.repoOverrides)) {
+      if (!VALID_PLATFORMS.includes(plat as Platform)) {
+        err(label, `repoOverrides has an unknown platform: ${plat}`);
+        continue;
+      }
+      if (!app.platforms?.includes(plat as Platform)) {
+        err(label, `repoOverrides.${plat} is set but the app does not list that platform`);
+      }
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(repo))) {
+        err(label, `repoOverrides.${plat} must be "owner/repo", got: ${repo}`);
+      }
+    }
+  }
+
   // 3. Icon: every catalog entry ships its official artwork.
   const iconPath = APP_ICONS[app.id];
   if (!iconPath) {

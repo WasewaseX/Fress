@@ -21,6 +21,18 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.2-beta',
+    date: '2026-09-26',
+    title: 'Every entry downloads now, straight from the source',
+    items: [
+      'The catalog-wide audit is done: no more "open their download page" dead ends. Apps that distribute outside GitHub (VLC, Blender, GIMP, Signal, Tor, Proton, Zotero, Nextcloud, Element, LibreWolf, Krita, Kdenlive, LibreOffice, SumatraPDF, Inkscape and more) resolve to their exact current installer from each project\'s own manifests.',
+      'Ente Photos desktop comes from its real repo now (the wrong-app pick is gone for good), and Bitwarden, Home Assistant, Proton VPN and Element resolve their Android builds from their dedicated repos.',
+      'Android is fully covered: Tor Browser, Signal and every other catalog app hands you the exact APK for your device, zero skips.',
+      'Where a project ships no Linux binary at all, the download button offers its official Flatpak build instead of a hunt. Server-only apps (LibreTranslate) no longer claim desktop platforms they never had.',
+      'Vendor lookups are allowlisted, size-capped and retry once on hiccups, and a source-code tarball can never again be served as "the app".',
+    ],
+  },
+  {
     version: '1.0.1-beta',
     date: '2026-09-25',
     title: 'Downloads queue politely, and the resolver remembers',

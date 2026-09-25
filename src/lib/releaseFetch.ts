@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { AppItem, Platform } from '../types';
 import { isTauri } from './downloads';
+import { resolveOfficialDownload } from './officialResolvers';
 
 /**
  * Resolves real download files from GitHub Releases and F-Droid.
@@ -30,7 +31,9 @@ export interface ReleaseInfo {
 }
 
 export interface ResolvedDownload {
-  source: 'github' | 'fdroid';
+  /** 'github' = release assets, 'fdroid' = the F-Droid index, 'official' =
+   * the project's own manifest/CDN outside GitHub (Tor, Signal, Proton, ...). */
+  source: 'github' | 'fdroid' | 'official';
   url: string;
   filename: string;
   size: number;
@@ -69,8 +72,11 @@ export function cleanVersion(tag: string): string {
 
 /** Files that can never be the app itself. */
 const BAD_EXT = /\.(sig|blockmap|sha256|sha512|sha256sum|md5|txt|json|yaml|yml|pub|pem|sbom|zsync|bittorrent|xml|map|dSYM|apk\.idsig|idsig)$/i;
-/** Metadata / tooling artefacts shipped next to installers. */
-const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy/i;
+/** Metadata / tooling artefacts shipped next to installers. A -src-/-source-
+ * token is ALSO excluded: projects that ship no binary for a platform still
+ * tag their source tarball next to the binaries, and a source archive was
+ * once served to a Linux user as "the app" (HandBrake). */
+const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy|(^|[^a-z0-9])(source|src)([-_.0-9]|$)/i;
 /** Command-line companions: repos like LocalSend ship "<App>-CLI-<v>-windows-arm-64.exe"
  * next to the GUI installer, and on an ARM64 host the CLI used to WIN the
  * scoring (hyphenated "arm-64" read as unmarked, bare /arm/ rewarded it) -
@@ -227,7 +233,7 @@ export function assetCompatibleWithDevice(
   }
 }
 
-function scoreAsset(name: string, platform: Platform, arch: string | undefined): number {
+export function scoreAsset(name: string, platform: Platform, arch: string | undefined): number {
   const n = name.toLowerCase();
   let s = 0;
 
@@ -613,9 +619,23 @@ const resolveErrors = new Map<string, string>();
 
 /** The last actionable failure for a repo|platform lookup, or null. */
 export function peekResolveError(app: AppItem, platform: Platform): string | null {
-  const repo = parseGithubRepo(app.githubUrl);
+  const repo = effectiveRepo(app, platform);
   if (!repo) return null;
   return resolveErrors.get(`${repo}|${platform}`) ?? null;
+}
+
+/** The GitHub repo that actually carries this platform's downloads: the
+ * repoOverrides entry when one exists, else the primary githubUrl. */
+export function effectiveRepo(app: AppItem, platform: Platform): string | null {
+  const override = app.repoOverrides?.[platform]?.trim();
+  if (override) {
+    // Owner/repo shorthand (what the catalog field stores) or a full URL.
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(override)) {
+      return override.replace(/\.git$/i, '');
+    }
+    return parseGithubRepo(override);
+  }
+  return parseGithubRepo(app.githubUrl);
 }
 
 /* ------------------------------------------------------------------ */
@@ -637,7 +657,7 @@ const CACHE_MAX_ENTRIES = 300;
 
 interface CacheEntry { t: number; url: string | null; hit: ResolvedDownload | null }
 
-function loadPersisted(key: string): ResolvedDownload | null | undefined {
+export function loadPersisted(key: string): ResolvedDownload | null | undefined {
   try {
     if (typeof localStorage === 'undefined') return undefined;
     const raw = localStorage.getItem(CACHE_KEY);
@@ -653,7 +673,7 @@ function loadPersisted(key: string): ResolvedDownload | null | undefined {
   }
 }
 
-function persist(key: string, hit: ResolvedDownload | null): void {
+export function persist(key: string, hit: ResolvedDownload | null): void {
   try {
     if (typeof localStorage === 'undefined') return;
     const raw = localStorage.getItem(CACHE_KEY);
@@ -690,7 +710,7 @@ function cacheSet(
 }
 
 export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
-  const repo = parseGithubRepo(app.githubUrl);
+  const repo = effectiveRepo(app, platform);
   if (!repo || platform === 'web' || platform === 'ios') return Promise.resolve(null);
   // The cache key must carry everything that changes WHAT is fetched, not
   // just what is picked: two apps can share one repo while using different
@@ -862,8 +882,10 @@ export function fdroidPageUrl(pkgId: string): string {
  *      marker, odd name) must not preempt it: F-Droid builds update
  *      consistently among themselves, while a generic GitHub apk can be
  *      the wrong signing flavor for an existing install.
- *   3. The weak GitHub pick as a last resort, flagged so the UI cautions.
- *   4. null, so the caller can fall back to curated targets and pages.
+ *   3. The project's own manifest outside GitHub (vendor CDNs, updater
+ *      feeds, mirror routers) - an official manifest outranks a guess.
+ *   4. The weak GitHub pick as a last resort, flagged so the UI cautions.
+ *   5. null, so the caller can fall back to curated targets and pages.
  */
 export async function resolveDownloadFor(
   app: AppItem,
@@ -875,6 +897,14 @@ export async function resolveDownloadFor(
   if (fdAllowed && app.fdroidId) {
     const fd = await resolveFdroidDownload(app.fdroidId);
     if (fd) return fd;
+  }
+  // 3) The project's own download infrastructure outside GitHub (Tor's
+  //    manifests, Signal's updater feeds, Proton's version.json, KDE's
+  //    mirror router, ...). An official manifest outranks a weak GitHub
+  //    guess: the vendor states exactly which file is current.
+  if (!gh || gh.weak) {
+    const official = await resolveOfficialDownload(app, platform);
+    if (official) return official;
   }
   return gh ?? null;
 }

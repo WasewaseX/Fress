@@ -93,6 +93,9 @@ const CURATED: Record<string, CuratedEntry> = {
       { kind: 'page', label: 'VLC for Windows', url: 'https://www.videolan.org/vlc/download-windows.html', note: 'Installer, x86_64 and ARM' },
     ],
     mac: [{ kind: 'page', label: 'VLC for macOS', url: 'https://www.videolan.org/vlc/download-macosx.html', note: 'Universal .dmg' }],
+    // VLC publishes no Linux binaries: distributions, Snap and Flatpak ARE
+    // the official channels. Flathub carries the VLC team's own build.
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.videolan.VLC', note: 'flatpak install flathub org.videolan.VLC' }],
     android: [{ kind: 'page', label: 'VLC on Google Play', url: 'https://play.google.com/store/apps/details?id=org.videolan.vlc' }],
     ios: [{ kind: 'store', label: 'VLC on the App Store', url: 'https://apps.apple.com/app/vlc-media-player/id6503779629' }],
   },
@@ -108,7 +111,8 @@ const CURATED: Record<string, CuratedEntry> = {
   gimp: {
     windows: [{ kind: 'page', label: 'Windows installer', url: 'https://www.gimp.org/downloads/' }],
     mac: [{ kind: 'page', label: 'macOS installer', url: 'https://www.gimp.org/downloads/' }],
-    linux: [{ kind: 'page', label: 'Linux packages', url: 'https://www.gimp.org/downloads/' }],
+    // GIMP's official Linux channel is the GIMP team's Flatpak on Flathub.
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.gimp.GIMP', note: 'flatpak install flathub org.gimp.GIMP' }],
   },
   'tor-browser': {
     windows: [{ kind: 'page', label: 'Windows bundle', url: 'https://www.torproject.org/download/' }],
@@ -120,6 +124,38 @@ const CURATED: Record<string, CuratedEntry> = {
     windows: [{ kind: 'page', label: 'Windows installer', url: 'https://www.qbittorrent.org/download' }],
     mac: [{ kind: 'page', label: 'macOS installer', url: 'https://www.qbittorrent.org/download' }],
     linux: [{ kind: 'page', label: 'Linux packages', url: 'https://www.qbittorrent.org/download' }],
+  },
+  krita: {
+    windows: [{ kind: 'page', label: 'Windows installer', url: 'https://krita.org/en/download/krita-desktop' }],
+    mac: [{ kind: 'page', label: 'macOS installer', url: 'https://krita.org/en/download/krita-desktop' }],
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.krita', note: 'flatpak install flathub org.krita' }],
+    android: [{ kind: 'page', label: 'Krita on Google Play', url: 'https://play.google.com/store/apps/details?id=org.krita' }],
+  },
+  handbrake: {
+    windows: [{ kind: 'page', label: 'Windows installer', url: 'https://handbrake.fr/downloads.php' }],
+    mac: [{ kind: 'page', label: 'macOS installer', url: 'https://handbrake.fr/downloads.php' }],
+    // HandBrake's official Linux build is the Flathub Flatpak; the GitHub
+    // releases carry source code only for Linux.
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/fr.handbrake.ghb', note: 'flatpak install flathub fr.handbrake.ghb' }],
+  },
+  element: {
+    // Element's official Linux channel is the Flatpak on Flathub (the deb
+    // comes from their apt repository, which requires repo setup first).
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/im.riot.Riot', note: 'flatpak install flathub im.riot.Riot' }],
+  },
+  libretranslate: {
+    // Self-hosted server software: pip and Docker are the official install
+    // methods; there is no desktop binary to download.
+    web: [{ kind: 'page', label: 'LibreTranslate public instance', url: 'https://libretranslate.com' }],
+  },
+  inkscape: {
+    mac: [
+      // The dmg URL carries a per-build hash and the release page renders
+      // links in JS, so there is no stable direct URL to resolve; the
+      // official release page lists the signed macOS build one click in.
+      { kind: 'page', label: 'Official macOS installer page', url: 'https://inkscape.org/release/' },
+    ],
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.inkscape.Inkscape', note: 'flatpak install flathub org.inkscape.Inkscape' }],
   },
   signal: {
     windows: [{ kind: 'page', label: 'Windows installer', url: 'https://signal.org/download/' }],

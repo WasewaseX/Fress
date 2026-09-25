@@ -24,6 +24,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { PLATFORM_LABELS, getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
+import { officialSupported, resolveOfficialDownload } from '../lib/officialResolvers';
 import { useDownloads, formatBytes } from '../lib/downloads';
 import { openExternal } from '../lib/external';
 import {
@@ -76,6 +77,10 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
 
   const wantGh = !unavailable && githubFetchSupported(platform) && !!parseGithubRepo(app.githubUrl);
   const wantFd = !unavailable && platform === 'android' && !!app.fdroidId;
+  const wantOfficial = !unavailable && officialSupported(app, platform);
+
+  const [official, setOfficial] = useState<ResolvedDownload | null>(null);
+  const [officialState, setOfficialState] = useState<ResolveState>('loading');
 
   useEffect(() => {
     let alive = true;
@@ -93,6 +98,14 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
         if (!alive) return;
         setFd(r);
         setFdState(r ? 'ready' : 'none');
+      });
+    }
+    if (wantOfficial) {
+      setOfficialState('loading');
+      resolveOfficialDownload(app, platform).then((r) => {
+        if (!alive) return;
+        setOfficial(r);
+        setOfficialState(r ? 'ready' : 'none');
       });
     }
     return () => {
@@ -126,7 +139,10 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
 
   // The forge fallback link stays visible while the primary pick is only a
   // weak guess: a questionable file deserves an obvious alternative.
-  const secondary = options.filter((o) => !(gh && !gh.weak && o.label === 'GitHub Releases'));
+  const secondary = options.filter((o) => !(
+    (gh && !gh.weak && o.label === 'GitHub Releases') ||
+    (official && !official.weak && o.kind === 'page' && o.url === official.releasePageUrl)
+  ));
 
   return (
     <div id="detail-download-box" className="border border-sky-500/25 rounded-lg p-3 bg-sky-500/5">
@@ -202,6 +218,36 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             </p>
           )}
           {wantGh && ghState === 'loading' && (
+            <div className="w-full flex items-center gap-2 text-xs px-3 py-2.5 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300" role="status">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" aria-hidden="true" />
+              <span>{t('detail.checkingStable')}</span>
+            </div>
+          )}
+
+          {/* Primary for apps that distribute outside GitHub: the file the
+              vendor's own manifest currently names. */}
+          {wantOfficial && officialState === 'ready' && official && (
+            <button
+              type="button"
+              onClick={() => void startDownload(official.url, official.filename)}
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <Download className="w-3.5 h-3.5 shrink-0 text-sky-100" aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    {official.filename}
+                    {official.size > 0 && <span className="ml-1.5 opacity-80 font-normal">{formatBytes(official.size)}</span>}
+                  </span>
+                  <span className="block text-[11px] font-normal opacity-80 truncate">
+                    {official.version ? `v${official.version} · ` : ''}{t('detail.latestStableOfficial')}
+                  </span>
+                </span>
+              </span>
+              <span className="text-[10px] font-mono uppercase tracking-wide bg-white/15 rounded px-1.5 py-0.5 shrink-0">{t('card.download')}</span>
+            </button>
+          )}
+          {wantOfficial && officialState === 'loading' && ghState !== 'loading' && (
             <div className="w-full flex items-center gap-2 text-xs px-3 py-2.5 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300" role="status">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" aria-hidden="true" />
               <span>{t('detail.checkingStable')}</span>

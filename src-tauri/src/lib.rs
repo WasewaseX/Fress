@@ -237,6 +237,108 @@ fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
     })
 }
 
+/// Allowlisted hosts the official download resolvers may read.
+///
+/// Every app in the catalog whose downloads do NOT live on GitHub resolves
+/// through a small manifest or directory index on the project's own
+/// infrastructure (KDE's mirror router, Tor's update manifests, Signal's
+/// electron-updater feeds, Proton's version.json, ...). This list names
+/// exactly those hosts, so the generic text fetch can never be turned into
+/// an open proxy: anything not listed is refused before a request is made.
+const FETCH_TEXT_ALLOWED_HOSTS: &[&str] = &[
+    "get.videolan.org",
+    "www.videolan.org",
+    "download.blender.org",
+    "download.kde.org",
+    "download.documentfoundation.org",
+    "www.gimp.org",
+    "download.gimp.org",
+    "inkscape.org",
+    "media.inkscape.org",
+    "www.zotero.org",
+    "download.zotero.org",
+    "updates.signal.org",
+    "aus1.torproject.org",
+    "dist.torproject.org",
+    "proton.me",
+    "packages.element.io",
+    "download.nextcloud.com",
+    "gitlab.com",
+    "www.sumatrapdfreader.org",
+    "api.github.com",
+    "raw.githubusercontent.com",
+];
+
+/// Reads a small text document (manifest, directory index, YAML feed) from a
+/// vendor host. Returns the final URL after redirects so callers that only
+/// need the redirect TARGET (Zotero's dl endpoint) can skip parsing entirely.
+///
+/// Safety rails: https only, host allowlisted, response body capped at 2 MB.
+/// A body larger than the cap is NOT read - the caller gets the final URL and
+/// the content length instead, which is exactly what a redirect-to-file
+/// endpoint requires without ever pulling a 200 MB installer into memory.
+#[derive(Serialize, Clone)]
+struct TextFetch {
+    status: u16,
+    final_url: String,
+    content_length: Option<u64>,
+    body: String,
+    truncated: bool,
+}
+
+const FETCH_TEXT_BODY_CAP: u64 = 2 * 1024 * 1024;
+
+#[tauri::command]
+async fn fetch_text(url: String) -> Result<TextFetch, String> {
+    let parsed = reqwest::Url::parse(url.trim())
+        .map_err(|_| "Not a valid URL".to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("Only https URLs are allowed".into());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL has no host".to_string())?
+        .to_ascii_lowercase();
+    if !FETCH_TEXT_ALLOWED_HOSTS.contains(&host.as_str()) {
+        return Err(format!("Host {} is not on the resolver allowlist", host));
+    }
+    let client = api_client()?;
+    let resp = client
+        .get(parsed)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    let status = resp.status().as_u16();
+    let final_url = resp.url().to_string();
+    let content_length = resp.content_length();
+    let mut truncated = false;
+    let body = if content_length.is_some_and(|n| n > FETCH_TEXT_BODY_CAP) {
+        truncated = true;
+        String::new()
+    } else {
+        // Stream at most the cap even without a content-length header.
+        // resp.chunk() is reqwest's own streaming API - no extra dep needed.
+        let mut buf: Vec<u8> = Vec::new();
+        let mut resp = resp;
+        loop {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    buf.extend_from_slice(&chunk);
+                    if buf.len() as u64 > FETCH_TEXT_BODY_CAP {
+                        buf.truncate(FETCH_TEXT_BODY_CAP as usize);
+                        truncated = true;
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => return Err(format!("Bad response: {}", e)),
+            }
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    };
+    Ok(TextFetch { status, final_url, content_length, body, truncated })
+}
+
 /// Resolves the suggested stable package version from the F-Droid index.
 #[tauri::command]
 async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
@@ -1312,6 +1414,7 @@ pub fn run() {
             fetch_latest_release,
             fetch_recent_releases,
             fetch_fdroid_package,
+            fetch_text,
             host_arch
         ])
         .run(tauri::generate_context!())

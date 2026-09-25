@@ -58,6 +58,12 @@ export interface AppItem {
    * outranks the heuristic asset picker entirely. Example:
    *   assetPatterns: { windows: 'myapp-.*?-win64(-portable)?\\.zip' } */
   assetPatterns?: Partial<Record<Platform, string>>;
+  /** Per-platform release repos for projects whose downloads live in a
+   * DIFFERENT repository than the one githubUrl links to (Ente Photos ships
+   * its desktop app from ente/photos-desktop while the Android APK ships
+   * from ente-io/ente; Bitwarden's desktop clients and Android app are two
+   * repos as well). The value is "owner/repo" on GitHub. */
+  repoOverrides?: Partial<Record<Platform, string>>;
   /** Per-platform release-tag regexes for repos that publish several
    * products from one repo under different tag prefixes (Ente ships photos,
    * auth, locker and Ensu from ente-io/ente; Tuta splits desktop, android

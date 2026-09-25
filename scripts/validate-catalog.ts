@@ -49,7 +49,10 @@ const COMMAND_PLATFORMS: Record<PkgManager, Platform[]> = {
 };
 
 const ANDROID_ID_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
-const GITHUB_URL_RE = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/;
+// `githubUrl` is the primary-repo field on any forge (see sourceLinks.ts):
+// GitHub owner/repo, or a GitLab project (which may nest owner/group/repo
+// - LibreWolf builds at gitlab.com/librewolf-community/browser/bsys6).
+const GITHUB_URL_RE = /^https:\/\/(github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|gitlab\.com\/[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+){1,2})\/?$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TRANSLATED_LANGS = ['fa', 'es', 'fr', 'de'] as const;
 
@@ -135,7 +138,7 @@ for (const app of apps) {
   checkUrl(label, 'downloadUrl', app.downloadUrl, false);
 
   if (app.githubUrl && !GITHUB_URL_RE.test(app.githubUrl.replace(/\/$/, ''))) {
-    err(label, `githubUrl is not a repository root (expected https://github.com/owner/repo): ${app.githubUrl}`);
+    err(label, `githubUrl is not a repository root (expected https://github.com/owner/repo or a gitlab.com project): ${app.githubUrl}`);
   }
 
   if (!app.license?.trim()) err(label, 'license is missing');

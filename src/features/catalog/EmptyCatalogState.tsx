@@ -2,46 +2,70 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { SearchX, RotateCcw } from 'lucide-react';
+import { SearchX, RotateCcw, PackagePlus } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 
 /**
- * Empty state for a catalog view that filtered everything out.
+ * Zero-result screen. It is a product moment, not an error: it answers
+ * three questions in order - why is this empty, how do I get my apps back,
+ * how do I add what is missing. Reset Filters is the recovery action;
+ * Add App is secondary. When the catalog itself is truly empty (totalCount
+ * is 0), the filters story is dropped because resetting cannot help.
  * Presentation only.
  */
 export function EmptyCatalogState(props: {
   onResetFilters: () => void;
   onAddApp: () => void;
+  /** Total apps in the catalog before filters; 0 means the catalog itself is empty. */
+  totalCount?: number;
 }) {
   const { t } = useI18n();
-  const { onResetFilters, onAddApp } = props;
+  const { onResetFilters, onAddApp, totalCount = 0 } = props;
+  const catalogItselfEmpty = totalCount === 0;
+  const title = catalogItselfEmpty ? t('empty.catalogTitle') : t('empty.title');
+  const description = catalogItselfEmpty ? t('empty.catalogDesc') : t('empty.desc');
 
   return (
-    <div id="no-apps-empty-state" className="bg-slate-900 border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-10 text-center max-w-md mx-auto my-8">
-      <SearchX className="w-8 h-8 text-slate-500 mx-auto mb-3" aria-hidden="true" />
-      <h2 id="empty-state-title" className="text-sm font-semibold text-slate-100 mb-1">
-        {t('empty.title')}
+    <div
+      id="no-apps-empty-state"
+      className="bg-fr-surface border border-fr-border rounded-xl p-8 sm:p-10 text-center max-w-md mx-auto my-8"
+    >
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-fr-bg border border-fr-border">
+        <SearchX className="h-6 w-6 text-fr-text-muted" aria-hidden="true" />
+      </div>
+      <h2 id="empty-state-title" className="text-base font-semibold text-fr-text mb-1.5">
+        {title}
       </h2>
-      <p id="empty-state-desc" className="text-xs text-slate-400 mb-4 leading-relaxed">
-        {t('empty.desc')}
+      <p id="empty-state-desc" className="text-sm text-fr-text-muted mb-5 leading-relaxed">
+        {description}
       </p>
-      <div id="empty-state-actions" className="flex items-center justify-center gap-2">
-        <button
-          id="empty-reset-filters-btn"
-          type="button"
-          onClick={onResetFilters}
-          className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 px-3 py-1.5 rounded-md border border-slate-950/10 dark:border-white/[0.08]"
-        >
-          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>{t('empty.reset')}</span>
-        </button>
+      <div
+        id="empty-state-actions"
+        className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2"
+      >
+        {!catalogItselfEmpty && (
+          <button
+            id="empty-reset-filters-btn"
+            type="button"
+            onClick={onResetFilters}
+            className="inline-flex items-center justify-center gap-1.5 h-[var(--fr-h-primary)] px-4 text-xs font-semibold bg-fr-primary hover:bg-fr-primary-hover text-white rounded-lg border border-fr-primary-hover transition-colors shadow-xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>{t('empty.reset')}</span>
+          </button>
+        )}
         <button
           id="empty-add-app-btn"
           type="button"
           onClick={onAddApp}
-          className="text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 rounded-md border border-sky-400"
+          className={
+            catalogItselfEmpty
+              ? 'inline-flex items-center justify-center gap-1.5 h-[var(--fr-h-primary)] px-4 text-xs font-semibold bg-fr-primary hover:bg-fr-primary-hover text-white rounded-lg border border-fr-primary-hover transition-colors shadow-xs'
+              : 'inline-flex items-center justify-center gap-1.5 h-[var(--fr-h-primary)] px-4 text-xs font-medium text-fr-text bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong rounded-lg transition-colors'
+          }
         >
-          {t('empty.add')}
+          <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>{t('empty.add')}</span>
         </button>
       </div>
     </div>

@@ -240,12 +240,14 @@ export const TableView: React.FC<TableViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onToggleCompare(app.id)}
+                        aria-label={isComp ? `Remove ${app.name} from the comparison matrix` : `Add ${app.name} to the comparison matrix`}
+                        aria-pressed={isComp}
                         className={`p-1 rounded transition-colors ${
                           isComp ? 'text-sky-400 bg-sky-400/20' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
                         }`}
                         title="Compare side by side"
                       >
-                        <Columns className="w-3.5 h-3.5" />
+                        <Columns className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     )}
 
@@ -260,6 +262,7 @@ export const TableView: React.FC<TableViewProps> = ({
                           onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
                           className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                           title={`Open ${link.label} source code`}
+                          aria-label={`Open ${app.name} on ${link.label}`}
                         >
                           <Icon className="w-3.5 h-3.5" aria-hidden="true" />
                         </a>
@@ -274,6 +277,7 @@ export const TableView: React.FC<TableViewProps> = ({
                         onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
                         className="p-1 text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title="Open official website"
+                        aria-label={`Open ${app.name}'s official website`}
                       >
                         <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                       </a>
@@ -283,6 +287,7 @@ export const TableView: React.FC<TableViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onEditApp(app)}
+                        aria-label={`Edit ${app.name}`}
                         className="p-1 text-slate-400 hover:text-sky-300 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title="Edit custom app"
                       >
@@ -294,6 +299,7 @@ export const TableView: React.FC<TableViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onDeleteApp(app.id)}
+                        aria-label={`Delete ${app.name}`}
                         className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title="Delete custom app"
                       >

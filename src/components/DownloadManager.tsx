@@ -19,6 +19,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useDownloads, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
+import { summarizeDownloadStates } from '../lib/downloadsAnnouncement';
 import { useI18n } from '../lib/i18n';
 
 export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
@@ -53,6 +54,12 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
   return (
     <div ref={panelRef} className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('downloads.title')}>
       <div className="fr-backdrop absolute inset-0" onClick={onClose} aria-hidden="true" />
+
+      {/* Screen-reader announcements for progress and failures: the visual
+          list changes silently otherwise. Polite, so it never interrupts. */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {summarizeDownloadStates(items)}
+      </div>
 
       <aside
         className="absolute right-0 top-0 h-full w-full max-w-md bg-slate-950 border-l border-slate-950/10 dark:border-white/[0.08] shadow-2xl flex flex-col"

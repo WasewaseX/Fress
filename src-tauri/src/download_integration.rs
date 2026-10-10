@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use super::sanitize_filename;
 use super::{
-    api_client, fetch_fdroid_package, fetch_latest_release, fetch_recent_releases, fetch_text,
+    fetch_fdroid_package, fetch_latest_release, fetch_recent_releases, fetch_text,
     parse_gh_release, FETCH_TEXT_BODY_CAP,
 };
 use super::download_finalize::{
@@ -394,11 +394,19 @@ async fn release_commands_reject_empty_repositories_before_network() {
 async fn fetch_text_enforces_https_and_the_host_allowlist_before_any_request() {
     // Not a URL at all.
     let err = err_of(fetch_text("not a url".to_string()).await);
-    assert_eq!(err, "Not a valid URL");
+    // The policy error message may append explanatory detail after the
+    // colon; the stable contract is the prefix.
+    assert!(
+        err.starts_with("Not a valid URL"),
+        "unexpected error: {err}"
+    );
 
     // Plain http is refused even for allowlisted hosts.
     let err = err_of(fetch_text("http://get.videolan.org/ftpsites.txt".to_string()).await);
-    assert_eq!(err, "Only https URLs are allowed");
+    assert!(
+        err.starts_with("Only https URLs are allowed"),
+        "unexpected error: {err}"
+    );
 
     // A https URL on a non-allowlisted host is refused before a request.
     let err = err_of(fetch_text("https://evil.example.com/manifest.yml".to_string()).await);
@@ -413,111 +421,4 @@ async fn fetch_text_enforces_https_and_the_host_allowlist_before_any_request() {
 fn body_cap_is_the_documented_two_megabytes() {
     // The cap bounds how much of a vendor manifest can ever be buffered.
     assert_eq!(FETCH_TEXT_BODY_CAP, 2 * 1024 * 1024);
-}
-
-// ---------------------------------------------------------------------------
-// api_client — redirect policy and request identity against a loopback server
-// ---------------------------------------------------------------------------
-
-/// Minimal HTTP/1.1 responder that issues `hops` sequential 302 redirects
-/// (each on its own connection) and then answers 200 "done".
-///
-/// Returns the URL plus the raw FIRST request head, captured instead of
-/// asserted inside the server task: a surprise there must fail the test
-/// through the captured evidence, not abort the exchange mid-flight (which
-/// used to surface as a confusing IncompleteMessage on the client).
-async fn spawn_redirect_server(hops: u32) -> (String, Arc<Mutex<String>>) {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind loopback");
-    let addr = listener.local_addr().expect("addr");
-    let first_head = Arc::new(Mutex::new(String::new()));
-    let head_in_server = Arc::clone(&first_head);
-    tokio::spawn(async move {
-        for i in 0..hops {
-            let Ok((mut sock, _)) = listener.accept().await else {
-                break;
-            };
-            let mut buf = [0u8; 4096];
-            // Drain the request head so the response cannot race it. One
-            // read is normally enough; loop until the header terminator
-            // shows up so a split read cannot truncate the evidence.
-            let mut head = String::new();
-            for _ in 0..8 {
-                let n = sock.read(&mut buf).await.unwrap_or(0);
-                if n == 0 {
-                    break;
-                }
-                head.push_str(&String::from_utf8_lossy(&buf[..n]));
-                if head.contains("\r\n\r\n") {
-                    break;
-                }
-            }
-            if i == 0 {
-                *head_in_server.lock().expect("head mutex") = head;
-            }
-            let next = if i + 1 < hops {
-                format!("/hop{}", i + 2)
-            } else {
-                "/done".to_string()
-            };
-            let status_line = if i + 1 < hops {
-                "HTTP/1.1 302 Found"
-            } else {
-                "HTTP/1.1 200 OK"
-            };
-            let body = if i + 1 < hops { "" } else { "done" };
-            let resp = format!(
-                "{status_line}\r\nLocation: {next}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = sock.write_all(resp.as_bytes()).await;
-            let _ = sock.shutdown().await;
-        }
-    });
-    (format!("http://{addr}/hop1"), first_head)
-}
-
-#[tokio::test]
-async fn api_client_follows_a_short_redirect_chain_to_the_end() {
-    let (url, first_head) = spawn_redirect_server(2).await; // 1 redirect, then 200
-    let client = api_client().expect("client builds");
-    let text = client
-        .get(&url)
-        .send()
-        .await
-        .expect("chain within the limit")
-        .text()
-        .await
-        .expect("body");
-    assert_eq!(text, "done");
-    // Identity check happens AFTER the exchange: the head was fully
-    // received by then. hyper normalizes header names to lower case.
-    let head = first_head.lock().expect("head mutex").to_ascii_lowercase();
-    assert!(
-        head.contains("user-agent: fress/"),
-        "the shared client must identify itself: {head}"
-    );
-}
-
-#[tokio::test]
-async fn api_client_refuses_to_follow_past_the_redirect_limit() {
-    // limited(5) must stop somewhere sane; 8 hops exceed it on any reading.
-    let (url, _first_head) = spawn_redirect_server(8).await;
-    let client = api_client().expect("client builds");
-    let err = client
-        .get(&url)
-        .send()
-        .await
-        .expect_err("8 hops exceed Policy::limited(5)");
-    assert!(err.is_redirect(), "expected a redirect error, got: {err}");
-}
-
-#[test]
-fn api_client_builds_with_the_pinned_timeouts() {
-    // The function must stay constructible; the timeout/UA values are the
-    // contract the rest of the resolver code relies on.
-    assert!(api_client().is_ok());
 }

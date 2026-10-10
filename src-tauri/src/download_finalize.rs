@@ -990,32 +990,22 @@ pub(crate) trait ProgressSink: Send + Sync {
     fn retrying(&self, payload: RetryPayload);
 }
 
-/// HTTP client configuration for the download stream.
-///
-/// NOTE: the policy knobs here (user agent, connect timeout, redirect
-/// limit, and deliberately NO whole-request timeout) are the download
-/// client configuration owned by Agent 1 - they were moved here verbatim
-/// from `run_download` in lib.rs. Coordinate any policy changes with that
-/// ownership split; the engine itself only relies on the absence of a
-/// whole-request timeout (the stream loop enforces its own 60s stall rule)
-/// and on redirect following.
-fn download_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(format!(
-            "Fress/{} (+https://github.com/WasewaseX/Fress)",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::limited(8))
-        .build()
-        .map_err(|e| e.to_string())
-}
-
 /// Everything one download attempt needs, bundled so the runner keeps a
 /// readable signature and new knobs don't grow the parameter list forever.
 #[derive(Clone)]
 pub(crate) struct DownloadPlan {
-    pub(crate) url: String,
+    /// Admitted by `network_policy::UrlPolicy::executable_download()` in
+    /// `start_download` before this plan could ever exist. The engine never
+    /// re-validates: it cannot construct one of these itself, and every
+    /// request it makes goes through [`DownloadPlan::client`], which is the
+    /// policy-built client (validated per-hop redirects, public-address-only
+    /// connections, no whole-request timeout).
+    pub(crate) url: crate::network_policy::ValidatedUrl,
+    /// The HTTP client for every request of this download chain (initial
+    /// attempt, automatic retries, resumes). Built once by the Tauri layer
+    /// from the executable-download policy; the engine's own tests inject a
+    /// plain loopback client so the mock-server suite can run.
+    pub(crate) client: reqwest::Client,
     pub(crate) requested_name: Option<String>,
     pub(crate) dir: PathBuf,
     pub(crate) resume: bool,
@@ -1047,6 +1037,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
 ) -> Result<CompletePayload, (String, Option<String>)> {
     let DownloadPlan {
         url,
+        client,
         requested_name,
         dir,
         resume,
@@ -1055,8 +1046,6 @@ pub(crate) async fn run_download<E: ProgressSink>(
     } = plan;
     // The out-param describes THIS attempt only.
     *staging_out = None;
-
-    let client = download_client().map_err(|e| (e, None))?;
 
     // Resolve the resume target BEFORE the first request, in priority order:
     //   1. the exact staging file the previous attempt of this download
@@ -1093,7 +1082,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
             // reusing it against a different download target would compare
             // unrelated identities.
             if let Some(m) = read_part_meta(&p).await {
-                if m.url == url {
+                if m.url == url.as_str() {
                     resume_validator = m.etag.or(m.last_modified);
                 }
             }
@@ -1123,7 +1112,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
         }
     }
 
-    let mut request = client.get(&url);
+    let mut request = client.get(url.raw().clone());
     if planned_resume_len > 0 {
         request = request.header(
             reqwest::header::RANGE,
@@ -1249,7 +1238,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
     // the previously stored validators are stale by definition - the fresh
     // response's overwrite them. On a 206 they should be identical, and on a
     // fresh download the sidecar is created for the first time.
-    write_part_meta(&part, &url, &headers).await;
+    write_part_meta(&part, url.as_str(), &headers).await;
 
     let mut hasher = Sha256::new();
     // Seed the digest with the bytes from the earlier attempt so the final
@@ -1638,7 +1627,13 @@ mod tests {
 
     fn plan_for(url: &str, dir: &Path, name: Option<&str>) -> DownloadPlan {
         DownloadPlan {
-            url: url.to_string(),
+            url: crate::network_policy::ValidatedUrl::for_tests(
+                reqwest::Url::parse(url).expect("test url parses"),
+            ),
+            // A plain client, deliberately NOT the policy-built one: the
+            // mock servers live on loopback, which the policy refuses by
+            // design. The tests exercise transport behavior, not admission.
+            client: reqwest::Client::new(),
             requested_name: name.map(str::to_string),
             dir: dir.to_path_buf(),
             resume: false,

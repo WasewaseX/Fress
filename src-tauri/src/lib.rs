@@ -4,13 +4,18 @@
 //
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures_util::FutureExt;
 use serde::Serialize;
 // `Manager` powers the Android-only app-data path lookup below.
 #[cfg_attr(not(target_os = "android"), allow(unused_imports))]
 use tauri::{AppHandle, Emitter, Manager, State};
+
+
+/// Authoritative URL admission, redirect rules and client construction for
+/// every outbound request the native layer makes. The React side validates
+/// for usability; THIS module is what the native commands actually trust.
+pub mod network_policy;
 
 // The download engine owns everything between "user clicked download" and
 // "a complete, verified file exists on disk": the lifecycle state machine,
@@ -51,19 +56,6 @@ struct FdroidPackage {
     page_url: String,
 }
 
-fn api_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(format!(
-            "Fress/{} (+https://github.com/WasewaseX/Fress)",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .timeout(Duration::from_secs(20))
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .map_err(|e| e.to_string())
-}
-
 /// Resolves the LATEST STABLE release of a GitHub repository.
 /// The /releases/latest endpoint already excludes drafts and prereleases,
 /// so beta/RC versions are never offered here.
@@ -73,14 +65,18 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
     if repo.is_empty() {
         return Err("No GitHub repository configured".into());
     }
-    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
-    let client = api_client()?;
+    let requested = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let policy = network_policy::UrlPolicy::api_github();
+    // Admission happens before anything else: a slug that somehow formats
+    // the request URL off the pinned API host is refused here, not sent.
+    let url = policy.validate(&requested).map_err(|e| e.to_string())?;
+    let client = policy.http_client()?;
     let resp = client
-        .get(&url)
+        .get(url.raw().clone())
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|e| network_policy::describe_network_error(&e))?;
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
         return Err("No stable release found for this project".into());
@@ -120,17 +116,19 @@ async fn fetch_recent_releases(
         return Err("No GitHub repository configured".into());
     }
     let per_page = count.unwrap_or(20).clamp(1, 30);
-    let url = format!(
+    let requested = format!(
         "https://api.github.com/repos/{}/releases?per_page={}",
         repo, per_page
     );
-    let client = api_client()?;
+    let policy = network_policy::UrlPolicy::api_github();
+    let url = policy.validate(&requested).map_err(|e| e.to_string())?;
+    let client = policy.http_client()?;
     let resp = client
-        .get(&url)
+        .get(url.raw().clone())
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|e| network_policy::describe_network_error(&e))?;
     let status = resp.status();
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN
     {
@@ -214,46 +212,19 @@ fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
     })
 }
 
-/// Allowlisted hosts the official download resolvers may read.
-///
-/// Every app in the catalog whose downloads do NOT live on GitHub resolves
-/// through a small manifest or directory index on the project's own
-/// infrastructure (KDE's mirror router, Tor's update manifests, Signal's
-/// electron-updater feeds, Proton's version.json, ...). This list names
-/// exactly those hosts, so the generic text fetch can never be turned into
-/// an open proxy: anything not listed is refused before a request is made.
-const FETCH_TEXT_ALLOWED_HOSTS: &[&str] = &[
-    "get.videolan.org",
-    "www.videolan.org",
-    "download.blender.org",
-    "download.kde.org",
-    "download.documentfoundation.org",
-    "www.gimp.org",
-    "download.gimp.org",
-    "inkscape.org",
-    "media.inkscape.org",
-    "www.zotero.org",
-    "download.zotero.org",
-    "updates.signal.org",
-    "aus1.torproject.org",
-    "dist.torproject.org",
-    "proton.me",
-    "packages.element.io",
-    "download.nextcloud.com",
-    "gitlab.com",
-    "www.sumatrapdfreader.org",
-    "api.github.com",
-    "raw.githubusercontent.com",
-];
+// Resolver hosts the official download resolvers may read are defined (and
+// enforced per redirect hop) in `network_policy::RESOLVER_ALLOWED_HOSTS`.
 
 /// Reads a small text document (manifest, directory index, YAML feed) from a
 /// vendor host. Returns the final URL after redirects so callers that only
 /// need the redirect TARGET (Zotero's dl endpoint) can skip parsing entirely.
 ///
-/// Safety rails: https only, host allowlisted, response body capped at 2 MB.
-/// A body larger than the cap is NOT read - the caller gets the final URL and
-/// the content length instead, which is exactly what a redirect-to-file
-/// endpoint requires without ever pulling a 200 MB installer into memory.
+/// Safety rails (enforced by `network_policy::UrlPolicy::resolver_manifest`):
+/// https only, host allowlisted, every redirect hop re-checked against the
+/// same rules, and the response body capped at 2 MB. A body larger than the
+/// cap is NOT read - the caller gets the final URL and the content length
+/// instead, which is exactly what a redirect-to-file endpoint requires
+/// without ever pulling a 200 MB installer into memory.
 #[derive(Serialize, Clone)]
 struct TextFetch {
     status: u16,
@@ -267,23 +238,16 @@ const FETCH_TEXT_BODY_CAP: u64 = 2 * 1024 * 1024;
 
 #[tauri::command]
 async fn fetch_text(url: String) -> Result<TextFetch, String> {
-    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "Not a valid URL".to_string())?;
-    if parsed.scheme() != "https" {
-        return Err("Only https URLs are allowed".into());
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "URL has no host".to_string())?
-        .to_ascii_lowercase();
-    if !FETCH_TEXT_ALLOWED_HOSTS.contains(&host.as_str()) {
-        return Err(format!("Host {} is not on the resolver allowlist", host));
-    }
-    let client = api_client()?;
+    let policy = network_policy::UrlPolicy::resolver_manifest();
+    // Admission first: parse + allowlist + scheme/credential checks, so a
+    // malformed or disallowed request is refused before any client exists.
+    let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
+    let client = policy.http_client()?;
     let resp = client
-        .get(parsed)
+        .get(parsed.raw().clone())
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|e| network_policy::describe_network_error(&e))?;
     let status = resp.status().as_u16();
     let final_url = resp.url().to_string();
     let content_length = resp.content_length();
@@ -329,12 +293,14 @@ async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
         return Err("No F-Droid package configured".into());
     }
     let url = format!("https://f-droid.org/api/v1/packages/{}", pkg);
-    let client = api_client()?;
+    let policy = network_policy::UrlPolicy::api_fdroid();
+    let url = policy.validate(&url).map_err(|e| e.to_string())?;
+    let client = policy.http_client()?;
     let resp = client
-        .get(&url)
+        .get(url.raw().clone())
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|e| network_policy::describe_network_error(&e))?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Err("Package not found on F-Droid".into());
     }
@@ -459,6 +425,19 @@ async fn start_download(
     // download simply starts over.
     resume: Option<bool>,
 ) -> Result<u32, String> {
+    // THE native gate. The React layer validates for usability; this is the
+    // authoritative enforcement: the URL is admitted under the
+    // executable-download policy BEFORE any filesystem side effect (no
+    // directory created, no staging file reserved, no task scheduled).
+    // Malformed URLs, cleartext http, embedded credentials, private/
+    // loopback address literals and localhost names are refused here.
+    let policy = network_policy::UrlPolicy::executable_download();
+    let validated_url = policy.validate(&url).map_err(|e| e.to_string())?;
+    // The engine's HTTP client is the policy-built one: per-hop validated
+    // redirects and public-address-only connections for every request the
+    // engine makes, including the resume and retry attempts.
+    let client = policy.http_client().map_err(|e| e.to_string())?;
+
     let dir: PathBuf = match directory {
         Some(d) if !d.trim().is_empty() => PathBuf::from(d),
         _ => platform_download_dir(&app),
@@ -477,6 +456,7 @@ async fn start_download(
 
     let app_handle = app.clone();
     tokio::spawn(async move {
+
         // Maps engine callbacks onto the frontend events. Keeping this as a
         // trait impl is what lets the engine run (and be tested) without an
         // AppHandle.
@@ -486,6 +466,7 @@ async fn start_download(
         impl ProgressSink for AppSink {
             fn progress(&self, payload: download_finalize::ProgressPayload) {
                 let _ = self.app.emit("download-progress", payload);
+
             }
             fn retrying(&self, payload: download_finalize::RetryPayload) {
                 let _ = self.app.emit("download-retrying", payload);
@@ -504,7 +485,8 @@ async fn start_download(
             &session,
             id,
             DownloadPlan {
-                url,
+                url: validated_url,
+                client,
                 requested_name,
                 dir,
                 resume: resume.unwrap_or(false),
@@ -540,6 +522,7 @@ async fn start_download(
     Ok(id)
 }
 
+
 /// Runs the engine's retry loop, converting an unexpected panic into a
 /// failed download. (A plain async wrapper so the spawned task above stays
 /// readable; panics are aborted in release builds anyway.)
@@ -553,6 +536,7 @@ async fn catch_unwind_result(
     match FutureExt::catch_unwind(std::panic::AssertUnwindSafe(execute_with_retries(
         sink,
         session,
+
         id,
         plan,
         cancel_rx,

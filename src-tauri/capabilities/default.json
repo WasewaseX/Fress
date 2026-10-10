@@ -1,21 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability: window basics plus the download manager (folder picker, open file/folder) and core events.",
+  "description": "Default capability for the main window: download-manager events and path lookups, the folder picker, and scoped external-URL / file-open / reveal handling. Every entry maps to a traced frontend call site - see docs/security/tauri-security.md for the permission matrix.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "core:event:default",
-    "core:window:default",
-    "core:app:default",
-    "dialog:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:path:allow-dirname",
     "dialog:allow-open",
-    "dialog:allow-save",
-    "opener:default",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://**" }]
     },
+    "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir"
   ]
 }

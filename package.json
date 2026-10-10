@@ -12,6 +12,7 @@
     "test": "vitest run",
     "validate:catalog": "tsx scripts/validate-catalog.ts",
     "validate:security": "node scripts/validate-security-config.mjs",
+    "perf:catalog": "tsx scripts/perf-catalog.ts",
     "clean": "rm -rf dist",
     "tauri": "tauri"
   },

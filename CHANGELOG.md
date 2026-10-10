@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.4-beta (2026-10-11): the app speaks five languages — filter bar, palette, and a download context split
+
+The last English-only corners of the interface are localized now, and the download context grew a real API boundary. Nothing about how filtering or downloading behaves has changed: the categories and platforms you select, the platform filter your device remembers, and the favorites you keep are all the same values as before — only the words around them learned five languages.
+
+### Added
+- **Complete UI localization (91 new keys × 5 languages).** The filter bar, the command palette, the header, and the detail modal's source/license metadata were hardcoded English; every label now ships in English, Persian, Spanish, French and German as real translations — never English copied into the other dictionaries. A dictionary parity test locks the five languages to identical key sets, so a missing translation fails CI instead of shipping.
+- **Screen-reader announcements that translate.** The download panel's live summary accepts a translator (its default English output is pinned by tests), the filter bar announces result-count changes politely instead of interrupting, and the download progress bar carries proper progressbar ARIA plus a localized hash-copy label.
+
+### Changed
+- **The filter bar separates domain values from labels.** Category and platform chips keep their internal values — filter state, the persisted platform filter, and the keyboard shortcuts behave exactly as before — while rendering translated labels. The sort select, quick filters, reset button and the group aria-labels all read from the dictionary, and the comment declaring hardcoded English "a design choice" is gone with the assumption it described.
+- **Touch ergonomics on phones, density on desktop.** Mobile filter controls get roughly 40px touch targets and visible keyboard-focus rings while desktop keeps its compact rows; the platform row keeps scrolling sideways instead of wrapping, and the selected-platform auto-centering is scoped to the mobile container and direction-aware, so it works right-to-left in Persian.
+- **The download context is split into state and actions.** `useDownloadState()` (items, active count, folder) and `useDownloadActions()` (start, cancel, retry, open, ...) replace the twelve-member aggregate context. Every caller — the header badge, the download manager, app cards, the detail modal, the footer, batch selection and the app shell — migrated and verified, and the legacy `useDownloads()` hook is retired now that its migration condition is met.
+
+### Fixed
+- **Duplicate DOM ids in the filter bar.** Platform chips, quick-filter toggles, sort controls and the result counter each rendered twice (mobile row + desktop row) with shared ids, so `document.getElementById` could never be trusted. Every id is layout-suffixed now, the scroll effect queries inside the mobile container by ref, and a server-render regression test fails the build if any rendered id is ever duplicated.
+
 ## 1.0.3-beta (2026-10-11): the hardened engine — nine audits merged, vendor checksums verified
 
 Nine independent hardening and refactor rounds landed in one release, and the download engine learned to check the publisher's math. Every byte of every download now flows through a policy-validated network stack, files are assembled transactionally, and where a vendor publishes a checksum in the same manifest that named the file, a download that fails it is deleted before it can look finished.

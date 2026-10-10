@@ -21,6 +21,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.4-beta',
+    date: '2026-10-11',
+    title: 'The app speaks five languages now',
+    items: [
+      'The filter bar, the command palette (Ctrl+K), the header and the detail pages were the last English-only corners of Fress — they are translated into Persian, Spanish, French and German now, as real translations, not copied English. Persian gets proper right-to-left layout in the filter bar, including the platform scroller.',
+      'Filters work exactly the same underneath: the category and platform values never changed, only the words around them. Your saved platform filter and your favorites are untouched.',
+      'On phones the filter controls are easier to hit now (proper touch targets), keyboard focus is visible, the platform row still scrolls sideways instead of wrapping, and two copies of the same control no longer share one element id.',
+      'The download manager got quieter polish: progress bars are named for screen readers, result-count changes are announced politely, and the download state was split into focused hooks under the hood — same features, cleaner engine.',
+    ],
+  },
+  {
     version: '1.0.3-beta',
     date: '2026-10-11',
     title: 'The hardened engine: verified downloads, validated network',

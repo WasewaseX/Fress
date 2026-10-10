@@ -111,7 +111,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 
@@ -1010,6 +1010,11 @@ pub(crate) struct DownloadPlan {
     pub(crate) dir: PathBuf,
     pub(crate) resume: bool,
     pub(crate) expected_sha256: Option<String>,
+    /// Same contract for vendors that publish SHA-512 instead (Signal
+    /// desktop's electron-updater manifests, Proton's version.json). At
+    /// most one of the two is supplied per asset by any honest vendor;
+    /// if both arrive, both must hold for the file to be trusted.
+    pub(crate) expected_sha512: Option<String>,
     /// Exact staging (.part) path opened by the PREVIOUS attempt of this
     /// download chain. Set by the retry loop so an automatic retry reopens
     /// its own file instead of re-deriving a candidate name; None on a
@@ -1042,6 +1047,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
         dir,
         resume,
         expected_sha256,
+        expected_sha512,
         staging,
     } = plan;
     // The out-param describes THIS attempt only.
@@ -1093,14 +1099,19 @@ pub(crate) async fn run_download<E: ProgressSink>(
             // changed remote suffix with nothing able to detect it -
             // exactly the corruption the validator system exists to
             // prevent. Unless a published checksum will verify the
-            // assembled file anyway (expected_sha256, which catches the
-            // mixture at completion), the only sound move is to discard
-            // the staging bytes and start over.
+            // assembled file anyway (expected_sha256 / expected_sha512,
+            // which catch the mixture at completion), the only sound move
+            // is to discard the staging bytes and start over.
             let checksum_will_verify = expected_sha256
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .is_some();
+                .is_some()
+                || expected_sha512
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .is_some();
             if planned_resume_len > 0 && resume_validator.is_none() && !checksum_will_verify {
                 discard_staging(&p).await;
                 planned_resume_len = 0;
@@ -1241,8 +1252,9 @@ pub(crate) async fn run_download<E: ProgressSink>(
     write_part_meta(&part, url.as_str(), &headers).await;
 
     let mut hasher = Sha256::new();
-    // Seed the digest with the bytes from the earlier attempt so the final
-    // hash covers the complete file, not just the resumed tail.
+    let mut hasher512 = Sha512::new();
+    // Seed the digests with the bytes from the earlier attempt so the final
+    // hashes cover the complete file, not just the resumed tail.
     if resuming {
         let mut existing = tokio::fs::File::open(&part)
             .await
@@ -1257,6 +1269,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
                 break;
             }
             hasher.update(&buf[..n]);
+            hasher512.update(&buf[..n]);
         }
     }
 
@@ -1311,6 +1324,7 @@ pub(crate) async fn run_download<E: ProgressSink>(
             }
         };
         hasher.update(&bytes);
+        hasher512.update(&bytes);
         if file.write_all(&bytes).await.is_err() {
             drop(file);
             return Err(("Disk write failed".to_string(), None));
@@ -1434,11 +1448,13 @@ pub(crate) async fn run_download<E: ProgressSink>(
 
     let digest = hasher.finalize();
     let sha_hex: String = digest.iter().map(|b| format!("{:02x}", b)).collect();
+    let digest512 = hasher512.finalize();
+    let sha512_hex: String = digest512.iter().map(|b| format!("{:02x}", b)).collect();
 
     // Verification is a comparison against a trusted published value, not a
     // mere calculation. A mismatching file is rejected and removed: it must
     // never sit in the downloads folder looking finished.
-    let verified: Option<bool> = match verify_digest(expected_sha256.as_deref(), &sha_hex) {
+    let mut verified: Option<bool> = match verify_digest(expected_sha256.as_deref(), &sha_hex) {
         Verification::TrustedMatch => Some(true),
         Verification::Unverified => None,
         Verification::Mismatch { computed, expected } => {
@@ -1452,6 +1468,25 @@ pub(crate) async fn run_download<E: ProgressSink>(
             ));
         }
     };
+
+    // SHA-512 vendors (Signal desktop, Proton): same contract, second
+    // algorithm. A vendor publishes at most one of the two per asset; if
+    // both are published, both must hold. A mismatch here is exactly as
+    // fatal as a SHA-256 mismatch - the staging bytes are gone.
+    match verify_digest(expected_sha512.as_deref(), &sha512_hex) {
+        Verification::TrustedMatch => verified = Some(true),
+        Verification::Unverified => {}
+        Verification::Mismatch { computed, expected } => {
+            discard_staging(&part).await;
+            return Err((
+                format!(
+                    "Integrity check failed: the file hashes to {} but the publisher published {}. It was deleted. Re-download from the official source.",
+                    computed, expected
+                ),
+                Some("checksum".to_string()),
+            ));
+        }
+    }
 
     // Only now does the file appear under its real name - through an atomic
     // no-clobber commit, never a plain rename: rename silently replaces on
@@ -1625,6 +1660,12 @@ mod tests {
         h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
     }
 
+    fn sha512_hex(bytes: &[u8]) -> String {
+        let mut h = Sha512::new();
+        h.update(bytes);
+        h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
     fn plan_for(url: &str, dir: &Path, name: Option<&str>) -> DownloadPlan {
         DownloadPlan {
             url: crate::network_policy::ValidatedUrl::for_tests(
@@ -1638,6 +1679,7 @@ mod tests {
             dir: dir.to_path_buf(),
             resume: false,
             expected_sha256: None,
+            expected_sha512: None,
             staging: None,
         }
     }
@@ -2733,6 +2775,70 @@ mod tests {
             .expect("a matching trusted checksum must complete");
         assert_eq!(payload.verified, Some(true));
         assert_eq!(payload.sha256, sha256_hex(&body));
+    }
+
+    #[tokio::test]
+    async fn sha512_mismatch_deletes_the_artifact_exactly_like_sha256() {
+        let tmp = TempDir::new("e2e-checksum512");
+        let body = pattern(400);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("app.exe"));
+        plan.expected_sha512 = Some(sha512_hex(b"not the payload"));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a SHA-512 mismatch must fail");
+        assert_eq!(kind.as_deref(), Some("checksum"));
+        assert!(message.contains("Integrity check failed"));
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("app.exe").exists());
+        assert!(!tmp.path().join("app.exe.part").exists());
+        assert!(!tmp.path().join("app.exe.part.meta").exists());
+    }
+
+    #[tokio::test]
+    async fn sha512_match_reports_verified_without_any_sha256_reference() {
+        let tmp = TempDir::new("e2e-checksum512-ok");
+        let body = pattern(400);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("app.exe"));
+        // Uppercase on purpose: normalization must be algorithm-agnostic.
+        plan.expected_sha512 = Some(sha512_hex(&body).to_uppercase());
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a matching trusted SHA-512 must complete");
+        assert_eq!(payload.verified, Some(true));
+    }
+
+    #[tokio::test]
+    async fn both_checksums_supplied_means_both_must_hold() {
+        let tmp = TempDir::new("e2e-checksum-both");
+        let body = pattern(400);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("app.exe"));
+        plan.expected_sha256 = Some(sha256_hex(&body));
+        // The SHA-256 matches but the SHA-512 does not: the file is a lie
+        // no matter which single digest it satisfies.
+        plan.expected_sha512 = Some(sha512_hex(b"different payload"));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a SHA-512 mismatch must fail even with a matching SHA-256");
+        assert_eq!(kind.as_deref(), Some("checksum"));
+        assert!(message.contains("Integrity check failed"));
+        assert!(!tmp.path().join("app.exe").exists());
     }
 
     #[tokio::test]

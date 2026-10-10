@@ -32,6 +32,8 @@ export interface DownloadItem {
   sha256?: string;
   /** Trusted hash this download is being verified against, if one is known. */
   expectedSha256?: string;
+  /** Same contract for vendors that publish SHA-512 (Signal, Proton). */
+  expectedSha512?: string;
   /** true = the digest matched the trusted hash. Never true when only
    * calculated. absent = no trusted reference was available. */
   verified?: boolean;
@@ -68,7 +70,7 @@ interface DownloadsContextValue {
   startDownload: (
     url: string,
     nameHint?: string,
-    opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }
+    opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null }
   ) => Promise<void>;
   recordExternalOpen: (name: string, url: string) => void;
   cancel: (id: number) => void;
@@ -289,7 +291,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   /** The direct invoke path: hand one download to Rust and insert its item.
    * No queue logic here - callers above decide WHEN this may run. */
   const startTauriDownload = useCallback(
-    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }): Promise<void> => {
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null }): Promise<void> => {
       // A malformed %-escape (e.g. a URL containing a bare "%") makes
       // decodeURIComponent throw - BEFORE the invoke try-block below is
       // entered, so startDownload would reject with a raw URIError instead
@@ -323,6 +325,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           filename: guessedName || null,
           directory: dir,
           expectedSha256: opts?.expectedSha256 || null,
+          expectedSha512: opts?.expectedSha512 || null,
           resume: opts?.resume || false,
         });
         activeSlotsRef.current += 1;
@@ -338,6 +341,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             eta: 0,
             status: 'active',
             expectedSha256: opts?.expectedSha256,
+            expectedSha512: opts?.expectedSha512,
             startedAt: Date.now(),
           },
           ...prev,
@@ -351,7 +355,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const startDownload = useCallback(
-    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null }) => {
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null }) => {
       if (!url || !/^https?:\/\//i.test(url)) {
         toast.error('This link is not a direct download');
         return;
@@ -416,6 +420,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               eta: 0,
               status: 'queued',
               expectedSha256: opts?.expectedSha256,
+              expectedSha512: opts?.expectedSha512,
               startedAt: Date.now(),
             },
             ...prev,
@@ -458,6 +463,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         setItems((prev) => prev.filter((it) => it.id !== id));
         void startDownload(item.url, item.name, {
           expectedSha256: item.expectedSha256,
+          expectedSha512: item.expectedSha512,
           resume: resume || false,
           // Retry the SAME download: it belongs to the folder it started
           // in. Resume without this would hunt for the .part file in the

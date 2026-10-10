@@ -48,6 +48,11 @@ export function serializeItems(items: DownloadItem[]): string {
       path: it.path,
       sha256: it.sha256,
       verified: it.verified,
+      // The trusted hashes ride along so a Resume after an app restart
+      // still verifies the finished file. Losing them would silently
+      // downgrade a verified download into a merely computed one.
+      expectedSha256: it.expectedSha256,
+      expectedSha512: it.expectedSha512,
       canResume: it.canResume,
       startedAt: it.startedAt,
     }));
@@ -90,6 +95,14 @@ export function deserializeItems(raw: string | null): Array<Omit<DownloadItem, '
         path: typeof it.path === 'string' ? it.path : undefined,
         sha256: typeof it.sha256 === 'string' ? it.sha256 : undefined,
         verified: it.verified === true ? true : undefined,
+        expectedSha256:
+          typeof it.expectedSha256 === 'string' && it.expectedSha256
+            ? it.expectedSha256
+            : undefined,
+        expectedSha512:
+          typeof it.expectedSha512 === 'string' && it.expectedSha512
+            ? it.expectedSha512
+            : undefined,
         canResume: it.canResume === true ? true : undefined,
         startedAt: typeof it.startedAt === 'number' ? it.startedAt : 0,
         speed: 0,

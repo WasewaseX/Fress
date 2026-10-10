@@ -22,7 +22,7 @@ export const MAX_CONCURRENT_DOWNLOADS = 3;
 export interface QueuedDownload {
   url: string;
   name?: string;
-  opts?: { expectedSha256?: string; resume?: boolean; dir?: string | null };
+  opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null };
 }
 
 export class DownloadQueue {

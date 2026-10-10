@@ -21,6 +21,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.3-beta',
+    date: '2026-10-11',
+    title: 'The hardened engine: verified downloads, validated network',
+    items: [
+      'Downloads check the publisher\'s math now: Signal, Proton and GIMP publish a checksum next to every file, and any download that fails it is deleted before it can look finished. Your own self-update is verified the same way.',
+      'Every download URL is validated inside the native engine first: no cleartext http, no embedded credentials, no private-address redirects — the connection policy is enforced in Rust, not by convention.',
+      'Files are assembled transactionally: resumable staging, proven byte-identity on resume, and a no-clobber commit so two downloads finishing the same name can never destroy each other.',
+      'The whole app was decomposed and hardened under the hood: the download engine, the resolver and the app shell are focused, fully tested modules, with the Rust test suite now running in CI on every platform.',
+    ],
+  },
+  {
     version: '1.0.2-beta',
     date: '2026-09-26',
     title: 'Every entry downloads now, straight from the source',

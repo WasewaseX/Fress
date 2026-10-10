@@ -184,7 +184,12 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
           {wantGh && ghState === 'ready' && gh && (
             <button
               type="button"
-              onClick={() => void startDownload(gh.url, gh.filename)}
+              onClick={() =>
+                void startDownload(gh.url, gh.filename, {
+                  expectedSha256: gh.expectedSha256,
+                  expectedSha512: gh.expectedSha512,
+                })
+              }
               className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
@@ -229,7 +234,12 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
           {wantOfficial && officialState === 'ready' && official && (
             <button
               type="button"
-              onClick={() => void startDownload(official.url, official.filename)}
+              onClick={() =>
+                void startDownload(official.url, official.filename, {
+                  expectedSha256: official.expectedSha256,
+                  expectedSha512: official.expectedSha512,
+                })
+              }
               className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
@@ -258,7 +268,12 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
           {wantFd && fdState === 'ready' && fd && (
             <button
               type="button"
-              onClick={() => void startDownload(fd.url, fd.filename)}
+              onClick={() =>
+                void startDownload(fd.url, fd.filename, {
+                  expectedSha256: fd.expectedSha256,
+                  expectedSha512: fd.expectedSha512,
+                })
+              }
               className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">

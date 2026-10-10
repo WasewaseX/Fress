@@ -419,6 +419,9 @@ async fn start_download(
     // download is deleted and reported as an integrity failure instead of
     // being handed to the user as a finished file.
     expected_sha256: Option<String>,
+    // Same contract for vendors that publish SHA-512 instead (Signal
+    // desktop's electron-updater manifests, Proton's version.json).
+    expected_sha512: Option<String>,
     // Continue an interrupted download from its .part file. The caller
     // passes the same filename it saw before; without a matching .part the
     // download simply starts over.
@@ -488,6 +491,7 @@ async fn start_download(
                 dir,
                 resume: resume.unwrap_or(false),
                 expected_sha256,
+                expected_sha512,
                 staging: None,
             },
             cancel_rx,

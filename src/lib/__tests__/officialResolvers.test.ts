@@ -11,6 +11,7 @@ import {
   parseSignalYml,
   pickProtonStable,
   parseWingetInstallers,
+  base64ToHex,
   TOR_MANIFESTS,
   officialSupported,
 } from '../officialResolvers';
@@ -107,6 +108,54 @@ describe('pickProtonStable', () => {
   it('returns null on garbage or missing version', () => {
     expect(pickProtonStable('not json')).toBeNull();
     expect(pickProtonStable('{"Releases": []}')).toBeNull();
+  });
+});
+
+describe('checksum plumbing', () => {
+  it('base64ToHex converts electron-updater sha512 values to hex', () => {
+    // SHA-512 of the empty string, exactly as the Signal feed publishes it.
+    const hex = base64ToHex('z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==');
+    expect(hex).toBe(
+      'cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e'
+    );
+  });
+  it('base64ToHex returns empty on malformed base64, so no hash is asserted', () => {
+    expect(base64ToHex('!!!!')).toBe('');
+  });
+  it('parseSignalYml keeps the per-file sha512 as hex and drops malformed values', () => {
+    const yml = [
+      'version: 8.28.0',
+      'files:',
+      '  - url: signal-desktop-win-x64-8.28.0.exe',
+      '    sha512: z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==',
+      '    size: 141981864',
+      '  - url: signal-desktop-win-x64-8.28.0.exe.blockmap',
+      '    sha512: ???',
+      '    size: 49509',
+    ].join('\n');
+    const d = parseSignalYml(yml);
+    expect(d.files[0].sha512?.startsWith('cf83e135')).toBe(true);
+    expect(d.files[0].sha512).toHaveLength(128);
+    expect(d.files[1].sha512).toBeUndefined();
+  });
+  it('pickProtonStable carries the published Sha512CheckSum', () => {
+    const json = JSON.stringify({
+      Releases: [
+        {
+          CategoryName: 'Stable',
+          Version: '1.14.0',
+          File: [
+            {
+              Identifier: 'Windows installer EXE',
+              Url: 'https://proton.me/download/mail/windows/ProtonMail-desktop.exe',
+              Sha512CheckSum: 'ab'.repeat(64),
+            },
+          ],
+        },
+      ],
+    });
+    const d = pickProtonStable(json);
+    expect(d?.files[0].sha512).toBe('ab'.repeat(64));
   });
 });
 

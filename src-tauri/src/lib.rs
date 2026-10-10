@@ -408,6 +408,11 @@ fn host_arch() -> String {
     std::env::consts::ARCH.to_string()
 }
 
+// The command arguments ARE the wire contract with the React invoke call,
+// so the trusted-hash knobs cannot be bundled into a struct without
+// changing the payload shape on the other side. Eight explicit args is the
+// honest shape of this boundary.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn start_download(
     app: AppHandle,
@@ -419,6 +424,9 @@ async fn start_download(
     // download is deleted and reported as an integrity failure instead of
     // being handed to the user as a finished file.
     expected_sha256: Option<String>,
+    // Same contract for vendors that publish SHA-512 instead (Signal
+    // desktop's electron-updater manifests, Proton's version.json).
+    expected_sha512: Option<String>,
     // Continue an interrupted download from its .part file. The caller
     // passes the same filename it saw before; without a matching .part the
     // download simply starts over.
@@ -488,6 +496,7 @@ async fn start_download(
                 dir,
                 resume: resume.unwrap_or(false),
                 expected_sha256,
+                expected_sha512,
                 staging: None,
             },
             cancel_rx,

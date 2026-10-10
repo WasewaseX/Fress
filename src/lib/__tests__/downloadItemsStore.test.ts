@@ -53,6 +53,26 @@ describe('downloadItemsStore — the panel survives an app restart', () => {
     });
   });
 
+  it('trusted expected hashes survive the restart so Resume still verifies', () => {
+    const restored = deserializeItems(
+      serializeItems([
+        item({
+          status: 'cancelled',
+          canResume: true,
+          expectedSha256: 'a'.repeat(64),
+          expectedSha512: 'b'.repeat(128),
+        }),
+        // An item that never had a trusted hash stays without one: absent
+        // must round-trip as absent, never as an empty-string "hash".
+        item({ status: 'error', canResume: true }),
+      ])
+    );
+    expect(restored[0].expectedSha256).toBe('a'.repeat(64));
+    expect(restored[0].expectedSha512).toBe('b'.repeat(128));
+    expect(restored[1].expectedSha256).toBeUndefined();
+    expect(restored[1].expectedSha512).toBeUndefined();
+  });
+
   it('a corrupted store degrades to an empty panel, never a crash', () => {
     expect(deserializeItems('not json at all')).toEqual([]);
     expect(deserializeItems('{"url": "oops"}')).toEqual([]);

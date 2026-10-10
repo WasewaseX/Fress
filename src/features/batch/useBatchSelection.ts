@@ -89,6 +89,7 @@ export function useBatchSelection(apps: AppItem[], openDownloads: () => void): B
         const platform = guessUserPlatform(app);
         let url: string | null = null;
         let name = app.name;
+        let hash: { expectedSha256?: string; expectedSha512?: string } | undefined;
         try {
           // Confidence order lives in resolveDownloadFor: confident GitHub
           // pick, then the F-Droid package, then a flagged weak pick.
@@ -96,6 +97,12 @@ export function useBatchSelection(apps: AppItem[], openDownloads: () => void): B
           if (resolved) {
             url = resolved.url;
             name = resolved.filename;
+            // Vendor-manifest checksums (GIMP/Signal/Proton) verify the
+            // finished file exactly like a single download does.
+            hash = {
+              expectedSha256: resolved.expectedSha256,
+              expectedSha512: resolved.expectedSha512,
+            };
             if (resolved.weak) weakPicks += 1;
           }
         } catch {
@@ -106,10 +113,11 @@ export function useBatchSelection(apps: AppItem[], openDownloads: () => void): B
           if (target?.kind === 'direct') {
             url = target.url;
             name = `${app.name} ${target.label}`.trim();
+            hash = undefined;
           }
         }
         if (url) {
-          void startDownload(url, name);
+          void startDownload(url, name, hash);
           started += 1;
         } else {
           skipped.push(app.name);

@@ -33,7 +33,7 @@ const UpdateButton: React.FC = () => {
   const startUpdate = () => {
     if (state.kind !== 'available') return;
     if (state.asset) {
-      void startDownload(state.asset.url, state.asset.name);
+      void startDownload(state.asset.url, state.asset.name, { expectedSha256: state.expectedSha256 || undefined });
     } else {
       void openExternal(state.release.htmlUrl);
     }

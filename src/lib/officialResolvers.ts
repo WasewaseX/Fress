@@ -198,11 +198,11 @@ function toAssets(items: { name: string; url: string; size?: number }[]): Releas
  * hard refusal, shared with the GitHub path.
  */
 function pickOfficial(
-  items: { name: string; url: string; size?: number }[],
+  items: { name: string; url: string; size?: number; sha256?: string; sha512?: string }[],
   platform: Platform,
   arch: string | undefined
-): { name: string; url: string; size: number } | null {
-  let best: { name: string; url: string; size: number } | null = null;
+): { name: string; url: string; size: number; sha256?: string; sha512?: string } | null {
+  let best: { name: string; url: string; size: number; sha256?: string; sha512?: string } | null = null;
   let bestScore = -Infinity;
   for (const item of items) {
     if (!assetCompatibleWithDevice(item.name, platform, arch)) continue;
@@ -210,7 +210,7 @@ function pickOfficial(
     if (s === -1) continue;
     if (s > bestScore) {
       bestScore = s;
-      best = { name: item.name, url: item.url, size: item.size ?? 0 };
+      best = { name: item.name, url: item.url, size: item.size ?? 0, sha256: item.sha256, sha512: item.sha512 };
     }
   }
   return best;
@@ -310,7 +310,7 @@ const resolvers: Record<string, Partial<Record<Platform, OfficialResolver>>> = {
       if (!parsed.version || !parsed.files.length) return null;
       const files = parsed.files
         .filter((f) => !/blockmap/i.test(f.url))
-        .map((f) => ({ name: basename(f.url), url: `https://updates.signal.org/desktop/${f.url}`, size: f.size }))
+        .map((f) => ({ name: basename(f.url), url: `https://updates.signal.org/desktop/${f.url}`, size: f.size, sha512: f.sha512 }))
         .filter((f) => /^signal-desktop-win-.*\.exe$/i.test(f.name));
       const picked = pickOfficial(files, 'windows', arch);
       if (!picked) return null;
@@ -322,7 +322,7 @@ const resolvers: Record<string, Partial<Record<Platform, OfficialResolver>>> = {
       if (!parsed.version || !parsed.files.length) return null;
       const files = parsed.files
         .filter((f) => !/blockmap/i.test(f.url))
-        .map((f) => ({ name: basename(f.url), url: `https://updates.signal.org/desktop/${f.url}`, size: f.size }))
+        .map((f) => ({ name: basename(f.url), url: `https://updates.signal.org/desktop/${f.url}`, size: f.size, sha512: f.sha512 }))
         .filter((f) => f.name.endsWith('.dmg'));
       const picked = pickOfficial(files, 'mac', arch);
       if (!picked) return null;
@@ -334,7 +334,7 @@ const resolvers: Record<string, Partial<Record<Platform, OfficialResolver>>> = {
       if (!parsed.version || !parsed.files.length) return null;
       const files = parsed.files
         .filter((f) => !/blockmap/i.test(f.url))
-        .map((f) => ({ name: basename(f.url), url: `https://updates.signal.org/desktop/${f.url}`, size: f.size }))
+        .map((f) => ({ name: basename(f.url), url: `https://updates.signal.org/desktop/${f.url}`, size: f.size, sha512: f.sha512 }))
         .filter((f) => /\.AppImage$|\.deb$/i.test(f.name));
       const picked = pickOfficial(files, 'linux', arch);
       if (!picked) return null;
@@ -388,7 +388,7 @@ const resolvers: Record<string, Partial<Record<Platform, OfficialResolver>>> = {
 /* ------------------------------------------------------------------ */
 
 function official(
-  picked: { name: string; url: string; size: number },
+  picked: { name: string; url: string; size: number; sha256?: string; sha512?: string },
   version: string,
   page: string
 ): ResolvedDownload {
@@ -399,6 +399,8 @@ function official(
     size: picked.size,
     version,
     releasePageUrl: page,
+    expectedSha256: picked.sha256,
+    expectedSha512: picked.sha512,
   };
 }
 
@@ -559,22 +561,38 @@ async function resolveZotero(platform: Platform, arch: string | undefined, _app:
   };
 }
 
-/** Parses Signal's electron-updater YAML feeds (version + file list). */
-export function parseSignalYml(yaml: string): { version: string; files: { url: string; size: number }[] } {
+/** electron-updater manifests publish SHA-512 as base64; the download
+ * engine verifies hex. Returns '' when the value is not valid base64. */
+export function base64ToHex(b64: string): string {
+  try {
+    const bin = atob(b64);
+    let out = '';
+    for (let i = 0; i < bin.length; i++) out += bin.charCodeAt(i).toString(16).padStart(2, '0');
+    return out;
+  } catch {
+    return '';
+  }
+}
+
+export function parseSignalYml(yaml: string): { version: string; files: { url: string; size: number; sha512?: string }[] } {
   const version = yaml.match(/^version:\s*(\S+)/m)?.[1] ?? '';
-  const files: { url: string; size: number }[] = [];
+  const files: { url: string; size: number; sha512?: string }[] = [];
   const blocks = yaml.split(/^\s*- url:\s*/m).slice(1);
   for (const b of blocks) {
     const url = b.match(/^(\S+)/)?.[1];
     if (!url) continue;
     const size = Number(b.match(/^\s*size:\s*(\d+)/m)?.[1] ?? 0);
-    files.push({ url, size });
+    // electron-updater publishes a per-file sha512 (base64). A malformed
+    // value stays undefined: no checksum, no false confidence.
+    const raw512 = b.match(/^\s*sha512:\s*(\S+)/m)?.[1];
+    const hex = raw512 ? base64ToHex(raw512) : '';
+    files.push({ url, size, sha512: hex.length === 128 ? hex : undefined });
   }
   return { version, files };
 }
 
 async function resolveSignalAndroid(_app: AppItem): Promise<ResolvedDownload | null> {
-  const d = await fetchJson<{ url?: string; versionName?: string }>('https://updates.signal.org/android/latest.json');
+  const d = await fetchJson<{ url?: string; versionName?: string; sha256sum?: string }>('https://updates.signal.org/android/latest.json');
   if (!d.url) return null;
   return {
     source: 'official',
@@ -583,6 +601,7 @@ async function resolveSignalAndroid(_app: AppItem): Promise<ResolvedDownload | n
     size: 0,
     version: d.versionName ?? '',
     releasePageUrl: 'https://signal.org/android/apk/',
+    expectedSha256: d.sha256sum,
   };
 }
 
@@ -630,8 +649,8 @@ async function resolveTor(platform: Platform, arch: string | undefined, _app: Ap
 }
 
 /** Picks the STABLE channel out of Proton's version.json manifests. */
-export function pickProtonStable(json: string): { version: string; files: { identifier: string; url: string }[] } | null {
-  let d: { Releases?: { CategoryName?: string; Version?: string; File?: { Identifier?: string; Url?: string }[] }[] };
+export function pickProtonStable(json: string): { version: string; files: { identifier: string; url: string; sha512?: string }[] } | null {
+  let d: { Releases?: { CategoryName?: string; Version?: string; File?: { Identifier?: string; Url?: string; Sha512CheckSum?: string }[] }[] };
   try {
     d = JSON.parse(json);
   } catch {
@@ -642,7 +661,7 @@ export function pickProtonStable(json: string): { version: string; files: { iden
   if (!stable?.Version) return null;
   const files = (stable.File ?? [])
     .filter((f) => f.Url)
-    .map((f) => ({ identifier: f.Identifier ?? '', url: f.Url as string }));
+    .map((f) => ({ identifier: f.Identifier ?? '', url: f.Url as string, sha512: f.Sha512CheckSum }));
   return { version: stable.Version, files };
 }
 
@@ -651,7 +670,7 @@ async function resolveProtonMail(platform: Platform, arch: string | undefined, _
   const r = await fetchText(`https://proton.me/download/mail/${os}/version.json`);
   const parsed = pickProtonStable(r.body);
   if (!parsed) return null;
-  const files = parsed.files.map((f) => ({ name: basename(f.url), url: f.url }));
+  const files = parsed.files.map((f) => ({ name: basename(f.url), url: f.url, sha512: f.sha512 }));
   const wanted =
     platform === 'windows'
       ? files.filter((f) => f.name.endsWith('.exe'))
@@ -788,18 +807,23 @@ async function resolveSumatra(platform: Platform, arch: string | undefined, _app
 }
 
 async function resolveGimp(platform: Platform, arch: string | undefined, _app: AppItem): Promise<ResolvedDownload | null> {
-  const d = await fetchJson<{ STABLE?: { version?: string; windows?: { filename?: string }[]; macos?: { filename?: string }[] }[] }>(
-    'https://www.gimp.org/gimp_versions.json'
-  );
+  const d = await fetchJson<
+    { STABLE?: { version?: string; windows?: { filename?: string; sha256?: string; sha512?: string }[]; macos?: { filename?: string; sha256?: string; sha512?: string }[] }[] }
+  >('https://www.gimp.org/gimp_versions.json');
   const stable = d.STABLE?.[0];
   if (!stable?.version) return null;
   const majMin = stable.version.split('.').slice(0, 2).join('.');
   const base = `https://download.gimp.org/gimp/v${majMin}/${platform === 'windows' ? 'windows' : 'macos'}/`;
-  const names =
+  // GIMP publishes sha256 AND sha512 per file right next to the filename
+  // (verified live in gimp_versions.json); both ride along so the engine
+  // can verify the finished download.
+  const entries =
     platform === 'windows'
-      ? (stable.windows ?? []).map((w) => w.filename).filter((n): n is string => !!n)
-      : (stable.macos ?? []).map((w) => w.filename).filter((n): n is string => !!n);
-  const files = names.map((n) => ({ name: n, url: base + n }));
+      ? (stable.windows ?? [])
+      : (stable.macos ?? []);
+  const files = entries
+    .filter((w) => !!w.filename)
+    .map((w) => ({ name: w.filename as string, url: base + (w.filename as string), sha256: w.sha256, sha512: w.sha512 }));
   const picked = pickOfficial(files, platform, arch);
   if (!picked) return null;
   return official(picked, stable.version, 'https://www.gimp.org/downloads/');

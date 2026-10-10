@@ -378,7 +378,10 @@ export const AppCard: React.FC<AppCardProps> = ({
                   // GitHub pick, then the F-Droid package, then a weak pick.
                   const resolved = await resolveDownloadFor(app, platform);
                   if (resolved) {
-                    void startDownload(resolved.url, resolved.filename);
+                    void startDownload(resolved.url, resolved.filename, {
+                      expectedSha256: resolved.expectedSha256,
+                      expectedSha512: resolved.expectedSha512,
+                    });
                     return;
                   }
                   // 3) Curated targets: direct links stream in the app

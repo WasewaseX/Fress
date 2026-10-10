@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.3-beta (2026-10-11): the hardened engine — nine audits merged, vendor checksums verified
+
+Nine independent hardening and refactor rounds landed in one release, and the download engine learned to check the publisher's math. Every byte of every download now flows through a policy-validated network stack, files are assembled transactionally, and where a vendor publishes a checksum in the same manifest that named the file, a download that fails it is deleted before it can look finished.
+
+### Added
+- **Vendor checksum verification, end to end.** Signal's electron-updater feeds, Proton's `version.json` and GIMP's `gimp_versions.json` publish a per-file hash right next to the download URL; the resolver now carries that hash (SHA-256 and SHA-512, including electron-updater's base64 encoding) into the download engine, which verifies the finished file and deletes any that fails. The same contract covers single downloads, batch downloads and the app's own self-update (verified against the release's published `SHA256SUMS.txt`). A corrupted or tampered download can never present itself as done.
+- **An authoritative native network policy.** Before a download starts, the URL is admitted under an executable-download policy inside Rust: malformed URLs, cleartext http, embedded credentials, private and loopback address literals and localhost names are refused at the gate, redirects are re-validated per hop, and connections stay public-address-only. The engine's HTTP client is the policy's client — SSRF- and rebinding-resistant by construction, not by convention.
+- **A transaction-safe download engine.** Downloads stage into `.part` files with validator sidecars, resume only against a proven byte-identical origin (strict `Content-Range` checks), and finalize through an atomic no-clobber commit — two downloads finishing the same name can no longer destroy each other, and a finished file never appears half-written. The engine is a self-contained, unit-tested module with an explicit state machine.
+- **Rust is tested in CI now.** Every pull request and every main push runs the Rust test suite on every desktop platform Fress ships for, plus formatting and lint gates; release workflows are SHA-pinned and least-privilege.
+
+### Changed
+- **The frontend and the engine were decomposed.** `App.tsx` went from 1,245 lines to a composition shell, `releaseFetch` became a facade over focused `release/` modules (providers, matching, caching, types), and the download engine moved out of the Tauri monolith into `download_finalize.rs`. No behavior drift: characterization tests landed before the extraction.
+- **Imported regex overrides are boundary-checked.** Patterns coming from backup imports and custom entries pass a safe-subset analyzer that targets the catastrophic-backtracking class; the shipped catalog's patterns are compile-audited by test.
+- **Tauri capabilities are least-privilege now.** Every plugin permission in the capability file was re-verified against the actual frontend call sites and narrowed to exactly those, the CSP was hardened to the audited dist output with `freezePrototype`, and the previously-dead "Open file / Open folder" buttons work again.
+- **Accessibility pass.** Icon-only controls carry real names, the filter bar is a labelled group, and download progress is announced to screen readers.
+
+### Fixed
+- The download engine's extraction initially dropped the `serde::Serialize` derives that compile the event payloads (caught by CI, fixed before merge); the integration of the policy layer and the engine moved download-path validation into the plan itself so no download can bypass it.
+- The compare button in the app card now tells screen readers whether it adds to or removes from the comparison matrix, instead of reading the same either way.
+
+
+
 ## 1.0.2-beta (2026-09-26): every entry downloads, no "go look it up" left
 
 The catalog-wide download audit finished the job the earlier rounds started: every app, on every platform it claims, now hands you a real file (or, where a project genuinely ships no binary, its official package channel). Fifty-two desktop rows and seven Android rows used to dead-end in a download page; they resolve to exact installers now, read live from each project's own manifest infrastructure.

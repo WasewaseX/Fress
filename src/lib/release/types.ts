@@ -45,6 +45,13 @@ export interface ResolvedDownload {
    * (odd extension, no architecture marker, stripped flags). The UI warns
    * instead of presenting it as a sure thing. */
   weak?: boolean;
+  /** Checksums the vendor published in the same manifest that named the
+   * file (GIMP's gimp_versions.json, Signal's latest*.yml / latest.json,
+   * Proton's version.json). The download engine deletes any file that
+   * fails them, so a corrupted or tampered download can never look
+   * finished. Absent when the manifest ships no per-file checksum. */
+  expectedSha256?: string;
+  expectedSha512?: string;
 }
 
 export interface FdroidInfo {

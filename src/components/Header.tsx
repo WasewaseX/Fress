@@ -89,6 +89,16 @@ export const BrandMark: React.FC<{ size?: number }> = ({ size = 32 }) => (
   </svg>
 );
 
+/* Shared More-menu styling: one look for every row, label and chip. */
+const MORE_ITEM =
+  'w-full text-start px-3 py-2 flex items-center gap-2 text-xs text-fr-text hover:bg-fr-bg transition-colors';
+const MORE_LABEL =
+  'px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-fr-text-muted flex items-center gap-1.5';
+const MORE_CHIP_ON =
+  'flex-1 inline-flex items-center justify-center gap-1 px-2 py-2 rounded-md border text-xs fr-chip-active font-semibold transition-colors';
+const MORE_CHIP_OFF =
+  'flex-1 inline-flex items-center justify-center gap-1 px-2 py-2 rounded-md border text-xs text-fr-text bg-fr-bg border-fr-border transition-colors';
+
 export const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
@@ -117,6 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
   onUpdateChannelChange,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const { theme, setTheme } = useTheme();
   // Split contexts: state re-renders on every progress tick, actions never change.
@@ -161,575 +172,598 @@ export const Header: React.FC<HeaderProps> = ({
     setShowMoreMenu(false);
   };
 
-  // Close menus on Escape
+  // Close the More menu on Escape and hand focus back to its button, so
+  // keyboard users do not fall back to the top of the page.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && showMoreMenu) {
         setShowMoreMenu(false);
+        moreBtnRef.current?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [showMoreMenu]);
 
   return (
-    <header
-      id="main-app-header"
-      className="fixed inset-x-0 top-0 z-30 md:sticky border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-900/95 backdrop-blur-md"
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5">
-        <div id="header-content-row" className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 flex-wrap">
+    <>
+      {/* Skip link: first focusable element on the page, lands on #main-content */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-[70] focus:inline-flex focus:items-center focus:h-[var(--fr-h-primary)] focus:px-3 focus:rounded-lg focus:bg-fr-primary focus:text-white focus:text-xs focus:font-semibold focus:shadow-lg"
+      >
+        {t('a11y.skipToContent')}
+      </a>
 
-          {/* Brand: app icon + name, nothing else */}
-          <div id="header-brand-group" className="flex items-center gap-2.5 shrink-0">
-            <BrandMark size={32} />
-            <span id="header-brand-title" className="font-extrabold text-base text-slate-100 tracking-tight">
-              Fress
-            </span>
-            <span
-              id="header-version-chip"
-              className="text-[11px] font-mono font-semibold tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded"
-              title={t('header.versionTitle')}
-            >
-              v{pkg.version}
-            </span>
+      <header
+        id="main-app-header"
+        className="fixed inset-x-0 top-0 z-30 md:sticky border-b border-fr-border bg-fr-surface"
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2">
+          {/*
+            Two-tier action hierarchy.
+            Mobile (<md):   row 1 = brand · Add App · Downloads · More
+                            row 2 = search (and the update pill, when one exists)
+            Desktop (>=md): brand · update pill · search · Add App · Downloads
+                            · [secondary: tabs · view toggle · More]
+            Search always gets an equivalent route to every control: the More
+            menu exists on every screen size.
+          */}
+          <div
+            id="header-content-row"
+            className="flex flex-wrap items-center gap-x-1.5 gap-y-2 md:flex-nowrap md:gap-x-3"
+          >
+            {/* ---- Primary group: brand ---- */}
+            <div id="header-brand-group" className="order-1 flex items-center gap-2 shrink-0 min-w-0">
+              <BrandMark size={32} />
+              <span id="header-brand-title" className="font-extrabold text-base text-fr-text tracking-tight">
+                Fress
+              </span>
+              <span
+                id="header-version-chip"
+                className="hidden min-[420px]:inline-block text-[11px] font-mono font-semibold tracking-wide text-fr-text-muted bg-fr-bg border border-fr-border px-1.5 py-0.5 rounded"
+                title={t('header.versionTitle')}
+              >
+                v{pkg.version}
+              </span>
+            </div>
+
+            {/* ---- Primary group: Add App (dominant) + Downloads ---- */}
+            <div id="header-actions-group" className="order-2 md:order-4 flex items-center gap-1.5 md:gap-2 shrink-0 ml-auto md:ml-0">
+              <button
+                id="header-add-app-btn"
+                type="button"
+                onClick={onOpenAddApps}
+                className="inline-flex items-center justify-center gap-1.5 h-[var(--fr-h-primary)] max-md:h-[var(--fr-touch-target)] bg-fr-primary hover:bg-fr-primary-hover text-white text-xs font-semibold px-3 max-md:px-2.5 rounded-lg border border-fr-primary-hover transition-colors shadow-xs"
+                title={t('header.addAppTitle')}
+              >
+                <Plus className="w-4 h-4" aria-hidden="true" />
+                <span>{t('header.addApp')}</span>
+              </button>
+
+              <button
+                id="header-downloads-btn"
+                type="button"
+                onClick={onOpenDownloads}
+                className="relative inline-flex items-center justify-center gap-1.5 h-[var(--fr-h-primary)] max-md:h-[var(--fr-touch-target)] max-md:w-[var(--fr-touch-target)] max-md:px-0 text-xs font-medium text-fr-text bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong px-2.5 rounded-lg transition-colors"
+                title={t('header.downloads')}
+                aria-label={`${t('header.downloads')}${downloadBadge > 0 ? ` (${downloadBadge})` : ''}`}
+              >
+                <DownloadCloud className="w-4 h-4" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('header.downloads')}</span>
+                {downloadBadge > 0 && (
+                  <span
+                    id="downloads-active-badge"
+                    className="absolute -top-1.5 -end-1.5 min-w-[16px] h-4 px-1 rounded-full bg-fr-primary-hover text-white text-[11px] font-bold flex items-center justify-center"
+                  >
+                    {downloadBadge}
+                  </span>
+                )}
+              </button>
+
+              {onOpenBatchInstall && batchCount > 0 && (
+                <button
+                  type="button"
+                  id="header-batch-btn"
+                  onClick={onOpenBatchInstall}
+                  className="inline-flex items-center gap-1 h-[var(--fr-h-primary)] max-md:h-[var(--fr-touch-target)] bg-sky-800/[0.08] text-sky-900 border border-sky-800/25 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 hover:bg-sky-800/[0.14] dark:hover:bg-sky-500/30 text-xs font-medium px-2.5 rounded-lg transition-colors"
+                  title={t('header.batchTitle')}
+                >
+                  <Terminal className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{t('header.batchPill').replace('{n}', String(batchCount))}</span>
+                </button>
+              )}
+
+              {onOpenCompare && compareCount > 0 && (
+                <button
+                  type="button"
+                  id="header-compare-btn"
+                  onClick={onOpenCompare}
+                  className="inline-flex items-center gap-1 h-[var(--fr-h-primary)] max-md:h-[var(--fr-touch-target)] bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 text-xs font-medium px-2.5 rounded-lg transition-colors"
+                  title={t('header.compareTitle')}
+                >
+                  <Columns className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{t('header.comparePill').replace('{n}', String(compareCount))}</span>
+                </button>
+              )}
+            </div>
+
+            {/* ---- Secondary group: tabs + view toggle (desktop) and the More menu (every size) ---- */}
+            <div id="header-secondary-group" className="order-3 md:order-5 flex items-center gap-2 shrink-0">
+              {onPageChange && (
+                <div
+                  id="page-tabs"
+                  role="tablist"
+                  aria-label={t('header.sectionsAria')}
+                  className="hidden lg:flex items-center bg-fr-bg border border-fr-border p-0.5 rounded-lg"
+                >
+                  <button
+                    id="page-catalog-btn"
+                    type="button"
+                    role="tab"
+                    aria-selected={page === 'catalog'}
+                    onClick={() => onPageChange('catalog')}
+                    className={`h-[var(--fr-h-secondary)] px-2.5 rounded-md text-xs font-medium transition-colors ${
+                      page === 'catalog' ? 'fr-chip-active shadow-xs' : 'text-fr-text-muted hover:text-fr-text'
+                    }`}
+                    title={t('header.browseCatalog')}
+                  >
+                    {t('header.tabApps')}
+                  </button>
+                  <button
+                    id="page-replace-btn"
+                    type="button"
+                    role="tab"
+                    aria-selected={page === 'replace'}
+                    onClick={() => onPageChange('replace')}
+                    className={`inline-flex items-center gap-1 h-[var(--fr-h-secondary)] px-2.5 rounded-md text-xs font-medium transition-colors ${
+                      page === 'replace' ? 'fr-chip-active shadow-xs' : 'text-fr-text-muted hover:text-fr-text'
+                    }`}
+                    title={t('header.privacyPackTitle')}
+                  >
+                    <Replace className="w-3.5 h-3.5" aria-hidden="true" />
+                    {t('header.tabPrivacy')}
+                  </button>
+                </div>
+              )}
+
+              <div
+                id="view-mode-toggle"
+                className={`hidden md:flex items-center bg-fr-bg border border-fr-border p-0.5 rounded-lg ${
+                  page !== 'catalog' ? 'md:hidden' : ''
+                }`}
+              >
+                <button
+                  id="view-mode-grid-btn"
+                  type="button"
+                  onClick={() => onToggleViewMode('grid')}
+                  aria-pressed={viewMode === 'grid'}
+                  className={`inline-flex items-center justify-center h-[var(--fr-h-secondary)] w-[var(--fr-h-secondary)] rounded-md transition-colors ${
+                    viewMode === 'grid' ? 'fr-chip-active shadow-xs' : 'text-fr-text-muted hover:text-fr-text'
+                  }`}
+                  title={t('header.gridView')}
+                  aria-label={t('header.gridViewAria')}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+                <button
+                  id="view-mode-table-btn"
+                  type="button"
+                  onClick={() => onToggleViewMode('table')}
+                  aria-pressed={viewMode === 'table'}
+                  className={`inline-flex items-center justify-center h-[var(--fr-h-secondary)] w-[var(--fr-h-secondary)] rounded-md transition-colors ${
+                    viewMode === 'table' ? 'fr-chip-active shadow-xs' : 'text-fr-text-muted hover:text-fr-text'
+                  }`}
+                  title={t('header.tableView')}
+                  aria-label={t('header.tableViewAria')}
+                >
+                  <List className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </div>
+
+              {/* More menu: the single route to every secondary action */}
+              <div className="relative">
+                <button
+                  id="header-more-menu-btn"
+                  ref={moreBtnRef}
+                  type="button"
+                  onClick={() => setShowMoreMenu(!showMoreMenu)}
+                  className="inline-flex items-center justify-center h-[var(--fr-h-secondary)] w-[var(--fr-h-secondary)] max-md:h-[var(--fr-touch-target)] max-md:w-[var(--fr-touch-target)] text-fr-text bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong rounded-lg transition-colors"
+                  title={t('header.moreMenu')}
+                  aria-label={t('header.moreMenu')}
+                  aria-expanded={showMoreMenu}
+                  aria-controls="header-more-dropdown"
+                  aria-haspopup="true"
+                >
+                  <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
+                </button>
+
+                {showMoreMenu && (
+                  <>
+                    {/* Outside click closes the menu */}
+                    <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} aria-hidden="true" />
+                    <div
+                      id="header-more-dropdown"
+                      aria-label={t('header.moreMenu')}
+                      className="absolute end-0 mt-1.5 w-60 max-w-[calc(100vw-2rem)] max-h-[min(75vh,640px)] overflow-y-auto overscroll-contain bg-fr-surface-elevated border border-fr-border-strong rounded-xl shadow-2xl z-50 py-1 text-xs divide-y divide-fr-border"
+                    >
+                      {/* Phones and tablets: section tabs + view mode live here */}
+                      <div className="py-1 lg:hidden">
+                        {onPageChange && (
+                          <>
+                            <p id="more-menu-section-label" className={MORE_LABEL}>
+                              <LayoutGrid className="w-3 h-3" aria-hidden="true" />
+                              {t('header.section')}
+                            </p>
+                            <div className="px-3 pb-1 grid grid-cols-2 items-center gap-1.5" role="group" aria-labelledby="more-menu-section-label">
+                              <button
+                                type="button"
+                                aria-pressed={page === 'catalog'}
+                                onClick={() => {
+                                  onPageChange('catalog');
+                                  setShowMoreMenu(false);
+                                }}
+                                className={page === 'catalog' ? MORE_CHIP_ON : MORE_CHIP_OFF}
+                                title={t('header.browseCatalog')}
+                              >
+                                <span>{t('header.tabApps')}</span>
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={page === 'replace'}
+                                onClick={() => {
+                                  onPageChange('replace');
+                                  setShowMoreMenu(false);
+                                }}
+                                className={page === 'replace' ? MORE_CHIP_ON : MORE_CHIP_OFF}
+                                title={t('header.privacyPackTitle')}
+                              >
+                                <Replace className="w-3.5 h-3.5" aria-hidden="true" />
+                                <span>{t('header.tabPrivacy')}</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+
+                        <p id="more-menu-view-label" className={MORE_LABEL}>
+                          <LayoutGrid className="w-3 h-3" aria-hidden="true" />
+                          {t('header.view')}
+                        </p>
+                        <div className="px-3 pb-1 flex items-center gap-1.5" role="group" aria-labelledby="more-menu-view-label">
+                          <button
+                            type="button"
+                            aria-pressed={viewMode === 'grid'}
+                            onClick={() => {
+                              onToggleViewMode('grid');
+                              setShowMoreMenu(false);
+                            }}
+                            className={viewMode === 'grid' ? MORE_CHIP_ON : MORE_CHIP_OFF}
+                          >
+                            <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>{t('header.grid')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={viewMode === 'table'}
+                            onClick={() => {
+                              onToggleViewMode('table');
+                              setShowMoreMenu(false);
+                            }}
+                            className={viewMode === 'table' ? MORE_CHIP_ON : MORE_CHIP_OFF}
+                          >
+                            <List className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>{t('header.table')}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="py-1">
+                        <p className={MORE_LABEL}>
+                          <Folder className="w-3 h-3" aria-hidden="true" />
+                          {t('menu.catalog')}
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            onExportCatalog();
+                          }}
+                          className={MORE_ITEM}
+                        >
+                          <FileDown className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
+                          <span>{t('header.backup')}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            fileInputRef.current?.click();
+                          }}
+                          className={MORE_ITEM}
+                        >
+                          <Upload className="w-3.5 h-3.5 text-fr-success shrink-0" aria-hidden="true" />
+                          <span>{t('header.restore')}</span>
+                        </button>
+
+                        {onOpenExportModal && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMoreMenu(false);
+                              onOpenExportModal();
+                            }}
+                            className={MORE_ITEM}
+                          >
+                            <Share2 className="w-3.5 h-3.5 text-fr-success shrink-0" aria-hidden="true" />
+                            <span>{t('header.exportReadme')}</span>
+                          </button>
+                        )}
+
+                        {onOpenBatchInstall && batchCount === 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMoreMenu(false);
+                              onOpenBatchInstall();
+                            }}
+                            className={MORE_ITEM}
+                          >
+                            <Terminal className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
+                            <span>{t('header.batchGenerator')}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="py-1">
+                        <p className={MORE_LABEL}>
+                          <RefreshCw className="w-3 h-3" aria-hidden="true" />
+                          {t('menu.updates')}
+                        </p>
+
+                        {onOpenWhatsNew && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMoreMenu(false);
+                              onOpenWhatsNew();
+                            }}
+                            className={MORE_ITEM}
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
+                            <span>{t('header.whatsNew')}</span>
+                          </button>
+                        )}
+
+                        {onCheckForUpdates && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowMoreMenu(false);
+                              onCheckForUpdates();
+                            }}
+                            className={MORE_ITEM}
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
+                            <span>{t('header.checkUpdates')}</span>
+                          </button>
+                        )}
+
+                        {onUpdateChannelChange && (
+                          // Update channel: which roughness of build the
+                          // updater reports. Stable hides prereleases once a
+                          // stable 1.0 exists; Alpha sees everything.
+                          <div className="px-3 py-2 mt-1">
+                            <p className="text-[11px] text-fr-text-muted mb-1.5">{t('header.updateChannel')}</p>
+                            <div className="flex gap-1">
+                              {(['stable', 'beta', 'alpha'] as const).map((ch) => (
+                                <button
+                                  key={ch}
+                                  type="button"
+                                  onClick={() => onUpdateChannelChange(ch)}
+                                  aria-pressed={updateChannel === ch}
+                                  className={`flex-1 px-2 py-1.5 rounded-md border text-[11px] capitalize transition-colors ${
+                                    updateChannel === ch
+                                      ? 'fr-chip-active font-semibold'
+                                      : 'text-fr-text bg-fr-bg border-fr-border'
+                                  }`}
+                                >
+                                  {ch}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Download location (moved here from the old settings gear) */}
+                      <div className="px-3 pt-2.5 pb-2.5">
+                        <p className={MORE_LABEL}>
+                          <Folder className="w-3 h-3" aria-hidden="true" />
+                          {t('settings.downloadFolder')}
+                        </p>
+                        <code
+                          className="block w-full truncate text-[10px] font-mono text-fr-text-muted bg-fr-bg border border-fr-border rounded px-1.5 py-1 mb-1.5"
+                          dir="ltr"
+                          title={downloadDir || ''}
+                        >
+                          {downloadDir || '…'}
+                        </code>
+                        {canPickFolder ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void chooseFolder()}
+                              className="flex-1 inline-flex items-center justify-center gap-1 h-[var(--fr-h-secondary)] bg-fr-primary hover:bg-fr-primary-hover text-white px-2 rounded-md font-semibold border border-fr-primary-hover transition-colors text-[11px] whitespace-nowrap"
+                            >
+                              <FolderOpen className="w-3 h-3" aria-hidden="true" />
+                              <span>{t('settings.changeFolder')}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void resetFolder()}
+                              className="inline-flex items-center justify-center gap-1 h-[var(--fr-h-secondary)] text-fr-text bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong px-2 rounded-md transition-colors text-[11px] whitespace-nowrap"
+                              title={t('header.systemDownloads')}
+                            >
+                              <RotateCcw className="w-3 h-3" aria-hidden="true" />
+                              <span>{t('settings.resetFolder')}</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-fr-text-muted leading-snug">
+                            {t('settings.androidFolderNote')}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="py-1">
+                        <p className={MORE_LABEL}>
+                          <Globe className="w-3 h-3" aria-hidden="true" />
+                          {t('header.language')}
+                        </p>
+                        {LANGUAGES.map((l) => (
+                          <button
+                            key={l.code}
+                            type="button"
+                            onClick={() => setLang(l.code)}
+                            aria-pressed={lang === l.code}
+                            className={`w-full text-start px-3 py-2 flex items-center justify-between hover:bg-fr-bg transition-colors ${
+                              lang === l.code ? 'text-fr-primary font-semibold' : 'text-fr-text'
+                            }`}
+                          >
+                            <span>{l.native}</span>
+                            {lang === l.code && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="py-1">
+                        <p className={MORE_LABEL}>
+                          {theme === 'dark' ? (
+                            <Sun className="w-3 h-3" aria-hidden="true" />
+                          ) : (
+                            <Moon className="w-3 h-3" aria-hidden="true" />
+                          )}
+                          {t('header.theme')}
+                        </p>
+                        <div className="px-3 pb-1.5 flex items-center gap-1.5" role="group" aria-label={t('header.theme')}>
+                          <button
+                            type="button"
+                            onClick={() => setTheme('light')}
+                            aria-pressed={theme === 'light'}
+                            className={theme === 'light' ? MORE_CHIP_ON : MORE_CHIP_OFF}
+                          >
+                            <Sun className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>{t('header.light')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTheme('dark')}
+                            aria-pressed={theme === 'dark'}
+                            className={theme === 'dark' ? MORE_CHIP_ON : MORE_CHIP_OFF}
+                          >
+                            <Moon className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>{t('header.dark')}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="py-1">
+                        <p className={MORE_LABEL}>
+                          <Keyboard className="w-3 h-3" aria-hidden="true" />
+                          {t('menu.help')}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            onOpenTauriModal();
+                          }}
+                          className={MORE_ITEM}
+                        >
+                          <Download className="w-3.5 h-3.5 text-fr-warning shrink-0" aria-hidden="true" />
+                          <span>{t('header.packageGuide')}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            onOpenShortcutsModal();
+                          }}
+                          className={MORE_ITEM}
+                        >
+                          <Keyboard className="w-3.5 h-3.5 text-fr-text-muted shrink-0" aria-hidden="true" />
+                          <span>{t('header.shortcuts')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* ---- Update pill: own line on phones, inline after the brand on desktop ---- */}
             {updateVersion && (
               <button
                 id="header-update-pill"
                 type="button"
                 onClick={onUpdateClick}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-300 hover:bg-amber-200 border border-amber-400 px-2 py-0.5 rounded transition-colors"
-                title={t('update.available')}
+                className="order-4 md:order-2 max-md:basis-full max-md:justify-center inline-flex items-center gap-1 self-center text-[11px] font-bold text-amber-900 bg-amber-300 hover:bg-amber-200 border border-amber-400 px-2 py-1 rounded-lg transition-colors"
+                title={t('header.updatePillTitle').replace('{v}', updateVersion)}
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
-                <span>{t('update.download')} v{updateVersion}</span>
+                <span>{t('header.updatePill').replace('{v}', updateVersion)}</span>
               </button>
             )}
-          </div>
 
-          {/* Search bar & Cmd+K quick launcher */}
-          <div id="header-search-wrapper" className="flex-1 max-w-lg relative min-w-[200px]">
-            <label htmlFor="app-search-input" className="sr-only">
-              {t('header.search')} Ctrl+K
-            </label>
-            <div className="relative">
-              <Search
-                id="search-icon-indicator"
-                className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                aria-hidden="true"
-              />
-              <input
-                id="app-search-input"
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder={t('header.searchPlaceholder')}
-                className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] hover:border-slate-950/20 dark:hover:border-white/[0.2] text-slate-100 placeholder-slate-400 text-xs rounded-lg pl-9 pr-20 py-2 transition-colors focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
-              />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {searchQuery && (
-                  <button
-                    id="clear-search-btn"
-                    type="button"
-                    onClick={() => onSearchChange('')}
-                    aria-label={t('header.clearSearch')}
-                    className="text-slate-400 hover:text-slate-100 p-0.5"
-                  >
-                    <X className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                )}
-                {onOpenCommandPalette && (
-                  <button
-                    type="button"
-                    onClick={onOpenCommandPalette}
-                    className="text-[11px] font-mono bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] border border-slate-950/10 dark:border-white/[0.12] text-slate-300 px-1.5 py-0.5 rounded transition-colors"
-                    title={t('header.openPalette')}
-                  >
-                    Ctrl+K
-                  </button>
-                )}
+            {/* ---- Primary group: search ---- */}
+            <div
+              id="header-search-wrapper"
+              className="order-5 md:order-3 max-md:basis-full min-w-0 md:flex-1 md:max-w-lg relative"
+            >
+              <label htmlFor="app-search-input" className="sr-only">
+                {t('header.search')} Ctrl+K
+              </label>
+              <div className="relative">
+                <Search
+                  id="search-icon-indicator"
+                  className="w-4 h-4 text-fr-text-muted absolute start-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                  aria-hidden="true"
+                />
+                <input
+                  id="app-search-input"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  placeholder={t('header.searchPlaceholder')}
+                  className="w-full h-[var(--fr-h-input)] bg-fr-surface-elevated border border-fr-border hover:border-fr-border-strong text-fr-text placeholder:text-fr-text-muted text-xs rounded-lg ps-9 pe-20 transition-colors focus:outline-none focus:ring-2 focus:ring-fr-focus focus:border-fr-focus"
+                />
+                <div className="absolute end-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {searchQuery && (
+                    <button
+                      id="clear-search-btn"
+                      type="button"
+                      onClick={() => onSearchChange('')}
+                      aria-label={t('header.clearSearch')}
+                      className="text-fr-text-muted hover:text-fr-text p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  )}
+                  {onOpenCommandPalette && (
+                    <button
+                      type="button"
+                      onClick={onOpenCommandPalette}
+                      className="text-[11px] font-mono bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong text-fr-text px-1.5 py-0.5 rounded transition-colors"
+                      title={t('header.openPalette')}
+                    >
+                      Ctrl+K
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Action group */}
-          <div id="header-actions-group" className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button
-              id="header-add-app-btn"
-              type="button"
-              onClick={onOpenAddApps}
-              className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-sky-500 transition-colors shadow-xs"
-              title={t('header.addAppTitle')}
-            >
-              <Plus className="w-3.5 h-3.5 text-sky-100" aria-hidden="true" />
-              <span>{t('header.addApp')}</span>
-            </button>
-
-            {/* Downloads */}
-            <button
-              id="header-downloads-btn"
-              type="button"
-              onClick={onOpenDownloads}
-              className="relative inline-flex items-center gap-1.5 text-xs font-medium text-slate-200 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] px-2.5 py-1.5 rounded-lg transition-colors"
-              title={t('header.downloads')}
-              aria-label={`${t('header.downloads')}${downloadBadge > 0 ? ` (${downloadBadge})` : ''}`}
-            >
-              <DownloadCloud className="w-3.5 h-3.5" aria-hidden="true" />
-              <span className="hidden sm:inline">{t('header.downloads')}</span>
-              {downloadBadge > 0 && (
-                <span
-                  id="downloads-active-badge"
-                  className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[11px] font-bold flex items-center justify-center"
-                >
-                  {downloadBadge}
-                </span>
-              )}
-            </button>
-
-            {/* Batch pill */}
-            {onOpenBatchInstall && batchCount > 0 && (
-              <button
-                type="button"
-                id="header-batch-btn"
-                onClick={onOpenBatchInstall}
-                className="inline-flex items-center gap-1 bg-sky-800/[0.08] text-sky-900 border border-sky-800/25 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 hover:bg-sky-800/[0.14] dark:hover:bg-sky-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
-                title={t('header.batchTitle')}
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                {/* "Batch" stays literal: no short dictionary key fits this pill (round 22). */}
-                <span>Batch ({batchCount})</span>
-              </button>
-            )}
-
-            {/* Compare pill */}
-            {onOpenCompare && compareCount > 0 && (
-              <button
-                type="button"
-                id="header-compare-btn"
-                onClick={onOpenCompare}
-                className="inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
-                title={t('header.compareTitle')}
-              >
-                <Columns className="w-3.5 h-3.5" />
-                <span>{t('bar.compare')} ({compareCount})</span>
-              </button>
-            )}
-
-            {/* Tabs: catalog vs privacy pack (desktop; phones find them in the More menu) */}
-            {onPageChange && (
-              <div id="page-tabs" role="tablist" aria-label={t('header.sectionsAria')} className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
-                <button
-                  id="page-catalog-btn"
-                  type="button"
-                  role="tab"
-                  aria-selected={page === 'catalog'}
-                  onClick={() => onPageChange('catalog')}
-                  className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
-                    page === 'catalog'
-                      ? 'fr-chip-active shadow-xs'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title={t('header.browseCatalog')}
-                >
-                  {t('header.tabApps')}
-                </button>
-                <button
-                  id="page-replace-btn"
-                  type="button"
-                  role="tab"
-                  aria-selected={page === 'replace'}
-                  onClick={() => onPageChange('replace')}
-                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
-                    page === 'replace'
-                      ? 'fr-chip-active shadow-xs'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title={t('header.privacyPackTitle')}
-                >
-                  <Replace className="w-3.5 h-3.5" aria-hidden="true" />
-                  {t('header.tabPrivacy')}
-                </button>
-              </div>
-            )}
-
-            {/* View mode (desktop; phones find it in the More menu) */}
-            <div id="view-mode-toggle" className={`hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg ${page !== 'catalog' ? 'md:hidden' : ''}`}>
-              <button
-                id="view-mode-grid-btn"
-                type="button"
-                onClick={() => onToggleViewMode('grid')}
-                className={`p-1.5 rounded-md text-xs transition-colors ${
-                  viewMode === 'grid'
-                    ? 'fr-chip-active shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title={t('header.gridView')}
-                aria-label={t('header.gridViewAria')}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button
-                id="view-mode-table-btn"
-                type="button"
-                onClick={() => onToggleViewMode('table')}
-                className={`p-1.5 rounded-md text-xs transition-colors ${
-                  viewMode === 'table'
-                    ? 'fr-chip-active shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title={t('header.tableView')}
-                aria-label={t('header.tableViewAria')}
-              >
-                <List className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-            </div>
-
-            {/* Theme toggle (desktop; phones find it in the More menu) */}
-            <button
-              id="theme-toggle-btn"
-              type="button"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="hidden md:inline-flex p-1.5 text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] rounded-lg transition-colors"
-              title={theme === 'dark' ? t('theme.toLight') : t('theme.toDark')}
-              aria-label={theme === 'dark' ? t('theme.toLight') : t('theme.toDark')}
-              data-theme={theme}
-            >
-              {theme === 'dark' ? <Sun className="w-4 h-4" aria-hidden="true" /> : <Moon className="w-4 h-4" aria-hidden="true" />}
-            </button>
-
-            {/* More menu */}
-            <div className="relative">
-              <button
-                id="header-more-menu-btn"
-                type="button"
-                onClick={() => setShowMoreMenu(!showMoreMenu)}
-                className="p-1.5 text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] rounded-lg transition-colors"
-                title={t('header.moreMenu')}
-                aria-label={t('header.moreMenu')}
-                aria-expanded={showMoreMenu}
-                aria-haspopup="true"
-              >
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-
-              {showMoreMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} aria-hidden="true" />
-                  <div
-                    id="header-more-dropdown"
-                    className="absolute right-0 mt-1.5 w-60 bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl z-50 py-1 text-xs divide-y divide-slate-950/10 dark:divide-white/[0.06]"
-                  >
-                    {/* Phones: tabs, view mode + theme live here instead of the bar */}
-                    <div className="py-1 md:hidden">
-                      {onPageChange && (
-                        <>
-                          <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
-                            <LayoutGrid className="w-3 h-3" />
-                            {t('header.sectionsAria')}
-                          </p>
-                          <div className="px-3 pb-1 grid grid-cols-2 items-center gap-1.5">
-                            <button
-                              type="button"
-                              aria-pressed={page === 'catalog'}
-                              onClick={() => {
-                                onPageChange('catalog');
-                                setShowMoreMenu(false);
-                              }}
-                              className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
-                                page === 'catalog'
-                                  ? 'fr-chip-active font-semibold'
-                                  : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                              }`}
-                            >
-                              <span>{t('header.tabApps')}</span>
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={page === 'replace'}
-                              onClick={() => {
-                                onPageChange('replace');
-                                setShowMoreMenu(false);
-                              }}
-                              className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
-                                page === 'replace'
-                                  ? 'fr-chip-active font-semibold'
-                                  : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                              }`}
-                            >
-                              <Replace className="w-3.5 h-3.5" aria-hidden="true" />
-                              <span>{t('header.tabPrivacy')}</span>
-                            </button>
-                          </div>
-                        </>
-                      )}
-
-                      <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
-                        <LayoutGrid className="w-3 h-3" />
-                        {/* "View" stays literal: no matching dictionary key (round 22). */}
-                        View
-                      </p>
-                      <div className="px-3 pb-1 flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onToggleViewMode('grid');
-                            setShowMoreMenu(false);
-                          }}
-                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
-                            viewMode === 'grid'
-                              ? 'fr-chip-active font-semibold'
-                              : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                          }`}
-                        >
-                          <LayoutGrid className="w-3.5 h-3.5" />
-                          <span>{t('common.viewGrid')}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onToggleViewMode('table');
-                            setShowMoreMenu(false);
-                          }}
-                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
-                            viewMode === 'table'
-                              ? 'fr-chip-active font-semibold'
-                              : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                          }`}
-                        >
-                          <List className="w-3.5 h-3.5" />
-                          <span>{t('common.viewTable')}</span>
-                        </button>
-                      </div>
-
-                      <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
-                        {theme === 'dark' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
-                        {t('header.theme')}
-                      </p>
-                      <div className="px-3 pb-1.5 flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setTheme('light')}
-                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
-                            theme === 'light'
-                              ? 'fr-chip-active font-semibold'
-                              : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                          }`}
-                        >
-                          <Sun className="w-3.5 h-3.5" />
-                          <span>{t('header.light')}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTheme('dark')}
-                          className={`flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border transition-colors ${
-                            theme === 'dark'
-                              ? 'fr-chip-active font-semibold'
-                              : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                          }`}
-                        >
-                          <Moon className="w-3.5 h-3.5" />
-                          <span>{t('header.dark')}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="py-1">
-                      {onOpenWhatsNew && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onOpenWhatsNew();
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                          <span>{t('header.whatsNew')}</span>
-                        </button>
-                      )}
-
-                      {onCheckForUpdates && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onCheckForUpdates();
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
-                          <span>{t('header.checkUpdates')}</span>
-                        </button>
-                      )}
-
-                      {onUpdateChannelChange && (
-                        // Update channel: which roughness of build the
-                        // updater reports. Stable hides prereleases once a
-                        // stable 1.0 exists; Alpha sees everything.
-                        <div className="px-3 py-2 border-t border-slate-950/10 dark:border-white/[0.06] mt-1">
-                          <p className="text-[11px] text-slate-400 mb-1.5">{t('header.updateChannel')}</p>
-                          <div className="flex gap-1">
-                            {(['stable', 'beta', 'alpha'] as const).map((ch) => (
-                              <button
-                                key={ch}
-                                type="button"
-                                onClick={() => onUpdateChannelChange(ch)}
-                                className={`flex-1 px-2 py-1 rounded-md border text-[11px] capitalize transition-colors ${
-                                  updateChannel === ch
-                                    ? 'fr-chip-active font-semibold'
-                                    : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
-                                }`}
-                              >
-                                {ch}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {onOpenBatchInstall && batchCount === 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onOpenBatchInstall();
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                        >
-                          <Terminal className="w-3.5 h-3.5 text-sky-400" />
-                          <span>{t('header.batchGenerator')}</span>
-                        </button>
-                      )}
-
-                      {onOpenExportModal && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onOpenExportModal();
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                        >
-                          <Share2 className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>{t('header.exportReadme')}</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="py-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          onExportCatalog();
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                      >
-                        <FileDown className="w-3.5 h-3.5 text-sky-400" />
-                        <span>{t('header.backup')}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          fileInputRef.current?.click();
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>{t('header.restore')}</span>
-                      </button>
-                    </div>
-
-                    {/* Download location (moved here from the old settings gear) */}
-                    <div className="px-3 pt-2.5 pb-2.5 border-b border-slate-950/10 dark:border-white/[0.06]">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5 mb-1.5">
-                        <Folder className="w-3 h-3" />
-                        {t('settings.downloadFolder')}
-                      </p>
-                      <code
-                        className="block w-full truncate text-[10px] font-mono text-slate-300 bg-slate-950/[0.06] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.08] rounded px-1.5 py-1 mb-1.5"
-                        dir="ltr"
-                        title={downloadDir || ''}
-                      >
-                        {downloadDir || '…'}
-                      </code>
-                      {canPickFolder ? (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => void chooseFolder()}
-                            className="flex-1 inline-flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded-md font-semibold border border-sky-500 transition-colors"
-                          >
-                            <FolderOpen className="w-3 h-3" />
-                            <span>{t('settings.changeFolder')}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void resetFolder()}
-                            className="inline-flex items-center justify-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-950/[0.06] dark:bg-white/[0.06] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
-                            title={t('header.systemDownloads')}
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>{t('settings.resetFolder')}</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-slate-400 leading-snug">
-                          {t('settings.androidFolderNote')}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="py-1">
-                      <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
-                        <Globe className="w-3 h-3" />
-                        {t('header.language')}
-                      </p>
-                      {LANGUAGES.map((l) => (
-                        <button
-                          key={l.code}
-                          type="button"
-                          onClick={() => setLang(l.code)}
-                          className={`w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] ${
-                            lang === l.code ? 'text-sky-400 font-semibold' : 'text-slate-200'
-                          }`}
-                        >
-                          <span>{l.native}</span>
-                          {lang === l.code && <Check className="w-3.5 h-3.5" />}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="py-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          onOpenTauriModal();
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                      >
-                        <Download className="w-3.5 h-3.5 text-amber-400" />
-                        <span>{t('header.packageGuide')}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowMoreMenu(false);
-                          onOpenShortcutsModal();
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
-                      >
-                        <Keyboard className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{t('header.shortcuts')}</span>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
 
             <input
@@ -743,7 +777,7 @@ export const Header: React.FC<HeaderProps> = ({
             />
           </div>
         </div>
-      </div>
-    </header>
+      </header>
+    </>
   );
 };

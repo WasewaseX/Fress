@@ -17,9 +17,12 @@ use std::sync::{Arc, Mutex};
 
 use super::sanitize_filename;
 use super::{
-    api_client, dest_for_part, fetch_fdroid_package, fetch_latest_release, fetch_recent_releases,
-    fetch_text, filename_from_headers, numbered_name, parse_gh_release, part_path_for,
-    percent_decode, read_part_meta, unique_path, write_part_meta, PartMeta, FETCH_TEXT_BODY_CAP,
+    api_client, fetch_fdroid_package, fetch_latest_release, fetch_recent_releases, fetch_text,
+    parse_gh_release, FETCH_TEXT_BODY_CAP,
+};
+use super::download_finalize::{
+    commit_no_clobber, dest_for_part, filename_from_headers, numbered_name, part_path_for,
+    percent_decode, read_part_meta, write_part_meta, PartMeta,
 };
 
 // ---------------------------------------------------------------------------
@@ -211,7 +214,7 @@ fn url_last_segment_is_the_fallback_and_needs_an_extension() {
 }
 
 // ---------------------------------------------------------------------------
-// numbered_name / unique_path — concurrent-collision primitives
+// numbered_name / commit_no_clobber — concurrent-collision primitives
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -222,15 +225,26 @@ fn numbered_name_inserts_the_counter_before_the_extension() {
     assert_eq!(numbered_name("setup.exe", 0), "setup.exe");
 }
 
-#[test]
-fn unique_path_skips_taken_names() {
-    let dir = temp_dir("unique-path");
+#[tokio::test]
+async fn commit_no_clobber_skips_taken_names() {
+    let dir = temp_dir("commit-no-clobber");
     std::fs::write(dir.join("file.txt"), b"x").unwrap();
-    let first = unique_path(&dir, "file.txt");
-    assert_eq!(first.file_name().unwrap().to_string_lossy(), "file (1).txt");
 
-    // A free name is returned untouched.
-    let free = unique_path(&dir, "other.txt");
+    // A finished staging file whose first candidate name is taken must not
+    // clobber it: the commit lands on the next free candidate instead.
+    let part = dir.join("file.txt.part");
+    std::fs::write(&part, b"new").unwrap();
+    let committed = commit_no_clobber(&part, &dir, "file.txt").await.unwrap();
+    assert_eq!(committed.file_name().unwrap().to_string_lossy(), "file (1).txt");
+    assert_eq!(std::fs::read(dir.join("file.txt")).unwrap(), b"x");
+    assert_eq!(std::fs::read(dir.join("file (1).txt")).unwrap(), b"new");
+    // A successful commit consumes the staging file.
+    assert!(!part.exists());
+
+    // A free name is committed untouched.
+    let part2 = dir.join("other.txt.part");
+    std::fs::write(&part2, b"y").unwrap();
+    let free = commit_no_clobber(&part2, &dir, "other.txt").await.unwrap();
     assert_eq!(free.file_name().unwrap().to_string_lossy(), "other.txt");
     cleanup(&dir);
 }

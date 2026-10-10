@@ -2862,13 +2862,22 @@ mod tests {
         let session = DownloadSession::new(Arc::clone(&registry), id);
         let log = Arc::new(EventLog::default());
 
-        // Cancel as soon as the first progress event proves bytes flowed.
-        let watcher_log = Arc::clone(&log);
+        // Cancel once the staging file provably holds the first sent
+        // chunk (4 KiB) ON DISK. Cancelling on the first progress EVENT
+        // races the stream itself: reqwest may deliver the 4096 sent
+        // bytes as several smaller chunks, so the first event can fire
+        // long before 4096 bytes are staged, which made the assertion
+        // below flaky. Bytes on disk are the thing this test cares about.
+        let watcher_part = tmp.path().join("big.bin.part");
         let watcher_registry = Arc::clone(&registry);
         tokio::spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while watcher_log.progress.lock().unwrap().is_empty() {
-                if Instant::now() > deadline {
+            loop {
+                let staged = tokio::fs::metadata(&watcher_part)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                if staged >= 4096 || Instant::now() > deadline {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;

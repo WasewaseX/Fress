@@ -314,18 +314,27 @@ describe('resolveGitHubDownload, error reporting', () => {
     makeApp({ githubUrl: `https://github.com/example/err-${++n}`, ...over });
 
   it('surfaces a GitHub rate limit through peekResolveError', async () => {
-    // CHARACTERIZATION (pre-fix): resolve records the error under the FULL
-    // cache key (repo|platform|tagPattern|flagged) while peekResolveError
-    // looks under repo|platform, so the UI-facing lookup misses today.
-    // This test only locks the resolve-side behavior: null result, no throw.
-    // The keying mismatch gets its own documented fix + test right after.
+    // The fix: errors are recorded under repo|platform (the only key the
+    // UI-facing peek can compute), so a rate-limited resolve is reported
+    // as a rate limit instead of a generic "no stable build".
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse('rate limited', 403))
     );
     const app = appInRepo();
     expect(await resolveGitHubDownload(app, 'windows')).toBeNull();
-    expect(() => peekResolveError(app, 'windows')).not.toThrow();
+    expect(peekResolveError(app, 'windows')).toMatch(/rate limit/i);
+  });
+
+  it('a rate limit is visible even when the app pins a tag stream', async () => {
+    // Regression for the original bug: the error used to be stored under
+    // the FULL cache key (repo|platform|tagPattern|flagged), which the
+    // peek can never reconstruct - with a tag pattern pinned the lookup
+    // missed and the UI showed a generic failure.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse('rate limited', 403)));
+    const app = appInRepo({ tagPatterns: { windows: '^desktop-' } });
+    expect(await resolveGitHubDownload(app, 'windows')).toBeNull();
+    expect(peekResolveError(app, 'windows')).toMatch(/rate limit/i);
   });
 
   it('peekResolveError is null for a quiet miss (no stable build)', async () => {

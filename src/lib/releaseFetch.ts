@@ -614,14 +614,27 @@ const FAIL_TTL_MS = 30_000;
  * reason is actionable (rate limit vs the honest "no stable build here").
  * The UI reads this instead of showing a generic failure for what is often
  * just GitHub's unauthenticated quota being exhausted.
+ *
+ * Keyed by `repo|platform` only - NOT by the full resolve-cache key (which
+ * additionally carries the tag-stream pattern and the flagged-releases
+ * vouch). peekResolveError can only compute `repo|platform` from an app,
+ * so a full key here made every recorded error unreachable through the
+ * UI-facing getter; the error is a property of the repo lookup, not of one
+ * app's stream filter.
  */
 const resolveErrors = new Map<string, string>();
+
+/** The error-map key for a repo|platform pair; kept in one place so the
+ * writer and peekResolveError can never drift apart again. */
+function resolveErrorKey(repo: string, platform: Platform): string {
+  return `${repo}|${platform}`;
+}
 
 /** The last actionable failure for a repo|platform lookup, or null. */
 export function peekResolveError(app: AppItem, platform: Platform): string | null {
   const repo = effectiveRepo(app, platform);
   if (!repo) return null;
-  return resolveErrors.get(`${repo}|${platform}`) ?? null;
+  return resolveErrors.get(resolveErrorKey(repo, platform)) ?? null;
 }
 
 /** The GitHub repo that actually carries this platform's downloads: the
@@ -755,7 +768,7 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           } catch (e) {
             latest = null;
             const msg = (e as Error).message || '';
-            if (/rate limit/i.test(msg)) resolveErrors.set(key, msg);
+            if (/rate limit/i.test(msg)) resolveErrors.set(resolveErrorKey(repo, platform), msg);
           }
           // A latest release from the wrong product stream is worse than
           // none: drop it and let the scan find the right stream.
@@ -822,7 +835,7 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           return null;
         } catch (e) {
           const msg = (e as Error).message || '';
-          if (/rate limit/i.test(msg)) resolveErrors.set(key, msg);
+          if (/rate limit/i.test(msg)) resolveErrors.set(resolveErrorKey(repo, platform), msg);
           return null;
         }
       })();

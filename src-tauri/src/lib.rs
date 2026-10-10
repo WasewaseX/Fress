@@ -4,8 +4,10 @@
 //
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::FutureExt;
+use serde::Serialize;
 // `Manager` powers the Android-only app-data path lookup below.
 #[cfg_attr(not(target_os = "android"), allow(unused_imports))]
 use tauri::{AppHandle, Emitter, Manager, State};

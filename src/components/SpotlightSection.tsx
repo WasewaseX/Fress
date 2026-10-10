@@ -5,14 +5,8 @@
 import React from 'react';
 import { useI18n } from '../lib/i18n';
 
-interface SpotlightSectionProps {
-  onSelectTrending: () => void;
-  onSelectOwnerPicks: () => void;
-  totalApps: number;
-  androidCount: number;
-}
-
-export const SpotlightSection: React.FC<SpotlightSectionProps> = () => {
+// No props: the hero is fully dictionary-driven (the former four props were never read).
+export const SpotlightSection: React.FC = () => {
   const { t } = useI18n();
 
   return (

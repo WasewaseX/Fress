@@ -18,21 +18,14 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import { useDownloads, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
+import { useDownloadState, useDownloadActions, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
 import { summarizeDownloadStates } from '../lib/downloadsAnnouncement';
 import { useI18n } from '../lib/i18n';
 
 export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
-  const {
-    items,
-    cancel,
-    retry,
-    clearFinished,
-    openFile,
-    openFolder,
-    downloadDir,
-    chooseFolder,
-  } = useDownloads();
+  // Split context: state re-renders on every progress tick, actions never do.
+  const { items, downloadDir } = useDownloadState();
+  const { cancel, retry, clearFinished, openFile, openFolder, chooseFolder } = useDownloadActions();
   const { t } = useI18n();
 
   useEffect(() => {
@@ -58,7 +51,11 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
       {/* Screen-reader announcements for progress and failures: the visual
           list changes silently otherwise. Polite, so it never interrupts. */}
       <div className="sr-only" role="status" aria-live="polite">
-        {summarizeDownloadStates(items)}
+        {summarizeDownloadStates(items, (key, params) => {
+          let s: string = t(key);
+          if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v));
+          return s;
+        })}
       </div>
 
       <aside
@@ -112,7 +109,14 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                 </div>
 
                 {/* Progress bar */}
-                <div className="h-1.5 w-full bg-slate-950/10 dark:bg-white/[0.06] rounded-full overflow-hidden mb-2">
+                <div
+                  className="h-1.5 w-full bg-slate-950/10 dark:bg-white/[0.06] rounded-full overflow-hidden mb-2"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={item.total > 0 ? pct : undefined}
+                  aria-label={`${t('downloads.a11y.progress')}: ${item.name}`}
+                >
                   <div
                     className={`h-full rounded-full transition-[width] duration-200 ${
                       item.status === 'completed'
@@ -151,6 +155,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                     }}
                     className="w-full text-left text-[11px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
                     title={t('common.copy')}
+                    aria-label={t('downloads.a11y.copyHash')}
                   >
                     <FileCheck2 className="w-3 h-3 shrink-0 text-emerald-400" />
                     <span className="truncate">{t('downloads.hash')}: {item.sha256}</span>

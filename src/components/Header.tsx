@@ -30,7 +30,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
-import { useDownloads, isAndroidWebview } from '../lib/downloads';
+import { useDownloadState, useDownloadActions, isAndroidWebview } from '../lib/downloads';
 import { LANGUAGES, useI18n } from '../lib/i18n';
 import pkg from '../../package.json';
 
@@ -119,7 +119,9 @@ export const Header: React.FC<HeaderProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const { theme, setTheme } = useTheme();
-  const { activeCount, downloadDir, chooseFolder, resetFolder } = useDownloads();
+  // Split contexts: state re-renders on every progress tick, actions never change.
+  const { activeCount, downloadDir } = useDownloadState();
+  const { chooseFolder, resetFolder } = useDownloadActions();
   const { t, lang, setLang } = useI18n();
 
   const downloadBadge = activeDownloadCount ?? activeCount;
@@ -187,7 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span
               id="header-version-chip"
               className="text-[11px] font-mono font-semibold tracking-wide text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.05] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded"
-              title="The exact version of this Fress install"
+              title={t('header.versionTitle')}
             >
               v{pkg.version}
             </span>
@@ -197,10 +199,10 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={onUpdateClick}
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-300 hover:bg-amber-200 border border-amber-400 px-2 py-0.5 rounded transition-colors"
-                title={`Fress v${updateVersion} is available. Tap to download the update. Your apps and data are kept.`}
+                title={t('update.available')}
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
-                <span>Update v{updateVersion}</span>
+                <span>{t('update.download')} v{updateVersion}</span>
               </button>
             )}
           </div>
@@ -230,7 +232,7 @@ export const Header: React.FC<HeaderProps> = ({
                     id="clear-search-btn"
                     type="button"
                     onClick={() => onSearchChange('')}
-                    aria-label="Clear search input"
+                    aria-label={t('header.clearSearch')}
                     className="text-slate-400 hover:text-slate-100 p-0.5"
                   >
                     <X className="w-3.5 h-3.5" aria-hidden="true" />
@@ -241,7 +243,7 @@ export const Header: React.FC<HeaderProps> = ({
                     type="button"
                     onClick={onOpenCommandPalette}
                     className="text-[11px] font-mono bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] border border-slate-950/10 dark:border-white/[0.12] text-slate-300 px-1.5 py-0.5 rounded transition-colors"
-                    title="Open Command Palette (Ctrl+K)"
+                    title={t('header.openPalette')}
                   >
                     Ctrl+K
                   </button>
@@ -257,7 +259,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onOpenAddApps}
               className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-sky-500 transition-colors shadow-xs"
-              title="Add software to your catalog: search GitHub or enter it yourself"
+              title={t('header.addAppTitle')}
             >
               <Plus className="w-3.5 h-3.5 text-sky-100" aria-hidden="true" />
               <span>{t('header.addApp')}</span>
@@ -291,9 +293,10 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-batch-btn"
                 onClick={onOpenBatchInstall}
                 className="inline-flex items-center gap-1 bg-sky-800/[0.08] text-sky-900 border border-sky-800/25 dark:bg-sky-500/20 dark:text-sky-300 dark:border-sky-500/40 hover:bg-sky-800/[0.14] dark:hover:bg-sky-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
-                title="Generate batch installer script"
+                title={t('header.batchTitle')}
               >
                 <Terminal className="w-3.5 h-3.5" />
+                {/* "Batch" stays literal: no short dictionary key fits this pill (round 22). */}
                 <span>Batch ({batchCount})</span>
               </button>
             )}
@@ -305,16 +308,16 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-compare-btn"
                 onClick={onOpenCompare}
                 className="inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors"
-                title="Side-by-side feature comparison"
+                title={t('header.compareTitle')}
               >
                 <Columns className="w-3.5 h-3.5" />
-                <span>Compare ({compareCount})</span>
+                <span>{t('bar.compare')} ({compareCount})</span>
               </button>
             )}
 
             {/* Tabs: catalog vs privacy pack (desktop; phones find them in the More menu) */}
             {onPageChange && (
-              <div id="page-tabs" role="tablist" aria-label="Catalog sections" className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
+              <div id="page-tabs" role="tablist" aria-label={t('header.sectionsAria')} className="hidden md:flex items-center bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] p-0.5 rounded-lg">
                 <button
                   id="page-catalog-btn"
                   type="button"
@@ -326,9 +329,9 @@ export const Header: React.FC<HeaderProps> = ({
                       ? 'fr-chip-active shadow-xs'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
-                  title="Browse the app catalog"
+                  title={t('header.browseCatalog')}
                 >
-                  Apps
+                  {t('header.tabApps')}
                 </button>
                 <button
                   id="page-replace-btn"
@@ -341,10 +344,10 @@ export const Header: React.FC<HeaderProps> = ({
                       ? 'fr-chip-active shadow-xs'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
-                  title="Privacy Pack: friendlier alternatives to the apps you use"
+                  title={t('header.privacyPackTitle')}
                 >
                   <Replace className="w-3.5 h-3.5" aria-hidden="true" />
-                  Privacy
+                  {t('header.tabPrivacy')}
                 </button>
               </div>
             )}
@@ -360,8 +363,8 @@ export const Header: React.FC<HeaderProps> = ({
                     ? 'fr-chip-active shadow-xs'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
-                title="Grid Card View"
-                aria-label="Switch to Grid View"
+                title={t('header.gridView')}
+                aria-label={t('header.gridViewAria')}
               >
                 <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
@@ -374,8 +377,8 @@ export const Header: React.FC<HeaderProps> = ({
                     ? 'fr-chip-active shadow-xs'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
-                title="Compact Table View"
-                aria-label="Switch to Table View"
+                title={t('header.tableView')}
+                aria-label={t('header.tableViewAria')}
               >
                 <List className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
@@ -422,7 +425,7 @@ export const Header: React.FC<HeaderProps> = ({
                         <>
                           <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
                             <LayoutGrid className="w-3 h-3" />
-                            Section
+                            {t('header.sectionsAria')}
                           </p>
                           <div className="px-3 pb-1 grid grid-cols-2 items-center gap-1.5">
                             <button
@@ -438,7 +441,7 @@ export const Header: React.FC<HeaderProps> = ({
                                   : 'text-slate-200 bg-slate-950/[0.06] dark:bg-white/[0.06] border-slate-950/10 dark:border-white/[0.08]'
                               }`}
                             >
-                              <span>Apps</span>
+                              <span>{t('header.tabApps')}</span>
                             </button>
                             <button
                               type="button"
@@ -454,7 +457,7 @@ export const Header: React.FC<HeaderProps> = ({
                               }`}
                             >
                               <Replace className="w-3.5 h-3.5" aria-hidden="true" />
-                              <span>Privacy</span>
+                              <span>{t('header.tabPrivacy')}</span>
                             </button>
                           </div>
                         </>
@@ -462,6 +465,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                       <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
                         <LayoutGrid className="w-3 h-3" />
+                        {/* "View" stays literal: no matching dictionary key (round 22). */}
                         View
                       </p>
                       <div className="px-3 pb-1 flex items-center gap-1.5">
@@ -478,7 +482,7 @@ export const Header: React.FC<HeaderProps> = ({
                           }`}
                         >
                           <LayoutGrid className="w-3.5 h-3.5" />
-                          <span>Grid</span>
+                          <span>{t('common.viewGrid')}</span>
                         </button>
                         <button
                           type="button"
@@ -493,13 +497,13 @@ export const Header: React.FC<HeaderProps> = ({
                           }`}
                         >
                           <List className="w-3.5 h-3.5" />
-                          <span>Table</span>
+                          <span>{t('common.viewTable')}</span>
                         </button>
                       </div>
 
                       <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
                         {theme === 'dark' ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
-                        Theme
+                        {t('header.theme')}
                       </p>
                       <div className="px-3 pb-1.5 flex items-center gap-1.5">
                         <button
@@ -512,7 +516,7 @@ export const Header: React.FC<HeaderProps> = ({
                           }`}
                         >
                           <Sun className="w-3.5 h-3.5" />
-                          <span>Light</span>
+                          <span>{t('header.light')}</span>
                         </button>
                         <button
                           type="button"
@@ -524,7 +528,7 @@ export const Header: React.FC<HeaderProps> = ({
                           }`}
                         >
                           <Moon className="w-3.5 h-3.5" />
-                          <span>Dark</span>
+                          <span>{t('header.dark')}</span>
                         </button>
                       </div>
                     </div>
@@ -540,7 +544,7 @@ export const Header: React.FC<HeaderProps> = ({
                           className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
                         >
                           <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                          <span>What's new</span>
+                          <span>{t('header.whatsNew')}</span>
                         </button>
                       )}
 
@@ -554,7 +558,7 @@ export const Header: React.FC<HeaderProps> = ({
                           className="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08] flex items-center gap-2"
                         >
                           <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
-                          <span>Check for updates</span>
+                          <span>{t('header.checkUpdates')}</span>
                         </button>
                       )}
 
@@ -563,7 +567,7 @@ export const Header: React.FC<HeaderProps> = ({
                         // updater reports. Stable hides prereleases once a
                         // stable 1.0 exists; Alpha sees everything.
                         <div className="px-3 py-2 border-t border-slate-950/10 dark:border-white/[0.06] mt-1">
-                          <p className="text-[11px] text-slate-400 mb-1.5">Update channel</p>
+                          <p className="text-[11px] text-slate-400 mb-1.5">{t('header.updateChannel')}</p>
                           <div className="flex gap-1">
                             {(['stable', 'beta', 'alpha'] as const).map((ch) => (
                               <button
@@ -665,7 +669,7 @@ export const Header: React.FC<HeaderProps> = ({
                             type="button"
                             onClick={() => void resetFolder()}
                             className="inline-flex items-center justify-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-950/[0.06] dark:bg-white/[0.06] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] px-2 py-1 rounded-md transition-colors"
-                            title="Use the system Downloads folder"
+                            title={t('header.systemDownloads')}
                           >
                             <RotateCcw className="w-3 h-3" />
                             <span>{t('settings.resetFolder')}</span>

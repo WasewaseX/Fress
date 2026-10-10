@@ -15,8 +15,15 @@ import { DownloadItem } from './downloads';
  *
  * Pure function so the wording and state mapping are unit-testable without
  * a DOM environment.
+ *
+ * The optional translator receives the downloads.a11y.* keys with {count} /
+ * {list} params; without one the English fallback is byte-identical to the
+ * pre-i18n wording (pinned by the existing unit tests).
  */
-export function summarizeDownloadStates(items: DownloadItem[]): string {
+export function summarizeDownloadStates(
+  items: DownloadItem[],
+  translate?: (key: string, params?: Record<string, string | number>) => string
+): string {
   let active = 0;
   let queued = 0;
   let completed = 0;
@@ -27,11 +34,15 @@ export function summarizeDownloadStates(items: DownloadItem[]): string {
     else if (it.status === 'completed') completed++;
     else if (it.status === 'error' || it.status === 'cancelled') failed++;
   }
+  const bit = (n: number, key: string, en: string): string =>
+    translate ? translate(key, { count: n }) : en.replace('{count}', String(n));
   const bits: string[] = [];
-  if (active > 0) bits.push(`${active} downloading`);
-  if (queued > 0) bits.push(`${queued} queued`);
-  if (completed > 0) bits.push(`${completed} completed`);
-  if (failed > 0) bits.push(`${failed} failed`);
-  if (bits.length === 0) return 'Downloads';
-  return `Downloads: ${bits.join(', ')}`;
+  if (active > 0) bits.push(bit(active, 'downloads.a11y.summaryDownloading', '{count} downloading'));
+  if (queued > 0) bits.push(bit(queued, 'downloads.a11y.summaryQueued', '{count} queued'));
+  if (completed > 0) bits.push(bit(completed, 'downloads.a11y.summaryCompleted', '{count} completed'));
+  if (failed > 0) bits.push(bit(failed, 'downloads.a11y.summaryFailed', '{count} failed'));
+  if (bits.length === 0) return translate ? translate('downloads.a11y.summaryEmpty') : 'Downloads';
+  return translate
+    ? translate('downloads.a11y.summary', { list: bits.join(', ') })
+    : `Downloads: ${bits.join(', ')}`;
 }

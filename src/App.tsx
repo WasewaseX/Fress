@@ -45,7 +45,7 @@ import { WhatsNewModal } from './components/WhatsNewModal';
 import { ReplaceTab } from './components/ReplaceTab';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider, useI18n } from './lib/i18n';
-import { DownloadsProvider, useDownloads } from './lib/downloads';
+import { DownloadsProvider, useDownloadState, useDownloadActions } from './lib/downloads';
 import { Category } from './types';
 
 import { useAppCatalog, filterAndSortApps } from './features/catalog/useAppCatalog';
@@ -64,8 +64,8 @@ import { useWhatsNew } from './features/whatsNew/useWhatsNew';
 function AppShell() {
   const { theme: uiTheme } = useTheme();
   const { t } = useI18n();
-  const { items: downloadItems, startDownload } = useDownloads();
-  const activeDownloadCount = downloadItems.filter((d) => d.status === 'active').length;
+  const { activeCount: activeDownloadCount } = useDownloadState();
+  const { startDownload } = useDownloadActions();
 
   // Feature state
   const catalog = useAppCatalog();
@@ -173,14 +173,7 @@ function AppShell() {
       <div className="md:hidden" style={{ height: 'var(--fress-header-h, 0px)' }} aria-hidden="true" />
 
       {/* Spotlight Section */}
-      {page === 'catalog' && (
-        <SpotlightSection
-          onSelectTrending={() => handleFilterChange({ trendingOnly: true, ownerPickOnly: false, category: 'All' })}
-          onSelectOwnerPicks={() => handleFilterChange({ ownerPickOnly: true, trendingOnly: false, category: 'All' })}
-          totalApps={catalog.apps.length}
-          androidCount={catalog.androidCount}
-        />
-      )}
+      {page === 'catalog' && <SpotlightSection />}
 
       {/* Filter and Category Bar */}
       {page === 'catalog' && (

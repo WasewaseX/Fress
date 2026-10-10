@@ -408,6 +408,11 @@ fn host_arch() -> String {
     std::env::consts::ARCH.to_string()
 }
 
+// The command arguments ARE the wire contract with the React invoke call,
+// so the trusted-hash knobs cannot be bundled into a struct without
+// changing the payload shape on the other side. Eight explicit args is the
+// honest shape of this boundary.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn start_download(
     app: AppHandle,

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 //
 import { Platform } from '../../types';
+import { compileSafePattern } from '../patternSafety';
 import {
   AssetPick,
   DeviceAbi,
@@ -316,31 +317,39 @@ export function pickAssetDetailed(
   const pattern = patterns?.[platform];
   if (pattern) {
     try {
-      const re = new RegExp(pattern, 'i');
-      // Architecture compatibility is a HARD constraint an override cannot
-      // bypass: the pattern is the naming authority - it says which file
-      // FAMILY is right - but it must never declare an impossible
-      // architecture installable (an Android pattern pinning a split name
-      // used to hand that file to an unknown-ABI browser even though the
-      // heuristic correctly refuses it). Incompatible matches are dropped;
-      // if none survive, fall through to the heuristic, which applies the
-      // very same gate (assetCompatibleWithDevice).
-      const matches = usable
-        .filter((a) => re.test(a.name))
-        .filter((a) => assetCompatibleWithDevice(a.name, platform, arch));
-      if (matches.length > 0) {
-        // Among surviving pattern matches the heuristic still breaks ties
-        // (x64 vs arm64 variants of the same pinned naming).
-        let best = matches[0];
-        let bestScore = -Infinity;
-        for (const a of matches) {
-          const s = scoreAsset(a.name, platform, arch);
-          if (s > bestScore) {
-            bestScore = s;
-            best = a;
+      // compileSafePattern: an unsafe (pathologically backtracking) or
+      // invalid pattern compiles to null here, exactly like the invalid
+      // case below - the download path must never hang on a hand-edited
+      // catalog field. Sanitization at import time already drops unsafe
+      // patterns; this is the same gate at use time (defense in depth for
+      // data that predates it, e.g. storage written by an older build).
+      const re = compileSafePattern(pattern);
+      if (re) {
+        // Architecture compatibility is a HARD constraint an override cannot
+        // bypass: the pattern is the naming authority - it says which file
+        // FAMILY is right - but it must never declare an impossible
+        // architecture installable (an Android pattern pinning a split name
+        // used to hand that file to an unknown-ABI browser even though the
+        // heuristic correctly refuses it). Incompatible matches are dropped;
+        // if none survive, fall through to the heuristic, which applies the
+        // very same gate (assetCompatibleWithDevice).
+        const matches = usable
+          .filter((a) => re.test(a.name))
+          .filter((a) => assetCompatibleWithDevice(a.name, platform, arch));
+        if (matches.length > 0) {
+          // Among surviving pattern matches the heuristic still breaks ties
+          // (x64 vs arm64 variants of the same pinned naming).
+          let best = matches[0];
+          let bestScore = -Infinity;
+          for (const a of matches) {
+            const s = scoreAsset(a.name, platform, arch);
+            if (s > bestScore) {
+              bestScore = s;
+              best = a;
+            }
           }
+          return { pick: best, matchedBy: 'override', weak: false };
         }
-        return { pick: best, matchedBy: 'override', weak: false };
       }
     } catch {
       // An invalid pattern must never kill the download path; the catalog

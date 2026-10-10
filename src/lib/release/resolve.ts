@@ -4,6 +4,7 @@
 //
 import { AppItem, Platform } from '../../types';
 import { resolveOfficialDownload } from '../officialResolvers';
+import { compileSafePattern } from '../patternSafety';
 import { cleanVersion, effectiveRepo } from './repo';
 import {
   ghCache,
@@ -71,16 +72,13 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           // repo under different tag prefixes (Ente: photos/auth/locker/
           // Ensu; Tuta: desktop/android/calendar). Without it the picker
           // can serve a DIFFERENT product's installer that merely carries
-          // the right file extension. An invalid pattern must not kill the
-          // download path, so a failed compile just disables the filter.
+          // the right file extension. An invalid or unsafe pattern must
+          // not kill (or hang) the download path, so a failed compile just
+          // disables the filter (compileSafePattern: null = no filter).
           let tagRe: RegExp | null = null;
           const tagSrc = app.tagPatterns?.[platform];
           if (tagSrc) {
-            try {
-              tagRe = new RegExp(tagSrc, 'i');
-            } catch {
-              tagRe = null;
-            }
+            tagRe = compileSafePattern(tagSrc);
           }
           const tagOk = (tag: string): boolean => (tagRe ? tagRe.test(tag) : true);
           // 1) The cheapest correct answer: the repo's single latest stable

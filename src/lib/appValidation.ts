@@ -4,6 +4,7 @@
 //
 import { AppItem, BeginnerRating, Category, Platform } from '../types';
 import { sanitizeInstallCommand } from './installCommands';
+import { compileSafePattern } from './patternSafety';
 
 /**
  * Runtime validation for AppItem-shaped data that crosses a trust boundary:
@@ -111,40 +112,38 @@ export function sanitizeAppItem(raw: unknown): SanitizedApp {
       : undefined;
 
   // assetPatterns: per-platform regex strings. Anything that is not a
-  // compilable, size-capped pattern is dropped - a broken regex must never
-  // throw inside the resolve path later.
+  // compilable, size-capped SAFE pattern is dropped - a broken regex must
+  // never throw inside the resolve path later, and a pathological one
+  // (exponential backtracking, e.g. "(a+)+") must never hang it. See
+  // patternSafety.ts for the enforced subset; every shipped catalog entry
+  // is audited against it by patternSafety.test.ts.
   let assetPatterns: Partial<Record<Platform, string>> | undefined;
   if (r.assetPatterns && typeof r.assetPatterns === 'object' && !Array.isArray(r.assetPatterns)) {
     const out: Partial<Record<Platform, string>> = {};
     for (const [k, v] of Object.entries(r.assetPatterns as Record<string, unknown>)) {
       if (!(PLATFORMS as string[]).includes(k)) continue;
       if (typeof v !== 'string' || v.length === 0 || v.length > MAX_PATTERN_LEN) continue;
-      try {
-        // eslint-disable-next-line no-new
-        new RegExp(v, 'i');
+      if (compileSafePattern(v)) {
         out[k as Platform] = v;
-      } catch {
-        // invalid pattern dropped; the validator flags authoring mistakes
       }
+      // unsafe/invalid pattern dropped; the validator flags authoring mistakes
     }
     if (Object.keys(out).length > 0) assetPatterns = out;
   }
 
   // tagPatterns: per-platform release-tag regexes, validated exactly like
-  // assetPatterns. A broken regex must never throw inside the resolve path.
+  // assetPatterns (compilable, size-capped, safe subset). A broken or
+  // pathological regex must never throw or hang inside the resolve path.
   let tagPatterns: Partial<Record<Platform, string>> | undefined;
   if (r.tagPatterns && typeof r.tagPatterns === 'object' && !Array.isArray(r.tagPatterns)) {
     const out: Partial<Record<Platform, string>> = {};
     for (const [k, v] of Object.entries(r.tagPatterns as Record<string, unknown>)) {
       if (!(PLATFORMS as string[]).includes(k)) continue;
       if (typeof v !== 'string' || v.length === 0 || v.length > MAX_PATTERN_LEN) continue;
-      try {
-        // eslint-disable-next-line no-new
-        new RegExp(v, 'i');
+      if (compileSafePattern(v)) {
         out[k as Platform] = v;
-      } catch {
-        // invalid pattern dropped; the validator flags authoring mistakes
       }
+      // unsafe/invalid pattern dropped; the validator flags authoring mistakes
     }
     if (Object.keys(out).length > 0) tagPatterns = out;
   }

@@ -15,14 +15,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::download_finalize::{
+    commit_no_clobber, dest_for_part, filename_from_headers, numbered_name, part_path_for,
+    percent_decode, read_part_meta, write_part_meta, PartMeta,
+};
 use super::sanitize_filename;
 use super::{
     fetch_fdroid_package, fetch_latest_release, fetch_recent_releases, fetch_text,
     parse_gh_release, FETCH_TEXT_BODY_CAP,
-};
-use super::download_finalize::{
-    commit_no_clobber, dest_for_part, filename_from_headers, numbered_name, part_path_for,
-    percent_decode, read_part_meta, write_part_meta, PartMeta,
 };
 
 // ---------------------------------------------------------------------------
@@ -235,7 +235,10 @@ async fn commit_no_clobber_skips_taken_names() {
     let part = dir.join("file.txt.part");
     std::fs::write(&part, b"new").unwrap();
     let committed = commit_no_clobber(&part, &dir, "file.txt").await.unwrap();
-    assert_eq!(committed.file_name().unwrap().to_string_lossy(), "file (1).txt");
+    assert_eq!(
+        committed.file_name().unwrap().to_string_lossy(),
+        "file (1).txt"
+    );
     assert_eq!(std::fs::read(dir.join("file.txt")).unwrap(), b"x");
     assert_eq!(std::fs::read(dir.join("file (1).txt")).unwrap(), b"new");
     // A successful commit consumes the staging file.

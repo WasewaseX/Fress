@@ -11,7 +11,6 @@ use serde::Serialize;
 #[cfg_attr(not(target_os = "android"), allow(unused_imports))]
 use tauri::{AppHandle, Emitter, Manager, State};
 
-
 /// Authoritative URL admission, redirect rules and client construction for
 /// every outbound request the native layer makes. The React side validates
 /// for usability; THIS module is what the native commands actually trust.
@@ -456,7 +455,6 @@ async fn start_download(
 
     let app_handle = app.clone();
     tokio::spawn(async move {
-
         // Maps engine callbacks onto the frontend events. Keeping this as a
         // trait impl is what lets the engine run (and be tested) without an
         // AppHandle.
@@ -466,7 +464,6 @@ async fn start_download(
         impl ProgressSink for AppSink {
             fn progress(&self, payload: download_finalize::ProgressPayload) {
                 let _ = self.app.emit("download-progress", payload);
-
             }
             fn retrying(&self, payload: download_finalize::RetryPayload) {
                 let _ = self.app.emit("download-retrying", payload);
@@ -522,7 +519,6 @@ async fn start_download(
     Ok(id)
 }
 
-
 /// Runs the engine's retry loop, converting an unexpected panic into a
 /// failed download. (A plain async wrapper so the spawned task above stays
 /// readable; panics are aborted in release builds anyway.)
@@ -536,7 +532,6 @@ async fn catch_unwind_result(
     match FutureExt::catch_unwind(std::panic::AssertUnwindSafe(execute_with_retries(
         sink,
         session,
-
         id,
         plan,
         cancel_rx,

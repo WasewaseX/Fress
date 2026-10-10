@@ -13,7 +13,6 @@
 //   - Temp directories are per-test and removed best-effort afterwards.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use super::download_finalize::{
     commit_no_clobber, dest_for_part, filename_from_headers, numbered_name, part_path_for,

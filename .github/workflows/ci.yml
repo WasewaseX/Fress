@@ -2,30 +2,69 @@ name: CI
 
 # General validation layer for pull requests (and pushes to main).
 # Packaging stays exclusive to tag pushes (release.yml): PRs get typecheck,
-# unit tests, the catalog validator, a production frontend build and a Rust
-# compile check — everything needed to know a change is sound without
+# unit tests, the catalog validator, a production frontend build, Rust
+# formatting/linting, and the Rust test suite on every desktop platform
+# Fress ships for — everything needed to know a change is sound without
 # paying for six platform bundles.
+#
+# Hardening notes:
+#   - Least privilege: the workflow only ever reads repository contents.
+#   - Third-party and first-party actions are pinned to commit SHAs, so a
+#     compromised tag upstream cannot move what runs here.
+#   - persist-credentials: false keeps the checkout token out of .git/config,
+#     so untrusted PR code (npm scripts run below) cannot reach it.
 
 on:
   push:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  version-guard:
+    # The release workflow refuses a tag whose version disagrees with
+    # package.json, Cargo.toml or tauri.conf.json. Catch the drift here,
+    # at PR time, instead of at release time.
+    name: Version consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: package.json, Cargo.toml and tauri.conf.json must agree
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$CARGO_VERSION" = "$VERSION" ] || fail "Cargo.toml version ($CARGO_VERSION) != package.json version ($VERSION)"
+          [ "$TAURI_VERSION" = "$VERSION" ] || fail "tauri.conf.json version ($TAURI_VERSION) != package.json version ($VERSION)"
+          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION"
+
   frontend:
     name: Typecheck, tests, catalog, build
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      - name: Install dependencies from the lockfile
+        # npm ci refuses to run unless package.json and package-lock.json
+        # agree, which is the reproducibility guarantee for this job.
+        run: npm ci
       - name: TypeScript
         run: npm run typecheck
       - name: Unit tests
@@ -39,24 +78,27 @@ jobs:
         run: npm run build
 
   rust:
-    name: Rust check
+    name: Rust fmt, clippy, tests (linux)
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: rustfmt, clippy
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
       - name: Build the frontend
         # tauri::generate_context! embeds the frontendDist directory at
         # compile time - without a built ../dist the proc macro panics and
-        # cargo check fails for reasons that have nothing to do with Rust.
+        # the Rust jobs fail for reasons that have nothing to do with Rust.
         run: |
           npm ci
           npm run build
@@ -67,6 +109,43 @@ jobs:
       - name: Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Clippy
+        # --all-targets lints the lib, its integration tests and any example
+        # binaries, so lint-clean code is enforced for test code too.
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - name: cargo check
-        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Rust tests
+        # The gate that used to be missing: the suite must RUN, not merely
+        # compile (a green cargo check proved nothing about the tests).
+        # cargo test compiles every target clippy does not already cover,
+        # so no separate `cargo check` step is needed.
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  rust-native:
+    # Core native tests on the other desktop platforms Fress ships for.
+    # A full bundle build per platform stays exclusive to tag pushes
+    # (release.yml); here the Rust code must at least compile and its test
+    # suite must pass on the same OSes the installers are produced on.
+    name: Rust tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - name: Build the frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml

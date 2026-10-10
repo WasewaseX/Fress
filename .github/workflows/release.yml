@@ -6,8 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Least privilege by default; every job that writes release assets requests
+# contents: write for itself below.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   version:
@@ -17,7 +19,11 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
       - id: v
         run: |
           set -euo pipefail
@@ -46,15 +52,21 @@ jobs:
           fi
 
   create-release:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: version
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create.outputs.id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
       - name: Create the release
         id: create
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Fress v${{ needs.version.outputs.version }}
@@ -119,6 +131,8 @@ jobs:
           fi
 
   build-windows:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: [version, create-release]
     runs-on: windows-latest
     env:
@@ -147,12 +161,16 @@ jobs:
       FRESS_PFX_1: ${{ secrets.WINDOWS_PFX_B64 != '' }}
       FRESS_PFX_2: ${{ secrets.WINDOWS_PFX_PASSWORD != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
       - run: npm ci
@@ -186,7 +204,7 @@ jobs:
         # invalidate them. The .sig files are regenerated over the FINAL
         # binaries at the end of this job and latest.json is assembled by the
         # updater-manifest job from those final signatures.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -233,7 +251,7 @@ jobs:
         # Runs only when the signing account is configured. One-time setup
         # steps are in CODE_SIGNING.md.
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@b37b55d83a0c5c993cb33d1b376b20b75e13668c # v0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -252,7 +270,7 @@ jobs:
         # that skipped signing entirely. It is staged at the workspace root
         # by the build step above.
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@b37b55d83a0c5c993cb33d1b376b20b75e13668c # v0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -268,7 +286,7 @@ jobs:
           timestamp-digest: SHA256
       - name: Sign the portable exe with Azure Trusted Signing
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@b37b55d83a0c5c993cb33d1b376b20b75e13668c # v0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -454,6 +472,8 @@ jobs:
           Write-Host "Updater signature uploaded: $(Split-Path -Leaf $sigPath)"
 
   build-windows-arm64:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     # Native ARM64 builds for newer Windows-on-ARM devices: lighter and faster
     # than running the x64 build through emulation. Produced on every release
     # from now on, both as an installer and as a portable zip.
@@ -475,16 +495,20 @@ jobs:
       FRESS_PFX_1: ${{ secrets.WINDOWS_PFX_B64 != '' }}
       FRESS_PFX_2: ${{ secrets.WINDOWS_PFX_PASSWORD != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: aarch64-pc-windows-msvc
       - name: Install cross-compile target
         run: rustup target add aarch64-pc-windows-msvc
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
       - run: npm ci
@@ -512,7 +536,7 @@ jobs:
         # the .sig is regenerated over the FINAL (Authenticode-signed)
         # installer at the end of this job, and latest.json is assembled by
         # the updater-manifest job afterwards.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -521,7 +545,7 @@ jobs:
           args: '--target aarch64-pc-windows-msvc --bundles nsis'
       - name: Sign the ARM64 installer with Azure Trusted Signing
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@b37b55d83a0c5c993cb33d1b376b20b75e13668c # v0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -537,7 +561,7 @@ jobs:
           timestamp-digest: SHA256
       - name: Sign the ARM64 portable exe with Azure Trusted Signing
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@b37b55d83a0c5c993cb33d1b376b20b75e13668c # v0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -642,15 +666,21 @@ jobs:
           Write-Host "Updater signature uploaded: $(Split-Path -Leaf $sigPath)"
 
   build-linux:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: [version, create-release]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
       - name: Install Linux build dependencies
@@ -670,7 +700,7 @@ jobs:
             echo "args=" >> "$GITHUB_OUTPUT"
           fi
       - name: Build Linux bundles (AppImage + deb + rpm)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -681,6 +711,8 @@ jobs:
           args: '--target x86_64-unknown-linux-gnu --bundles appimage deb rpm ${{ steps.updater.outputs.args }}'
 
   build-macos-arm:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: [version, create-release]
     runs-on: macos-latest
     env:
@@ -699,11 +731,15 @@ jobs:
       FRESS_APPLE_5: ${{ secrets.APPLE_PASSWORD != '' }}
       FRESS_APPLE_6: ${{ secrets.APPLE_TEAM_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: aarch64-apple-darwin
       # rust-toolchain.toml pins channel 1.98.1, which rustup resolves as a
@@ -712,7 +748,7 @@ jobs:
       # ACTIVE (overridden) toolchain, same as the android fallback step.
       - name: Install cross-compile target
         run: rustup target add aarch64-apple-darwin
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
       - run: npm ci
@@ -762,7 +798,7 @@ jobs:
         # the ticket, so the dmg opens with no Gatekeeper warning. Setup:
         # CODE_SIGNING.md.
         if: env.FRESS_APPLE_CONFIGURED == 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -781,7 +817,7 @@ jobs:
         # Without Apple credentials the dmg still builds and ships; macOS asks
         # for a one-time right-click -> Open on first launch.
         if: env.FRESS_APPLE_CONFIGURED != 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -792,6 +828,8 @@ jobs:
           args: '--target aarch64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
 
   build-macos-intel:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: [version, create-release]
     runs-on: macos-latest
     env:
@@ -805,16 +843,20 @@ jobs:
       FRESS_APPLE_5: ${{ secrets.APPLE_PASSWORD != '' }}
       FRESS_APPLE_6: ${{ secrets.APPLE_TEAM_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: x86_64-apple-darwin
       - name: Install cross-compile target
         run: rustup target add x86_64-apple-darwin
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
       - run: npm ci
@@ -856,7 +898,7 @@ jobs:
         # Cross-compiling from the arm64 runner keeps the Intel build fast;
         # signing and notarization work the same way.
         if: env.FRESS_APPLE_CONFIGURED == 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -873,7 +915,7 @@ jobs:
           args: '--target x86_64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
       - name: Cross-compile macOS Intel (.dmg), unsigned
         if: env.FRESS_APPLE_CONFIGURED != 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -884,24 +926,30 @@ jobs:
           args: '--target x86_64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
 
   build-android:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: [version, create-release]
     runs-on: ubuntu-latest
     env:
       # true when the persistent keystore is stored as a repository secret.
       FRESS_KEYSTORE_CONFIGURED: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: 17
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: src-tauri
       - name: Install Rust Android targets (fallback)
@@ -1037,6 +1085,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   updater-manifest:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     # Assembles latest.json from the .sig files that are on the release AFTER
     # every binary reached its final form. Two reasons this must not happen
     # at build time:
@@ -1152,10 +1202,16 @@ jobs:
           echo "latest.json uploaded: $(python3 -c "import json;print(len(json.load(open('latest.json'))['platforms']))") platform entries"
 
   checksums:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     needs: [version, create-release, build-windows, build-windows-arm64, build-linux, build-macos-arm, build-macos-intel, build-android, updater-manifest]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this workflow pushes to git; the release uploads
+          # authenticate via GH_TOKEN env vars instead.
+          persist-credentials: false
       - name: Download all release assets
         run: |
           mkdir -p assets
@@ -1174,6 +1230,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   virustotal:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     # Scans every release asset with VirusTotal and appends the analysis
     # links to the release page, so users can see multi-engine results before
     # they trust a download. Uses the public VT API directly (4 uploads/min
@@ -1227,6 +1285,8 @@ jobs:
           fi
 
   verify-release:
+    permissions:
+      contents: write # the only job privilege this workflow needs beyond read
     # The gate between "CI built something" and "users can download it".
     # Runs after every build and the checksum pass, checks that every
     # required artifact is present and that every uploaded file still hashes

@@ -23,9 +23,9 @@ import {
   Play,
   AlertTriangle
 } from 'lucide-react';
-import { PLATFORM_LABELS, getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
+import { getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
 import { officialSupported, resolveOfficialDownload } from '../lib/officialResolvers';
-import { useDownloads, formatBytes } from '../lib/downloads';
+import { useDownloadActions, formatBytes } from '../lib/downloads';
 import { openExternal } from '../lib/external';
 import {
   resolveGitHubDownload,
@@ -58,7 +58,7 @@ function detectUserPlatform(): Platform {
 type ResolveState = 'loading' | 'ready' | 'none';
 
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
-  const { startDownload, recordExternalOpen } = useDownloads();
+  const { startDownload, recordExternalOpen } = useDownloadActions();
   const { t } = useI18n();
   const tx = useAppText(app);
   const inApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -165,9 +165,9 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                 : 'text-slate-300 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.08]'
             }`}
             aria-pressed={platform === p}
-            title={PLATFORM_LABELS[p]}
+            title={t(`common.platform.${p}`)}
           >
-            {PLATFORM_LABELS[p]}
+            {t(`common.platform.${p}`)}
           </button>
         ))}
       </div>
@@ -176,7 +176,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
         <div className="text-center py-4">
           <MonitorSmartphone className="w-6 h-6 text-slate-500 mx-auto mb-2" aria-hidden="true" />
           <p className="text-xs text-slate-300 font-medium mb-0.5">{t('detail.notAvailable')}</p>
-          <p className="text-[11px] text-slate-400 leading-relaxed">{unavailable}. {app.websiteUrl ? 'Check the official website for updates.' : ''}</p>
+          <p className="text-[11px] text-slate-400 leading-relaxed">{unavailable}. {app.websiteUrl ? t('detail.resolver.checkWebsite') : ''}</p>
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -343,7 +343,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                     <Download className="w-3.5 h-3.5 shrink-0 text-sky-400" aria-hidden="true" />
                     <span className="truncate">
                       {option.label === 'GitHub Releases' ? t('detail.allReleases') : option.label}
-                      {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">app store</span>}
+                      {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">{t('detail.resolver.storeBadge')}</span>}
                     </span>
                   </span>
                   <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />
@@ -410,7 +410,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
       role="dialog"
       aria-modal="true"
       aria-labelledby="app-detail-title"
-      aria-label={app ? `${app.name} details` : 'Application details'}
+      aria-label={t('detail.resolver.detailsAria').replace('{name}', app.name)}
     >
       <div 
         id="app-detail-modal-container"
@@ -442,7 +442,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
               {hasAndroid && (
                 <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded inline-flex items-center gap-1 font-medium">
                   <Smartphone className="w-3 h-3" />
-                  <span>Android Supported</span>
+                  <span>{t('detail.resolver.androidSupported')}</span>
                 </span>
               )}
             </div>
@@ -468,10 +468,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                   onEditApp(app);
                 }}
                 className="inline-flex items-center gap-1 text-xs bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 border border-slate-950/10 dark:border-white/[0.1] px-2.5 py-1.5 rounded-lg transition-colors"
-                title="Edit this custom application"
+                title={t('detail.resolver.editTitle')}
               >
                 <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Edit</span>
+                <span>{t('common.edit')}</span>
               </button>
             )}
             <button
@@ -479,7 +479,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
               type="button"
               onClick={onClose}
               className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
-              aria-label="Close details modal"
+              aria-label={t('common.close')}
             >
               <X className="w-5 h-5" aria-hidden="true" />
             </button>
@@ -532,13 +532,13 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 <Terminal className="w-3.5 h-3.5 text-slate-400" />
                 <span>{t('detail.packageManagers')}</span>
               </h3>
-              <p className="text-[11px] text-slate-400 mb-2">For the terminal. Not sure what this is? Use the download buttons above instead.</p>
+              <p className="text-[11px] text-slate-400 mb-2">{t('detail.resolver.terminalHint')}</p>
 
               <div className="space-y-2">
                 {app.wingetCommand && (
                   <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
                     <div className="min-w-0">
-                      <span className="text-[11px] uppercase font-mono text-slate-400 block">Winget (Windows)</span>
+                      <span className="text-[11px] uppercase font-mono text-slate-400 block">{t('detail.resolver.wingetLabel')}</span>
                       <code className="font-mono text-xs text-sky-300 select-all truncate block">
                         {app.wingetCommand}
                       </code>
@@ -566,7 +566,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 {app.brewCommand && (
                   <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
                     <div className="min-w-0">
-                      <span className="text-[11px] uppercase font-mono text-slate-400 block">Homebrew (macOS / Linux)</span>
+                      <span className="text-[11px] uppercase font-mono text-slate-400 block">{t('detail.resolver.brewLabel')}</span>
                       <code className="font-mono text-xs text-amber-300 select-all truncate block">
                         {app.brewCommand}
                       </code>
@@ -594,7 +594,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 {app.flatpakCommand && (
                   <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
                     <div className="min-w-0">
-                      <span className="text-[11px] uppercase font-mono text-slate-400 block">Flatpak (Linux)</span>
+                      <span className="text-[11px] uppercase font-mono text-slate-400 block">{t('detail.resolver.flatpakLabel')}</span>
                       <code className="font-mono text-xs text-emerald-300 select-all truncate block">
                         {app.flatpakCommand}
                       </code>
@@ -627,10 +627,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             <div className="bg-emerald-950/20 border border-emerald-500/20 rounded-lg p-3">
               <h3 className="text-xs font-semibold text-emerald-400 mb-1 flex items-center gap-1.5">
                 <Smartphone className="w-3.5 h-3.5" />
-                <span>Android Installation</span>
+                <span>{t('detail.resolver.androidInstallTitle')}</span>
               </h3>
               <p className="text-slate-300 text-xs leading-relaxed">
-                Available via F-Droid, Google Play, or direct APK releases on the official GitHub repository.
+                {t('detail.resolver.androidInstallBody')}
               </p>
             </div>
           )}
@@ -639,45 +639,52 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           <div id="detail-safety-box" className="border border-slate-950/10 dark:border-white/[0.08] rounded-lg p-3 bg-slate-950/[0.03] dark:bg-white/[0.02]">
             <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-              <span>Source & license</span>
+              <span>{t('detail.resolver.sourceLicense')}</span>
             </h3>
             <ul className="space-y-1.5 text-slate-400 text-xs">
               <li className="flex items-center gap-2">
                 <Check className="w-3 h-3 text-emerald-400 shrink-0" />
                 <span>
                   {licenseClass !== 'foss'
-                    ? 'Distributed officially by its developer; free to download and use.'
+                    ? t('detail.resolver.sourceNotFoss')
                     : !app.githubUrl
-                      ? 'Source code is published by the project.'
+                      ? t('detail.resolver.sourceNoRepo')
                       : repoHost === 'github'
                       ? (shownStars > 0
-                          ? `Verified open-source repository with ${shownStars.toLocaleString()} stars on GitHub.`
-                          : 'Verified open-source repository on GitHub.')
+                          ? t('detail.resolver.sourceGithubStars').replace('{stars}', shownStars.toLocaleString())
+                          : t('detail.resolver.sourceGithub'))
                       : repoHost === 'gitlab.com'
                         ? (shownStars > 0
-                            ? `Verified open-source repository with ${shownStars.toLocaleString()} stars on GitLab.com.`
-                            : 'Verified open-source repository, hosted on GitLab.com.')
+                            ? t('detail.resolver.sourceGitlabStars').replace('{stars}', shownStars.toLocaleString())
+                            : t('detail.resolver.sourceGitlab'))
                         : (shownStars > 0
-                            ? `Verified open-source repository with ${shownStars.toLocaleString()} stars on the project's own forge.`
-                            : 'Verified open-source repository, hosted on the project\'s own infrastructure.')}
+                            ? t('detail.resolver.sourceForgeStars').replace('{stars}', shownStars.toLocaleString())
+                            : t('detail.resolver.sourceForge'))}
                 </span>
               </li>
               <li className="flex items-center gap-2">
                 <Check className="w-3 h-3 text-emerald-400 shrink-0" />
                 <span>
                   {licenseClass === 'foss'
-                    ? `Distributed under the ${app.license} open-source license.`
+                    ? t('detail.resolver.licenseFoss').replace('{license}', app.license)
                     : app.license === 'Free for Personal Use'
-                      ? 'Free to download and use, but the license is proprietary (not open source).'
+                      ? t('detail.resolver.licensePersonal')
                       : app.license === 'Source-available'
-                        ? 'Source code is published under a custom license (source-available, not OSI-approved).'
-                        : `Distributed under the ${app.license} license.`}
+                        ? t('detail.resolver.licenseSourceAvailable')
+                        : t('detail.resolver.licenseOther').replace('{license}', app.license)}
                 </span>
               </li>
               {app.proprietaryAlternative && (
                 <li className="flex items-center gap-2">
                   <Check className="w-3 h-3 text-sky-400 shrink-0" />
-                  <span>Free replacement for proprietary software: <strong className="text-slate-200 font-normal">{app.proprietaryAlternative}</strong>.</span>
+                  <span>
+                    {/* {name} is terminal in the contract's English string, so
+                        the strong-wrapped name stays in JSX between the two
+                        template halves. */}
+                    {t('detail.resolver.fossReplacement').split('{name}')[0]}
+                    <strong className="text-slate-200 font-normal">{app.proprietaryAlternative}</strong>
+                    {t('detail.resolver.fossReplacement').split('{name}')[1] || '.'}
+                  </span>
                 </li>
               )}
             </ul>
@@ -692,7 +699,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             onClick={onClose}
             className="text-xs text-slate-400 hover:text-slate-100 px-3 py-1.5 rounded-lg hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04] transition-colors"
           >
-            Close
+            {t('common.close')}
           </button>
 
           <div className="flex items-center gap-2">
@@ -722,7 +729,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
                 className="inline-flex items-center gap-1 text-xs bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-sky-400 transition-colors shadow-xs"
               >
-                <span>Official Website</span>
+                <span>{t('detail.website')}</span>
                 <ExternalLink className="w-3 h-3 text-sky-200" aria-hidden="true" />
               </a>
             )}

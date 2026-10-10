@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import { RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
 import { LegalTab } from './LegalModals';
 import { openExternal } from '../lib/external';
-import { useDownloads } from '../lib/downloads';
+import { useDownloadActions } from '../lib/downloads';
 import { checkForUpdate, UpdateState } from '../lib/selfUpdate';
 import { useI18n } from '../lib/i18n';
 import pkg from '../../package.json';
@@ -20,7 +20,7 @@ interface FooterProps {
  *  only downloads when your installed version is behind. */
 const UpdateButton: React.FC = () => {
   const [state, setState] = useState<UpdateState>({ kind: 'idle' });
-  const { startDownload } = useDownloads();
+  const { startDownload } = useDownloadActions();
   const { t } = useI18n();
 
   const run = async () => {

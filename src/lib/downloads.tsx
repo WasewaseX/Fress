@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { dirname } from '@tauri-apps/api/path';
@@ -63,10 +63,19 @@ export function isAndroidWebview(): boolean {
   return typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 }
 
-interface DownloadsContextValue {
+/** Read side of the download engine: values that change as downloads
+ * progress. Split from the actions so progress-heavy consumers (manager,
+ * header badge) can subscribe alone - and so action-only consumers stop
+ * re-rendering on every progress tick. */
+export interface DownloadsStateValue {
   items: DownloadItem[];
   activeCount: number;
   downloadDir: string | null;
+}
+
+/** Write side of the download engine. Every member is a useCallback with
+ * stable deps, so identities only change when the functions themselves do. */
+export interface DownloadsActionsValue {
   startDownload: (
     url: string,
     nameHint?: string,
@@ -82,7 +91,8 @@ interface DownloadsContextValue {
   resetFolder: () => Promise<void>;
 }
 
-const DownloadsContext = createContext<DownloadsContextValue | null>(null);
+const DownloadsStateContext = createContext<DownloadsStateValue | null>(null);
+const DownloadsActionsContext = createContext<DownloadsActionsValue | null>(null);
 
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   // The panel survives restarts: completed/failed entries come back (the
@@ -559,17 +569,40 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const activeCount = items.filter((it) => it.status === 'active').length;
 
+  // Memoized context values: the callbacks are already useCallback, the
+  // memo keeps the value OBJECTS stable so consumers only re-render when
+  // the values they read actually change, not on every provider render.
+  const stateValue = useMemo<DownloadsStateValue>(
+    () => ({ items, activeCount, downloadDir }),
+    [items, activeCount, downloadDir]
+  );
+  const actionsValue = useMemo<DownloadsActionsValue>(
+    () => ({ startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder, resetFolder }),
+    [startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder, resetFolder]
+  );
+
+  // State on the OUTSIDE, actions INSIDE: the actions value is stable
+  // across item updates, so action-only consumers nested under it never
+  // re-render from progress ticks, while state consumers above still see
+  // every update.
   return (
-    <DownloadsContext.Provider
-      value={{ items, activeCount, downloadDir, startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder, resetFolder }}
-    >
-      {children}
-    </DownloadsContext.Provider>
+    <DownloadsStateContext.Provider value={stateValue}>
+      <DownloadsActionsContext.Provider value={actionsValue}>
+        {children}
+      </DownloadsActionsContext.Provider>
+    </DownloadsStateContext.Provider>
   );
 }
 
-export function useDownloads(): DownloadsContextValue {
-  const ctx = useContext(DownloadsContext);
-  if (!ctx) throw new Error('useDownloads must be used inside DownloadsProvider');
+export function useDownloadState(): DownloadsStateValue {
+  const ctx = useContext(DownloadsStateContext);
+  if (!ctx) throw new Error('useDownloadState must be used inside DownloadsProvider');
   return ctx;
 }
+
+export function useDownloadActions(): DownloadsActionsValue {
+  const ctx = useContext(DownloadsActionsContext);
+  if (!ctx) throw new Error('useDownloadActions must be used inside DownloadsProvider');
+  return ctx;
+}
+

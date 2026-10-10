@@ -4,6 +4,7 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
+import { useI18n } from '../lib/i18n';
 import { AppItem, Category, Platform } from '../types';
 import { formatStarCount } from '../lib/starFetch';
 import { 
@@ -54,6 +55,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t, lang } = useI18n();
 
   useEffect(() => {
     if (isOpen) {
@@ -92,8 +94,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       matches.push({
         type: 'action',
         id: 'act-batch',
-        title: 'Generate Batch Install Script',
-        subtitle: 'Create combined PowerShell, Bash, or Brewfile scripts for multiple apps',
+        title: t('palette.actionBatchTitle'),
+        subtitle: t('palette.actionBatchSub'),
         action: () => {
           onClose();
           onOpenBatchInstall();
@@ -105,8 +107,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       matches.push({
         type: 'action',
         id: 'act-compare',
-        title: 'Open Side-by-Side Comparison Matrix',
-        subtitle: 'Compare licenses, architectures, and capabilities of selected software',
+        title: t('palette.actionCompareTitle'),
+        subtitle: t('palette.actionCompareSub'),
         action: () => {
           onClose();
           onOpenCompare();
@@ -118,8 +120,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       matches.push({
         type: 'action',
         id: 'act-export',
-        title: 'Export Catalog (Markdown README / CSV / JSON)',
-        subtitle: 'Download complete awesome-list formatted markdown or spreadsheet data',
+        title: t('palette.actionExportTitle'),
+        subtitle: t('palette.actionExportSub'),
         action: () => {
           onClose();
           onOpenExport();
@@ -131,8 +133,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       matches.push({
         type: 'action',
         id: 'act-view',
-        title: `Switch View Mode (Currently: ${viewMode === 'grid' ? 'Grid' : 'Table'})`,
-        subtitle: 'Toggle between visual card grid and compact data table',
+        title: t('palette.actionViewTitle').replace('{mode}', viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable')),
+        subtitle: t('palette.actionViewSub'),
         action: () => {
           onToggleViewMode();
           onClose();
@@ -154,14 +156,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           app,
           id: app.id,
           title: app.name,
-          subtitle: matchAlt ? `Alternative to ${app.proprietaryAlternative} · ${app.tagline}` : app.tagline,
+          subtitle: matchAlt
+            ? t('palette.alternativeTo').replace('{alt}', app.proprietaryAlternative).replace('{tagline}', app.tagline)
+            : app.tagline,
           alt: app.proprietaryAlternative
         });
       }
     }
 
     return matches.slice(0, 12);
-  }, [query, apps, viewMode]);
+    // t/lang re-translate the action titles when the language switches
+    // (the keyword matching above stays English on purpose).
+  }, [query, apps, viewMode, t, lang]);
 
   // The selection can go stale when the list shrinks under it (the apps
   // array updates while the palette is open: live stars, a fresh import).
@@ -232,9 +238,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="Type a tool name, category, or alternative (e.g., 'Photoshop', 'AirDrop', 'brew')..."
+            placeholder={t('palette.placeholder')}
             className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
-            aria-label="Command palette input"
+            aria-label={t('palette.inputAria')}
           />
           <kbd className="hidden sm:inline-block font-mono text-[11px] text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1.5 py-0.5 rounded ml-2">
             ESC
@@ -267,7 +273,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       </div>
                     </div>
                     <span className="text-[11px] font-mono text-slate-500 uppercase tracking-wider">
-                      Action
+                      {t('palette.actionBadge')}
                     </span>
                   </div>
                 );
@@ -299,7 +305,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         <span className="text-xs font-semibold text-slate-100 truncate">{app.name}</span>
                         {app.proprietaryAlternative && (
                           <span className="text-[11px] text-amber-300/90 font-mono bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded shrink-0">
-                            vs {app.proprietaryAlternative}
+                            {t('palette.vs').replace('{alt}', app.proprietaryAlternative)}
                           </span>
                         )}
                         <span className="text-[11px] text-slate-400 font-mono">
@@ -321,12 +327,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         {copiedId === app.id ? (
                           <>
                             <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                            <span className="text-emerald-400">Copied!</span>
+                            <span className="text-emerald-400">{t('common.copied')}</span>
                           </>
                         ) : (
                           <>
                             <Copy className="w-3 h-3 text-slate-400" aria-hidden="true" />
-                            <span>Copy Cmd</span>
+                            <span>{t('common.copy')}</span>
                           </>
                         )}
                       </button>
@@ -337,7 +343,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             })
           ) : (
             <div className="p-8 text-center text-xs text-slate-400">
-              No matching software or command found for &quot;{query}&quot;.
+              {t('palette.noMatch').replace('{query}', query)}
             </div>
           )}
         </div>
@@ -345,11 +351,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         {/* Footer Navigation Hints */}
         <div className="px-4 py-2.5 bg-slate-950/90 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between text-[11px] text-slate-400">
           <div className="flex items-center gap-3">
-            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↑↓</kbd> Navigate</span>
-            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↵</kbd> Select</span>
-            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">ESC</kbd> Dismiss</span>
+            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↑↓</kbd> {t('palette.navigate')}</span>
+            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↵</kbd> {t('palette.select')}</span>
+            <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">ESC</kbd> {t('palette.dismiss')}</span>
           </div>
-          <span className="font-mono text-[11px] text-slate-500">{apps.length} tools indexed</span>
+          <span className="font-mono text-[11px] text-slate-500">{t('palette.toolsIndexed').replace('{count}', String(apps.length))}</span>
         </div>
       </div>
     </div>

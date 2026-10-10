@@ -20,7 +20,7 @@ import {
   Download
 } from 'lucide-react';
 import { bestDownloadFor } from '../lib/appDownloads';
-import { useDownloads } from '../lib/downloads';
+import { useDownloadActions, useDownloadState } from '../lib/downloads';
 import { openExternal } from '../lib/external';
 import { resolveDownloadFor, guessUserPlatform } from '../lib/releaseFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
@@ -88,7 +88,8 @@ export const AppCard: React.FC<AppCardProps> = ({
   onToggleCompare
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const { startDownload, recordExternalOpen, items: downloadItems } = useDownloads();
+  const { startDownload, recordExternalOpen } = useDownloadActions();
+  const { items: downloadItems } = useDownloadState();
   const { t } = useI18n();
   const tx = useAppText(app);
   // The panel names entries by the real file name ("VLC-3.0.2-win64.exe",

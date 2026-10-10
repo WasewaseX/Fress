@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 
 import { AppItem } from '../../types';
 import { useI18n } from '../../lib/i18n';
-import { useDownloads } from '../../lib/downloads';
+import { useDownloadActions } from '../../lib/downloads';
 import { openExternal } from '../../lib/external';
 import { bestDownloadFor } from '../../lib/appDownloads';
 import { guessUserPlatform, resolveDownloadFor } from '../../lib/releaseFetch';
@@ -34,7 +34,7 @@ export interface BatchSelection {
 
 export function useBatchSelection(apps: AppItem[], openDownloads: () => void): BatchSelection {
   const { t } = useI18n();
-  const { startDownload } = useDownloads();
+  const { startDownload } = useDownloadActions();
 
   // Batch selection IDs
   const [selectedBatchAppIds, setSelectedBatchAppIds] = useState<string[]>([]);

@@ -13,6 +13,7 @@
 //   - Temp directories are per-test and removed best-effort afterwards.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use super::sanitize_filename;
 use super::{
@@ -129,7 +130,13 @@ fn percent_decode_turns_escapes_into_bytes() {
 
 #[test]
 fn percent_decode_keeps_invalid_or_truncated_escapes_literally() {
-    assert_eq!(percent_decode("%E6"), "%E6"); // truncated
+    // "E6" is a complete BYTE-wise escape: it decodes to the byte 0xE6,
+    // which is not valid UTF-8 on its own, so the documented lossy
+    // conversion turns it into U+FFFD. The decoder works on bytes, not
+    // characters - exactly what RFC 5987 ext-values need.
+    assert_eq!(percent_decode("%E6"), "\u{FFFD}");
+    // A TRUNCATED escape (not enough hex digits) is kept literally.
+    assert_eq!(percent_decode("%E"), "%E");
     assert_eq!(percent_decode("%ZZ"), "%ZZ"); // not hex
     assert_eq!(percent_decode("100%"), "100%"); // dangling percent
     assert_eq!(percent_decode("%2"), "%2"); // short escape
@@ -400,13 +407,20 @@ fn body_cap_is_the_documented_two_megabytes() {
 
 /// Minimal HTTP/1.1 responder that issues `hops` sequential 302 redirects
 /// (each on its own connection) and then answers 200 "done".
-async fn spawn_redirect_server(hops: u32) -> String {
+///
+/// Returns the URL plus the raw FIRST request head, captured instead of
+/// asserted inside the server task: a surprise there must fail the test
+/// through the captured evidence, not abort the exchange mid-flight (which
+/// used to surface as a confusing IncompleteMessage on the client).
+async fn spawn_redirect_server(hops: u32) -> (String, Arc<Mutex<String>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind loopback");
     let addr = listener.local_addr().expect("addr");
+    let first_head = Arc::new(Mutex::new(String::new()));
+    let head_in_server = Arc::clone(&first_head);
     tokio::spawn(async move {
         for i in 0..hops {
             let Ok((mut sock, _)) = listener.accept().await else {
@@ -415,7 +429,7 @@ async fn spawn_redirect_server(hops: u32) -> String {
             let mut buf = [0u8; 4096];
             // Drain the request head so the response cannot race it. One
             // read is normally enough; loop until the header terminator
-            // shows up so the UA assertion cannot flake on a split read.
+            // shows up so a split read cannot truncate the evidence.
             let mut head = String::new();
             for _ in 0..8 {
                 let n = sock.read(&mut buf).await.unwrap_or(0);
@@ -428,10 +442,7 @@ async fn spawn_redirect_server(hops: u32) -> String {
                 }
             }
             if i == 0 {
-                assert!(
-                    head.contains("User-Agent: Fress/"),
-                    "the shared client must identify itself: {head}"
-                );
+                *head_in_server.lock().expect("head mutex") = head;
             }
             let next = if i + 1 < hops {
                 format!("/hop{}", i + 2)
@@ -452,12 +463,12 @@ async fn spawn_redirect_server(hops: u32) -> String {
             let _ = sock.shutdown().await;
         }
     });
-    format!("http://{addr}/hop1")
+    (format!("http://{addr}/hop1"), first_head)
 }
 
 #[tokio::test]
 async fn api_client_follows_a_short_redirect_chain_to_the_end() {
-    let url = spawn_redirect_server(2).await; // 1 redirect, then 200
+    let (url, first_head) = spawn_redirect_server(2).await; // 1 redirect, then 200
     let client = api_client().expect("client builds");
     let text = client
         .get(&url)
@@ -468,12 +479,19 @@ async fn api_client_follows_a_short_redirect_chain_to_the_end() {
         .await
         .expect("body");
     assert_eq!(text, "done");
+    // Identity check happens AFTER the exchange: the head was fully
+    // received by then. hyper normalizes header names to lower case.
+    let head = first_head.lock().expect("head mutex").to_ascii_lowercase();
+    assert!(
+        head.contains("user-agent: fress/"),
+        "the shared client must identify itself: {head}"
+    );
 }
 
 #[tokio::test]
 async fn api_client_refuses_to_follow_past_the_redirect_limit() {
     // limited(5) must stop somewhere sane; 8 hops exceed it on any reading.
-    let url = spawn_redirect_server(8).await;
+    let (url, _first_head) = spawn_redirect_server(8).await;
     let client = api_client().expect("client builds");
     let err = client
         .get(&url)

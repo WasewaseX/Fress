@@ -30,8 +30,20 @@ jobs:
           git fetch origin "${{ github.event.repository.default_branch }}" --quiet 2>/dev/null || true
           RANGE=$(git rev-parse --verify -q "$BASE" >/dev/null 2>&1 && echo "$BASE..HEAD" || echo "HEAD")
           echo "Checking commit range: $RANGE"
+          # Allowed identities - anything else fails the run:
+          #   1. WasewaseX <WasewaseX@users.noreply.github.com> authoring and
+          #      committing (every normal commit).
+          #   2. GitHub's anonymous PULL-REQUEST MERGE commit. On pull_request
+          #      events GitHub itself composes the merge commit it checks out,
+          #      with committer "GitHub <noreply@github.com>" and the PR
+          #      opener's account identity as author: the noreply address when
+          #      "Keep my email addresses private" is enabled, the account's
+          #      primary address otherwise. Only WasewaseX's own account can
+          #      open such a PR, so the guard's intent - no ghost
+          #      contributors - is preserved. The gmail shape can be dropped
+          #      once the account enables private email mode.
           VIOLATIONS=$(git log --format='%H|%an|%ae|%cn|%ce' "$RANGE" \
-            | grep -viE '\|WasewaseX\|WasewaseX@users\.noreply\.github\.com\|WasewaseX\|WasewaseX@users\.noreply\.github\.com$' || true)
+            | grep -viE '\|WasewaseX\|(WasewaseX@users\.noreply\.github\.com\|WasewaseX\|WasewaseX@users\.noreply\.github\.com|WasewaseX@users\.noreply\.github\.com\|GitHub\|noreply@github\.com|khosraviasghar55@gmail\.com\|GitHub\|noreply@github\.com)$' || true)
           if [ -n "$VIOLATIONS" ]; then
             echo "::error::Foreign commit identity found. Only WasewaseX <WasewaseX@users.noreply.github.com> may author or commit here."
             echo "$VIOLATIONS"

@@ -341,6 +341,16 @@ fn parse_gh_release_falls_back_for_missing_name_and_url() {
 // command input validation — the branches that must fail BEFORE any network
 // ---------------------------------------------------------------------------
 
+/// Extract the Err side of a Result without requiring the Ok type to
+/// implement Debug (TextFetch is not Debug and must not become one just for
+/// the tests - the implementation stays untouched).
+fn err_of<T>(r: Result<T, String>) -> String {
+    match r {
+        Err(e) => e,
+        Ok(_) => panic!("expected Err, got Ok"),
+    }
+}
+
 #[tokio::test]
 async fn release_commands_reject_empty_repositories_before_network() {
     for repo in ["", "   ", " / ", "//"] {
@@ -362,19 +372,15 @@ async fn release_commands_reject_empty_repositories_before_network() {
 #[tokio::test]
 async fn fetch_text_enforces_https_and_the_host_allowlist_before_any_request() {
     // Not a URL at all.
-    let err = fetch_text("not a url".to_string()).await.unwrap_err();
+    let err = err_of(fetch_text("not a url".to_string()).await);
     assert_eq!(err, "Not a valid URL");
 
     // Plain http is refused even for allowlisted hosts.
-    let err = fetch_text("http://get.videolan.org/ftpsites.txt".to_string())
-        .await
-        .unwrap_err();
+    let err = err_of(fetch_text("http://get.videolan.org/ftpsites.txt".to_string()).await);
     assert_eq!(err, "Only https URLs are allowed");
 
     // A https URL on a non-allowlisted host is refused before a request.
-    let err = fetch_text("https://evil.example.com/manifest.yml".to_string())
-        .await
-        .unwrap_err();
+    let err = err_of(fetch_text("https://evil.example.com/manifest.yml".to_string()).await);
     assert!(
         err.contains("not on the resolver allowlist"),
         "unexpected error: {err}"

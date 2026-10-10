@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AppItem } from '../../types';
@@ -32,8 +32,9 @@ export function useCompareSelection(apps: AppItem[]): CompareSelection {
     return apps.filter((a) => comparedAppIds.includes(a.id));
   }, [apps, comparedAppIds]);
 
-  // Compare toggle
-  const toggleCompare = (appId: string) => {
+  // Compare toggle. Card-facing: stable identity via useCallback (memoized
+  // cards rely on it). `apps` only feeds the confirmation toast's name.
+  const toggleCompare = useCallback((appId: string) => {
     setComparedAppIds((prev) => {
       if (prev.includes(appId)) {
         return prev.filter((id) => id !== appId);
@@ -46,19 +47,19 @@ export function useCompareSelection(apps: AppItem[]): CompareSelection {
       toast.success(`Added "${app?.name || 'app'}" to comparison matrix.`);
       return [...prev, appId];
     });
-  };
+  }, [apps]);
 
-  const removeApp = (appId: string) => {
+  const removeApp = useCallback((appId: string) => {
     setComparedAppIds((prev) => prev.filter((id) => id !== appId));
-  };
+  }, []);
 
-  const clear = () => {
+  const clear = useCallback(() => {
     setComparedAppIds([]);
-  };
+  }, []);
 
-  const setIds = (ids: string[]) => {
+  const setIds = useCallback((ids: string[]) => {
     setComparedAppIds(ids.slice(0, MAX_COMPARE));
-  };
+  }, []);
 
   return {
     comparedIds: comparedAppIds,

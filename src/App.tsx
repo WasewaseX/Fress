@@ -20,7 +20,7 @@
  * closes the editor, ...) happens here so every feature stays independently
  * readable and testable. See docs/ARCHITECTURE-frontend.md.
  */
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Toaster } from 'sonner';
 
 import { Header } from './components/Header';
@@ -45,7 +45,7 @@ import { WhatsNewModal } from './components/WhatsNewModal';
 import { ReplaceTab } from './components/ReplaceTab';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { I18nProvider, useI18n } from './lib/i18n';
-import { DownloadsProvider, useDownloadState, useDownloadActions } from './lib/downloads';
+import { DownloadsProvider, useDownloadActions, useDownloadSummary } from './lib/downloads';
 import { Category } from './types';
 
 import { useAppCatalog, filterAndSortApps } from './features/catalog/useAppCatalog';
@@ -64,8 +64,11 @@ import { useWhatsNew } from './features/whatsNew/useWhatsNew';
 function AppShell() {
   const { theme: uiTheme } = useTheme();
   const { t } = useI18n();
-  const { activeCount: activeDownloadCount } = useDownloadState();
+  // Focused subscriptions: the shell needs the actions and the active
+  // count, NOT the live item list. Byte-count/ETA updates therefore do not
+  // rerender the shell - and with memoized cards, not the grid either.
   const { startDownload } = useDownloadActions();
+  const { activeCount: activeDownloadCount } = useDownloadSummary();
 
   // Feature state
   const catalog = useAppCatalog();
@@ -86,28 +89,38 @@ function AppShell() {
   // Cross-feature coordination ------------------------------------------
 
   // Saving closes the editor (the modal itself owns its other close paths).
-  const handleSaveApp = (appToSave: Parameters<typeof catalog.saveApp>[0]) => {
-    catalog.saveApp(appToSave);
-    dialogs.setEditingApp(null);
-  };
+  // Stabilized so memoized cards do not see a new identity per render.
+  const handleSaveApp = useCallback(
+    (appToSave: Parameters<typeof catalog.saveApp>[0]) => {
+      catalog.saveApp(appToSave);
+      dialogs.setEditingApp(null);
+    },
+    [catalog.saveApp, dialogs.setEditingApp]
+  );
 
   // Deleting cleans up every other surface that may hold the app.
-  const handleDeleteApp = (appId: string) => {
-    catalog.deleteApp(appId);
-    batch.removeIds([appId]);
-    compare.removeApp(appId);
-    dialogs.closeDetailIfApp(appId);
-  };
+  const handleDeleteApp = useCallback(
+    (appId: string) => {
+      catalog.deleteApp(appId);
+      batch.removeIds([appId]);
+      compare.removeApp(appId);
+      dialogs.closeDetailIfApp(appId);
+    },
+    [catalog.deleteApp, batch.removeIds, compare.removeApp, dialogs.closeDetailIfApp]
+  );
 
-  const handleEditApp = (app: Parameters<typeof dialogs.setEditingApp>[0]) => {
-    dialogs.setEditingApp(app);
-    dialogs.setIsAddModalOpen(true);
-  };
+  const handleEditApp = useCallback(
+    (app: Parameters<typeof dialogs.setEditingApp>[0]) => {
+      dialogs.setEditingApp(app);
+      dialogs.setIsAddModalOpen(true);
+    },
+    [dialogs.setEditingApp, dialogs.setIsAddModalOpen]
+  );
 
-  const openAddFlowSearch = () => {
+  const openAddFlowSearch = useCallback(() => {
     dialogs.setEditingApp(null);
     dialogs.setAddFlow('search');
-  };
+  }, [dialogs.setEditingApp, dialogs.setAddFlow]);
 
   // Keyboard map: same keys and guards as before, actions pulled from the
   // feature hooks on each render.
@@ -124,6 +137,14 @@ function AppShell() {
     toggleOwnerPickOnly: () => handleFilterChange({ ownerPickOnly: !filters.ownerPickOnly }),
     toggleViewMode: () => toggleViewMode(viewMode === 'grid' ? 'table' : 'grid'),
   });
+
+  // Membership as memoized Sets: O(1) lookups in the mapped list instead
+  // of a fresh Array.includes per card and per render. Cheap by itself;
+  // it matters once catalogs grow into the hundreds with large batch or
+  // compare selections.
+  const favoriteSet = useMemo(() => new Set(catalog.favorites), [catalog.favorites]);
+  const selectedSet = useMemo(() => new Set(batch.selectedIds), [batch.selectedIds]);
+  const comparedSet = useMemo(() => new Set(compare.comparedIds), [compare.comparedIds]);
 
   return (
     <div id="awesome-apps-root" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-sky-600 selection:text-white">
@@ -209,14 +230,14 @@ function AppShell() {
                 <AppCard
                   key={app.id}
                   app={app}
-                  isFavorite={catalog.favorites.includes(app.id)}
+                  isFavorite={favoriteSet.has(app.id)}
                   onToggleFavorite={catalog.toggleFavorite}
-                  onOpenDetail={(item) => dialogs.openDetail(item)}
+                  onOpenDetail={dialogs.openDetail}
                   onEditApp={handleEditApp}
                   onDeleteApp={handleDeleteApp}
-                  isBatchSelected={batch.selectedIds.includes(app.id)}
+                  isBatchSelected={selectedSet.has(app.id)}
                   onToggleBatchSelect={batch.toggleSelect}
-                  isCompared={compare.comparedIds.includes(app.id)}
+                  isCompared={comparedSet.has(app.id)}
                   onToggleCompare={compare.toggleCompare}
                 />
               ))}

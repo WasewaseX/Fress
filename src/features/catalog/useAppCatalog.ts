@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { INITIAL_APPS } from '../../data/appsData';
@@ -90,8 +90,10 @@ export function useAppCatalog(): AppCatalog {
   const customCount = useMemo(() => apps.filter((a) => a.isCustom).length, [apps]);
   const androidCount = useMemo(() => apps.filter((a) => a.platforms.includes('android')).length, [apps]);
 
-  // Persist favorites
-  const toggleFavorite = (appId: string) => {
+  // Persist favorites. Wrapped in useCallback with empty deps: this is a
+  // card-facing prop, and memoized cards rely on its identity never
+  // changing (it only touches the state setter).
+  const toggleFavorite = useCallback((appId: string) => {
     setFavorites((prev) => {
       const next = prev.includes(appId)
         ? prev.filter((id) => id !== appId)
@@ -103,11 +105,12 @@ export function useAppCatalog(): AppCatalog {
       }
       return next;
     });
-  };
+  }, []);
 
   // Add or update application. Dialog state is deliberately NOT touched
   // here: the composition layer closes the editor when it calls this.
-  const saveApp = (appToSave: AppItem) => {
+  // Stable identity (only the setter is used) - see toggleFavorite.
+  const saveApp = useCallback((appToSave: AppItem) => {
     setApps((prev) => {
       const existingIndex = prev.findIndex((item) => item.id === appToSave.id);
       let updated: AppItem[];
@@ -129,12 +132,12 @@ export function useAppCatalog(): AppCatalog {
       }
       return updated;
     });
-  };
+  }, []);
 
   // Delete a custom application from the catalog and the favorites store.
   // Selection/compare/detail cleanup stays with the composition layer,
-  // which owns those states.
-  const deleteApp = (appId: string) => {
+  // which owns those states. Stable identity - see toggleFavorite.
+  const deleteApp = useCallback((appId: string) => {
     setApps((prev) => {
       const target = prev.find((a) => a.id === appId);
       const updated = prev.filter((item) => item.id !== appId);
@@ -159,7 +162,7 @@ export function useAppCatalog(): AppCatalog {
       }
       return next;
     });
-  };
+  }, []);
 
   // Export catalog
   const exportCatalog = () => {

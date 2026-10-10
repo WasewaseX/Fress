@@ -204,7 +204,8 @@ export const AppCard: React.FC<AppCardProps> = ({
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
                 }`}
                 title={isCompared ? 'In compare matrix' : 'Add to compare matrix'}
-                aria-label={`Compare ${app.name}`}
+                aria-label={isCompared ? `Remove ${app.name} from the comparison matrix` : `Add ${app.name} to the comparison matrix`}
+                aria-pressed={isCompared}
               >
                 <Columns className="w-3.5 h-3.5" aria-hidden="true" />
               </button>

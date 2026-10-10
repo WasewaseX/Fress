@@ -183,6 +183,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         id="sort-selector"
         value={filters.sortBy}
         onChange={(e) => onFilterChange({ sortBy: e.target.value as FilterState['sortBy'] })}
+        // The sort selector has no visible label; give assistive tech a name.
+        // (FilterBar's visible strings are hardcoded English by design; the
+        // label matches that convention until the bar itself is localized.)
+        aria-label="Sort apps"
         className="bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] text-slate-200 text-xs rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
       >
         <option value="stars" className="bg-slate-950 text-slate-200">Most Stars</option>
@@ -253,7 +257,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           className="md:hidden fixed left-0 right-0 z-20 bg-slate-950 border-b border-slate-950/10 dark:border-white/[0.08] px-4 py-1.5"
           style={{ top: 'var(--fress-header-h, 0px)' }}
         >
-          <div id="platform-bar-mobile-scroll" className="flex items-center gap-1 overflow-x-auto scrollbar-none text-xs">
+          <div
+            id="platform-bar-mobile-scroll"
+            role="group"
+            aria-label="Platforms"
+            className="flex items-center gap-1 overflow-x-auto scrollbar-none text-xs"
+          >
             {platformChips}
           </div>
         </div>
@@ -265,10 +274,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           id="secondary-filter-row"
           className="hidden md:flex flex-wrap items-center justify-between gap-2.5 pt-1.5 border-t border-slate-950/10 dark:border-white/[0.04] text-xs"
         >
-          <div id="platform-chips-group" className="flex items-center gap-1 flex-wrap">
+          <div id="platform-chips-group" role="group" aria-label="Platform filter" className="flex items-center gap-1 flex-wrap">
             {platformChips}
           </div>
-          <div id="filter-toggles-group" className="flex items-center flex-wrap gap-1.5">
+          <div id="filter-toggles-group" role="group" aria-label="Quick filters" className="flex items-center flex-wrap gap-1.5">
             {toggleButtons}
           </div>
           {sortControls}

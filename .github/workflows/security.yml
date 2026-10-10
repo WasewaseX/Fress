@@ -1,0 +1,71 @@
+name: Security scan
+
+# Dependency and vulnerability scanning with an explicit, documented policy:
+#
+#   - npm production dependencies: BLOCKING. The baseline is verified clean
+#     (source-map-js is pinned to the patched 1.2.2 via package.json
+#     overrides), so any new high/critical advisory in runtime dependencies
+#     fails this job and must be resolved before merge.
+#   - npm development dependencies: ADVISORY. Dev-only findings surface as a
+#     warning annotation; they do not block. Bumping them belongs to normal
+#     dependency maintenance, not to every change.
+#   - Cargo (RustSec): ADVISORY until the existing baseline is triaged. The
+#     job reports findings but cannot fail a build on untriaged debt. Once
+#     the report is clean, remove `continue-on-error` to make it blocking.
+#
+# Runs weekly, on pushes that touch a lockfile, and on demand. It never runs
+# on pull requests: it holds no secrets and its verdicts belong to the
+# maintenance baseline, not to individual changes.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - ".github/workflows/security.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Production dependencies (blocking, high and above)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Development dependencies (advisory, critical and above)
+        run: |
+          if ! npm audit --audit-level=critical; then
+            echo "::warning::dev-dependency audit has critical findings (advisory only, see policy in the workflow header)"
+          fi
+
+  cargo-audit:
+    name: cargo audit (RustSec)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit Cargo.lock
+        # ADVISORY on purpose until the baseline is triaged - see the policy
+        # comment at the top of this workflow. Flip this to make it blocking
+        # once the report is clean.
+        continue-on-error: true
+        run: cargo audit --file src-tauri/Cargo.lock

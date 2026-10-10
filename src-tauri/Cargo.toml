@@ -24,6 +24,13 @@ futures-util = "0.3"
 sha2 = "0.10"
 dirs = "5"
 
+[dev-dependencies]
+# Feature declarations only: tokio is already a normal dependency, so this
+# adds no package to Cargo.lock. Pinning the test module's required feature
+# surface explicitly (net/fs/rt) keeps the integration tests compiling even
+# if a future dependency change stops enabling those features transitively.
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

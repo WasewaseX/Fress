@@ -1426,6 +1426,11 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+// Integration tests for the download/resolver rails. AppHandle-free by
+// design (see the module's header comment); compiled only under `cargo test`.
+#[cfg(test)]
+mod download_integration;
+
 #[cfg(test)]
 mod tests {
     use super::validate_resume_content_range;

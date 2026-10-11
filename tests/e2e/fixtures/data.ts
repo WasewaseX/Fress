@@ -77,7 +77,9 @@ export const BAD_SHA256 = '00000000000000000000000000000000000000000000000000000
 // ---------------------------------------------------------------------------
 // Fress SELF-UPDATE fixtures (Workflows I/J): the app's own release feed.
 //
-// The running app is 1.0.7-beta (APP_VERSION comes from package.json). Every
+// The running app version is read from package.json at fixture build time
+// (APP_VERSION in netpolicy.ts), so these fixtures pin the CANDIDATE at the
+// NEXT version (1.0.9-beta) and stay correct across release bumps. Every
 // fixture here answers api.github.com/repos/WasewaseX/Fress/releases the way
 // the real feed would - drafts are never included (the API does not return
 // them), prerelease flags match the tag shape.
@@ -88,17 +90,17 @@ const OWN_BASE = 'https://github.com/WasewaseX/Fress/releases/download';
 /** SHA256SUMS.txt as CI would publish it: sha256sum format, two spaces,
  * covering the assets of the valid release. */
 export const OWN_SUMS_TXT = [
-  `${GOOD_SHA256}  Fress_1.0.8_amd64.AppImage`,
-  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Fress_1.0.8_x64-setup.exe`,
-  `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  Fress_1.0.8_aarch64.AppImage`,
+  `${GOOD_SHA256}  Fress_1.0.9_amd64.AppImage`,
+  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Fress_1.0.9_x64-setup.exe`,
+  `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  Fress_1.0.9_aarch64.AppImage`,
 ].join('\n');
 
 /** Worst-case sums for the ARM-only release: the incompatible Windows
  * installer HAS a published digest, so if the picker wrongly selects it the
  * user gets a fully "verified" download of a file their machine cannot run. */
 export const OWN_SUMS_ARM_ONLY = [
-  `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  Fress_1.0.8_aarch64.AppImage`,
-  `${GOOD_SHA256}  Fress_1.0.8_arm64-setup.exe`,
+  `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  Fress_1.0.9_aarch64.AppImage`,
+  `${GOOD_SHA256}  Fress_1.0.9_arm64-setup.exe`,
 ].join('\n');
 
 /** A newer release this (x86_64, Linux) install can update into: a
@@ -106,31 +108,32 @@ export const OWN_SUMS_ARM_ONLY = [
  * document. pickOwnAsset must pick the amd64 AppImage on the Linux runner. */
 export const OWN_RELEASES_VALID: GhReleaseFixture[] = [
   {
-    tag: 'v1.0.8-beta',
-    name: 'Fress 1.0.8-beta',
+    tag: 'v1.0.9-beta',
+    name: 'Fress 1.0.9-beta',
     published_at: '2026-10-12T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta',
+    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta',
     prerelease: true,
     assets: [
-      { name: 'Fress_1.0.8_amd64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_amd64.AppImage` },
-      { name: 'Fress_1.0.8_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_x64-setup.exe` },
-      { name: 'Fress_1.0.8_aarch64.AppImage', size: 20_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_aarch64.AppImage` },
-      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.8-beta/SHA256SUMS.txt` },
+      { name: 'Fress_1.0.9_amd64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_amd64.AppImage` },
+      { name: 'Fress_1.0.9_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_x64-setup.exe` },
+      { name: 'Fress_1.0.9_aarch64.AppImage', size: 20_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_aarch64.AppImage` },
+      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.9-beta/SHA256SUMS.txt` },
     ],
   },
   {
-    tag: 'v1.0.7-beta',
-    name: 'Fress 1.0.7-beta',
+    tag: 'v1.0.8-beta',
+    name: 'Fress 1.0.8-beta',
     published_at: '2026-10-11T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.7-beta',
+    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta',
     prerelease: true,
     assets: [],
   },
 ];
 
-/** A release whose tag parseVersion() cannot read. The updater must treat it
- * as NOT newer (string fallback ranks it below the running version) instead
- * of crashing or offering a bogus update. */
+/** A release whose tag parseVersion() cannot read. The updater drops
+ * unparsable tags from the candidate list before sorting; a feed of only
+ * malformed tags fails closed into the "No published releases" contract
+ * (the honest "Update check unavailable" answer), never a bogus update. */
 export const OWN_RELEASE_MALFORMED: GhReleaseFixture[] = [
   {
     tag: 'not-a-version',
@@ -139,24 +142,24 @@ export const OWN_RELEASE_MALFORMED: GhReleaseFixture[] = [
     html_url: 'https://github.com/WasewaseX/Fress/releases/tag/not-a-version',
     prerelease: false,
     assets: [
-      { name: 'Fress_1.0.8_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/not-a-version/Fress_1.0.8_x64-setup.exe` },
+      { name: 'Fress_1.0.9_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/not-a-version/Fress_1.0.9_x64-setup.exe` },
     ],
   },
 ];
 
 /** Channel-filter fixture: the newest build is a beta (invisible on the
  * Stable channel, visible on Beta/Alpha), the stable tag is OLDER than the
- * running 1.0.7-beta so neither channel may offer it. */
+ * running 1.0.8-beta so neither channel may offer it. */
 export const OWN_RELEASES_CHANNEL: GhReleaseFixture[] = [
   {
-    tag: 'v1.0.8-beta',
-    name: 'Fress 1.0.8-beta',
+    tag: 'v1.0.9-beta',
+    name: 'Fress 1.0.9-beta',
     published_at: '2026-10-12T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta',
+    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta',
     prerelease: true,
     assets: [
-      { name: 'Fress_1.0.8_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_x64-setup.exe` },
-      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.8-beta/SHA256SUMS.txt` },
+      { name: 'Fress_1.0.9_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_x64-setup.exe` },
+      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.9-beta/SHA256SUMS.txt` },
     ],
   },
   {
@@ -177,15 +180,15 @@ export const OWN_RELEASES_CHANNEL: GhReleaseFixture[] = [
  * assets at all) so the updater offers the releases page, never a download. */
 export const OWN_RELEASE_ARM_ONLY: GhReleaseFixture[] = [
   {
-    tag: 'v1.0.8-beta',
-    name: 'Fress 1.0.8-beta',
+    tag: 'v1.0.9-beta',
+    name: 'Fress 1.0.9-beta',
     published_at: '2026-10-12T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta',
+    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta',
     prerelease: true,
     assets: [
-      { name: 'Fress_1.0.8_aarch64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_aarch64.AppImage` },
-      { name: 'Fress_1.0.8_arm64-setup.exe', size: 20_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_arm64-setup.exe` },
-      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.8-beta/SHA256SUMS.txt` },
+      { name: 'Fress_1.0.9_aarch64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_aarch64.AppImage` },
+      { name: 'Fress_1.0.9_arm64-setup.exe', size: 20_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_arm64-setup.exe` },
+      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.9-beta/SHA256SUMS.txt` },
     ],
   },
 ];
@@ -195,13 +198,13 @@ export const OWN_RELEASE_ARM_ONLY: GhReleaseFixture[] = [
  * releases page instead of an unverifiable in-app download. */
 export const OWN_RELEASE_NO_SUMS: GhReleaseFixture[] = [
   {
-    tag: 'v1.0.8-beta',
-    name: 'Fress 1.0.8-beta',
+    tag: 'v1.0.9-beta',
+    name: 'Fress 1.0.9-beta',
     published_at: '2026-10-12T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta',
+    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta',
     prerelease: true,
     assets: [
-      { name: 'Fress_1.0.8_amd64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.8-beta/Fress_1.0.8_amd64.AppImage` },
+      { name: 'Fress_1.0.9_amd64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_amd64.AppImage` },
     ],
   },
 ];

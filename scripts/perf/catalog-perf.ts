@@ -81,9 +81,28 @@ const measured: Measured = {
 // ---------------------------------------------------------------- helpers
 
 async function startPreview(): Promise<ChildProcess> {
+  // A leaked preview server from a previous run (the npx child survives the
+  // parent's SIGTERM) would answer this health check while serving a STALE
+  // dist from memory - the round-26 incident, which surfaced as the What's-
+  // New modal opening because the stale bundle's version disagreed with the
+  // seeded fress.seen_version. The port must be FREE before we spawn.
+  let leaked = false;
+  try {
+    const res = await fetch(`${BASE_URL}/`);
+    leaked = res.ok;
+  } catch {
+    /* port free */
+  }
+  if (leaked) {
+    throw new Error(
+      `port ${PORT} is already serving something - a leaked vite preview from a ` +
+        `previous run. Kill it before measuring: pkill -f "vite preview"`,
+    );
+  }
   const proc = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
     cwd: new URL('../..', import.meta.url).pathname,
     stdio: 'pipe',
+    detached: true, // own process group, so the cleanup below can kill the whole tree
   });
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
@@ -457,7 +476,14 @@ async function main(): Promise<void> {
     }
   } finally {
     if (browser) await browser.close().catch(() => undefined);
-    preview.kill('SIGTERM');
+    // The npx wrapper spawns vite preview as its own child; killing only
+    // the wrapper leaves the server listening (its in-memory dist cache
+    // then poisons the NEXT run). Kill the whole process group instead.
+    try {
+      if (preview.pid) process.kill(-preview.pid, 'SIGTERM');
+    } catch {
+      preview.kill('SIGTERM');
+    }
   }
   // Exit explicitly: the vite preview child (spawned through npx) keeps
   // this process alive after the report is written - the first CI run

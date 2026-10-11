@@ -43,7 +43,7 @@ import {
 } from './fixtures/data';
 
 const d = DICTS.en;
-const VALID_RELEASE_URL = 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta';
+const VALID_RELEASE_URL = 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta';
 
 test.use({ tauriMode: true });
 
@@ -81,13 +81,13 @@ test.describe('Workflow I: valid release fixture', () => {
     // The available toast names the exact version (tag without the v).
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText(d['update.availableToast'].replace('{version}', '1.0.8-beta'));
+    await expect(toast).toContainText(d['update.availableToast'].replace('{version}', '1.0.9-beta'));
 
     // The header pill is on screen and names the version.
     const pill = page.locator('#header-update-pill');
     await expect(pill).toBeVisible();
-    await expect(pill).toContainText(d['header.updatePill'].replace('{v}', '1.0.8-beta'));
-    await expect(pill).toHaveAttribute('title', d['header.updatePillTitle'].replace('{v}', '1.0.8-beta'));
+    await expect(pill).toContainText(d['header.updatePill'].replace('{v}', '1.0.9-beta'));
+    await expect(pill).toHaveAttribute('title', d['header.updatePillTitle'].replace('{v}', '1.0.9-beta'));
 
     await drainToasts(page);
 
@@ -98,14 +98,14 @@ test.describe('Workflow I: valid release fixture', () => {
     const b = (await bridge(page))!;
     const entries = Object.values(b.downloads);
     expect(entries).toHaveLength(1);
-    expect(entries[0].url).toBe('https://github.com/WasewaseX/Fress/releases/download/v1.0.8-beta/Fress_1.0.8_amd64.AppImage');
+    expect(entries[0].url).toBe('https://github.com/WasewaseX/Fress/releases/download/v1.0.9-beta/Fress_1.0.9_amd64.AppImage');
     expect(entries[0].expectedSha256).not.toBeNull();
-    expect(entries[0].filename).toBe('Fress_1.0.8_amd64.AppImage');
+    expect(entries[0].filename).toBe('Fress_1.0.9_amd64.AppImage');
     expect(b.openedUrls).toEqual([]);
 
     // The transfer is a real download-manager row (same pipeline as any app).
     await openDownloads(page);
-    await expect(page.locator(sel.downloadsPanel)).toContainText('Fress_1.0.8_amd64.AppImage');
+    await expect(page.locator(sel.downloadsPanel)).toContainText('Fress_1.0.9_amd64.AppImage');
   });
 });
 
@@ -144,13 +144,13 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
   test('Stable hides the prerelease, switching channels surfaces it', async ({ gotoApp, page }) => {
     await gotoApp();
 
-    // On the Stable channel the only newer build (v1.0.8-beta, flagged
+    // On the Stable channel the only newer build (v1.0.9-beta, flagged
     // prerelease) is invisible; the stable v1.0.6 is OLDER than the running
-    // 1.0.7-beta. The check must report "latest".
+    // 1.0.8-beta. The check must report "latest".
     await checkForUpdates(page);
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText(d['update.latestToast'].replace('{version}', '1.0.7-beta'));
+    await expect(toast).toContainText(d['update.latestToast'].replace('{version}', '1.0.8-beta'));
     await expect(page.locator('#header-update-pill')).toHaveCount(0);
 
     await drainToasts(page);
@@ -171,7 +171,7 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
     await checkForUpdates(page);
     const available = page.locator('[data-sonner-toast]').first();
     await expect(available).toBeVisible();
-    await expect(available).toContainText(d['update.availableToast'].replace('{version}', '1.0.8-beta'));
+    await expect(available).toContainText(d['update.availableToast'].replace('{version}', '1.0.9-beta'));
     await expect(page.locator('#header-update-pill')).toBeVisible();
   });
 });

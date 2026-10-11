@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.8-beta (2026-10-12): the integration release
+
+Six parallel quality threads land together and are verified against each other: the updater's candidate selection becomes deterministic and architecture-safe, release artifacts gain a tested minisign verification path, the last data-driven English strings speak five languages, the catalog cards and table finish their visual contract, and CI learns to run the full browser suite on every pull request. One real user-facing bug this round fixed: an ARM-only release could be delivered to an Intel machine as a fully "verified" download — the delivery layer now refuses any release that ships no file the running machine can execute.
+
+### Self-update: deterministic selection, strict versions, artifact signatures
+- **Versions parse strictly, anchored on both ends.** The old pattern matched the `1.0.7` prefix of `1.0.7junk`, so trailing junk rode into the candidate list as a stable release. Leading zeros, empty identifiers and unparsable tags are rejected now, and a malformed tag is eligible on NO channel — it used to stay visible on every channel including Stable. Build metadata never affects precedence (SemVer rule 10).
+- **Asset selection happens in two explicit phases.** Hard platform/architecture/role gates decide what MAY be delivered at all; scoring only ranks the survivors. The old single-pass scoring kept ineligible assets alive at low scores, and because the scan started at −Infinity a lone ARM64-only dmg could win on an Intel Mac. Ranking is architecture-certainty first with a final lexicographic tie-break, so permuting the release's asset list can never change what you get.
+- **The ARM-only worst case is closed.** This defect was pinned as an expected failure in the E2E suite (`test.fail`) against the old picker: on an x64 host, an ARM64-only release resolved to an uninstallable file — and with a published checksum it arrived as a fully "verified" download. The hard gate refuses it; the pill now routes to the Releases page, the annotation is lifted, and the test keeps passing.
+- **Wrong-ABI Android files are refused, not merely ranked.** armv7 apks on arm64 devices and x86 apks on x86_64 devices stay documented compatibility paths; everything else is a guaranteed install failure and can no longer survive as a low-ranked candidate that wins by being alone.
+- **Artifact authenticity: a native minisign verifier.** `verify_self_update_signature` streams a completed download through `minisign-verify` (the Tauri updater's own crate family) against the public key embedded at compile time — the same key CI signs the Windows installers and Linux bundles with, byte-identical to the one published in `tauri.conf.json`. The v1.0.7 signatures were downloaded and verified against it row by row; the audit table lives in CODE_SIGNING.md. Legacy (non-prehashed) signatures are refused.
+
+### The last untranslated surfaces
+- **Privacy Pack category names come from one shared mapping.** All 28 category names resolve through `PP_CATEGORY_I18N_KEYS` — card headings, ARIA labels, dropdown triggers, clear buttons and the picked-list label — so a second English display list can never grow back. A CI gate fails when a `PRIVACY_PACK` name lacks a mapping or a dictionary lacks the translation.
+- **Download-option labels translate at render time.** The per-app data file keeps its English labels as identifiers (the fallback filter compares against them), while the words you read follow the active language; product proper nouns stay and only the glue word translates ("Thunderbird for Windows" → "Thunderbird für Windows"). The translated label travels with the download record, so the download list names the entry exactly as the button you read.
+- **The detail dialog's category badge, the export dialog and the last "Close dialog" ARIA labels speak five languages** through the same shared mappings the cards and filters already use.
+
+### Visual contract, verified against the rendered app
+- **Card and table category labels use the shared translation.** A Persian or German UI no longer shows an uppercase English category string on every card — the same label the filters, compare matrix and detail dialog use.
+- **Ghost text is readable.** The table's zero-star placeholder and "Direct download" label sat at ~1.2:1 in light mode (decorative `slate-600` used as text); the resolver-error note and the F-Droid CTA in the detail dialog carried near-invisible inks on their tinted wells in light mode. All ride proper per-theme text tokens now, with contrast tests pinning them.
+- **Long app names cannot break the card.** The two-line clamp used to sit on the heading and was defeated by the inline-block button inside it — a 96-character stress name grew the card to four lines. The clamp lives on the button now, with the full name in a tooltip.
+- **The theme menu closes when you pick a theme** (every other item in that menu already did).
+- **A full-disk download leaves a correct `.part`.** The retained partial file is flushed before the failure returns, so a resume can never start from an offset computed off a half-landed buffer.
+
+### Catalog resolver: order-invariance under adversarial shuffles
+- New fixtures seed 35+ deterministic shuffles of a release carrying every decoy family the live audits found in the wild — source archives, wrong arch, wrong OS, help/lang packs, debug builds, CLI companions, server products, signature/checksum/blockmap exhaust — and assert the one correct installer wins in every order, on Windows and Android. The export dialog also stops swallowing clipboard failures: a refused copy now shows "Copy failed" with the button still usable.
+
+### Native engine: evidence, not behavior changes
+- 718 lines of adversarial test evidence for the download engine and network policy — production code untouched (verified hunk by hunk). The mock HTTP server learned `If-Range`, so conditional-resume behavior is now exercised end to end: matching validators resume, stale validators restart, and the resumed byte stream is proven coherent.
+
+### CI runs the real app now
+- **The full Playwright suite (workflows A–J plus 20 reviewed visual baselines) is a required CI job**, running against the production build with a deny-all fixture network layer — shared GitHub quota can never flake a pull request. A weekly scheduled live-network smoke complements it without being a release gate.
+- **Performance invariants are a required gate**: zero unrelated card mutations during a 1000-event progress burst, persistence writes inside the coalescing bound. Wall-clock numbers are recorded as informational artifacts only.
+- **`validate:security` is required, and the version guard pins both lockfile spots** — package-lock.json records the version twice, and a drifted lockfile would ship a mismatched `npm view`.
+
 ## 1.0.7-beta (2026-10-12): the machine-truth release, and a polished surface
 
 Three threads land together. The app now asks the MACHINE for its architecture instead of trusting the process, so Windows-on-ARM machines stop being treated as x64 by the updater and the catalog. The self-update chain was pinned end to end: the checksum file that was CORS-dead code in every shipped release is fetched natively now, and an update that cannot be verified is not delivered through the app at all. And the interface finished its polish pass: light-theme text now meets WCAG AA by measurement (enforced by tests), every dialog speaks five languages and behaves under a keyboard, and the download engine gained adversarial test coverage with one real IPv6 policy fix.

@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.7-beta',
+    date: '2026-10-12',
+    title: 'The machine-truth release, and a polished surface',
+    items: [
+      'Fress asks the machine for its architecture now, not the process: a Windows-on-ARM machine running the x64 build under emulation was treated as x64 by both the updater and the catalog. ARM64 hosts get ARM64 builds offered, hyphenated names like LocalSend\'s "x86-64" are understood, a "-CLI-" companion can no longer impersonate the app, and a skipped batch download now offers an Open-official-pages action instead of a dead end.',
+      'The self-update chain is pinned: the published checksum file was CORS-dead code in every earlier release, so updates shipped "unverified" silently. It is fetched natively now, and an update that cannot be verified is not delivered through the app — the Releases page opens instead. The network policy gained registry-complete IPv6 classification, and a full disk during a download is now an honest, resumable dead stop rather than a confusing retry loop.',
+      'The interface finished its polish pass: light-theme text holds WCAG AA contrast by measurement (with automated tests keeping it there), the green Download button is readable in both themes, and the comparison tab\'s install command no longer sits in a black stripe. Every dialog speaks five languages, closes one layer per Escape press, and hands focus back where it belongs.',
+    ],
+  },
+  {
     version: '1.0.6-beta',
     date: '2026-10-11',
     title: 'A catalog that uses its desktop, and a table that speaks',

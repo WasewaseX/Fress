@@ -42,7 +42,7 @@ const REPO = 'WasewaseX/Fress';
  * plain fetch stays as the best-effort fallback and its CORS failure
  * degrades to null exactly as before.
  */
-async function fetchSelfUpdateText(url: string): Promise<string | null> {
+export async function fetchSelfUpdateText(url: string): Promise<string | null> {
   if (isTauri()) {
     try {
       const r = await invoke<{ status: number; body: string; truncated: boolean }>(
@@ -669,6 +669,102 @@ async function fetchExpectedSha256(release: OwnRelease, assetName: string): Prom
   return matches.every((h) => h === first) ? first : null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Signature sidecar (.sig) lookup                                    */
+/* ------------------------------------------------------------------ */
+
+/** The sidecar document that authenticates ONE release asset.
+ * Kept alongside the digest: the delivery plan carries BOTH, and the
+ * post-download verifier consumes the exact bytes this URL returned. */
+export interface SignatureSidecar {
+  /** e.g. "Fress_1.0.9_x64-setup.exe.sig" */
+  name: string;
+  url: string;
+}
+
+/** Finds the minisign signature sidecar for `assetName` on THIS release.
+ *
+ * The convention CI publishes is `<exact-asset-filename>.sig` next to the
+ * asset (verified against every release since v1.0.5-beta). The match is
+ * byte-exact on the selected filename - a sidecar for another file, another
+ * version or another architecture is simply not the sidecar for THIS
+ * artifact, and returning it would let "verify file A over signature B"
+ * look like a success. Nothing here guesses: no sidecar means the caller
+ * routes the update to the official Releases page ("unsigned"), it never
+ * means "deliver anyway". */
+export function signatureSidecarFor(
+  release: OwnRelease,
+  assetName: string
+): SignatureSidecar | null {
+  const expected = `${assetName}.sig`;
+  const sidecar = (release.assets || []).find((a) => a.name === expected);
+  if (!sidecar) return null;
+  return { name: sidecar.name, url: sidecar.url };
+}
+
+/** Fetches the signature document that authenticates `assetName` on this
+ * release, through the SAME authorized native text path as the checksum
+ * manifest (github.com + release-asset CDN allowlist, repo path pin, 2 MiB
+ * cap).
+ *
+ * The result says WHY a signature is not available, so the delivery flow
+ * can react honestly instead of collapsing every failure into "no update":
+ *   - `{ status: 'ok' }` carries the EXACT sidecar content (the
+ *     outer-base64 minisign document, also what the native verifier expects
+ *     in its `signature_base64` argument);
+ *   - `{ status: 'missing' }` - the release ships no sidecar for this exact
+ *     filename (macOS dmgs and Android APKs today): an UNSIGNED artifact,
+ *     not a network problem;
+ *   - `{ status: 'unreachable' }` - a sidecar exists but the document could
+ *     not be fetched: transient, safe to retry with a REAL re-fetch;
+ *   - `{ status: 'malformed' }` - the document does not have the shape of a
+ *     minisign/Tauri signature document: broken release, fail closed.
+ *
+ * The cryptographic check itself is deliberately NOT done here: this only
+ * establishes that a well-formed signature document EXISTS and is
+ * reachable. Whether the downloaded artifact's bytes actually match it is
+ * the native verifier's job, run against the completed file on disk. */
+export type SignatureFetchResult =
+  | { status: 'ok'; document: string }
+  | { status: 'missing' }
+  | { status: 'unreachable' }
+  | { status: 'malformed' };
+
+export async function fetchOwnAssetSignature(
+  release: OwnRelease,
+  assetName: string
+): Promise<SignatureFetchResult> {
+  const sidecar = signatureSidecarFor(release, assetName);
+  if (!sidecar) return { status: 'missing' };
+  const text = await fetchSelfUpdateText(sidecar.url);
+  if (!text) return { status: 'unreachable' };
+  // Shape gate: a Tauri/minisign .sig sidecar is one outer-base64 line that
+  // decodes to a four-line document (untrusted comment / sig cryptobuf /
+  // trusted comment / global signature). Anything else is malformed and
+  // can never authenticate an artifact.
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.includes('\n')) return { status: 'malformed' };
+  try {
+    const doc = atob(trimmed);
+    const lines = doc.split('\n');
+    if (lines.length < 4) return { status: 'malformed' };
+    if (!/^untrusted comment:/.test(lines[0])) return { status: 'malformed' };
+    if (!/^trusted comment: /.test(lines[2])) return { status: 'malformed' };
+    // Sig cryptobuf: 2-byte algo + 8-byte key id + 64 bytes. Only the
+    // PREHASHED algorithm ("ED") is accepted - exactly what the native
+    // verifier accepts (it refuses legacy non-prehashed signatures), so a
+    // document the app could never verify fails here, before a download.
+    const cryptobuf = atob(lines[1]);
+    if (cryptobuf.length !== 74) return { status: 'malformed' };
+    if (cryptobuf.slice(0, 2) !== 'ED') return { status: 'malformed' };
+    // Global signature cryptobuf: 64 bytes.
+    if (atob(lines[3]).length !== 64) return { status: 'malformed' };
+  } catch {
+    return { status: 'malformed' };
+  }
+  return { status: 'ok', document: trimmed };
+}
+
 export async function checkForUpdate(currentVersion: string): Promise<UpdateState> {
   try {
     const channel = getUpdateChannel();
@@ -700,29 +796,57 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateStat
 
 /** What tapping the update button may do with a detected update.
  *
- * - `download` : a platform-matched asset exists AND its published SHA-256
- *   entry was read from SHA256SUMS.txt - the download manager verifies the
- *   file against it before it counts as finished.
- * - `releases-page`: no usable asset (unknown ABI), or the asset's
- *   checksum could NOT be established (no SHA256SUMS.txt on the release,
- *   no entry for the asset, or the checksum document was unreachable).
- *   The update is NOT delivered through the app in that state - handing an
- *   unverifiable installer to the user while calling it an update would be
- *   the one thing this flow must never do. The releases page keeps the
- *   manual `sha256sum -c SHA256SUMS.txt` instructions one click away.
+ * A direct in-app update is only offered when ALL THREE gates pass:
+ *
+ * - `download` : a platform-matched asset exists, its published SHA-256
+ *   entry was read from SHA256SUMS.txt (the download manager verifies the
+ *   file against it before it counts as finished), AND a well-formed
+ *   minisign signature sidecar exists on the same release for this exact
+ *   filename. The signature bytes travel in the delivery plan; after the
+ *   download completes, the native `verify_self_update_signature` command
+ *   checks the actual file bytes against them before anything is shown as
+ *   "verified".
+ * - `releases-page`: one of the gates failed, each with its own reason so
+ *   the UI can explain WHAT is missing instead of pretending no update
+ *   exists:
+ *     - 'no-asset'     : nothing on the release can run on this machine.
+ *     - 'unverifiable' : the checksum cannot be established (no
+ *                        SHA256SUMS.txt, no entry for the asset, document
+ *                        unreachable).
+ *     - 'unsigned'     : the artifact has no minisign sidecar on the
+ *                        release yet (macOS dmgs and Android APKs today).
+ *                        Integrity could be checked, publisher
+ *                        authenticity could not - so the app does not
+ *                        deliver it in-app and does not claim it is
+ *                        publisher-authenticated.
+ *   In all three cases the releases page is the honest path: the user
+ *   gets the file with the manual `sha256sum -c SHA256SUMS.txt`
+ *   instructions one click away.
  */
 export type UpdateDelivery =
-  | { kind: 'download'; asset: { name: string; size: number; url: string }; sha256: string }
-  | { kind: 'releases-page'; release: OwnRelease; reason: 'no-asset' | 'unverifiable' };
+  | {
+      kind: 'download';
+      asset: { name: string; size: number; url: string };
+      sha256: string;
+      signature: SignatureSidecar;
+    }
+  | { kind: 'releases-page'; release: OwnRelease; reason: 'no-asset' | 'unverifiable' | 'unsigned' };
 
 /** Pure decision behind BOTH update buttons (header pill, footer button),
- * so the two call sites cannot drift apart on the fail-closed rule. */
+ * so the two call sites cannot drift apart on the fail-closed rule.
+ *
+ * `signature` is a REQUIRED argument on purpose: there is no way to call
+ * the planner without making the signature decision explicit. Passing null
+ * means "no sidecar for this artifact on this release" and routes to the
+ * releases page - it can never silently mean "skip that check". */
 export function planUpdateDelivery(
   release: OwnRelease,
   asset: { name: string; size: number; url: string } | null,
-  expectedSha256: string | null
+  expectedSha256: string | null,
+  signature: SignatureSidecar | null
 ): UpdateDelivery {
   if (!asset) return { kind: 'releases-page', release, reason: 'no-asset' };
   if (!expectedSha256) return { kind: 'releases-page', release, reason: 'unverifiable' };
-  return { kind: 'download', asset, sha256: expectedSha256 };
+  if (!signature) return { kind: 'releases-page', release, reason: 'unsigned' };
+  return { kind: 'download', asset, sha256: expectedSha256, signature };
 }

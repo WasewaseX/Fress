@@ -2,32 +2,46 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
 import { useI18n } from '../../lib/i18n';
 import { openExternal } from '../../lib/external';
+import { useDownloadActions, useDownloadItems } from '../../lib/downloads';
 import {
   checkForUpdate,
   getUpdateChannel,
   setUpdateChannel,
-  planUpdateDelivery,
   OwnRelease,
   UpdateChannel,
   UpdateState,
 } from '../../lib/selfUpdate';
+import {
+  getDeliveryState,
+  isDelivering,
+  setDeliveryTranslator,
+  startOwnUpdateDelivery,
+  subscribeDelivery,
+  syncDeliveryItems,
+  UpdateDeliveryState,
+} from './updateDelivery';
 import pkg from '../../../package.json';
 
 /**
  * In-app self-update state: compares this install against the newest
  * GitHub release. Checked automatically at most once every 24 hours, plus
  * on demand from the menu. When an update exists, the header shows a pill;
- * tapping it downloads the platform file (an APK update on Android keeps
- * all apps and data, no reinstall needed).
+ * tapping it starts the delivery lifecycle (updateDelivery.ts): checksum
+ * expectation, signature sidecar, verified download - and the in-app flow
+ * only calls the result "verified" after the native signature check passed
+ * on the completed file.
  *
  * The hook receives `startDownload` from the downloads context so the
  * update asset goes through the same verified download pipeline as every
- * other file.
+ * other file. The download manager's item list is mirrored into the
+ * delivery module so a terminal download event can be bound to THIS update
+ * through the manager's own id->url records.
  */
 
 export interface SelfUpdateUi {
@@ -37,6 +51,37 @@ export interface SelfUpdateUi {
   handleUpdateChannelChange: (channel: UpdateChannel) => void;
   runUpdateCheck: (announce: boolean) => Promise<UpdateState | null>;
   handleHeaderUpdateClick: () => void;
+  /** Live delivery status for the header pill (label override + busy);
+   * null when the pill should show its default "Update {v}" text. */
+  updatePillStatus: { label: string; busy: boolean } | null;
+}
+
+/** Maps the delivery state onto the pill's label override. Kept beside the
+ * hook (not inside the delivery module) so every label comes from i18n and
+ * carries the release version the pill already names. */
+function pillStatusFor(
+  delivery: UpdateDeliveryState,
+  version: string,
+  t: (key: string) => string
+): { label: string; busy: boolean } | null {
+  const v = (key: string) => t(key).replace('{v}', version);
+  switch (delivery.phase) {
+    case 'fetching-signature':
+    case 'downloading':
+      return { label: v('header.updatePillDownloading'), busy: true };
+    case 'verifying-checksum':
+      return { label: v('header.updatePillVerifyingChecksum'), busy: true };
+    case 'verifying-signature':
+      return { label: v('header.updatePillVerifyingSignature'), busy: true };
+    case 'verified':
+      return { label: v('header.updatePillReady'), busy: false };
+    case 'failed':
+      return delivery.fallback
+        ? { label: t('header.updatePillSeeReleases'), busy: false }
+        : { label: t('header.updatePillRetry'), busy: false };
+    default:
+      return null;
+  }
 }
 
 export function useSelfUpdate(
@@ -47,6 +92,28 @@ export function useSelfUpdate(
   const [ownUpdate, setOwnUpdate] = useState<{ release: OwnRelease; asset: { name: string; size: number; url: string } | null; expectedSha256: string | null } | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>(() => getUpdateChannel());
+
+  // Delivery lifecycle: subscribe for the pill, translate module toasts,
+  // and mirror the download manager's items so terminal download events
+  // can be bound to this update through the manager's own records.
+  const deliveryState = useSyncExternalStore(subscribeDelivery, getDeliveryState);
+  const { items } = useDownloadItems();
+
+  useEffect(() => {
+    setDeliveryTranslator(t);
+  }, [t]);
+
+  useEffect(() => {
+    syncDeliveryItems(
+      items.map((it) => ({
+        id: it.id,
+        url: it.url,
+        status: it.status,
+        path: it.path,
+        verified: it.verified,
+      }))
+    );
+  }, [items]);
 
   const handleUpdateChannelChange = (channel: UpdateChannel) => {
     setUpdateChannelState(channel);
@@ -106,27 +173,31 @@ export function useSelfUpdate(
 
   const handleHeaderUpdateClick = () => {
     if (!ownUpdate) return;
-    // ONE decision for both update buttons (this hook and the footer's
-    // UpdateButton): download only when the asset's published SHA-256 is
-    // in hand, otherwise open the releases page instead of shipping an
-    // unverified installer. A missing checksum never becomes a successful
-    // update - the file the user already has keeps working until they
-    // choose to verify and install manually from the releases page.
-    const plan = planUpdateDelivery(ownUpdate.release, ownUpdate.asset, ownUpdate.expectedSha256);
-    if (plan.kind === 'download') {
-      void startDownload(plan.asset.url, plan.asset.name, { expectedSha256: plan.sha256 });
-      toast.success(t('update.downloading'), {
-        description: t('update.downloadingHint'),
-      });
-    } else {
-      toast.info(t('update.releasesPage'), {
-        description:
-          plan.reason === 'unverifiable'
-            ? t('update.unverifiableHint')
-            : t('update.noAssetHint'),
-      });
-      void openExternal(plan.release.htmlUrl);
+    if (deliveryState.phase === 'verified') {
+      // Reveal - never auto-launch. Verification established trust in the
+      // bytes; the user decides when (and whether) to run the installer.
+      void revealItemInDir(deliveryState.path);
+      return;
     }
+    if (isDelivering()) {
+      toast.info(t('update.alreadyInProgress'), {
+        description: t('update.alreadyInProgressHint'),
+      });
+      return;
+    }
+    // One delivery entry point for the pill: runs the shared three-gate
+    // plan (asset + checksum + signature sidecar), fetches the signature
+    // document for real, and hands the asset to the download manager. A
+    // failed attempt is retried here too - the retry re-runs every gate
+    // with FRESH fetches, never a cached answer.
+    void startOwnUpdateDelivery(
+      {
+        release: ownUpdate.release,
+        asset: ownUpdate.asset,
+        expectedSha256: ownUpdate.expectedSha256,
+      },
+      { startDownload, openExternal, revealItemInDir }
+    );
   };
 
   return {
@@ -136,5 +207,10 @@ export function useSelfUpdate(
     handleUpdateChannelChange,
     runUpdateCheck,
     handleHeaderUpdateClick,
+    updatePillStatus: pillStatusFor(
+      deliveryState,
+      ownUpdate ? ownUpdate.release.version : '',
+      t
+    ),
   };
 }

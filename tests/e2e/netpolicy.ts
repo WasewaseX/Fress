@@ -80,6 +80,11 @@ export interface NetworkPolicyOptions {
   /** Body served for the self-update SHA256SUMS.txt release asset. Omit it
    * to simulate a release whose checksum document is missing/unreachable. */
   ownSums?: string;
+  /** Body served for the self-update minisign signature sidecars
+   * ("<asset>.sig" release assets). Omit it to simulate a release whose
+   * sidecar document is unreachable; the delivery plan gate then fails
+   * closed exactly as it would against a broken release. */
+  ownSigs?: string;
 }
 
 /** Installs the route layer on a page. Call after context creation, before goto.
@@ -93,6 +98,7 @@ export async function installNetworkPolicy(page: Page, opts: NetworkPolicyOption
   const releases = { ...RELEASE_FIXTURES, ...(opts.releases ?? {}) };
   const ownReleases = opts.ownReleases ?? [];
   const ownSums = opts.ownSums;
+  const ownSigs = opts.ownSigs;
 
   const apiRe = /https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/?]+)(\/releases\/latest|\/releases[^/]*?)?(\?.*)?$/;
 
@@ -176,14 +182,21 @@ export async function installNetworkPolicy(page: Page, opts: NetworkPolicyOption
   );
 
   // Self-update checksum document (fetch_self_update_text proxies it through
-  // the page fetch, which the route layer answers). Other self-update asset
-  // URLs are never fetched - the download engine is passive in tests - so
-  // they fall through to deny-all and any surprise fails loudly.
+  // the page fetch, which the route layer answers). The minisign signature
+  // sidecars answer from the same rails. Any other self-update asset URL is
+  // never fetched - the download engine is passive in tests - so it falls
+  // through to deny-all and any surprise fails loudly.
   await page.route(/https:\/\/github\.com\/WasewaseX\/Fress\/releases\/download\/[^/]+\/SHA256SUMS\.txt$/, (route) => {
     if (ownSums === undefined) {
       return route.fulfill({ status: 404, contentType: 'text/plain', body: 'not found' });
     }
     return route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: ownSums });
+  });
+  await page.route(/https:\/\/github\.com\/WasewaseX\/Fress\/releases\/download\/[^/]+\/[^/]+\.sig$/, (route) => {
+    if (ownSigs === undefined) {
+      return route.fulfill({ status: 404, contentType: 'text/plain', body: 'not found' });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: ownSigs });
   });
 }
 

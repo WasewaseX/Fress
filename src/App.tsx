@@ -181,6 +181,7 @@ function AppShell() {
         onOpenDownloads={() => dialogs.setIsDownloadsOpen(true)}
         activeDownloadCount={activeDownloadCount}
         updateVersion={selfUpdate.ownUpdate ? selfUpdate.ownUpdate.release.version : null}
+        updatePillStatus={selfUpdate.updatePillStatus}
         updateChannel={selfUpdate.updateChannel}
         onUpdateChannelChange={selfUpdate.handleUpdateChannelChange}
         onUpdateClick={selfUpdate.handleHeaderUpdateClick}

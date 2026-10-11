@@ -80,6 +80,10 @@ export interface FressTestBridge {
   setFailStart(msg: string | null): void;
   failCancel: string | null;
   setFailCancel(msg: string | null): void;
+  /** When set, `verify_self_update_signature` rejects with this error
+   * (Workflow I: a tampered/foreign-key artifact must never verify). */
+  failVerify: string | null;
+  setFailVerify(msg: string | null): void;
   resolverMode: 'ok' | 'rate-limit' | 'empty';
   setResolver(mode: 'ok' | 'rate-limit' | 'empty'): void;
   releases: Record<string, unknown[]>;
@@ -133,6 +137,8 @@ const BRIDGE_BODY = String.raw`
     setFailStart: function (msg) { this.failStart = msg; },
     failCancel: null,
     setFailCancel: function (msg) { this.failCancel = msg; },
+    failVerify: null,
+    setFailVerify: function (msg) { this.failVerify = msg; },
     resolverMode: 'ok',
     setResolver: function (mode) { this.resolverMode = mode; },
     releases: INITIAL_RELEASES,
@@ -303,6 +309,16 @@ const BRIDGE_BODY = String.raw`
         // Contract (docs/download-lifecycle.md): cancel emits a terminal
         // download-error whose message is exactly "Cancelled".
         emit('download-error', { id: cid, message: 'Cancelled' });
+        return null;
+      }
+      case 'verify_self_update_signature': {
+        // The real command streams the completed artifact from disk through
+        // the minisign verifier against the embedded public key; here the
+        // (already recorded) call resolves ok unless the test injects a
+        // verification failure. The recorded args ARE the binding contract:
+        // filePath must be the download engine's completion path and
+        // signatureBase64 must be the release sidecar document.
+        if (bridge.failVerify) throw bridge.failVerify;
         return null;
       }
       case 'plugin:dialog|open': {

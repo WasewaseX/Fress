@@ -19,6 +19,7 @@ import {
   RELEASES_LOCALSEND,
   OWN_RELEASES_VALID,
   OWN_SUMS_TXT,
+  OWN_SIG_TXT,
   type GhReleaseFixture,
 } from './fixtures/data';
 
@@ -82,6 +83,9 @@ export interface SeedOptions {
   /** Body for the self-update SHA256SUMS.txt asset; omit to simulate a
    * release whose checksum document is missing (fail-closed path). */
   ownSums?: string;
+  /** Body for the self-update minisign sidecar ("*.sig") assets; omit to
+   * simulate a release whose signature document is unreachable. */
+  ownSigs?: string;
 }
 
 export type TestFixtures = {
@@ -94,6 +98,7 @@ export type TestFixtures = {
   updateChannel: 'stable' | 'beta' | 'alpha' | undefined;
   ownReleases: { list: GhReleaseFixture[] } | undefined;
   ownSums: string | undefined;
+  ownSigs: string | undefined;
   /** Navigates to the app with all seeding already in place. */
   gotoApp: (path?: string) => Promise<Page>;
 };
@@ -107,9 +112,10 @@ export const test = base.extend<TestFixtures>({
   updateChannel: [undefined, { option: true }],
   ownReleases: [undefined, { option: true }],
   ownSums: [undefined, { option: true }],
+  ownSigs: [undefined, { option: true }],
 
   gotoApp: async (
-    { page, tauriMode, lang, theme, customItems, rateLimitResolver, updateChannel, ownReleases, ownSums },
+    { page, tauriMode, lang, theme, customItems, rateLimitResolver, updateChannel, ownReleases, ownSums, ownSigs },
     use
   ) => {
     // The init script is serialized: every value it needs must be in the
@@ -133,6 +139,7 @@ export const test = base.extend<TestFixtures>({
       rateLimitResolver,
       ownReleases: ownReleases?.list,
       ownSums: ownSums ?? (ownReleases ? OWN_SUMS_TXT : undefined),
+      ownSigs: ownSigs ?? (ownReleases ? OWN_SIG_TXT : undefined),
     });
 
     await use(async (path = '/') => {

@@ -21,9 +21,48 @@
  * note instead of a scary red toast.
  */
 
+import { invoke } from '@tauri-apps/api/core';
+
+import { isTauri } from './downloads';
 import { androidAssetAbi, androidAssetFlags, androidDeviceAbi, getHostArch } from './releaseFetch';
 
 const REPO = 'WasewaseX/Fress';
+
+/**
+ * Reads a small text document from the Fress release feed (releases.atom,
+ * SHA256SUMS.txt).
+ *
+ * Inside the Tauri app this goes through the native `fetch_self_update_text`
+ * command: github.com and its release-asset CDN send no CORS headers, so a
+ * WebView fetch of these documents fails in EVERY runtime - the old WebView
+ * fetch made the checksum step and the atom fallback dead code while looking
+ * alive. The native command enforces the same rails as the rest of the
+ * native layer (HTTPS, GitHub-host allowlist, per-hop re-check, repo path
+ * pin, 2 MiB cap). In a plain browser tab there is no native bridge; the
+ * plain fetch stays as the best-effort fallback and its CORS failure
+ * degrades to null exactly as before.
+ */
+async function fetchSelfUpdateText(url: string): Promise<string | null> {
+  if (isTauri()) {
+    try {
+      const r = await invoke<{ status: number; body: string; truncated: boolean }>(
+        'fetch_self_update_text',
+        { url }
+      );
+      if (r.status >= 400 || r.truncated) return null;
+      return r.body;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
 
 export interface OwnRelease {
   tag: string;
@@ -347,9 +386,8 @@ async function fetchFromAtom(channel: UpdateChannel): Promise<OwnRelease> {
   // UI still links to the releases page; the cost is one session without
   // an update notice while the API is down, not a wrong-channel install.
   if (channel === 'stable') throw new Error('Atom feed cannot verify stable-channel releases');
-  const res = await fetch(`https://github.com/${REPO}/releases.atom`);
-  if (!res.ok) throw new Error(`Atom feed ${res.status}`);
-  const xml = await res.text();
+  const xml = await fetchSelfUpdateText(`https://github.com/${REPO}/releases.atom`);
+  if (!xml) throw new Error('Atom feed unreachable');
   // The feed carries the newest ~10 releases, newest first. Scanning ONLY
   // the first entry broke channel selection: with 1.0.5-alpha newest and
   // the user on the Beta channel, the alpha entry was rejected and the
@@ -398,22 +436,26 @@ export async function fetchOwnLatestRelease(channel: UpdateChannel = getUpdateCh
  * for `assetName`. This is what turns the download manager's "calculated a
  * hash" into an actual verification: the hash is compared against the value
  * CI published next to the file, not merely computed and shown.
+ *
+ * Routed through the native text fetch inside the app (see
+ * fetchSelfUpdateText): a WebView fetch of this release asset fails on
+ * CORS, which silently degraded every self-update to "unverified".
  */
 async function fetchExpectedSha256(release: OwnRelease, assetName: string): Promise<string | null> {
   const sums = release.assets.find((a) => /^sha256sums\.txt$/i.test(a.name));
   if (!sums) return null;
-  try {
-    const res = await fetch(sums.url);
-    if (!res.ok) return null;
-    const text = await res.text();
-    for (const line of text.split('\n')) {
-      // "<hex>  <name>" (two spaces, sha256sum format)
-      const m = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
-      if (m && m[2].trim() === assetName) return m[1].toLowerCase();
-    }
-  } catch {
+  const text = await fetchSelfUpdateText(sums.url);
+  if (!text) {
     // A missing/unreachable checksum file degrades to "unverified", never to
-    // a fake "verified".
+    // a fake "verified". The update delivery layer treats null as "cannot
+    // verify" and refuses the in-app download instead of shipping an
+    // unverified installer (fail closed).
+    return null;
+  }
+  for (const line of text.split('\n')) {
+    // "<hex>  <name>" (two spaces, sha256sum format)
+    const m = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+    if (m && m[2].trim() === assetName) return m[1].toLowerCase();
   }
   return null;
 }
@@ -445,4 +487,33 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateStat
   } catch {
     return { kind: 'error' };
   }
+}
+
+/** What tapping the update button may do with a detected update.
+ *
+ * - `download` : a platform-matched asset exists AND its published SHA-256
+ *   entry was read from SHA256SUMS.txt - the download manager verifies the
+ *   file against it before it counts as finished.
+ * - `releases-page`: no usable asset (unknown ABI), or the asset's
+ *   checksum could NOT be established (no SHA256SUMS.txt on the release,
+ *   no entry for the asset, or the checksum document was unreachable).
+ *   The update is NOT delivered through the app in that state - handing an
+ *   unverifiable installer to the user while calling it an update would be
+ *   the one thing this flow must never do. The releases page keeps the
+ *   manual `sha256sum -c SHA256SUMS.txt` instructions one click away.
+ */
+export type UpdateDelivery =
+  | { kind: 'download'; asset: { name: string; size: number; url: string }; sha256: string }
+  | { kind: 'releases-page'; release: OwnRelease; reason: 'no-asset' | 'unverifiable' };
+
+/** Pure decision behind BOTH update buttons (header pill, footer button),
+ * so the two call sites cannot drift apart on the fail-closed rule. */
+export function planUpdateDelivery(
+  release: OwnRelease,
+  asset: { name: string; size: number; url: string } | null,
+  expectedSha256: string | null
+): UpdateDelivery {
+  if (!asset) return { kind: 'releases-page', release, reason: 'no-asset' };
+  if (!expectedSha256) return { kind: 'releases-page', release, reason: 'unverifiable' };
+  return { kind: 'download', asset, sha256: expectedSha256 };
 }

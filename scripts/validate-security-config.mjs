@@ -127,8 +127,12 @@ expectAbsent('script-src-elem'); // never needed: no inline scripts in dist/
 // connect-src: allow only the verified WebView fetch hosts.
 const allowedConnectHosts = new Set([
   "'self'",
-  'https://api.github.com', // selfUpdate, star counts, live search, add-app validation (the only WebView host that actually answers CORS)
-  'https://github.com', // releases.atom fallback + SHA256SUMS.txt asset fetch (attempted by app code; currently fails on CORS, not CSP - see docs/security/tauri-security.md)
+  'https://api.github.com', // selfUpdate API check, star counts, live search, add-app validation (the only WebView host that actually answers CORS)
+  // NOTE: https://github.com was REMOVED - the releases.atom fallback and the
+  // SHA256SUMS.txt fetch now go through the native `fetch_self_update_text`
+  // command (github.com sends no CORS headers, so the WebView fetch never
+  // worked; see docs/security/tauri-security.md). Do not re-add the host
+  // without evidence of a WebView-fetched document.
 ]);
 const connect = directives.get('connect-src') || [];
 check(connect.length > 0, 'connect-src is present');

@@ -42,11 +42,15 @@ Deliberately NOT granted (each verified unused by the frontend):
 
 Notes on custom commands: Tauri capability permissions gate **plugin and core
 commands only**. The app's own Rust IPC commands (`start_download`,
-`cancel_download`, `default_download_dir`, `app_version`,
-`fetch_latest_release`, `fetch_recent_releases`, `fetch_fdroid_package`,
-`fetch_text`, `host_arch`) are not authorization-gated by capabilities; they
-must enforce their own input validation in Rust (see the URL allowlist inside
-`fetch_text` and the native network policy in `src-tauri/src/`).
+`cancel_download`, `default_download_dir`, `fetch_latest_release`,
+`fetch_recent_releases`, `fetch_fdroid_package`, `fetch_text`,
+`fetch_self_update_text`, `host_arch`) are not authorization-gated by
+capabilities; they must enforce their own input validation in Rust (see the
+URL allowlist inside `fetch_text`, the repo-pinned admission inside
+`fetch_self_update_text`, and the native network policy in
+`src-tauri/src/`). `app_version` was removed in the October 2026 audit: no
+frontend call site ever existed (the UI reads its version from
+`package.json`), and an uncallable command is surface without a purpose.
 
 ## Content Security Policy
 
@@ -74,15 +78,18 @@ Directive rationale:
 - **`img-src 'self' data:`** — local assets plus the small data-URL icons the
   UI uses. No remote image hosts are allowed.
 - **`font-src 'self' data:`** — self-hosted Fontsource files.
-- **`connect-src`** — `'self'` plus the two hosts the WebView itself fetches:
+- **`connect-src`** — `'self'` plus the one host the WebView itself fetches:
   - `https://api.github.com` — self-update check, star counts, live search,
     add-app repo validation. The only WebView-fetched host that answers CORS
     (`access-control-allow-origin: *`).
-  - `https://github.com` — the `releases.atom` fallback and the
-    `SHA256SUMS.txt` asset fetch in `src/lib/selfUpdate.ts` (see the CORS
-    limitation below). This entry exists so the CSP is never the reason such
-    an attempt fails.
-  - `https://f-droid.org` was removed: inside the desktop app the only
+  - `https://github.com` was REMOVED in the October 2026 audit. It used to
+    cover the `releases.atom` fallback and the `SHA256SUMS.txt` asset fetch in
+    `src/lib/selfUpdate.ts`, but github.com does not answer CORS, so those
+    WebView fetches failed regardless of CSP — the entry permitted a request
+    that could never succeed. Both reads now go through the native
+    `fetch_self_update_text` command (GitHub-host allowlist, Fress repo path
+    pin, per-hop re-check, 2 MiB cap), and the CSP entry is gone with them.
+  - `https://f-droid.org` was removed earlier: inside the desktop app the only
     F-Droid WebView fetch (`getFdroid` in `src/lib/releaseFetch.ts`) is gated
     behind `!isTauri()` and the desktop path uses the native
     `fetch_fdroid_package` command instead, so the Tauri WebView never
@@ -124,9 +131,15 @@ opening a URL grants the target no native capabilities.
 Two paths exist by design (documented in `CODE_SIGNING.md`):
 
 1. **Active:** the custom self-updater in `src/lib/selfUpdate.ts` — checks
-   GitHub releases over the WebView (`api.github.com` primary, `github.com`
-   `releases.atom` fallback), hands the platform-matched installer to the
-   native download manager and verifies SHA-256 against `SHA256SUMS.txt`.
+   GitHub releases over the WebView (`api.github.com` primary,
+   `releases.atom` fallback through the native `fetch_self_update_text`
+   command), hands the platform-matched installer to the native download
+   manager and verifies SHA-256 against `SHA256SUMS.txt` — the checksum
+   document is read through `fetch_self_update_text` as well, so the
+   verification runs inside the app instead of silently degrading. When the
+   checksum cannot be established (missing file, missing entry, unreachable),
+   the update is NOT delivered: both update buttons open the releases page
+   instead (fail closed, `planUpdateDelivery` in `src/lib/selfUpdate.ts`).
 2. **Configured but not wired:** `plugins.updater` in `tauri.conf.json`
    (public key + endpoint) exists for the future Tauri updater plugin.
    `tauri-plugin-updater` is intentionally **not** a Cargo dependency yet and
@@ -137,19 +150,30 @@ Two paths exist by design (documented in `CODE_SIGNING.md`):
    defense, and do not rotate or edit the embedded key in a configuration
    change.
 
-### Known limitation (needs a future, coordinated fix)
+Which mechanism establishes what: `SHA256SUMS.txt` provides the INTEGRITY
+checksum (file matches what CI built); the minisign `.sig` + `latest.json` +
+embedded public key provide AUTHENTICITY for the future updater plugin (who
+authorized the artifact). They are separate guarantees and the docs keep them
+separate.
+
+### Former known limitation (resolved October 2026)
 
 The self-updater's WebView fetches to `github.com` (`releases.atom`, and the
 `SHA256SUMS.txt` release asset and its redirect to
-`release-assets.githubusercontent.com`) fail on **CORS**, not on CSP: GitHub
+`release-assets.githubusercontent.com`) failed on **CORS**, not on CSP: GitHub
 does not send `access-control-allow-origin` on those responses, so a
-cors-mode `fetch()` from the WebView cannot read them regardless of CSP. The
-primary `api.github.com` path is unaffected (it sends `ACAO: *`), so update
-*checks* work; the checksum-verification step silently degrades to
-"unverified". The proper fix is routing those reads through a native command
-(they are outside this configuration workstream — `src/lib/selfUpdate.ts` and
-`src-tauri/src/lib.rs` have separate owners), after which the `github.com`
-connect-src entry can be re-evaluated.
+cors-mode `fetch()` from the WebView could not read them regardless of CSP.
+Every shipped release therefore degraded to "unverified" self-updates and a
+dead atom fallback. Resolved by routing both reads through the native
+`fetch_self_update_text` command, whose admission is narrower than any
+WebView fetch could be: HTTPS only, hosts pinned to `github.com` + the two
+GitHub asset CDNs (`network_policy::UrlPolicy::self_update_feed`, every
+redirect hop re-checked), the `github.com` path pinned to the `WasewaseX/Fress`
+repository, private addresses refused, and the response body capped at 2 MiB.
+With no WebView fetch of `github.com` left, its `connect-src` entry was
+removed. The browser (web preview) keeps the plain-`fetch` fallback, where
+the same CORS failure degrades to null and the update links out to the
+releases page — unchanged behavior for a context without a native bridge.
 
 ## Local validation
 
@@ -182,10 +206,14 @@ above are what can run without them.
 - The `plugins.updater` block is a staged migration state, not an active
   mechanism (see above). Wiring the plugin is a deliberate future task that
   must re-check the endpoint, the key and the capability additions the plugin
-  requires.
-- The self-updater's `github.com` WebView fetches fail on CORS today
-  (checksum verification degrades to "unverified"); fix belongs to the
-  native/networking workstream.
+  requires. The endpoint points at `releases/latest/download/latest.json`,
+  which only resolves for STABLE releases — while Fress publishes
+  prereleases, wiring the plugin also needs a per-channel manifest decision
+  (see CODE_SIGNING.md).
+- macOS updater artifacts: releases v1.0.4–v1.0.6-beta shipped dmgs without
+  the `.app.tar.gz`/`.sig` pair, so `latest.json` has no darwin entries. The
+  active self-update path is unaffected (it verifies checksums, not
+  signatures), but wiring the plugin for macOS needs a CI fix first.
 - Live star counts for GitLab-hosted projects (fetched from
   `gitlab.com`/self-hosted instances by `src/lib/starFetch.ts`) are blocked by
   `connect-src` and degrade to cached/absent counts. Allowing those hosts

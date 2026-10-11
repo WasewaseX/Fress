@@ -384,6 +384,51 @@ impl UrlPolicy {
         }
     }
 
+    /// Self-update feed reads (`fetch_self_update_text`): the Fress
+    /// releases.atom fallback and the release's `SHA256SUMS.txt` checksum
+    /// file. These are github.com pages that do NOT answer CORS, so the
+    /// WebView cannot read them (the CSP `connect-src` entry was never the
+    /// blocking layer) and the reads are routed through this native command
+    /// instead.
+    ///
+    /// The allowlist is exactly the two GitHub-owned hosts the feed can
+    /// touch: the request starts on `github.com` and the release-asset
+    /// redirect lands on `release-assets.githubusercontent.com`
+    /// (`objects.githubusercontent.com` is the older asset host, kept so a
+    /// historic manifest shape cannot fail closed into an unverified
+    /// update). Every hop is re-checked against the same two hosts, so the
+    /// fetch can never be bounced anywhere else. Request bodies are capped
+    /// by the caller (2 MiB, like `fetch_text`); the command additionally
+    /// pins the github.com path to the Fress repository. The repo pin and
+    /// the command live in `lib.rs` (Agent 5); this policy constructor is
+    /// the only addition to Agent 3's module - flagged for review in the
+    /// bridge-contract notes of PR quality/platform-updater.
+    pub fn self_update_feed() -> Self {
+        const SELF_UPDATE_ALLOWED_HOSTS: &[&str] = &[
+            "github.com",
+            "release-assets.githubusercontent.com",
+            "objects.githubusercontent.com",
+        ];
+        UrlPolicy {
+            label: "self-update-feed",
+            admission: AdmissionRule::Allowlist(SELF_UPDATE_ALLOWED_HOSTS),
+            redirects: RedirectRules {
+                max_hops: 3,
+                host_rule: RedirectHostRule::Allowlist(SELF_UPDATE_ALLOWED_HOSTS),
+                // Integration fix (orchestrator): Agent 3's redirect-literal
+                // guard (PR #16) made this field load-bearing on every
+                // policy. The self-update feed is a strict allowlist class,
+                // so a redirect to a private/LITERAL destination is named
+                // and refused here exactly like the other strict classes;
+                // hostname hops stay guarded by the allowlist plus the
+                // connect-time resolver.
+                block_private_literals: true,
+            },
+            block_private_addrs: true,
+            request_timeout: Some(API_REQUEST_TIMEOUT),
+        }
+    }
+
     /// Executable / installer downloads (`start_download` -> `run_download`).
     ///
     /// HTTPS is mandatory (the payload is code the user will run), but the

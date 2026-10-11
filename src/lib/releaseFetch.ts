@@ -39,6 +39,9 @@ export type {
   AndroidAbi,
   DeviceAbi,
   PlatformPatterns,
+  ResolveFailureKind,
+  ResolveOutcome,
+  AssetSelectionOptions,
 } from './release/types';
 export { WEAK_SCORE_MAX } from './release/types';
 
@@ -51,6 +54,7 @@ export {
   androidAssetAbi,
   androidDeviceAbi,
   assetCompatibleWithDevice,
+  assetServesSelectionRole,
   scoreAsset,
   pickAsset,
   pickAssetDetailed,
@@ -59,14 +63,30 @@ export {
 // Host architecture --------------------------------------------------------------
 export { getHostArch } from './release/hostArch';
 
+// Trusted-digest integrity --------------------------------------------------------
+export {
+  attachTrustedDigests,
+  normalizeTrustedDigest,
+  peekDigestDiagnostics,
+  revalidatePersistedDigests,
+} from './release/digests';
+
 // Caches and error bookkeeping ---------------------------------------------------
-export { peekResolveError, loadPersisted, persist } from './release/resolveCache';
+export {
+  peekResolveError,
+  peekResolveFailure,
+  loadPersisted,
+  persist,
+} from './release/resolveCache';
 
 // Resolution orchestration -------------------------------------------------------
 export {
   resolveGitHubDownload,
   resolveFdroidDownload,
+  retryGitHubResolve,
+  retryFdroidResolve,
   resolveDownloadFor,
+  resolveWithOutcome,
   fdroidPageUrl,
   playStoreUrl,
   githubFetchSupported,

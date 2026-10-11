@@ -4,6 +4,7 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
+import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { AppItem, Category, Platform } from '../types';
 import { X, Plus, AlertCircle, RefreshCw, Check } from 'lucide-react';
 import { fetchLiveStarCount } from '../lib/starFetch';
@@ -36,6 +37,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   showTabs = false,
   onSwitchTab
 }) => {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [tagline, setTagline] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
@@ -131,7 +133,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   }, [githubUrl, isOpen]);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
+  // Focus lands on the first form control (the GitHub URL field) - the
+  // useful control for both add and edit flows - not on the close button.
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose, initialFocus: firstFieldRef });
   if (!isOpen) return null;
 
   const togglePlatform = (p: Platform) => {
@@ -153,14 +158,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     try {
       const match = githubUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
       if (!match) {
-        throw new Error('Please enter a valid GitHub repository URL (e.g., https://github.com/owner/repo)');
+        throw new Error(t('add.invalidGithubUrl'));
       }
       const [, owner, repo] = match;
       const cleanRepo = repo.replace(/\.git$/, '');
 
       const res = await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}`);
       if (!res.ok) {
-        throw new Error(`GitHub API returned status ${res.status}. Please verify the repository exists and is public.`);
+        throw new Error(t('add.githubApiStatus').replace('{status}', String(res.status)));
       }
 
       const data = await res.json();
@@ -181,9 +186,9 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
         setTags(data.topics.slice(0, 5).join(', '));
       }
 
-      setInspectSuccessMsg(`Successfully populated metadata for ${data.name || cleanRepo}!`);
+      setInspectSuccessMsg(t('add.inspectSuccess').replace('{name}', data.name || cleanRepo));
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to inspect GitHub repository.');
+      setErrorMsg(err.message || t('add.inspectFailed'));
     } finally {
       setIsInspecting(false);
     }
@@ -192,11 +197,11 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setErrorMsg('Application name is required.');
+      setErrorMsg(t('add.nameRequired'));
       return;
     }
     if (!description.trim()) {
-      setErrorMsg('Description is required.');
+      setErrorMsg(t('add.descriptionRequired'));
       return;
     }
 
@@ -208,23 +213,23 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     // Install commands end up in generated batch scripts, so anything that
     // is not a plain single install invocation is refused here, at the door.
     if (wingetCommand.trim() && !sanitizeInstallCommand('winget', wingetCommand)) {
-      setErrorMsg('The Winget command looks unsafe, so it was not saved. Use one plain install command, e.g. "winget install Package.Id". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      setErrorMsg(t('add.cmdUnsafeWinget'));
       return;
     }
     if (brewCommand.trim() && !sanitizeInstallCommand('brew', brewCommand)) {
-      setErrorMsg('The Homebrew command looks unsafe, so it was not saved. Use one plain install command, e.g. "brew install --cask name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      setErrorMsg(t('add.cmdUnsafeBrew'));
       return;
     }
     if (flatpakCommand.trim() && !sanitizeInstallCommand('flatpak', flatpakCommand)) {
-      setErrorMsg('The Flatpak command looks unsafe, so it was not saved. Use one plain install command, e.g. "flatpak install flathub org.app.Name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      setErrorMsg(t('add.cmdUnsafeFlatpak'));
       return;
     }
     if (scoopCommand.trim() && !sanitizeInstallCommand('scoop', scoopCommand)) {
-      setErrorMsg('The Scoop command looks unsafe, so it was not saved. Use one plain install command, e.g. "scoop install name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      setErrorMsg(t('add.cmdUnsafeScoop'));
       return;
     }
     if (aptCommand.trim() && !sanitizeInstallCommand('apt', aptCommand)) {
-      setErrorMsg('The APT command looks unsafe, so it was not saved. Use one plain install command, e.g. "apt install name". Chaining (&&, ;, |), substitution and special characters are not allowed.');
+      setErrorMsg(t('add.cmdUnsafeApt'));
       return;
     }
 
@@ -283,25 +288,26 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
         <div className="p-4 sm:p-5 border-b border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between gap-3 bg-slate-900">
           <div>
             <h2 id="add-modal-title" className="text-sm sm:text-base font-bold text-slate-100 tracking-tight">
-              {initialApp ? 'Edit Tool' : 'Enter manually'}
+              {initialApp ? t('add.titleEdit') : t('ls.tabManual')}
             </h2>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Saved on this device only.
+              {t('common.savedLocal')}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
+            aria-label={t('common.close')}
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
         {/* Shared tabs: one entry point for both ways of adding an app */}
         {showTabs && onSwitchTab && !initialApp && (
-          <div className="flex items-center gap-1 px-4 sm:px-5 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label="Add app method">
-            {([['search', 'Search GitHub'], ['manual', 'Enter manually']] as const).map(([id, label]) => (
+          <div className="flex items-center gap-1 px-4 sm:px-5 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label={t('ls.tabsAria')}>
+            {([['search', t('ls.title')], ['manual', t('ls.tabManual')]] as const).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -323,15 +329,15 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
           {errorMsg && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-lg flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
+            <div role="alert" className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-lg flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {inspectSuccessMsg && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg flex items-center gap-2">
-              <Check className="w-4 h-4 shrink-0" />
+            <div role="status" className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg flex items-center gap-2">
+              <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{inspectSuccessMsg}</span>
             </div>
           )}
@@ -339,11 +345,12 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           {/* GitHub Auto-Fill */}
           <div className="space-y-1">
             <label htmlFor="input-github-url" className="block text-slate-300 font-medium">
-              GitHub Repository URL
+              {t('add.githubLabel')}
             </label>
             <div className="flex items-center gap-2">
               <input
                 id="input-github-url"
+                ref={firstFieldRef}
                 type="url"
                 value={githubUrl}
                 onChange={(e) => setGithubUrl(e.target.value)}
@@ -356,15 +363,15 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 disabled={isInspecting || !githubUrl}
                 className="inline-flex items-center gap-1.5 text-xs bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] disabled:opacity-50 text-sky-400 font-semibold px-3 py-2 rounded-lg border border-slate-950/10 dark:border-white/[0.1] transition-colors shrink-0"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isInspecting ? 'animate-spin' : ''}`} />
-                <span>{isInspecting ? 'Fetching...' : 'Auto-Fill'}</span>
+                <RefreshCw className={`w-3.5 h-3.5 ${isInspecting ? 'animate-spin' : ''}`} aria-hidden="true" />
+                <span>{isInspecting ? t('add.fetching') : t('add.autoFill')}</span>
               </button>
             </div>
           </div>
 
           <div className="space-y-1">
             <label htmlFor="input-gitlab-url" className="block text-slate-300 font-medium">
-              GitLab Repository URL <span className="text-slate-500 font-normal">(optional, shown as a second source button)</span>
+              {t('add.gitlabLabel')} <span className="text-slate-400 font-normal">{t('add.gitlabHint')}</span>
             </label>
             <input
               id="input-gitlab-url"
@@ -379,7 +386,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="input-app-name" className="block text-slate-300 font-medium mb-1">
-                Application Name *
+                {t('add.nameLabel')}
               </label>
               <input
                 id="input-app-name"
@@ -387,21 +394,21 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Syncthing"
+                placeholder={t('add.namePlaceholder')}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>
 
             <div>
               <label htmlFor="input-app-tagline" className="block text-slate-300 font-medium mb-1">
-                Short Tagline
+                {t('add.taglineLabel')}
               </label>
               <input
                 id="input-app-tagline"
                 type="text"
                 value={tagline}
                 onChange={(e) => setTagline(e.target.value)}
-                placeholder="e.g. Continuous decentralized file synchronization"
+                placeholder={t('add.taglinePlaceholder')}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>
@@ -410,7 +417,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="input-website-url" className="block text-slate-300 font-medium mb-1">
-                Official Website URL
+                {t('add.websiteLabel')}
               </label>
               <input
                 id="input-website-url"
@@ -424,14 +431,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
             <div>
               <label htmlFor="input-alt" className="block text-slate-300 font-medium mb-1">
-                Replaces Proprietary Software (Optional)
+                {t('add.replacesLabel')}
               </label>
               <input
                 id="input-alt"
                 type="text"
                 value={proprietaryAlternative}
                 onChange={(e) => setProprietaryAlternative(e.target.value)}
-                placeholder="e.g. Dropbox, Google Drive"
+                placeholder={t('add.replacesPlaceholder')}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>
@@ -440,7 +447,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label htmlFor="select-category" className="block text-slate-300 font-medium mb-1">
-                Category
+                {t('add.categoryLabel')}
               </label>
               <select
                 id="select-category"
@@ -449,14 +456,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 className="w-full bg-slate-900 border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               >
                 {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c} value={c}>{t(CATEGORY_I18N_KEYS[c])}</option>
                 ))}
               </select>
             </div>
 
             <div>
               <label htmlFor="input-license" className="block text-slate-300 font-medium mb-1">
-                License
+                {t('table.head.license')}
               </label>
               <input
                 id="input-license"
@@ -470,7 +477,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
             <div>
               <label htmlFor="input-stars" className="block text-slate-300 font-medium mb-1">
-                GitHub Stars
+                {t('add.starsLabel')}
               </label>
               <input
                 id="input-stars"
@@ -485,8 +492,8 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               />
               <p className="text-[11px] text-slate-400 mt-1">
                 {starsAutoFilled
-                  ? 'Filled automatically from the live GitHub API.'
-                  : 'Filled automatically from GitHub once a repository URL is set.'}
+                  ? t('add.starsAutoFilled')
+                  : t('add.starsAutoHint')}
               </p>
             </div>
           </div>
@@ -494,7 +501,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           {/* Operating Systems */}
           <div>
             <span className="block text-slate-300 font-medium mb-1.5">
-              Supported Platforms
+              {t('add.platformsLabel')}
             </span>
             <div className="flex items-center gap-1.5 flex-wrap">
               {(['windows', 'mac', 'linux', 'android', 'web'] as Platform[]).map((p) => {
@@ -504,13 +511,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                     key={p}
                     type="button"
                     onClick={() => togglePlatform(p)}
+                    aria-pressed={isSelected}
                     className={`px-3 py-1.5 rounded-lg text-xs uppercase font-mono border transition-colors ${
                       isSelected
                         ? 'bg-sky-600 text-white border-sky-400 font-semibold'
                         : 'bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-400 border-slate-950/10 dark:border-white/[0.08] hover:text-slate-100'
                     }`}
                   >
-                    {p}
+                    {t(`common.platform.${p}`)}
                   </button>
                 );
               })}
@@ -520,7 +528,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           {/* Description */}
           <div>
             <label htmlFor="input-description" className="block text-slate-300 font-medium mb-1">
-              Description *
+              {t('add.descriptionLabel')}
             </label>
             <textarea
               id="input-description"
@@ -528,7 +536,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this tool do?"
+              placeholder={t('add.descriptionPlaceholder')}
               className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
@@ -543,7 +551,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               type="text"
               value={whyItsAwesome}
               onChange={(e) => setWhyItsAwesome(e.target.value)}
-              placeholder="e.g. End-to-end encrypted, zero central servers."
+              placeholder={t('add.highlightPlaceholder')}
               className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
@@ -552,7 +560,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label htmlFor="input-winget" className="block text-slate-300 font-medium mb-1">
-                Winget Command
+                {t('add.wingetLabel')}
               </label>
               <input
                 id="input-winget"
@@ -566,7 +574,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
             <div>
               <label htmlFor="input-brew" className="block text-slate-300 font-medium mb-1">
-                Homebrew Command
+                {t('add.brewLabel')}
               </label>
               <input
                 id="input-brew"
@@ -580,7 +588,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
             <div>
               <label htmlFor="input-flatpak" className="block text-slate-300 font-medium mb-1">
-                Flatpak Command
+                {t('add.flatpakLabel')}
               </label>
               <input
                 id="input-flatpak"
@@ -596,7 +604,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="input-scoop" className="block text-slate-300 font-medium mb-1">
-                Scoop Command
+                {t('add.scoopLabel')}
               </label>
               <input
                 id="input-scoop"
@@ -610,7 +618,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
             <div>
               <label htmlFor="input-apt" className="block text-slate-300 font-medium mb-1">
-                APT Command
+                {t('add.aptLabel')}
               </label>
               <input
                 id="input-apt"
@@ -630,14 +638,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               onClick={onClose}
               className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-100 transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs px-4 py-2 rounded-lg border border-sky-400 transition-colors shadow-xs"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{initialApp ? 'Save' : 'Add'}</span>
+              <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{initialApp ? t('common.save') : t('common.add')}</span>
             </button>
           </div>
         </form>

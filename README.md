@@ -10,7 +10,7 @@ There is no telemetry and no advertising, and nothing in the catalog is sponsore
 
 - **Curated, not scraped.** Every entry is checked by hand: official links, real descriptions, honest notes about what the app replaces.
 - **One-click stable downloads.** Pick your platform and Fress resolves the app's actual latest STABLE file straight from GitHub Releases or F-Droid. No hunting through release pages, and beta/RC builds are never offered.
-- **Update check for Fress itself.** The button in the footer compares your installed version with the latest release on GitHub and only downloads when there is something newer.
+- **Update check for Fress itself.** The header pill and the footer button compare your installed version with the latest release on GitHub, pick the right file for your platform, verify it against the release's published `SHA256SUMS.txt` entry, and only then hand it to you — when no checksum can be established, Fress links to the releases page instead of delivering an unverified installer.
 - **Download manager built in.** Downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification, saved to the folder you choose (your system Downloads folder by default).
 - **Device-aware downloads.** Windows, macOS, Linux, and Android (GitHub APK, F-Droid, Google Play): Fress picks the right file for your architecture.
 - **Light and dark themes.** The light mode uses warm paper tones, the dark mode is easy on the eyes, and both follow your system preference until you pick one yourself.
@@ -55,14 +55,15 @@ Releases are tagged. Every release ships installers for all platforms, built by 
 
 | Platform | File |
 | --- | --- |
-| Windows (installer) | `Fress_*_x64-setup.exe` |
-| Windows (portable, no install) | `Fress_*_x64-portable.zip` |
+| Windows x64 (installer) | `Fress_*_x64-setup.exe` |
+| Windows x64 (MSI) | `Fress_*_x64_en-US.msi` |
+| Windows x64 (portable, no install) | `Fress_*_x64-portable.zip` |
 | Windows ARM64 (installer) | `Fress_*_arm64-setup.exe` |
 | Windows ARM64 (portable) | `Fress_*_arm64-portable.zip` |
 | macOS (Apple Silicon) | `Fress_*_aarch64.dmg` |
 | macOS (Intel) | `Fress_*_x64.dmg` |
-| Linux | `Fress_*_amd64.AppImage`, `.deb`, `.rpm` |
-| Android | `Fress_*_universal.apk`, `Fress_*_arm64.apk` |
+| Linux | `Fress_*_amd64.AppImage`, `Fress_*_amd64.deb`, `Fress-<version>-1.x86_64.rpm` (native RPM naming) |
+| Android | `Fress_*_universal.apk` plus ABI splits `Fress_*_{arm64,arm,x64,x86}.apk` |
 
 **Fress is distributed only through this repository's GitHub Releases page**, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer anywhere else (a file host, a mirror, a "download site"), it is not ours.
 
@@ -74,7 +75,7 @@ sha256sum -c SHA256SUMS.txt
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header (for example `v1.0.4-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
+Each Fress app shows its exact version in the header (for example `v1.0.6-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
 
 ### Where downloads are saved (per operating system)
 
@@ -88,10 +89,12 @@ Fress picks each operating system's own download location, the same place your b
 | Android | The app's private storage (Android does not let apps pick arbitrary folders) | No. Use Open after a download to install or share the file |
 
 ### Why Windows shows "Unknown publisher"
-The Windows installer is signed with a timestamp, which proves the file is exactly the one CI produced and has not been altered. Windows still shows the blue "Unknown publisher" / "Windows protected your PC" warning because that warning only goes away once the publisher is covered by a certificate Windows already trusts. [CODE_SIGNING.md](CODE_SIGNING.md) documents the fix, including a free signing route for open-source projects (SignPath Foundation). Until that is set up, you can:
+The Windows installer is **not code-signed today**: no Authenticode certificate is configured for CI (see [CODE_SIGNING.md](CODE_SIGNING.md) for the setup and the free routes), so Windows shows the blue "Unknown publisher" / "Windows protected your PC" warning and will keep showing it until the publisher is covered by a certificate Windows already trusts. What protects the file you download is the release integrity chain, not a publisher certificate:
 
-- Click **More info → Run anyway** after checking the checksum against `SHA256SUMS.txt`, or
-- Build the app yourself from this repository (`npm run tauri build`).
+- Every release ships a `SHA256SUMS.txt` covering all assets, and the app itself verifies its own updates against that file before offering the installer. Verify manually with `sha256sum -c SHA256SUMS.txt` after downloading.
+- [CODE_SIGNING.md](CODE_SIGNING.md) documents the signing fix, including a free signing route for open-source projects (SignPath Foundation). Until that is set up, you can:
+  - Click **More info → Run anyway** after checking the checksum against `SHA256SUMS.txt`, or
+  - Build the app yourself from this repository (`npm run tauri build`).
 
 ## Contributing
 

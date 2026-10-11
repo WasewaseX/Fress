@@ -4,6 +4,7 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
+import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { openExternal } from '../lib/external';
 import { 
   Search, 
@@ -46,30 +47,35 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Monotonic id: only the newest search may touch state (stale responses
   // used to overwrite fresh results and kill the spinner early).
   const searchReqId = useRef(0);
+  const { t } = useI18n();
 
-  // Focus input when opened; close on Escape like every other modal
+  // Pre-populate with a starting search once per open, so the dialog is
+  // never an empty wall. The query reset keeps repeated opens consistent.
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-      // Pre-populate with trending search if empty
-      if (!query) {
-        handleSearch('awesome open-source');
-      }
-      const onKey = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          onClose();
-        }
-      };
-      window.addEventListener('keydown', onKey);
-      return () => window.removeEventListener('keydown', onKey);
+    if (isOpen && !query) {
+      handleSearch('awesome open-source');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  // Focus, Escape and the shared stack: keepFocusInside moves focus to the
+  // search input synchronously on open (no setTimeout that could leak past
+  // close), restores focus to the opener on close, and answers Escape only
+  // while this dialog is the topmost open surface.
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose, initialFocus: inputRef });
+
+  // A keystroke schedules a search 350ms out; that pending timer must not
+  // fire into an unmounted dialog.
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current !== null) clearTimeout(debounceTimer.current);
+    };
+  }, []);
 
   const existingGithubUrls = new Set(
     existingApps.map((a) => a.githubUrl?.toLowerCase().replace(/\/$/, '')).filter(Boolean)
@@ -158,10 +164,10 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         });
         if (myId === searchReqId.current) setResults(mappedItems);
       } else {
-        if (myId === searchReqId.current) setErrorMsg('GitHub search limit reached. Try again in a minute, or use the Enter manually tab.');
+        if (myId === searchReqId.current) setErrorMsg(t('ls.rateLimited'));
       }
     } catch (err: any) {
-      if (myId === searchReqId.current) setErrorMsg('GitHub search failed. Check the internet connection and try again.');
+      if (myId === searchReqId.current) setErrorMsg(t('ls.networkFailed'));
     } finally {
       if (myId === searchReqId.current) setLoading(false);
     }
@@ -192,8 +198,6 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
     setAddedIds((prev) => new Set([...prev, app.id]));
   };
 
-  const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   return (
@@ -213,14 +217,14 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         <div className="p-4 border-b border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between gap-3 bg-slate-900">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
-              <Sparkles className="w-4 h-4" />
+              <Sparkles className="w-4 h-4" aria-hidden="true" />
             </div>
             <div>
               <h2 id="live-search-title" className="text-sm font-bold text-slate-100 tracking-tight">
-                Search GitHub
+                {t('ls.title')}
               </h2>
               <p className="text-[11px] text-slate-400">
-                Anything you add here is saved on this device. These entries are not checked by us, so look at the license and links yourself.
+                {t('ls.disclaimer')}
               </p>
             </div>
           </div>
@@ -229,16 +233,16 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
             type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-100 p-1 rounded-md hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
-            aria-label="Close live search modal"
+            aria-label={t('ls.closeAria')}
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
 
         {/* Shared tabs: one entry point for both ways of adding an app */}
         {showTabs && onSwitchTab && (
-          <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label="Add app method">
-            {([['search', 'Search GitHub'], ['manual', 'Enter manually']] as const).map(([id, label]) => (
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label={t('ls.tabsAria')}>
+            {([['search', t('ls.title')], ['manual', t('ls.tabManual')]] as const).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -260,24 +264,24 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         {/* Search Input Bar */}
         <div className="p-4 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950">
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
             <input
               ref={inputRef}
               id="live-search-query-input"
               type="text"
               value={query}
               onChange={handleInputChange}
-              placeholder="Search tools: syncthing, neovim, tailscale, alacritty, bitwarden, rust..."
+              placeholder={t('ls.placeholder')}
               className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/[0.12] dark:border-white/[0.12] text-slate-100 placeholder-slate-400 text-sm rounded-lg pl-9 pr-10 py-2.5 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition-colors"
             />
             {loading && (
-              <Loader2 className="w-4 h-4 text-sky-400 absolute right-3 top-1/2 -translate-y-1/2 animate-spin" />
+              <Loader2 className="w-4 h-4 text-sky-400 absolute right-3 top-1/2 -translate-y-1/2 animate-spin" aria-hidden="true" />
             )}
           </div>
 
           {/* Quick Search Badges */}
           <div className="flex items-center gap-1.5 flex-wrap mt-2.5 text-xs">
-            <span className="text-slate-400 text-[11px]">Try:</span>
+            <span className="text-slate-400 text-[11px]">{t('ls.tryLabel')}</span>
             {['syncthing', 'neovim', 'tailscale', 'alacritty', 'obsidian', 'termux', 'ollama'].map((term) => (
               <button
                 key={term}
@@ -297,17 +301,17 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         {/* Results List */}
         <div id="live-search-results-list" className="flex-1 overflow-y-auto p-4 space-y-2.5">
           {errorMsg && (
-            <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs rounded-lg">
+            <div role="alert" className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs rounded-lg">
               {errorMsg}
             </div>
           )}
 
           {results.length === 0 && !loading && (
-            <div className="text-center py-12 text-slate-400 text-xs">
-              <FolderGit2 className="w-8 h-8 mx-auto mb-2 text-slate-400" />
-              <p>Type a name above to search GitHub.</p>
+            <div role="status" className="text-center py-12 text-slate-400 text-xs">
+              <FolderGit2 className="w-8 h-8 mx-auto mb-2 text-slate-400" aria-hidden="true" />
+              <p>{t('ls.emptyTitle')}</p>
               <p className="text-[11px] text-slate-400 mt-1">
-                Any public GitHub project can be added to your catalog.
+                {t('ls.emptyHint')}
               </p>
             </div>
           )}
@@ -332,16 +336,16 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                       {item.name}
                     </h3>
                     <span className="text-[11px] text-amber-300 font-mono inline-flex items-center gap-0.5 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20">
-                      <Star className="w-2.5 h-2.5" />
-                      {typeof item.stars === 'number' && item.stars > 0 ? formatStarCount(item.stars) : 'FOSS'}
+                      <Star className="w-2.5 h-2.5" aria-hidden="true" />
+                      {typeof item.stars === 'number' && item.stars > 0 ? formatStarCount(item.stars) : t('common.fossBadge')}
                     </span>
                     <span className="text-[11px] text-sky-300 bg-sky-400/10 px-1.5 py-0.5 rounded border border-sky-400/20">
-                      {item.category}
+                      {t(CATEGORY_I18N_KEYS[item.category])}
                     </span>
                     {hasAndroid && (
                       <span className="text-[11px] text-emerald-300 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20 inline-flex items-center gap-0.5">
-                        <Smartphone className="w-2.5 h-2.5" />
-                        Android
+                        <Smartphone className="w-2.5 h-2.5" aria-hidden="true" />
+                        {t('common.platform.android')}
                       </span>
                     )}
                     {item.license && (
@@ -363,8 +367,8 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                       className="inline-flex items-center gap-1 hover:text-sky-300 transition-colors"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); void openExternal(item.githubUrl); }}
                     >
-                      <span>View GitHub</span>
-                      <ExternalLink className="w-3 h-3" />
+                      <span>{t('ls.viewGitHub')}</span>
+                      <ExternalLink className="w-3 h-3" aria-hidden="true" />
                     </a>
                     {item.wingetCommand && (
                       <span className="font-mono text-[11px] text-slate-400 truncate max-w-xs">
@@ -380,10 +384,11 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                     <button
                       type="button"
                       disabled
+                      aria-disabled="true"
                       className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-xs font-medium px-3 py-1.5 rounded-md cursor-default"
                     >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>In Catalog</span>
+                      <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{t('ls.inCatalog')}</span>
                     </button>
                   ) : (
                     <button
@@ -392,8 +397,8 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                       onClick={() => handleAddTool(item)}
                       className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md border border-sky-400 transition-colors shadow-xs"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add</span>
+                      <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{t('common.add')}</span>
                     </button>
                   )}
                 </div>
@@ -404,13 +409,13 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
 
         {/* Footer info */}
         <div className="p-3 border-t border-slate-950/10 dark:border-white/[0.08] bg-slate-950 flex items-center justify-between text-xs text-slate-400">
-          <span>Saved on this device only.</span>
+          <span>{t('common.savedLocal')}</span>
           <button
             type="button"
             onClick={onClose}
             className="text-slate-300 hover:text-slate-100 px-2 py-1 text-xs"
           >
-            Done
+            {t('common.done')}
           </button>
         </div>
       </div>

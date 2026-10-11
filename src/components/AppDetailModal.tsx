@@ -21,7 +21,8 @@ import {
   MonitorSmartphone,
   Loader2,
   Play,
-  AlertTriangle
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import { getDownloadOptions, platformUnavailableNote, DownloadOption } from '../lib/appDownloads';
 import { officialSupported, resolveOfficialDownload } from '../lib/officialResolvers';
@@ -37,6 +38,10 @@ import {
   peekResolveError,
   ResolvedDownload,
 } from '../lib/releaseFetch';
+// The agreed retry seam: the dialog NEVER touches resolver caches itself;
+// what a retry does (including evicting the failed memo entry) is resolver-
+// side code behind this interface. See src/lib/resolveRetry.ts.
+import { resolverRetry } from '../lib/resolveRetry';
 import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
@@ -55,7 +60,23 @@ function detectUserPlatform(): Platform {
   return 'windows';
 }
 
-type ResolveState = 'loading' | 'ready' | 'none';
+/**
+ * Lifecycle of one automatic download lookup.
+ *
+ * 'ready'  - a file was resolved (possibly weak-flagged; see ResolvedDownload).
+ * 'none'   - the resolver ANSWERED: no automatic installer exists for this
+ *            platform right now. An honest result, not a failure - the
+ *            official-page fallbacks below are the intended path.
+ * 'error'  - the lookup itself failed (rate limit, network, unexpected
+ *            response). Retrying is meaningful; a bare 'none' would lie
+ *            about the app while the truth is about the network.
+ * 'loading' - a request is in flight. Rejections always land in 'error' -
+ *            no lookup may stay loading forever.
+ */
+type ResolveState = 'loading' | 'ready' | 'none' | 'error';
+
+/** Why a lookup failed, when the reason changes what the UI should say. */
+type ResolveFailure = 'rate-limit' | 'network';
 
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { startDownload, recordExternalOpen } = useDownloadActions();
@@ -72,8 +93,10 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
 
   const [gh, setGh] = useState<ResolvedDownload | null>(null);
   const [ghState, setGhState] = useState<ResolveState>('loading');
+  const [ghErr, setGhErr] = useState<ResolveFailure | null>(null);
   const [fd, setFd] = useState<ResolvedDownload | null>(null);
   const [fdState, setFdState] = useState<ResolveState>('loading');
+  const [fdErr, setFdErr] = useState<ResolveFailure | null>(null);
 
   const wantGh = !unavailable && githubFetchSupported(platform) && !!parseGithubRepo(app.githubUrl);
   const wantFd = !unavailable && platform === 'android' && !!app.fdroidId;
@@ -81,36 +104,98 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
 
   const [official, setOfficial] = useState<ResolvedDownload | null>(null);
   const [officialState, setOfficialState] = useState<ResolveState>('loading');
+  const [officialErr, setOfficialErr] = useState<ResolveFailure | null>(null);
+
+  // Lifecycle guards: each lookup carries its own generation counter, so a
+  // superseded response (platform switched mid-flight, dialog closed, a
+  // retry racing the original request) can never update state that no
+  // longer describes it. Unmounted dialogs are dropped by mountedRef.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const ghGenRef = useRef(0);
+  const fdGenRef = useRef(0);
+  const officialGenRef = useRef(0);
+
+  const runGh = (isRetry: boolean) => {
+    const myGen = ++ghGenRef.current;
+    setGhState('loading');
+    setGhErr(null);
+    (isRetry ? resolverRetry.retryGitHubResolve(app, platform) : resolveGitHubDownload(app, platform))
+      .then((r) => {
+        if (!mountedRef.current || ghGenRef.current !== myGen) return;
+        setGh(r ?? null);
+        if (r) {
+          setGhState('ready');
+        } else {
+          // A rate limit is a lookup failure, not an honest "none": the
+          // network's shared API quota ran out, which says nothing about
+          // whether the project publishes installers.
+          const peek = peekResolveError(app, platform) || '';
+          if (/rate limit/i.test(peek)) {
+            setGhState('error');
+            setGhErr('rate-limit');
+          } else {
+            setGhState('none');
+          }
+        }
+      })
+      .catch(() => {
+        if (!mountedRef.current || ghGenRef.current !== myGen) return;
+        setGh(null);
+        setGhState('error');
+        setGhErr('network');
+      });
+  };
+
+  const runFd = (isRetry: boolean) => {
+    if (!app.fdroidId) return;
+    const myGen = ++fdGenRef.current;
+    setFdState('loading');
+    setFdErr(null);
+    (isRetry ? resolverRetry.retryFdroidResolve(app.fdroidId) : resolveFdroidDownload(app.fdroidId))
+      .then((r) => {
+        if (!mountedRef.current || fdGenRef.current !== myGen) return;
+        setFd(r ?? null);
+        setFdState(r ? 'ready' : 'none');
+      })
+      .catch(() => {
+        if (!mountedRef.current || fdGenRef.current !== myGen) return;
+        setFd(null);
+        setFdState('error');
+        setFdErr('network');
+      });
+  };
+
+  const runOfficial = (isRetry: boolean) => {
+    const myGen = ++officialGenRef.current;
+    setOfficialState('loading');
+    setOfficialErr(null);
+    (isRetry ? resolverRetry.retryOfficialResolve(app, platform) : resolveOfficialDownload(app, platform))
+      .then((r) => {
+        if (!mountedRef.current || officialGenRef.current !== myGen) return;
+        setOfficial(r ?? null);
+        setOfficialState(r ? 'ready' : 'none');
+      })
+      .catch(() => {
+        if (!mountedRef.current || officialGenRef.current !== myGen) return;
+        setOfficial(null);
+        setOfficialState('error');
+        setOfficialErr('network');
+      });
+  };
 
   useEffect(() => {
-    let alive = true;
-    if (wantGh) {
-      setGhState('loading');
-      resolveGitHubDownload(app, platform).then((r) => {
-        if (!alive) return;
-        setGh(r);
-        setGhState(r ? 'ready' : 'none');
-      });
-    }
-    if (wantFd) {
-      setFdState('loading');
-      resolveFdroidDownload(app.fdroidId!).then((r) => {
-        if (!alive) return;
-        setFd(r);
-        setFdState(r ? 'ready' : 'none');
-      });
-    }
-    if (wantOfficial) {
-      setOfficialState('loading');
-      resolveOfficialDownload(app, platform).then((r) => {
-        if (!alive) return;
-        setOfficial(r);
-        setOfficialState(r ? 'ready' : 'none');
-      });
-    }
-    return () => {
-      alive = false;
-    };
+    // Every resolver only runs when it is actually relevant for this
+    // platform; a Retry re-runs exactly one failed lookup, never all of
+    // them.
+    if (wantGh) runGh(false);
+    if (wantFd) runFd(false);
+    if (wantOfficial) runOfficial(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app.id, platform]);
 
@@ -132,17 +217,38 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
     }
   };
 
-  // When the resolver came back empty because GitHub rate-limited this
-  // network, say so: "no auto download" would be a lie about the app while
-  // the truth is about the network's shared API quota.
-  const rateLimited = ghState === 'none' && /rate limit/i.test(peekResolveError(app, platform) || '');
-
-  // The forge fallback link stays visible while the primary pick is only a
-  // weak guess: a questionable file deserves an obvious alternative.
+  // A failed lookup keeps the forge fallback visible: the user must always
+  // have an official path even while the automatic resolver is down.
   const secondary = options.filter((o) => !(
     (gh && !gh.weak && o.label === 'GitHub Releases') ||
     (official && !official.weak && o.kind === 'page' && o.url === official.releasePageUrl)
   ));
+
+  /** One reusable failure row: message + Retry + the fallback stays below. */
+  const renderLookupError = (
+    key: string,
+    err: ResolveFailure | null,
+    onRetry: () => void
+  ) => (
+    <div
+      key={key}
+      role="alert"
+      className="text-[11px] leading-snug px-3 py-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-200 dark:text-rose-300"
+    >
+      <p className="flex items-start gap-1.5">
+        <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
+        <span>{err === 'rate-limit' ? t('detail.rateLimited') : t('detail.resolver.lookupFailed')}</span>
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-slate-100 hover:text-white bg-slate-950/[0.25] dark:bg-white/[0.1] hover:bg-slate-950/[0.35] dark:hover:bg-white/[0.16] border border-slate-950/20 dark:border-white/[0.2] px-2 py-1 rounded transition-colors"
+      >
+        <RotateCcw className="w-3 h-3" aria-hidden="true" />
+        <span>{t('downloads.retry')}</span>
+      </button>
+    </div>
+  );
 
   return (
     <div id="detail-download-box" className="border border-sky-500/25 rounded-lg p-3 bg-sky-500/5">
@@ -219,9 +325,10 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
               className="text-[11px] text-slate-400 leading-snug px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04]"
               role="status"
             >
-              {rateLimited ? t('detail.rateLimited') : t('detail.noAutoDownload')}
+              {t('detail.noAutoDownload')}
             </p>
           )}
+          {wantGh && ghState === 'error' && renderLookupError('gh-err', ghErr, () => runGh(true))}
           {wantGh && ghState === 'loading' && (
             <div className="w-full flex items-center gap-2 text-xs px-3 py-2.5 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300" role="status">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" aria-hidden="true" />
@@ -264,6 +371,8 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             </div>
           )}
 
+          {wantOfficial && officialState === 'error' && renderLookupError('official-err', officialErr, () => runOfficial(true))}
+
           {/* Android: F-Droid (direct stable apk, falls back to the F-Droid page) */}
           {wantFd && fdState === 'ready' && fd && (
             <button
@@ -292,7 +401,8 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
               <span>{t('detail.fdroid')} · {t('detail.checkingStable')}</span>
             </div>
           )}
-          {wantFd && fdState === 'none' && (
+          {wantFd && fdState === 'error' && renderLookupError('fd-err', fdErr, () => runFd(true))}
+          {wantFd && (fdState === 'none' || fdState === 'error') && (
             <button
               type="button"
               onClick={() => {
@@ -368,21 +478,74 @@ interface AppDetailModalProps {
 }
 
 export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, onEditApp }) => {
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState<{ label: string; ok: boolean } | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
   const { t } = useI18n();
   const tx = useAppText(app);
   const liveStars = useLiveStars(app?.githubUrl);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, !!app);
+  keepFocusInside(panelRef, !!app, { onEscape: onClose });
+
+  // Clipboard flash timer cleanup. Kept BEFORE the early return below:
+  // hooks must run unconditionally on every render, app or no app.
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   if (!app) return null;
 
   const shownStars = liveStars ?? app.stars;
 
-  const handleCopy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedCmd(label);
-    setTimeout(() => setCopiedCmd(null), 2000);
+  // Clipboard feedback, localized and honest: a denied clipboard shows
+  // "Copy failed" instead of pretending success, and the flash timer is
+  // cleaned up so a closed dialog never sets state after unmount.
+  const handleCopy = async (text: string, label: string) => {
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCmd({ label, ok: true });
+    } catch {
+      setCopiedCmd({ label, ok: false });
+    }
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopiedCmd(null);
+      copyTimerRef.current = null;
+    }, 2000);
+  };
+
+  /** The Copy/Copied/failed chip for one install command. A plain function
+   * (not a nested component) so no component identity is recreated. */
+  const renderCopyChip = (cmd: string, label: string) => {
+    const state = copiedCmd?.label === label ? copiedCmd : null;
+    return (
+      <button
+        type="button"
+        onClick={() => void handleCopy(cmd, label)}
+        className="inline-flex items-center gap-1 bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.1] shrink-0 transition-colors"
+      >
+        {state ? (
+          state.ok ? (
+            <>
+              <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+              <span className="text-emerald-400">{t('common.copied')}</span>
+            </>
+          ) : (
+            <>
+              <X className="w-3 h-3 text-rose-400" aria-hidden="true" />
+              <span className="text-rose-400">{t('common.copyFailed')}</span>
+            </>
+          )
+        ) : (
+          <>
+            <Copy className="w-3 h-3 text-slate-400" aria-hidden="true" />
+            <span>{t('common.copy')}</span>
+          </>
+        )}
+      </button>
+    );
   };
 
   const hasAndroid = app.platforms.includes('android');
@@ -403,14 +566,13 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
 
 
   return (
-    <div 
+    <div
       ref={panelRef}
       id="app-detail-modal-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="app-detail-title"
-      aria-label={t('detail.resolver.detailsAria').replace('{name}', app.name)}
     >
       <div 
         id="app-detail-modal-container"
@@ -453,7 +615,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             <p id="app-detail-tagline" className="text-xs text-slate-400 mt-0.5">
               {tx.tagline}
             </p>
-            <p className="text-[11px] text-slate-500 mt-1 font-mono">
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
               {t('detail.metaLine').replace('{d}', app.addedAt)}
             </p>
           </div>
@@ -543,23 +705,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                         {app.wingetCommand}
                       </code>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(app.wingetCommand!, 'winget')}
-                      className="inline-flex items-center gap-1 bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.1] shrink-0 transition-colors"
-                    >
-                      {copiedCmd === 'winget' ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-slate-400" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </button>
+                    {renderCopyChip(app.wingetCommand!, 'winget')}
                   </div>
                 )}
 
@@ -571,23 +717,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                         {app.brewCommand}
                       </code>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(app.brewCommand!, 'brew')}
-                      className="inline-flex items-center gap-1 bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.1] shrink-0 transition-colors"
-                    >
-                      {copiedCmd === 'brew' ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-slate-400" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </button>
+                    {renderCopyChip(app.brewCommand!, 'brew')}
                   </div>
                 )}
 
@@ -599,23 +729,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                         {app.flatpakCommand}
                       </code>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(app.flatpakCommand!, 'flatpak')}
-                      className="inline-flex items-center gap-1 bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.1] shrink-0 transition-colors"
-                    >
-                      {copiedCmd === 'flatpak' ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-slate-400" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </button>
+                    {renderCopyChip(app.flatpakCommand!, 'flatpak')}
                   </div>
                 )}
               </div>
@@ -735,6 +849,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             )}
           </div>
         </div>
+        {/* Localized clipboard completion feedback for screen readers. */}
+        <span className="sr-only" role="status">
+          {copiedCmd ? (copiedCmd.ok ? t('common.copied') : t('common.copyFailed')) : ''}
+        </span>
       </div>
     </div>
   );

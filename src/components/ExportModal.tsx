@@ -150,6 +150,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       ref={panelRef}
       id="export-modal-backdrop"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-modal-title"
       onClick={onClose}
     >
       <div 
@@ -164,7 +167,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <Share2 className="w-5 h-5" aria-hidden="true" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-100 tracking-tight">
+              <h2 id="export-modal-title" className="text-base font-bold text-slate-100 tracking-tight">
                 Export Catalog Data
               </h2>
               <p className="text-xs text-slate-400">
@@ -224,7 +227,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Preview */}
         <div className="flex-1 p-5 overflow-y-auto bg-slate-950">
-          <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-black/40 border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
+          <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
             {content}
           </pre>
         </div>

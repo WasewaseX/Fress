@@ -50,7 +50,11 @@
 //!   response's promise does the download enter Verifying, from where it
 //!   always runs to a terminal state: the bytes are already on disk, and
 //!   deleting a fully received, hash-checked artifact would only waste the
-//!   transfer.
+//!   transfer. A cancel signalled during Verifying is therefore ignored by
+//!   design, and the phase reaches exactly ONE terminal outcome
+//!   (Completed or Failed) - the state machine has no Verifying -> Cancelled
+//!   edge, so a cancelled download can never emit success and a verified
+//!   download can never emit an error afterwards.
 //! - A download that ends in a terminal state is removed from the active
 //!   registry; a failure path can never leave an entry behind (the session
 //!   is released by the spawned task even if the task panics).
@@ -65,6 +69,32 @@
 //! download attempt: fresh downloads reserve it with an atomic
 //! `create_new`, and automatic retries reuse the exact path the previous
 //! attempt opened.
+//!
+//! Every staging byte flows through one small seam, the [`StagingSink`] /
+//! [`PartWriter`] traits. Production always uses the [`DiskStaging`]
+//! implementation, which is the direct `tokio::fs` path unchanged; the seam
+//! exists so a mid-write disk failure can be driven end to end by a test
+//! (see `DiskFullAfter` in the test module) without new dependencies and
+//! without a production-visible difference.
+//!
+//! # Error cleanup policy
+//!
+//! What a failure leaves on disk is part of the contract, not an accident:
+//!
+//! | failure | staging (.part + sidecar) | automatic retry |
+//! |---------|---------------------------|-----------------|
+//! | network (short transfer, stall, reset) | kept, resumable | yes, same staging file |
+//! | cancel | kept, resumable | no (user's Resume button) |
+//! | checksum mismatch | deleted | no |
+//! | resume-invalid (416, bad Content-Range) | deleted | no |
+//! | disk write failure (ENOSPC, permissions) | kept, resumable | no (final) |
+//! | protocol violation (bad status/headers) | untouched - never written to | no |
+//!
+//! A disk write failure keeps the staging file because a full disk is a
+//! recoverable condition: the user frees space and hits Resume, and the
+//! download continues from exactly the bytes that made it to disk. It is
+//! categorized as `kind = None` (final, never retried) so the retry loop
+//! can never misread a local disk-full as a transient server problem.
 //!
 //! # Resume correctness rules
 //!
@@ -112,7 +142,7 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, Mutex};
 
 // ---------------------------------------------------------------------------
@@ -560,6 +590,80 @@ pub(crate) async fn discard_staging(part: &Path) {
 }
 
 // ---------------------------------------------------------------------------
+// Staging write seam (production: direct filesystem access, unchanged)
+// ---------------------------------------------------------------------------
+
+/// How a staging file is (re)opened for one attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StagingOpenMode {
+    /// Continue our own `.part` with a verified 206 tail.
+    Append,
+    /// The server ignored the Range and resent the whole body: truncate
+    /// and restart in place.
+    Truncate,
+    /// Fresh download: atomic `create_new` reservation.
+    CreateNew,
+}
+
+/// The write end of a staging file. The three operations are exactly the
+/// ones the streaming loop needs; production implements this for
+/// [`tokio::fs::File`], delegating to the same calls the engine used
+/// inline before the seam existed.
+trait PartWriter {
+    async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()>;
+    async fn flush(&mut self) -> io::Result<()>;
+    async fn sync_all(&mut self) -> io::Result<()>;
+}
+
+impl PartWriter for tokio::fs::File {
+    async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        tokio::io::AsyncWriteExt::write_all(self, bytes).await
+    }
+    async fn flush(&mut self) -> io::Result<()> {
+        tokio::io::AsyncWriteExt::flush(self).await
+    }
+    async fn sync_all(&mut self) -> io::Result<()> {
+        // `sync_all` is an inherent async method of tokio::fs::File (not
+        // part of AsyncWriteExt), so it is called as UFCS on the type.
+        tokio::fs::File::sync_all(self).await
+    }
+}
+
+/// The staging seam: opens the write end of a `.part` file in one of the
+/// three modes above. Production always uses [`DiskStaging`], so the
+/// production stream path is byte-for-byte what it was before the seam
+/// existed. The seam's purpose is testability with zero dependencies: a
+/// mid-write disk failure (ENOSPC) cannot be simulated portably against a
+/// real filesystem, but a test sink that accepts exactly N bytes and then
+/// fails like a full disk drives the REAL write loop, the REAL error
+/// categorization, and the REAL cleanup policy deterministically.
+trait StagingSink: Sync {
+    type Writer: PartWriter;
+    async fn open(&self, part: &Path, mode: StagingOpenMode) -> io::Result<Self::Writer>;
+}
+
+/// Production staging sink: plain tokio filesystem access, the same three
+/// open shapes the engine used inline.
+struct DiskStaging;
+
+impl StagingSink for DiskStaging {
+    type Writer = tokio::fs::File;
+    async fn open(&self, part: &Path, mode: StagingOpenMode) -> io::Result<Self::Writer> {
+        match mode {
+            StagingOpenMode::Append => tokio::fs::OpenOptions::new().append(true).open(part).await,
+            StagingOpenMode::Truncate => tokio::fs::File::create(part).await,
+            StagingOpenMode::CreateNew => {
+                tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(part)
+                    .await
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Resume response evaluation
 // ---------------------------------------------------------------------------
 
@@ -917,7 +1021,9 @@ async fn commit_via_reservation(part: &Path, dest: &Path) -> Result<(), Reservat
     let result = async {
         let mut src = tokio::fs::File::open(part).await?;
         tokio::io::copy(&mut src, &mut out).await?;
-        out.flush().await?;
+        // Qualified: PartWriter is also implemented for File in this
+        // module, which would make the plain method call ambiguous.
+        tokio::io::AsyncWriteExt::flush(&mut out).await?;
         out.sync_all().await?;
         Ok(())
     }
@@ -1026,19 +1132,26 @@ pub(crate) struct DownloadPlan {
 /// the destination. One attempt only: retry orchestration lives in
 /// [`execute_with_retries`].
 ///
+/// The staging sink is always [`DiskStaging`] in production; the seam is
+/// injected only by tests, to drive the mid-write disk-failure branch
+/// deterministically (see `DiskFullAfter` in the test module).
+///
 /// Error kinds returned in the `(message, kind)` pair:
 /// - `Some("network")` - transient, the retry loop may re-attempt;
 /// - `Some("checksum")` / `Some("resume-invalid")` - final, staging bytes
 ///   were discarded, never retried automatically;
 /// - `None` - final (disk, protocol, or server-status errors);
 /// - the [`CANCEL_SENTINEL`] message - cancelled, staging bytes kept.
-pub(crate) async fn run_download<E: ProgressSink>(
+async fn run_download_on<E: ProgressSink, S: StagingSink>(
     events: &E,
     session: &DownloadSession,
     id: u32,
     plan: DownloadPlan,
     cancel_rx: &mut mpsc::Receiver<()>,
     staging_out: &mut Option<PathBuf>,
+    // Named `sink` to stay distinct from the plan's `staging` field (the
+    // path of a previous attempt), which this function destructures.
+    sink: &S,
 ) -> Result<CompletePayload, (String, Option<String>)> {
     let DownloadPlan {
         url,
@@ -1203,29 +1316,22 @@ pub(crate) async fn run_download<E: ProgressSink>(
         // whole body (200): truncate the same staging file and restart in
         // place. Either way the file is ours - never a neighbor candidate's.
         let f = if resuming {
-            tokio::fs::OpenOptions::new()
-                .append(true)
-                .open(p)
+            sink.open(p, StagingOpenMode::Append)
                 .await
                 .map_err(|e| (format!("Cannot reopen partial download: {}", e), None))?
         } else {
-            tokio::fs::File::create(p)
+            sink.open(p, StagingOpenMode::Truncate)
                 .await
                 .map_err(|e| (format!("Cannot write file: {}", e), None))?
         };
         (candidate.clone(), p.clone(), f)
     } else {
         // Fresh download: atomically reserve a staging file for ourselves.
-        let mut reserved: Option<(PathBuf, PathBuf, tokio::fs::File)> = None;
+        let mut reserved: Option<(PathBuf, PathBuf, S::Writer)> = None;
         for i in 0..10_000u32 {
             let candidate = dir.join(numbered_name(&name, i));
             let p = part_path_for(&candidate);
-            match tokio::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&p)
-                .await
-            {
+            match sink.open(&p, StagingOpenMode::CreateNew).await {
                 Ok(f) => {
                     reserved = Some((candidate, p, f));
                     break;
@@ -1325,9 +1431,16 @@ pub(crate) async fn run_download<E: ProgressSink>(
         };
         hasher.update(&bytes);
         hasher512.update(&bytes);
-        if file.write_all(&bytes).await.is_err() {
+        if let Err(e) = file.write_all(&bytes).await {
+            // A local disk failure is FINAL: `kind` stays None so the
+            // retry loop can never misread it as a transient server
+            // problem. The OS reason travels with the message (an ENOSPC
+            // "No space left on device" is actionable; a bare "failed"
+            // is not). The staging file is intentionally KEPT: a full
+            // disk is recoverable, and the .part resumes from exactly
+            // the bytes that made it to disk (see the cleanup policy).
             drop(file);
-            return Err(("Disk write failed".to_string(), None));
+            return Err((format!("Disk write failed: {}", e), None));
         }
         downloaded += bytes.len() as u64;
 
@@ -1372,11 +1485,17 @@ pub(crate) async fn run_download<E: ProgressSink>(
         return Err((CANCEL_SENTINEL.to_string(), None));
     }
 
-    file.flush().await.map_err(|e| (e.to_string(), None))?;
+    file.flush()
+        .await
+        .map_err(|e| (format!("Disk write failed: {}", e), None))?;
     // Durability: the bytes reach the disk before the file is committed
     // under its final name, so a power cut cannot leave a truncated file
-    // behind a completed-looking name.
-    file.sync_all().await.map_err(|e| (e.to_string(), None))?;
+    // behind a completed-looking name. ENOSPC regularly surfaces HERE
+    // rather than at write time, so the same final, non-retryable
+    // categorization applies.
+    file.sync_all()
+        .await
+        .map_err(|e| (format!("Disk write failed: {}", e), None))?;
     drop(file);
 
     // EOF is not completion: a connection that closed early used to look
@@ -1536,9 +1655,22 @@ pub(crate) async fn execute_with_retries<E: ProgressSink>(
     events: &E,
     session: &DownloadSession,
     id: u32,
+    plan: DownloadPlan,
+    cancel_rx: mpsc::Receiver<()>,
+    backoff: Duration,
+) -> Result<CompletePayload, (String, Option<String>)> {
+    execute_with_retries_on(events, session, id, plan, cancel_rx, backoff, &DiskStaging).await
+}
+
+/// [`execute_with_retries`] with the staging seam injected (test entry).
+async fn execute_with_retries_on<E: ProgressSink, S: StagingSink>(
+    events: &E,
+    session: &DownloadSession,
+    id: u32,
     mut plan: DownloadPlan,
     mut cancel_rx: mpsc::Receiver<()>,
     backoff: Duration,
+    sink: &S,
 ) -> Result<CompletePayload, (String, Option<String>)> {
     const MAX_AUTO_RETRIES: u32 = 2;
     let mut attempt: u32 = 0;
@@ -1556,13 +1688,14 @@ pub(crate) async fn execute_with_retries<E: ProgressSink>(
                 None,
             ));
         }
-        match run_download(
+        match run_download_on(
             events,
             session,
             id,
             plan.clone(),
             &mut cancel_rx,
             &mut resolved_staging,
+            sink,
         )
         .await
         {
@@ -2354,6 +2487,11 @@ mod tests {
         /// Keep the connection open this long after writing: used so the
         /// body stream is still pending when a cancellation is requested.
         hold_ms: u64,
+        /// After the hold, write the REST of the body and close: the
+        /// transfer pauses mid-stream and resumes on the SAME connection.
+        /// Used to prove a cancel signalled while the tail is provably
+        /// still in flight wins over the completion decision.
+        resume_body_after_hold: bool,
     }
 
     impl MockReply {
@@ -2368,6 +2506,7 @@ mod tests {
                 body,
                 send_body_bytes: None,
                 hold_ms: 0,
+                resume_body_after_hold: false,
             }
         }
 
@@ -2473,6 +2612,11 @@ mod tests {
         let _ = stream.flush();
         if reply.hold_ms > 0 {
             std::thread::sleep(Duration::from_millis(reply.hold_ms));
+        }
+        if reply.resume_body_after_hold && limit < reply.body.len() {
+            // Release the held tail onto the same connection, then close.
+            let _ = stream.write_all(&reply.body[limit..]);
+            let _ = stream.flush();
         }
         drop(stream);
     }
@@ -3087,5 +3231,794 @@ mod tests {
         // One of them holds the unnumbered name; both hashes are honest.
         assert_eq!(payload_a.sha256, sha256_hex(&body_a));
         assert_eq!(payload_b.sha256, sha256_hex(&body_b));
+    }
+
+    // -----------------------------------------------------------------------
+    // Adversarial additions (Agent 3 hardening round)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transfer_with_no_data_for_the_stall_window_is_not_finalized() {
+        // The mock promises 100 KB, delivers 1 KiB, then holds the socket.
+        // Paused time lets the 60s stall window fire deterministically: the
+        // attempt must fail as a RETRYABLE network stall (the .part stays
+        // resumable), the retry names the stall, and after the retry budget
+        // is spent the download lands in Failed - never a partial file.
+        let tmp = TempDir::new("e2e-stall");
+        let mut first = MockReply::full_200(&pattern(100_000));
+        first.send_body_bytes = Some(1024);
+        first.hold_ms = 30_000; // real-time hold; the paused clock is ours
+        let server = spawn_mock(vec![first]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let task_session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = Arc::new(EventLog::default());
+        let task_log = Arc::clone(&log);
+        let plan = plan_for(&server.url, tmp.path(), Some("stall.bin"));
+
+        let task = tokio::spawn(async move {
+            execute_with_retries(&task_log, &task_session, 1, plan, cancel_rx, test_backoff()).await
+        });
+
+        // Cross the stall window: the 60s body timeout fires, attempt 1
+        // fails as retryable, the backoff elapses on the paused clock, the
+        // retry runs against the exhausted mock and fails, and the loop
+        // reaches its terminal state.
+        tokio::time::advance(Duration::from_secs(61)).await;
+        for _ in 0..4000 {
+            tokio::time::advance(Duration::from_millis(50)).await;
+            if task.is_finished() {
+                break;
+            }
+        }
+        let result = task.await.expect("retry loop must finish");
+        assert!(result.is_err(), "a stalled download must never complete");
+        assert_eq!(result.unwrap_err().1.as_deref(), Some("network"));
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+
+        // The retries are the stall itself, named as such, followed by the
+        // retry's connection failure against the exhausted mock.
+        let retries = log.retries.lock().unwrap();
+        assert_eq!(retries.len(), 2);
+        assert!(
+            retries[0].message.contains("Connection stalled"),
+            "the first retry must name the stall, got: {}",
+            retries[0].message
+        );
+        assert!(
+            tmp.path().join("stall.bin.part").exists(),
+            "the staging file must survive a stall (resumable)"
+        );
+        assert!(!tmp.path().join("stall.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_signalled_before_the_transfer_cannot_report_success() {
+        // The cancellation channel is latched BEFORE the engine runs. The
+        // biased select sees the pending signal on the very first loop
+        // iteration, so no byte is processed and the final checkpoint
+        // (try_recv) would catch it even then: the download must land in
+        // Cancelled with nothing at the final name.
+        let tmp = TempDir::new("e2e-pre-cancel");
+        let mut first = MockReply::full_200(&pattern(10_000));
+        first.send_body_bytes = Some(2048);
+        first.hold_ms = 800;
+        let server = spawn_mock(vec![first]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        registry.request_cancel(id).await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("early.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, id, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a pre-cancelled download must not complete");
+        assert_eq!(message, CANCEL_SENTINEL);
+        assert_eq!(kind, None);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Cancelled));
+        assert!(!tmp.path().join("early.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_corrupted_sidecar_is_discarded_instead_of_trusted() {
+        // "{not json" parses to nothing: no validator is carried into the
+        // resume request, and (without a trusted checksum) the byte-identity
+        // rule refuses to resume staging bytes whose origin cannot be
+        // proven. The download restarts cleanly from zero.
+        let tmp = TempDir::new("e2e-bad-sidecar");
+        let full = pattern(500);
+        let server = spawn_mock(vec![MockReply::full_200(&full)]);
+        let part = tmp.path().join("file.bin.part");
+        tokio::fs::write(&part, b"UNPROVABLE-PREFIX").await.unwrap();
+        tokio::fs::write(meta_path_for(&part), "{not json")
+            .await
+            .unwrap();
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("file.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a corrupted sidecar must degrade to a fresh download");
+        assert_eq!(payload.bytes, full.len() as u64);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("file.bin")).await.unwrap(),
+            full
+        );
+        assert_eq!(payload.verified, None);
+        let head = request_head(&server, 0);
+        assert!(!head.contains("range:"), "must restart from byte zero");
+        assert!(
+            !head.contains("if-range:"),
+            "a corrupted sidecar must not produce a validator"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sidecar_from_another_url_is_never_trusted_for_the_resume() {
+        // The staging file belongs to a DIFFERENT resource than the one now
+        // requested: its ETag is meaningless here, so it must neither be
+        // sent as If-Range nor keep the staging bytes alive.
+        let tmp = TempDir::new("e2e-sidecar-url");
+        let full = pattern(500);
+        let server = spawn_mock(vec![MockReply::full_200(&full)]);
+        let part = tmp.path().join("file.bin.part");
+        seed_staging(
+            &part,
+            "https://other.example/file.bin",
+            Some("\"someone-elses-etag\""),
+            b"FOREIGN-PREFIX",
+        )
+        .await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("file.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let _payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a foreign sidecar must degrade to a fresh download");
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("file.bin")).await.unwrap(),
+            full,
+            "the assembled file must be exactly the requested resource"
+        );
+        // The foreign validator was neither sent as If-Range nor allowed to
+        // keep the staging bytes alive: the request restarted from zero.
+        let head = request_head(&server, 0);
+        assert!(!head.contains("if-range:"));
+        assert!(!head.contains("range:"));
+        assert!(!part.exists(), "unprovable staging bytes must be discarded");
+    }
+
+    #[tokio::test]
+    async fn resume_preserves_the_trusted_digest_and_reports_verified() {
+        // The trusted digest travels through the resume path (and the
+        // automatic retry loop, via the cloned plan) unchanged: a resumed
+        // download that satisfies it completes as verified, not unverified.
+        let tmp = TempDir::new("e2e-resume-digest");
+        let full = pattern(1000);
+        let server = spawn_mock(vec![MockReply::partial_206(
+            "bytes 600-999/1000",
+            &full[600..],
+        )]);
+        let part = tmp.path().join("setup.exe.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &full[..600]).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.resume = true;
+        plan.expected_sha256 = Some(sha256_hex(&full));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a resumed download with a trusted digest must complete");
+        assert_eq!(payload.verified, Some(true));
+        assert_eq!(payload.sha256, sha256_hex(&full));
+    }
+
+    #[tokio::test]
+    async fn an_auto_retry_keeps_the_trusted_digest_for_the_final_verdict() {
+        // Truncated first attempt (retryable) + a trusted digest: the
+        // retried attempt must still be judged against the SAME digest,
+        // and the assembled file must complete as verified.
+        let tmp = TempDir::new("e2e-retry-digest");
+        let full = pattern(1000);
+        let mut first = MockReply::full_200(&full);
+        first.send_body_bytes = Some(400);
+        let second = MockReply::partial_206("bytes 400-999/1000", &full[400..]);
+        let server = spawn_mock(vec![first, second]);
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("retry.bin"));
+        plan.expected_sha256 = Some(sha256_hex(&full));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("the retry must complete the download");
+        assert_eq!(payload.bytes, full.len() as u64);
+        assert_eq!(payload.verified, Some(true));
+        assert_eq!(log.retries.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_chunked_response_without_content_length_completes_at_eof() {
+        // Real chunked framing: hyper decodes the chunks; the engine sees
+        // the decoded stream and finalizes exactly the delivered bytes.
+        let tmp = TempDir::new("e2e-chunked");
+        let expected: Vec<u8> = pattern(512);
+        let mut raw = Vec::new();
+        for chunk in [&expected[..300], &expected[300..]] {
+            raw.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            raw.extend_from_slice(chunk);
+            raw.extend_from_slice(b"\r\n");
+        }
+        raw.extend_from_slice(b"0\r\n\r\n");
+        let server = spawn_mock(vec![MockReply::raw(
+            "HTTP/1.1 200 OK",
+            vec![("Transfer-Encoding", "chunked".to_string())],
+            raw,
+        )]);
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("chunked.bin"));
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a chunked body must complete at the terminal chunk");
+        assert_eq!(payload.bytes, expected.len() as u64);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("chunked.bin"))
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unwritable_directory_fails_without_creating_artifacts() {
+        // Permission errors surface as a final (non-retryable) failure
+        // naming the problem, and leave NOTHING behind - not at the final
+        // name, not as a staging file. Skips itself when running with
+        // filesystem privileges that ignore directory permissions.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new("e2e-unwritable");
+        let body = pattern(100);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        tokio::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500))
+            .await
+            .unwrap();
+        let probe = tmp.path().join(".probe");
+        if std::fs::write(&probe, b"x").is_ok() {
+            // Privileged environment (root): permissions don't apply.
+            let _ = tokio::fs::remove_file(&probe).await;
+            tokio::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700))
+                .await
+                .unwrap();
+            return;
+        }
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("denied.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("an unwritable directory must fail the download");
+        assert!(
+            message.contains("Cannot write file"),
+            "unexpected error: {message}"
+        );
+        assert_eq!(kind, None, "a disk/permission error is final, not retried");
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("denied.bin").exists());
+        assert!(!tmp.path().join("denied.bin.part").exists());
+        tokio::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700))
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn sidecars_cannot_carry_or_alter_the_trusted_digest() {
+        // The .part.meta contract is exactly {url, etag, last_modified}.
+        // There is no digest-shaped field: verification input comes ONLY
+        // from the caller's DownloadPlan on every attempt, so no sidecar
+        // (and no stale persisted state that survives in one) can ever
+        // downgrade a trusted checksum to unverified or upgrade a plain
+        // calculation to a verified match.
+        let meta = PartMeta {
+            url: "https://example.com/a".to_string(),
+            etag: Some("\"e\"".to_string()),
+            last_modified: None,
+        };
+        let json = serde_json::to_value(&meta).expect("sidecar serializes");
+        let keys: Vec<String> = json
+            .as_object()
+            .expect("sidecar is an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys.len(), 3, "the sidecar shape is fixed: {keys:?}");
+        for key in ["url", "etag", "last_modified"] {
+            assert!(keys.iter().any(|k| k == key), "missing {key}");
+        }
+        for key in &keys {
+            assert!(
+                !key.to_ascii_lowercase().contains("sha"),
+                "sidecar key {key} must never carry digest material"
+            );
+        }
+        // Hand-edited or future sidecars with extra fields deserialize
+        // harmlessly: unknown fields are ignored and cannot inject a
+        // verification verdict.
+        let extra = r#"{"url":"https://x/a","etag":"\"e\"","last_modified":null,"sha256":"00","verified":true}"#;
+        let parsed: PartMeta = serde_json::from_str(extra).expect("unknown fields are ignored");
+        assert_eq!(parsed.etag.as_deref(), Some("\"e\""));
+        assert!(parsed.last_modified.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Mid-write disk failure (injected write-failure point)
+    // -----------------------------------------------------------------------
+
+    /// Test-only staging sink that accepts exactly `budget` bytes across
+    /// all its writes and then fails like a full disk. The bytes accepted
+    /// BEFORE the failure are real bytes in the real `.part` file, so the
+    /// filesystem assertions see exactly what a mid-write ENOSPC leaves
+    /// behind: a truncated staging file and nothing at the final name.
+    ///
+    /// This is the "small injected writer" the disk-full gap needs - no
+    /// dependency, no fabricated filesystem, and the production write
+    /// loop, error categorization and cleanup policy are the ones being
+    /// exercised.
+    struct DiskFullAfter {
+        budget: u64,
+    }
+
+    struct BudgetedWriter {
+        inner: tokio::fs::File,
+        remaining: u64,
+    }
+
+    impl PartWriter for BudgetedWriter {
+        async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+            let len = bytes.len() as u64;
+            if len > self.remaining {
+                // A real full disk accepts a partial write before failing,
+                // so the budget is filled to the last byte first.
+                let room = self.remaining as usize;
+                if room > 0 {
+                    // Qualified: PartWriter is also implemented for File,
+                    // which would make the plain method call ambiguous.
+                    tokio::io::AsyncWriteExt::write_all(&mut self.inner, &bytes[..room]).await?;
+                    self.remaining = 0;
+                }
+                return Err(io::Error::from(io::ErrorKind::StorageFull));
+            }
+            tokio::io::AsyncWriteExt::write_all(&mut self.inner, bytes).await?;
+            self.remaining -= len;
+            Ok(())
+        }
+        async fn flush(&mut self) -> io::Result<()> {
+            tokio::io::AsyncWriteExt::flush(&mut self.inner).await
+        }
+        async fn sync_all(&mut self) -> io::Result<()> {
+            tokio::fs::File::sync_all(&self.inner).await
+        }
+    }
+
+    impl StagingSink for DiskFullAfter {
+        type Writer = BudgetedWriter;
+        async fn open(&self, part: &Path, mode: StagingOpenMode) -> io::Result<Self::Writer> {
+            let inner = match mode {
+                StagingOpenMode::Append => {
+                    tokio::fs::OpenOptions::new()
+                        .append(true)
+                        .open(part)
+                        .await?
+                }
+                StagingOpenMode::Truncate => tokio::fs::File::create(part).await?,
+                StagingOpenMode::CreateNew => {
+                    tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(part)
+                        .await?
+                }
+            };
+            Ok(BudgetedWriter {
+                inner,
+                remaining: self.budget,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_disk_full_failure_is_final_never_retryable_and_leaves_a_resumable_partial() {
+        // The staging writer accepts exactly 400 of the promised 1000
+        // bytes, then fails with ENOSPC-class StorageFull, exactly like a
+        // disk that fills mid-write. The failure must be FINAL (never
+        // mistaken for a transient server problem), leave the truncated
+        // file ONLY under the staging name, and keep that staging file
+        // resumable - which the second phase proves by finishing the
+        // download from exactly those 400 bytes.
+        let tmp = TempDir::new("e2e-disk-full");
+        let body = pattern(1_000);
+        let tail = MockReply::partial_206(
+            &format!("bytes 400-{}/{}", body.len() - 1, body.len()),
+            &body[400..],
+        );
+        let server = spawn_mock(vec![MockReply::full_200(&body), tail]);
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let mut plan = plan_for(&server.url, tmp.path(), Some("full.bin"));
+        plan.expected_sha256 = Some(sha256_hex(&body));
+        let sink = DiskFullAfter { budget: 400 };
+
+        let (message, kind) =
+            execute_with_retries_on(&log, &session, 1, plan, cancel_rx, test_backoff(), &sink)
+                .await
+                .expect_err("a full disk must fail the download");
+        assert!(
+            message.starts_with("Disk write failed"),
+            "the failure must be categorized as a disk-write failure, got: {message}"
+        );
+        assert_eq!(
+            kind, None,
+            "a local disk failure is final - never the retryable network kind"
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(
+            log.retries.lock().unwrap().is_empty(),
+            "a disk-full failure must never trigger the automatic retry"
+        );
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            1,
+            "no second attempt may be started against the server"
+        );
+
+        // Nothing truncated at the destination name...
+        assert!(!tmp.path().join("full.bin").exists());
+        // ...but the staging file is retained as the documented recoverable
+        // condition: exactly the bytes that made it to disk, with its
+        // validator sidecar for a later resume.
+        let part = tmp.path().join("full.bin.part");
+        assert_eq!(
+            tokio::fs::metadata(&part).await.unwrap().len(),
+            400,
+            "the partial write must have landed exactly the budgeted bytes"
+        );
+        assert!(
+            read_part_meta(&part).await.is_some(),
+            "the validator sidecar must survive for the resume"
+        );
+
+        // Recovery: with the failure point removed (space freed), the
+        // retained partial resumes EXACTLY where the disk filled and
+        // completes with the trusted digest intact.
+        let mut plan2 = plan_for(&server.url, tmp.path(), Some("full.bin"));
+        plan2.resume = true;
+        plan2.staging = Some(part.clone());
+        plan2.expected_sha256 = Some(sha256_hex(&body));
+        let (session2, cancel_rx2) = test_session().await;
+        let payload = execute_with_retries(&log, &session2, 1, plan2, cancel_rx2, test_backoff())
+            .await
+            .expect("freeing space and resuming must complete the download");
+        assert_eq!(payload.bytes, 1_000);
+        assert_eq!(payload.verified, Some(true));
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("full.bin")).await.unwrap(),
+            body
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Cancellation boundaries
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_cancel_signalled_while_the_tail_is_in_flight_wins_over_completion() {
+        // The mock sends the first 60,000 bytes, holds, and (after the
+        // hold) releases the remaining 40,000 on the SAME connection. The
+        // cancel is latched the moment the first 60,000 are provably on
+        // disk - i.e. before any tail byte can be processed. The engine
+        // must observe the cancel at its next checkpoint (biased select,
+        // then the final try_recv drain) and land in Cancelled with
+        // EXACTLY the staged bytes: no tail processing, no completion
+        // decision, nothing at the final name.
+        let tmp = TempDir::new("e2e-cancel-tail");
+        let full = pattern(100_000);
+        let mut first = MockReply::full_200(&full);
+        first.send_body_bytes = Some(60_000);
+        first.hold_ms = 1_500;
+        first.resume_body_after_hold = true;
+        let server = spawn_mock(vec![first]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = Arc::new(EventLog::default());
+
+        let watcher_part = tmp.path().join("tail.bin.part");
+        let watcher_registry = Arc::clone(&registry);
+        tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let staged = tokio::fs::metadata(&watcher_part)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                if staged >= 60_000 || Instant::now() > deadline {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            watcher_registry.request_cancel(id).await;
+        });
+
+        let plan = plan_for(&server.url, tmp.path(), Some("tail.bin"));
+        let (message, kind) =
+            execute_with_retries(&log, &session, id, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a cancel signalled before the tail is processed must win");
+        assert_eq!(message, CANCEL_SENTINEL);
+        assert_eq!(kind, None);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Cancelled));
+
+        // Exactly the bytes staged before the tail arrived: the cancel
+        // preempted the completion decision, so the in-flight tail was
+        // never processed.
+        let part = tmp.path().join("tail.bin.part");
+        assert_eq!(
+            tokio::fs::metadata(&part).await.unwrap().len(),
+            60_000,
+            "no tail byte may be processed after the cancel was signalled"
+        );
+        assert!(!tmp.path().join("tail.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_racing_verification_cannot_contradict_the_completed_outcome() {
+        // The cancel is signalled the moment the engine is observed in
+        // Verifying - or, if that window is missed (it is short by
+        // design), right after completion. BOTH interleavings are legal
+        // under the documented rule ("from Verifying on, the engine always
+        // reaches exactly one terminal state; cancellation is no longer
+        // honored"), and this test asserts the outcome is IDENTICAL in
+        // both: a completed file with the right bytes, a Completed state,
+        // and no contradictory error anywhere.
+        let tmp = TempDir::new("e2e-cancel-verify");
+        let body = pattern(300_000);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let task_session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = Arc::new(EventLog::default());
+
+        let watcher_session = DownloadSession::new(Arc::clone(&registry), id);
+        let watcher_registry = Arc::clone(&registry);
+        tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let state = watcher_session.snapshot().await;
+                if state == Some(DownloadState::Verifying)
+                    || state == Some(DownloadState::Completed)
+                    || Instant::now() > deadline
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            watcher_registry.request_cancel(id).await;
+        });
+
+        let plan = plan_for(&server.url, tmp.path(), Some("verify.bin"));
+        let task_log = Arc::clone(&log);
+        let payload = tokio::spawn(async move {
+            execute_with_retries(
+                &task_log,
+                &task_session,
+                id,
+                plan,
+                cancel_rx,
+                test_backoff(),
+            )
+            .await
+        })
+        .await
+        .expect("the engine task must not panic")
+        .expect("a cancel racing verification must never produce a failure");
+        assert_eq!(payload.bytes, 300_000);
+        assert_eq!(
+            payload.path,
+            tmp.path().join("verify.bin").to_string_lossy().to_string()
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Completed));
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("verify.bin"))
+                .await
+                .unwrap(),
+            body
+        );
+        assert!(
+            !tmp.path().join("verify.bin.part").exists(),
+            "a committed download leaves no staging file behind"
+        );
+        assert!(log.retries.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_during_the_retry_request_itself_never_completes() {
+        // Attempt 1 is truncated (retryable). While the RETRY REQUEST is
+        // provably in flight (its response holds the connection open), the
+        // cancel arrives. The retry attempt - not just the backoff - must
+        // observe the signal, stop, and keep the staging file resumable.
+        let tmp = TempDir::new("e2e-cancel-retry-request");
+        let full = pattern(2_000);
+        let mut first = MockReply::full_200(&full);
+        first.send_body_bytes = Some(400);
+        let mut second = MockReply::full_200(&full);
+        second.send_body_bytes = Some(512);
+        second.hold_ms = 5_000;
+        let server = spawn_mock(vec![first, second]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = Arc::new(EventLog::default());
+
+        // The retry event is emitted only after the backoff completes and
+        // the next attempt has started, so seeing one retry event proves
+        // attempt 2's request is the one in flight.
+        let watcher_log = Arc::clone(&log);
+        let watcher_registry = Arc::clone(&registry);
+        tokio::spawn(async move {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while watcher_log.retries.lock().unwrap().is_empty() {
+                if Instant::now() > deadline {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            watcher_registry.request_cancel(id).await;
+        });
+
+        let plan = plan_for(&server.url, tmp.path(), Some("retry.bin"));
+        let (message, kind) =
+            execute_with_retries(&log, &session, id, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("the cancelled retry attempt must not complete");
+        assert_eq!(message, CANCEL_SENTINEL);
+        assert_eq!(kind, None);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Cancelled));
+        assert_eq!(
+            log.retries.lock().unwrap().len(),
+            1,
+            "exactly the automatic retry - the cancel must not schedule another"
+        );
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            2,
+            "the cancel interrupted the retry request itself"
+        );
+        // Attempt 2 reopened the staging file (a 200 to a resume request
+        // truncates it) and delivered 512 bytes before holding. How many
+        // of those bytes were already written when the cancel was OBSERVED
+        // is a legal interleaving (0..=512) - what matters is that the
+        // transfer stopped, nothing more than the delivered 512 was ever
+        // staged, and nothing sits at the final name.
+        let part = tmp.path().join("retry.bin.part");
+        let staged = tokio::fs::metadata(&part).await.unwrap().len();
+        assert!(
+            staged <= 512,
+            "no more than the delivered bytes may be staged, got {staged}"
+        );
+        assert!(!tmp.path().join("retry.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_download_leaves_its_same_name_neighbor_untouched() {
+        // Two downloads race for the same destination name. A reserves
+        // "clash.bin.part" and stalls mid-stream; B moves to the next
+        // staging candidate, completes, and claims "clash (1).bin".
+        // Cancelling A afterwards must not touch B's artifact in any way -
+        // and A must keep its own staging file, cancelled cleanly.
+        let tmp = TempDir::new("e2e-cancel-neighbor");
+        let body_a = pattern(1_000);
+        // Deliberately different bytes from body_a everywhere.
+        let body_b: Vec<u8> = (0..2_000u32).map(|i| ((i + 7) % 251) as u8).collect();
+        let mut reply_a = MockReply::full_200(&body_a);
+        reply_a.send_body_bytes = Some(400);
+        reply_a.hold_ms = 5_000;
+        let server_a = spawn_mock(vec![reply_a]);
+        let server_b = spawn_mock(vec![MockReply::full_200(&body_b)]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id_a, cancel_rx_a) = registry.register().await;
+        let (id_b, cancel_rx_b) = registry.register().await;
+        let session_a = DownloadSession::new(Arc::clone(&registry), id_a);
+        let task_session_a = DownloadSession::new(Arc::clone(&registry), id_a);
+        let session_b = DownloadSession::new(Arc::clone(&registry), id_b);
+        let log = EventLog::default();
+
+        let dir = tmp.path().to_path_buf();
+        let url_a = server_a.url.clone();
+        let task_log = EventLog::default();
+        let task_a = tokio::spawn(async move {
+            let plan = plan_for(&url_a, &dir, Some("clash.bin"));
+            execute_with_retries(
+                &task_log,
+                &task_session_a,
+                id_a,
+                plan,
+                cancel_rx_a,
+                test_backoff(),
+            )
+            .await
+        });
+
+        // Wait until A provably holds "clash.bin.part", then start B.
+        let a_part = tmp.path().join("clash.bin.part");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while tokio::fs::metadata(&a_part).await.is_err() {
+            assert!(
+                Instant::now() <= deadline,
+                "download A never reserved its staging file"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let plan_b = plan_for(&server_b.url, tmp.path(), Some("clash.bin"));
+        let payload_b =
+            execute_with_retries(&log, &session_b, id_b, plan_b, cancel_rx_b, test_backoff())
+                .await
+                .expect("the neighbor download must complete");
+        assert_eq!(
+            payload_b.path,
+            tmp.path()
+                .join("clash (1).bin")
+                .to_string_lossy()
+                .to_string(),
+            "B must land on the next candidate: A holds candidate 0's staging file"
+        );
+
+        registry.request_cancel(id_a).await;
+        let result_a = task_a.await.expect("download A's task must not panic");
+        assert_eq!(result_a.unwrap_err().0, CANCEL_SENTINEL);
+        assert_eq!(session_a.snapshot().await, Some(DownloadState::Cancelled));
+
+        // B's artifact is byte-perfect and untouched; A's staging file is
+        // exactly what A staged; nothing sits at the never-committed
+        // candidate 0 name.
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("clash (1).bin"))
+                .await
+                .unwrap(),
+            body_b
+        );
+        assert!(!tmp.path().join("clash (1).bin.part").exists());
+        assert_eq!(
+            tokio::fs::metadata(&a_part).await.unwrap().len(),
+            400,
+            "A's staging file must hold exactly A's staged bytes"
+        );
+        assert!(!tmp.path().join("clash.bin").exists());
     }
 }

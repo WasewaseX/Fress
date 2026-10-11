@@ -61,12 +61,12 @@ export interface AppItem {
   /** Per-platform release repos for projects whose downloads live in a
    * DIFFERENT repository than the one githubUrl links to (Ente Photos ships
    * its desktop app from ente/photos-desktop while the Android APK ships
-   * from ente-io/ente; Bitwarden's desktop clients and Android app are two
+   * from ente/ente; Bitwarden's desktop clients and Android app are two
    * repos as well). The value is "owner/repo" on GitHub. */
   repoOverrides?: Partial<Record<Platform, string>>;
   /** Per-platform release-tag regexes for repos that publish several
    * products from one repo under different tag prefixes (Ente ships photos,
-   * auth, locker and Ensu from ente-io/ente; Tuta splits desktop, android
+   * auth, locker and Ensu from ente/ente; Tuta splits desktop, android
    * and calendar streams). Without a pattern here, the asset picker can
    * grab a DIFFERENT product's installer just because it carries the right
    * file extension. Example: tagPatterns: { android: '^photos-' } */

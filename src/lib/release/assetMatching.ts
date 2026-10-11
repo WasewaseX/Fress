@@ -5,6 +5,7 @@
 import { Platform } from '../../types';
 import { compileSafePattern } from '../patternSafety';
 import {
+  AssetSelectionOptions,
   AssetPick,
   DeviceAbi,
   ReleaseAsset,
@@ -24,11 +25,35 @@ import {
 
 /** Files that can never be the app itself. */
 const BAD_EXT = /\.(sig|blockmap|sha256|sha512|sha256sum|md5|txt|json|yaml|yml|pub|pem|sbom|zsync|bittorrent|xml|map|dSYM|apk\.idsig|idsig)$/i;
-/** Metadata / tooling artefacts shipped next to installers. A -src-/-source-
- * token is ALSO excluded: projects that ship no binary for a platform still
- * tag their source tarball next to the binaries, and a source archive was
- * once served to a Linux user as "the app" (HandBrake). */
-const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy|(^|[^a-z0-9])(source|src)([-_.0-9]|$)/i;
+/** Metadata / tooling artefacts shipped next to installers. A -src-/-source-/
+ * -sources- token is ALSO excluded: projects that ship no binary for a
+ * platform still tag their source tarball next to the binaries, and a source
+ * archive was once served to a Linux user as "the app" (HandBrake); the
+ * plural form slipped past the singular-only rule and OBS Studio's
+ * "-Sources.tar.gz" became the last-resort pick for Linux hosts.
+ *
+ * The other tokens exclude artefacts that are shipped NEXT TO the app but
+ * are not the app (each added after a live release audit found them ranked
+ * or picked):
+ *   - helppack / langpack: LibreOffice-style help and language ADD-ON
+ *     packs. Same filename shape as the real installer, half the size,
+ *     and useless without it.
+ *   - debug: debug builds (gradle's app-debug.apk, -debug- installers).
+ *     A debug build is a developer artefact, never the stable end-user
+ *     download the resolver exists to find. ONE documented exception:
+ *     a plus-prefixed FLAVOR designator ending in "-debug" (Termux has
+ *     published every stable GitHub release as
+ *     "termux-app_v0.118.3+github-debug_<abi>.apk" since 2020 - there
+ *     "debug" names the release flavor, not a debug build; excluding it
+ *     cut Termux's Android users off from the only APKs the project
+ *     ships, verified live 2026-10-12).
+ */
+const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy|(^|[^a-z0-9])(sources|source|src)([-_.0-9]|$)|(^|[^a-z0-9])(helppack|langpack)([-_.0-9]|$)/i;
+/** Debug artefacts, applied with the FLAVOR_DEBUG exception above. */
+const BAD_DEBUG_NAME = /(^|[^a-z0-9])debug([-_.0-9]|$)/i;
+/** A plus-prefixed build-flavor designator that ENDS in "-debug": the
+ * project's own release naming, not a debug artefact. */
+const FLAVOR_DEBUG = /\+[a-z0-9._]+-debug([-_.0-9]|$)/i;
 /** Command-line companions: repos like LocalSend ship "<App>-CLI-<v>-windows-arm-64.exe"
  * next to the GUI installer, and on an ARM64 host the CLI used to WIN the
  * scoring (hyphenated "arm-64" read as unmarked, bare /arm/ rewarded it) -
@@ -177,9 +202,46 @@ export function assetCompatibleWithDevice(
   }
 }
 
-export function scoreAsset(name: string, platform: Platform, arch: string | undefined): number {
+/**
+ * The HARD ROLE constraint, orthogonal to the architecture gate: an asset
+ * that names a SERVER product is not the desktop client the catalog entry
+ * resolves for (multi-product repos ship both from one releases page -
+ * e.g. a "jellyfin-server_10.10_windows-x64.zip" next to the player). A
+ * low-confidence score must never rescue it.
+ *
+ * The gate ONLY fires for desktop platforms, and only when the caller does
+ * not vouch that the app itself IS the server product (resolve.ts derives
+ * that vouch from the release repo's own name: an app resolving from
+ * "owner/server-repo" is a server product and keeps its server assets).
+ * Token-boundary anchored like CLI_NAME so "observers"/"preservers" never
+ * match.
+ */
+const SERVER_NAME = /(^|[^a-z0-9])servers?([-_.0-9]|$)/i;
+
+export function assetServesSelectionRole(
+  name: string,
+  platform: Platform,
+  opts?: AssetSelectionOptions
+): boolean {
+  if (opts?.allowServer) return true;
+  if (platform !== 'windows' && platform !== 'mac' && platform !== 'linux') return true;
+  return !SERVER_NAME.test(name);
+}
+
+export function scoreAsset(
+  name: string,
+  platform: Platform,
+  arch: string | undefined,
+  opts?: AssetSelectionOptions
+): number {
   const n = name.toLowerCase();
   let s = 0;
+
+  // Hard role gate first: a server binary scored against a desktop client
+  // selection is not a weak candidate, it is the WRONG product. Kept next
+  // to the compatibility gate so the two hard constraints read as one
+  // unit (a low score may never override either).
+  if (!assetServesSelectionRole(name, platform, opts)) return -1;
 
   switch (platform) {
     case 'android': {
@@ -288,7 +350,11 @@ export function scoreAsset(name: string, platform: Platform, arch: string | unde
   return s;
 }
 
-export function pickAsset(assets: ReleaseAsset[], platform: Platform, arch: string | undefined): ReleaseAsset | null {
+export function pickAsset(
+  assets: ReleaseAsset[],
+  platform: Platform,
+  arch: string | undefined
+): ReleaseAsset | null {
   return pickAssetDetailed(assets, platform, arch)?.pick ?? null;
 }
 
@@ -308,10 +374,15 @@ export function pickAssetDetailed(
   assets: ReleaseAsset[],
   platform: Platform,
   arch: string | undefined,
-  patterns?: Partial<Record<Platform, string>>
+  patterns?: Partial<Record<Platform, string>>,
+  selection?: AssetSelectionOptions
 ): AssetPick | null {
   const usable = assets.filter(
-    (a) => !BAD_EXT.test(a.name) && !BAD_NAME.test(a.name) && !CLI_NAME.test(a.name)
+    (a) =>
+      !BAD_EXT.test(a.name) &&
+      !BAD_NAME.test(a.name) &&
+      !CLI_NAME.test(a.name) &&
+      !(BAD_DEBUG_NAME.test(a.name) && !FLAVOR_DEBUG.test(a.name))
   );
 
   const pattern = patterns?.[platform];
@@ -325,24 +396,26 @@ export function pickAssetDetailed(
       // data that predates it, e.g. storage written by an older build).
       const re = compileSafePattern(pattern);
       if (re) {
-        // Architecture compatibility is a HARD constraint an override cannot
-        // bypass: the pattern is the naming authority - it says which file
-        // FAMILY is right - but it must never declare an impossible
-        // architecture installable (an Android pattern pinning a split name
-        // used to hand that file to an unknown-ABI browser even though the
-        // heuristic correctly refuses it). Incompatible matches are dropped;
-        // if none survive, fall through to the heuristic, which applies the
-        // very same gate (assetCompatibleWithDevice).
+        // Architecture compatibility and selection role are HARD constraints
+        // an override cannot bypass: the pattern is the naming authority -
+        // it says which file FAMILY is right - but it must never declare an
+        // impossible architecture installable (an Android pattern pinning a
+        // split name used to hand that file to an unknown-ABI browser even
+        // though the heuristic correctly refuses it) nor resurrect a server
+        // binary for a desktop-client selection. Incompatible matches are
+        // dropped; if none survive, fall through to the heuristic, which
+        // applies the very same gates.
         const matches = usable
           .filter((a) => re.test(a.name))
-          .filter((a) => assetCompatibleWithDevice(a.name, platform, arch));
+          .filter((a) => assetCompatibleWithDevice(a.name, platform, arch))
+          .filter((a) => assetServesSelectionRole(a.name, platform, selection));
         if (matches.length > 0) {
           // Among surviving pattern matches the heuristic still breaks ties
           // (x64 vs arm64 variants of the same pinned naming).
           let best = matches[0];
           let bestScore = -Infinity;
           for (const a of matches) {
-            const s = scoreAsset(a.name, platform, arch);
+            const s = scoreAsset(a.name, platform, arch, selection);
             if (s > bestScore) {
               bestScore = s;
               best = a;
@@ -360,7 +433,7 @@ export function pickAssetDetailed(
   let best: ReleaseAsset | null = null;
   let bestScore = -Infinity;
   for (const a of usable) {
-    const s = scoreAsset(a.name, platform, arch);
+    const s = scoreAsset(a.name, platform, arch, selection);
     if (s === -1) continue;
     if (s > bestScore) {
       bestScore = s;

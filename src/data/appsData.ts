@@ -28,13 +28,14 @@ const BASE_APPS: AppItem[] = [
     tags: ['file-sharing', 'airdrop-alternative', 'local-network', 'privacy'],
     wingetCommand: 'winget install LocalSend.LocalSend',
     brewCommand: 'brew install --cask localsend',
-    flatpakCommand: 'flatpak install flathub org.localsend.localsend',
+    flatpakCommand: 'flatpak install flathub org.localsend.localsend_app',
     scoopCommand: 'scoop install localsend',
     proprietaryAlternative: 'Apple AirDrop / Nearby Share',
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-15'
+    addedAt: '2025-01-15',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'sharex',
@@ -60,7 +61,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64'],
     offlineReady: true,
-    addedAt: '2025-01-10'
+    addedAt: '2025-01-10',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'vlc',
@@ -90,7 +92,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-05'
+    addedAt: '2025-01-05',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'obsidian',
@@ -120,7 +123,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-02-01'
+    addedAt: '2025-02-01',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'bitwarden',
@@ -156,7 +160,8 @@ const BASE_APPS: AppItem[] = [
     // The clients repo releases browser, cli, web and desktop builds from
     // one repo; only the desktop-v* tags carry the installers.
     tagPatterns: { windows: '^desktop-', mac: '^desktop-', linux: '^desktop-' },
-    addedAt: '2025-01-20'
+    addedAt: '2025-01-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'handbrake',
@@ -177,14 +182,18 @@ const BASE_APPS: AppItem[] = [
     isTrendingToday: false,
     tags: ['video-converter', 'compression', 'ffmpeg', 'transcoder'],
     wingetCommand: 'winget install HandBrake.HandBrake',
-    brewCommand: 'brew install --cask handbrake',
+    // Live audit 2026-10-12: the cask was RENAMED handbrake -> handbrake-app
+    // (Casks/h/handbrake.rb is 404 in homebrew-cask; the official GUI dmg
+    // lives at handbrake-app.rb, v1.11.2). The old token fails outright.
+    brewCommand: 'brew install --cask handbrake-app',
     flatpakCommand: 'flatpak install flathub fr.handbrake.ghb',
     scoopCommand: 'scoop install handbrake',
     proprietaryAlternative: 'Adobe Media Encoder',
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-18'
+    addedAt: '2025-01-18',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'blender',
@@ -212,7 +221,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-12'
+    addedAt: '2025-01-12',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'krita',
@@ -242,7 +252,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-22'
+    addedAt: '2025-01-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: '7zip',
@@ -268,7 +279,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-01-08'
+    addedAt: '2025-01-08',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'devtoys',
@@ -290,7 +302,6 @@ const BASE_APPS: AppItem[] = [
     tags: ['developer-tools', 'json-formatter', 'jwt', 'regex', 'offline'],
     wingetCommand: 'winget install DevToys-app.DevToys',
     brewCommand: 'brew install --cask devtoys',
-    scoopCommand: 'scoop install devtoys',
     proprietaryAlternative: 'CyberChef / Various Online Converters',
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
@@ -299,7 +310,8 @@ const BASE_APPS: AppItem[] = [
     // stable 2.x builds the website links to. Without vouching for the
     // repo here, the stable-only resolver sees an empty release list.
     includeFlaggedReleases: true,
-    addedAt: '2025-02-10'
+    addedAt: '2025-02-10',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'vscodium',
@@ -327,7 +339,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-14'
+    addedAt: '2025-01-14',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'rustdesk',
@@ -348,7 +361,8 @@ const BASE_APPS: AppItem[] = [
     isOwnerPick: false,
     isTrendingToday: true,
     tags: ['remote-desktop', 'teamviewer-alternative', 'rust', 'network'],
-    wingetCommand: 'winget install RustDesk.RustDesk',
+    // No wingetCommand: RustDesk.RustDesk was REMOVED from winget-pkgs
+    // (removal commit landed 2026-03-27), so the command would always fail.
     brewCommand: 'brew install --cask rustdesk',
     flatpakCommand: 'flatpak install flathub com.rustdesk.RustDesk',
     scoopCommand: 'scoop install rustdesk',
@@ -356,7 +370,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
-    addedAt: '2025-02-05'
+    addedAt: '2025-02-05',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'inkscape',
@@ -384,7 +399,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-11'
+    addedAt: '2025-01-11',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'audacity',
@@ -412,7 +428,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-09'
+    addedAt: '2025-01-09',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'losslesscut',
@@ -432,7 +449,8 @@ const BASE_APPS: AppItem[] = [
     isOwnerPick: false,
     isTrendingToday: true,
     tags: ['video-cutter', 'ffmpeg', 'lossless', 'fast-trim'],
-    wingetCommand: 'winget install mifi.LosslessCut',
+    // No wingetCommand: mifi.LosslessCut has never had a winget-pkgs manifest
+    // (no manifests/m/mifi directory), so the command could never succeed.
     brewCommand: 'brew install --cask losslesscut',
     flatpakCommand: 'flatpak install flathub no.mifi.losslesscut',
     scoopCommand: 'scoop install losslesscut',
@@ -440,7 +458,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-02-14'
+    addedAt: '2025-02-14',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'keepassxc',
@@ -468,7 +487,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-19'
+    addedAt: '2025-01-19',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'bruno',
@@ -496,7 +516,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-02-18'
+    addedAt: '2025-02-18',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'libreoffice',
@@ -507,7 +528,7 @@ const BASE_APPS: AppItem[] = [
     beginnerGuide: 'Open LibreOffice Writer for essays and reports or Calc for spreadsheets. Use File > Save As to choose either open ODF format or standard Microsoft Office format.',
     githubUrl: 'https://github.com/LibreOffice/core',
     websiteUrl: 'https://www.libreoffice.org',
-    downloadUrl: 'https://www.libreoffice.org/download/download',
+    downloadUrl: 'https://www.libreoffice.org/download/download-libreoffice/',
     category: 'Productivity & Office',
     platforms: ['windows', 'mac', 'linux'],
     license: 'MPL-2.0',
@@ -524,7 +545,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-16'
+    addedAt: '2025-01-16',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'bleachbit',
@@ -550,7 +572,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64'],
     offlineReady: true,
-    addedAt: '2025-01-21'
+    addedAt: '2025-01-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'ollama',
@@ -571,7 +594,10 @@ const BASE_APPS: AppItem[] = [
     isTrendingToday: true,
     tags: ['local-ai', 'llm', 'offline', 'privacy'],
     wingetCommand: 'winget install Ollama.Ollama',
-    brewCommand: 'brew install --cask ollama',
+    // Live audit 2026-10-12: the cask was RENAMED ollama -> ollama-app
+    // (Casks/o/ollama.rb is 404 in homebrew-cask; the official Ollama.app
+    // lives at ollama-app.rb and bundles the CLI). The old token fails.
+    brewCommand: 'brew install --cask ollama-app',
     scoopCommand: 'scoop install ollama',
     proprietaryAlternative: 'OpenAI ChatGPT Desktop / Claude App',
     isPortable: false,
@@ -581,7 +607,8 @@ const BASE_APPS: AppItem[] = [
     // (-mlx, -rocm) and Jetson builds of the arm64 one. The [^-]+ pin keeps
     // the plain per-arch tarball ahead of those variants.
     assetPatterns: { linux: '^ollama-linux-[^-]+\\.tar\\.zst$' },
-    addedAt: '2025-02-20'
+    addedAt: '2025-02-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'flameshot',
@@ -609,7 +636,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-02-25'
+    addedAt: '2025-02-25',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'shotcut',
@@ -637,7 +665,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-01-25'
+    addedAt: '2025-01-25',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'syncthing',
@@ -652,8 +681,9 @@ const BASE_APPS: AppItem[] = [
     category: 'Utilities & System',
     platforms: ['windows', 'mac', 'linux', 'android'],
     // The official Android app was retired in December 2024; the Syncthing
-    // team points Android users to the maintained Syncthing-Fork.
-    repoOverrides: { android: 'Catfriend1/syncthing-android' },
+    // team points Android users to the maintained Syncthing-Fork. The fork's
+    // repo moved: Catfriend1/syncthing-android now redirects to researchxxl.
+    repoOverrides: { android: 'researchxxl/syncthing-android' },
     assetPatterns: { android: 'syncthingfork_release_v[\\d.]+\\.apk$' },
     fdroidId: 'com.github.catfriend1.syncthingfork',
     license: 'MPL-2.0',
@@ -669,7 +699,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-02-28'
+    addedAt: '2025-02-28',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'joplin',
@@ -698,7 +729,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-02-28'
+    addedAt: '2025-02-28',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'newpipe',
@@ -723,7 +755,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['arm64'],
     offlineReady: true,
-    addedAt: '2025-02-28'
+    addedAt: '2025-02-28',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'termux',
@@ -749,7 +782,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: false,
     architectures: ['arm64'],
     offlineReady: true,
-    addedAt: '2025-02-28'
+    addedAt: '2025-02-28',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'antennapod',
@@ -774,7 +808,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-03-01'
+    addedAt: '2025-03-01',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'keepassdx',
@@ -799,7 +834,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-03-01'
+    addedAt: '2025-03-01',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'organicmaps',
@@ -825,7 +861,8 @@ const BASE_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2025-03-01'
+    addedAt: '2025-03-01',
+    lastVerifiedAt: '2026-10-12',
   }
 ];
 

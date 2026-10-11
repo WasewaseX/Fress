@@ -88,3 +88,63 @@ export type DeviceAbi = AndroidAbi | 'unknown';
  * so both the matching layer and the resolver orchestration share one
  * shape. */
 export type PlatformPatterns = Partial<Record<Platform, string>>;
+
+/** Selection hints the resolver feeds the asset picker alongside the
+ * platform/arch. Declared here (types only) so assetMatching, the
+ * orchestration and the official resolvers share one shape. */
+export interface AssetSelectionOptions {
+  /** True only when the app being resolved IS the server product (its
+   * release repo is itself named "*server*"). Default false: the common
+   * case is a desktop client, where a server binary can never be the
+   * answer (hard-refused by assetServesSelectionRole). */
+  allowServer?: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Typed resolution outcome (the resolver/UI contract)                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * WHY a resolution ended the way it did. The resolver's plain API answers
+ * `ResolvedDownload | null`, which deliberately keeps the hot path simple
+ * — but a null is five different situations, and the UI must be able to
+ * tell them apart instead of guessing (a rate limit needs a Retry afford-
+ * ance; a genuine "no Linux build exists" needs a page link, not a retry;
+ * an unsupported platform needs nothing at all). Consumers that only need
+ * the file keep using ResolvedDownload | null; consumers that render the
+ * WHY use resolveWithOutcome() (release/resolve.ts), which returns this
+ * union. Never infer the difference from string matching in the UI.
+ *
+ * The union is EXHAUSTIVE on purpose: a new resolver situation must add a
+ * variant here, which forces every consuming switch to acknowledge it.
+ */
+export type ResolveFailureKind =
+  | 'rate-limit' // the forge/vendor quota window is exhausted; retrying now will fail
+  | 'network'    // the request could not leave the machine (offline, DNS, timeout, redirect loop)
+  | 'api';       // the remote answered but not with usable data (HTTP 5xx, non-JSON, schema drift)
+
+export type ResolveOutcome =
+  /** A usable download was resolved. `confident: true` = the picker vouches
+   * for the file (vendor manifest, well-named release asset). `confident:
+   * false` = a weak/low-confidence pick the UI MUST disclose as such
+   * (download.weak is set); it is still installable-looking, it is just not
+   * certain. */
+  | { status: 'resolved'; download: ResolvedDownload; confident: boolean }
+  /** The lookup ran against a supported, configured source and found no
+   * compatible installable asset (e.g. the repo ships no Linux binary, or
+   * only wrong-ABI splits). This is a genuine answer, NOT a failure. */
+  | { status: 'no-match' }
+  /** The platform (or source for that platform) cannot have a resolution
+   * at all: web/ios targets, or an app with no repository, F-Droid id or
+   * official resolver for the requested platform. There is nothing to
+   * retry and nothing to find. */
+  | { status: 'unsupported'; reason: string }
+  /** The lookup could not complete. `kind` separates the actionable cases;
+   * `message` is the recorded human-readable diagnostic. This is the ONLY
+   * variant where a retry/invalidation makes sense. */
+  | { status: 'failed'; kind: ResolveFailureKind; message: string }
+  /** No direct file exists, but there IS a valid official page that names
+   * one (curated page, the project's own download page, the forge releases
+   * page). `pageUrl` is the fallback the UI should offer - plainly
+   * labelled as a page, never as a ready-to-run installer. */
+  | { status: 'official-page'; pageUrl: string; why: 'no-direct-asset' | 'unsupported-direct' };

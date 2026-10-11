@@ -11,6 +11,7 @@ import {
   checkForUpdate,
   getUpdateChannel,
   setUpdateChannel,
+  planUpdateDelivery,
   OwnRelease,
   UpdateChannel,
   UpdateState,
@@ -50,8 +51,8 @@ export function useSelfUpdate(
   const handleUpdateChannelChange = (channel: UpdateChannel) => {
     setUpdateChannelState(channel);
     setUpdateChannel(channel);
-    toast.info(`Update channel: ${channel}`, {
-      description: 'Re-check for updates to apply the new channel.',
+    toast.info(t('update.channelSet').replace('{channel}', channel), {
+      description: t('update.channelSetHint'),
     });
   };
 
@@ -62,11 +63,11 @@ export function useSelfUpdate(
     setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset, expectedSha256: res.expectedSha256 } : null);
     if (announce) {
       if (res.kind === 'available') {
-        toast.info(`Fress v${res.release.version} is available.`, {
-          description: 'Use the Update button in the header. Your apps and data are kept.',
+        toast.info(t('update.availableToast').replace('{version}', res.release.version), {
+          description: t('update.availableToastHint'),
         });
       } else if (res.kind === 'latest') {
-        toast.success(`You are on the latest version (v${pkg.version}).`);
+        toast.success(t('update.latestToast').replace('{version}', pkg.version));
       } else {
         // Both the API and the atom fallback failed (offline, firewall). This
         // is normal and must not look like the app is broken: quiet note, no
@@ -105,15 +106,26 @@ export function useSelfUpdate(
 
   const handleHeaderUpdateClick = () => {
     if (!ownUpdate) return;
-    if (ownUpdate.asset) {
-      // The download is verified against the release's published
-      // SHA256SUMS.txt entry before it counts as finished.
-      void startDownload(ownUpdate.asset.url, ownUpdate.asset.name, { expectedSha256: ownUpdate.expectedSha256 || undefined });
-      toast.success('Update downloading…', {
-        description: 'When it finishes, open the file to update Fress. Your apps and data stay.',
+    // ONE decision for both update buttons (this hook and the footer's
+    // UpdateButton): download only when the asset's published SHA-256 is
+    // in hand, otherwise open the releases page instead of shipping an
+    // unverified installer. A missing checksum never becomes a successful
+    // update - the file the user already has keeps working until they
+    // choose to verify and install manually from the releases page.
+    const plan = planUpdateDelivery(ownUpdate.release, ownUpdate.asset, ownUpdate.expectedSha256);
+    if (plan.kind === 'download') {
+      void startDownload(plan.asset.url, plan.asset.name, { expectedSha256: plan.sha256 });
+      toast.success(t('update.downloading'), {
+        description: t('update.downloadingHint'),
       });
     } else {
-      void openExternal(ownUpdate.release.htmlUrl);
+      toast.info(t('update.releasesPage'), {
+        description:
+          plan.reason === 'unverifiable'
+            ? t('update.unverifiableHint')
+            : t('update.noAssetHint'),
+      });
+      void openExternal(plan.release.htmlUrl);
     }
   };
 

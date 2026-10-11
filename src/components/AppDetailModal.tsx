@@ -42,7 +42,7 @@ import {
 // what a retry does (including evicting the failed memo entry) is resolver-
 // side code behind this interface. See src/lib/resolveRetry.ts.
 import { resolverRetry } from '../lib/resolveRetry';
-import { useI18n } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
@@ -233,7 +233,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
     <div
       key={key}
       role="alert"
-      className="text-[11px] leading-snug px-3 py-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-200 dark:text-rose-300"
+      className="text-[11px] leading-snug px-3 py-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-900 dark:text-rose-300"
     >
       <p className="flex items-start gap-1.5">
         <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
@@ -383,7 +383,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                   expectedSha512: fd.expectedSha512,
                 })
               }
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 font-semibold transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Smartphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -584,7 +584,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
               <span id="detail-category-badge" className="text-xs font-medium text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2.5 py-0.5 rounded">
-                {app.category}
+                {t(CATEGORY_I18N_KEYS[app.category])}
               </span>
               <span id="detail-license-badge" className="text-xs font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] text-slate-300 px-2 py-0.5 rounded">
                 {app.license}

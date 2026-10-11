@@ -91,6 +91,22 @@ describe('useViewPreferences page-switch scroll reset', () => {
     expect(box.current!.page).toBe('catalog');
   });
 
+  it('resets scroll after a DEEP scroll (the reported bug: deep catalog scroll, then Privacy Pack)', () => {
+    mount();
+    // jsdom has no layout, so "scrolled deeply" is simulated by planting the
+    // offset the real browser would report; the hook contract under test is
+    // that a page CHANGE answers it with an instant scrollTo(top: 0) no
+    // matter how far the page was scrolled. The full-browser reproduction
+    // lives in the E2E navigation coverage.
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(4233);
+
+    act(() => {
+      box.current!.changePage('replace');
+    });
+    expect(scrollToMock).toHaveBeenCalledTimes(1);
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: 'instant' });
+  });
+
   it('does not scroll when only the view mode toggles', () => {
     mount();
 

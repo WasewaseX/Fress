@@ -708,7 +708,7 @@ fn is_publicly_routable_v6(ip: std::net::Ipv6Addr) -> bool {
         && !(s[0] == 0x2001 && s[1] == 0x0db8) // 2001:db8::/32 documentation
         && !(s[0] == 0x2002) // 2002::/16 6to4 (decommissioned RFC 7526; embedded IPv4 never evaluated)
         && !(s[0] == 0x3ffe) // 3ffe::/16 former 6bone (returned to IANA)
-        && !(s[0] == 0x3fff && (s[1] & 0xfff0) == 0) // 3fff::/20 documentation (RFC 9637)
+        && !(s[0] == 0x3fff && (s[1] & 0xf000) == 0) // 3fff::/20 documentation (RFC 9637): top 4 bits of s[1] complete the /20 prefix
         && !(s[0] == 0x5f00) // 5f00::/16 SRv6 segment-routing SIDs
 }
 

@@ -1,6 +1,40 @@
 # Changelog
 
-## Unreleased: a catalog that still points where the world moved
+## 1.0.7-beta (2026-10-12): the machine-truth release, and a polished surface
+
+Three threads land together. The app now asks the MACHINE for its architecture instead of trusting the process, so Windows-on-ARM machines stop being treated as x64 by the updater and the catalog. The self-update chain was pinned end to end: the checksum file that was CORS-dead code in every shipped release is fetched natively now, and an update that cannot be verified is not delivered through the app at all. And the interface finished its polish pass: light-theme text now meets WCAG AA by measurement (enforced by tests), every dialog speaks five languages and behaves under a keyboard, and the download engine gained adversarial test coverage with one real IPv6 policy fix.
+
+### Windows on ARM64 — the app asks the machine, not the process
+- **`host_arch` reports the native machine architecture now.** `GetNativeSystemInfo` replaces compile-time arch: the x64 build running under emulation on a Windows-on-ARM machine used to report `x86_64`, so both the self-updater and the catalog resolver treated the whole machine as x64. ARM64 hosts get ARM64 builds offered, and catalog apps prefer their native ARM builds when they ship one.
+- **Hyphenated architecture names are understood.** The classifiers only matched `x86_64`/`arm64`/`aarch64` — not LocalSend's `x86-64`/`arm-64` spelling, which even scored its installer as a 32-bit build.
+- **A `-CLI-` companion can no longer impersonate the app.** On an ARM64 host, `LocalSend-CLI-…-windows-arm-64.exe` used to win the scoring while the real app was penalized as "32-bit"; CLI assets are refused before scoring now, verified against the live LocalSend manifest.
+- **Batch-download skips stopped being a dead end.** The skip toast now carries an **Open official pages** action that opens each skipped app's official download target, in all five languages — a GitHub rate-limit blip no longer reads as a joke.
+
+### Native download engine and network policy (adversarial round)
+- **The IPv6 public-address classification is registry-complete.** One gate confines connectable destinations to native global unicast in `2000::/3`; the IANA special-purpose assignments inside it are refused explicitly (IETF protocol assignments, documentation ranges including the full `3fff::/20`, decommissioned 6to4/6bone, SRv6). A review fix corrected the `3fff::/20` mask from a /28 to the registry's /20, with boundary regression tests on both sides of every refusal.
+- **Redirect hops to private address literals are named and refused** per policy class, instead of surfacing later as an anonymous connect failure. DNS answers are trusted for reachability, never identity; every hop is re-checked.
+- **A full-disk download is final, honest, and resumable.** Mid-write and fsync failures are categorized non-retryable (the retry loop can never misread a local disk-full as a server problem), keep the `.part` for an explicit Resume, and the OS reason travels in the message. Cancel-during-verify is documented as ignored by design: the phase has exactly one terminal outcome.
+- **The staging seam makes failure testable without dependencies.** Production bytes flow through the exact same `tokio::fs` calls as before; a scripted sink drives a real mid-write ENOSPC end to end. New adversarial tests: stall-timeout on a paused clock, pre-canceled transfers, corrupted and foreign resume sidecars, cancel-vs-completion races.
+
+### Self-update trust chain
+- **Checksum verification is no longer dead code.** `github.com` sends no CORS headers, so the WebView fetch of `SHA256SUMS.txt` failed in EVERY shipped release and every self-update silently degraded to "unverified". The reads now go through a native command with the same rails as the rest of the native layer (HTTPS, GitHub-host allowlist, per-hop re-check, Fress-repo path pin, 2 MiB cap).
+- **A missing checksum fails CLOSED.** When the published SHA-256 entry cannot be established, both update buttons open the Releases page instead of delivering an unverifiable installer — one shared decision function so the header pill and the footer button cannot drift.
+- **The CSP tells the truth.** `https://github.com` left `connect-src` (it never worked from the WebView), enforced by the security validator; README and CODE_SIGNING.md no longer claim a timestamped signature the shipped installer does not carry.
+
+### Accessibility and dialogs
+- **One Escape closes one layer.** A stacked focus contract gives the topmost open surface ownership of Tab and Escape; focus restores across palette-over-dialog stacks and survives close. Background scrolling locks while any modal is open and unlocks when the last one closes.
+- **Every dialog is named and localized.** All ten modals carry `role="dialog"`, `aria-modal`, accessible names, and five-language strings — plus honest failure states in the detail dialog (loading / none / rate-limit / network, each with the right recovery) and truthful download states.
+- **The retry seam became real.** The dialog's Retry evicts exactly the failed lookup (session memo + persisted failure) for the one app|platform asked about and performs a fresh network request; successes and unrelated apps stay cached.
+
+### Catalog truth pass (audited live against real registries)
+- Renamed repos referenced canonically, dead package-manager commands corrected, six dead download pages re-pointed, source archives can no longer pose as the app, wrong-product and junk assets are hard-refused, trusted digests are bound to their exact file, and the resolver speaks a typed outcome contract. The full 75-entry × platform × arch live probe matches pre-change verdicts row for row.
+
+### Interface polish
+- **Light theme meets WCAG AA by measurement.** Every real-text token holds 4.5:1 on the surfaces it renders on (secondary text, category labels, metadata, links, muted table content, danger text), with seven automated contrast assertions in CI; `slate-500` is documented decorative-only so hierarchy survives.
+- **The green Download button is readable in both themes.** White text on `emerald-600` measured 3.77:1 — it now rides `--fr-success-strong` (emerald-700/800, 5.48/7.68:1).
+- **Two latent ink bugs fixed.** The amber trending badge and the selected Android chip used `text-slate-950`, which redefines to warm PAPER in light mode (1.95:1); both now pin proper ink per theme.
+- **The compare tab's install command no longer reads as a black stripe.** Three ad-hoc `bg-black/40` code wells became one token-driven `--fr-inset` material (compare, export, batch previews) — quiet in dark, warm in light.
+- Revalidation: no horizontal overflow at 320–1920 px in both themes, one content boundary, grid ladder 1/2/3/4 columns, cards and table aligned, and the page-switch scroll fix holds after a deep scroll.
 
 A live audit of all 75 catalog entries against the real GitHub, F-Droid, winget, Homebrew, Scoop and Flathub infrastructure found the quiet rot that time leaves behind: repositories that were renamed, package ids that moved, and package-manager commands that can no longer succeed. Every one is fixed, plus one asset-picker leak and two screen-reader gaps.
 

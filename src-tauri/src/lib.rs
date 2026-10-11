@@ -355,7 +355,7 @@ async fn fetch_self_update_text(url: String) -> Result<TextFetch, String> {
 ///
 /// File format (the `tauri signer` convention): the file is ONE base64
 /// line that decodes to a minisign key document ("untrusted comment:" line
-/// + the base64 key cryptobuf). Decode-then-parse is handled by
+/// plus the base64 key cryptobuf). Decode-then-parse is handled by
 /// [`decode_updater_public_key`]; do NOT feed the outer base64 straight to
 /// `PublicKey::from_base64` - that expects the inner cryptobuf line only.
 const UPDATER_PUBLIC_KEY_FILE_B64: &str = include_str!("../../fress-updater.key.pub");
@@ -382,6 +382,12 @@ fn decode_updater_public_key(key_file_b64: &str) -> Result<PublicKey, String> {
 /// Legacy (non-prehashed) minisign signatures are refused: Tauri's signer
 /// emits prehashed signatures, and accepting both modes would widen the
 /// verification surface for no reason.
+///
+/// In-memory shape of the streaming verifier below: the production path
+/// (`verify_self_update_signature`) always streams the artifact from disk,
+/// so this byte-slice form is exercised only by the unit tests - which is
+/// exactly where the documented accept/refuse matrix lives.
+#[cfg(test)]
 fn verify_signature_document(
     key_file_b64: &str,
     signature_b64: &str,

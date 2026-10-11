@@ -459,6 +459,10 @@ async function main(): Promise<void> {
     if (browser) await browser.close().catch(() => undefined);
     preview.kill('SIGTERM');
   }
+  // Exit explicitly: the vite preview child (spawned through npx) keeps
+  // this process alive after the report is written - the first CI run
+  // printed PERF GATE PASSED and then idled until the job timeout.
+  process.exit(process.exitCode ?? 0);
 }
 
 main().catch((err) => {

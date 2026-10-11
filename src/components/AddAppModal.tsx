@@ -544,7 +544,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           {/* Highlight */}
           <div>
             <label htmlFor="input-why" className="block text-slate-300 font-medium mb-1">
-              Highlight
+              {t('add.highlightLabel')}
             </label>
             <input
               id="input-why"

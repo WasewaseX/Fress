@@ -32,6 +32,9 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'common.platform.ios',
     // Product/technology badge: Tauri, Rust and the version are proper names.
     'tauri.badgeStack',
+    // International technical abbreviations: used as-is in Persian tech text.
+    'pp.cat.vpn',
+    'pp.cat.dns',
   ]),
   es: new Set([
     'card.portable',
@@ -61,6 +64,10 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'table.vs',
     // Product/technology badge: Tauri, Rust and the version are proper names.
     'tauri.badgeStack',
+    // International technical abbreviations: used as-is in Spanish tech text.
+    'pp.cat.twofa',
+    'pp.cat.vpn',
+    'pp.cat.dns',
   ]),
   fr: new Set([
     'card.guide',
@@ -95,6 +102,15 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'tauri.badgeStack',
     // "Description" is the same word in French.
     'add.descriptionLabel',
+    // "Photos", "Notes", "Contacts" are genuine French cognates (same
+    // spelling, same meaning) for the Privacy-Pack category names.
+    'pp.cat.photos',
+    'pp.cat.notes',
+    'pp.cat.contacts',
+    // International technical abbreviations: used as-is in French tech text.
+    'pp.cat.twofa',
+    'pp.cat.vpn',
+    'pp.cat.dns',
   ]),
   de: new Set([
     'header.downloads',
@@ -133,6 +149,15 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'tauri.badgeStack',
     // "Highlight" is the standard German loanword for a feature highlight (Duden).
     'add.highlightLabel',
+    // "Browser", "Smart Home" and "Community" are standard German loanwords
+    // for these Privacy-Pack categories (Duden); "2FA", "VPN", "DNS" are
+    // international technical abbreviations used as-is in German tech text.
+    'pp.cat.browser',
+    'pp.cat.smarthome',
+    'pp.cat.community',
+    'pp.cat.twofa',
+    'pp.cat.vpn',
+    'pp.cat.dns',
   ]),
 };
 

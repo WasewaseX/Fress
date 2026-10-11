@@ -4,6 +4,7 @@
 //
 import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
+import { useI18n } from '../lib/i18n';
 import { AppItem } from '../types';
 import { 
   Download, 
@@ -30,10 +31,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   apps
 }) => {
   const [format, setFormat] = useState<ExportFormat>('markdown');
-  const [copied, setCopied] = useState(false);
+  // Three states, not a boolean: a FAILED copy must be visible and
+  // actionable ("Copy failed" + the button stays usable), not silently
+  // swallowed like the old `catch { /* ignore */ }`.
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'failed'>('idle');
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { t } = useI18n();
 
   const panelRef = useRef<HTMLDivElement>(null);
   keepFocusInside(panelRef, isOpen);
+  // Reopening starts from a clean slate (never show a stale "Copied"), and
+  // the reset timer never fires after the dialog is gone.
+  React.useEffect(() => {
+    if (isOpen) setCopyState('idle');
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, [isOpen]);
   if (!isOpen) return null;
 
   const generateMarkdown = () => {
@@ -112,10 +126,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopyState('ok');
     } catch {
-      // ignore
+      // Actionable feedback: the clipboard can refuse (permission denied,
+      // insecure context). The user must see that the copy did NOT happen,
+      // and the button must stay usable for a retry (or the Download
+      // button next to it becomes the documented alternative path).
+      setCopyState('failed');
+    } finally {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopyState('idle'), 2000);
     }
   };
 
@@ -168,10 +188,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div>
               <h2 id="export-modal-title" className="text-base font-bold text-slate-100 tracking-tight">
-                Export Catalog Data
+                {t('export.title')}
               </h2>
               <p className="text-xs text-slate-400">
-                Generate an awesome-list README.md, CSV spreadsheet, or complete JSON export.
+                {t('export.subtitle')}
               </p>
             </div>
           </div>
@@ -179,7 +199,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-100 rounded-md hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]"
-            aria-label="Close dialog"
+            aria-label={t('common.closeDialog')}
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -197,7 +217,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             }`}
           >
             <FileCode className="w-3.5 h-3.5" />
-            <span>Awesome README.md</span>
+            <span>{t('export.formatReadme')}</span>
           </button>
           <button
             type="button"
@@ -209,7 +229,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             }`}
           >
             <Table className="w-3.5 h-3.5" />
-            <span>Spreadsheet CSV</span>
+            <span>{t('export.formatCsv')}</span>
           </button>
           <button
             type="button"
@@ -221,7 +241,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Full JSON</span>
+            <span>{t('export.formatJson')}</span>
           </button>
         </div>
 
@@ -235,7 +255,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         {/* Footer */}
         <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between">
           <span className="text-xs text-slate-400 font-mono">
-            {apps.length} records ready for export
+            {t('export.readyCount').replace('{n}', String(apps.length))}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -243,15 +263,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               onClick={handleCopy}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-950/[0.05] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.1] text-slate-100 transition-colors"
             >
-              {copied ? (
+              {copyState === 'ok' ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Copied!</span>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+                  <span className="text-emerald-400">{t('common.copied')}</span>
+                </>
+              ) : copyState === 'failed' ? (
+                <>
+                  <X className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  <span className="text-amber-400">{t('common.copyFailed')}</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5 text-slate-300" />
-                  <span>Copy to Clipboard</span>
+                  <Copy className="w-3.5 h-3.5 text-slate-300" aria-hidden="true" />
+                  <span>{t('export.copyClipboard')}</span>
                 </>
               )}
             </button>
@@ -260,8 +285,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               onClick={handleDownload}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white border border-sky-400 transition-colors"
             >
-              <Download className="w-3.5 h-3.5 text-slate-100" />
-              <span>Download {format === 'markdown' ? 'README.md' : format.toUpperCase()}</span>
+              <Download className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
+              <span>
+                {t('export.download').replace(
+                  '{fmt}',
+                  format === 'markdown' ? 'README.md' : format.toUpperCase()
+                )}
+              </span>
             </button>
           </div>
         </div>

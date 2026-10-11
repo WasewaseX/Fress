@@ -650,7 +650,7 @@ export const Header: React.FC<HeaderProps> = ({
                         <div className="px-3 pb-1.5 flex items-center gap-1.5" role="group" aria-label={t('header.theme')}>
                           <button
                             type="button"
-                            onClick={() => setTheme('light')}
+                            onClick={() => { setTheme('light'); setShowMoreMenu(false); }}
                             aria-pressed={theme === 'light'}
                             className={theme === 'light' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                           >
@@ -659,7 +659,7 @@ export const Header: React.FC<HeaderProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => setTheme('dark')}
+                            onClick={() => { setTheme('dark'); setShowMoreMenu(false); }}
                             aria-pressed={theme === 'dark'}
                             className={theme === 'dark' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                           >

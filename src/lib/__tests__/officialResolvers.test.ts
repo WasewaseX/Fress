@@ -10,11 +10,14 @@ import {
   versionFromName,
   parseSignalYml,
   pickProtonStable,
+  pickOfficial,
+  official,
   parseWingetInstallers,
   base64ToHex,
   TOR_MANIFESTS,
   officialSupported,
 } from '../officialResolvers';
+import { peekDigestDiagnostics } from '../release/digests';
 import { INITIAL_APPS } from '../../data/appsData';
 
 describe('parseVersion', () => {
@@ -156,6 +159,92 @@ describe('checksum plumbing', () => {
     });
     const d = pickProtonStable(json);
     expect(d?.files[0].sha512).toBe('ab'.repeat(64));
+  });
+});
+
+describe('pickOfficial determinism and digest conflict handling', () => {
+  const digest64 = 'a'.repeat(64);
+  const digest64b = 'b'.repeat(64);
+
+  it('equal-score manifest entries pick the same file in every row order', () => {
+    // "install" and "setup" both read as installer tokens: a genuine tie.
+    const a = { name: 'App-1.0-install.exe', url: 'https://v.example/App-1.0-install.exe', size: 10 };
+    const b = { name: 'App-1.0-setup.exe', url: 'https://v.example/App-1.0-setup.exe', size: 10 };
+    for (const order of [[a, b], [b, a]]) {
+      expect(pickOfficial(order, 'windows', 'x86_64')?.name).toBe('App-1.0-install.exe');
+    }
+  });
+
+  it('conflicting duplicate digest rows fail closed: the pick stays but the digest does not survive', () => {
+    // The same filename twice with DIFFERENT digests: at most one can be
+    // true, and trusting either would make verification depend on manifest
+    // row order. The file itself still resolves (it is installable), but it
+    // must arrive UNVERIFIED - never carrying one of the rival digests.
+    const rows = [
+      { name: 'App-1.0-setup.exe', url: 'https://v.example/a.exe', size: 10, sha256: digest64 },
+      { name: 'App-1.0-setup.exe', url: 'https://mirror.example/a.exe', size: 10, sha256: digest64b },
+    ];
+    for (const order of [rows, [...rows].reverse()]) {
+      const pick = pickOfficial(order, 'windows', 'x86_64');
+      expect(pick?.name).toBe('App-1.0-setup.exe');
+      expect(pick?.sha256).toBeUndefined();
+      expect(pick?.sha512).toBeUndefined();
+    }
+    // The refusal is diagnosed, not silent.
+    const reasons = peekDigestDiagnostics().map((d) => d.reason);
+    expect(reasons.some((r) => r.includes('conflicting duplicate digest entries'))).toBe(true);
+  });
+
+  it('byte-identical duplicate rows are duplicates, not conflicts: the digest survives', () => {
+    const rows = [
+      { name: 'App-1.0-setup.exe', url: 'https://v.example/a.exe', size: 10, sha256: digest64 },
+      { name: 'App-1.0-setup.exe', url: 'https://mirror.example/a.exe', size: 10, sha256: digest64 },
+    ];
+    const pick = pickOfficial(rows, 'windows', 'x86_64');
+    expect(pick?.sha256).toBe(digest64);
+  });
+
+  it('a conflicting name does not poison other entries: their digests stay bound', () => {
+    const good = 'c'.repeat(64);
+    const rows = [
+      { name: 'App-1.0-good.exe', url: 'https://v.example/good.exe', size: 10, sha256: good },
+      { name: 'App-1.0-bad.exe', url: 'https://v.example/bad.exe', size: 10, sha256: digest64 },
+      { name: 'App-1.0-bad.exe', url: 'https://m.example/bad.exe', size: 10, sha256: digest64b },
+    ];
+    const pick = pickOfficial(rows, 'windows', 'x86_64');
+    // good > bad lexically? No: bad < good, but both are installers with
+    // the same score... the winner between the two clean installers is the
+    // lexicographic one; the important assertion is digest correctness.
+    expect(pick?.name).toBe('App-1.0-bad.exe');
+    expect(pick?.sha256).toBeUndefined(); // conflicting name -> unverified
+    expect(pickOfficial([rows[0]], 'windows', 'x86_64')?.sha256).toBe(good);
+  });
+
+  it('the official() constructor normalizes casing and refuses malformed digests', () => {
+    // Uppercase hex of the right length is a VALID digest in a different
+    // notation: normalized to lowercase and attached.
+    const upper = official(
+      { name: 'App-1.0-setup.exe', url: 'https://v.example/a.exe', size: 10, sha256: 'AB'.repeat(32) },
+      '1.0',
+      'https://v.example/download'
+    );
+    expect(upper.expectedSha256).toBe('ab'.repeat(32));
+    // Malformed: the download resolves but stays UNVERIFIED, diagnosed.
+    const junk = official(
+      { name: 'App-1.0-setup.exe', url: 'https://v.example/a.exe', size: 10, sha256: 'definitely-not-a-digest' },
+      '1.0',
+      'https://v.example/download'
+    );
+    expect(junk.expectedSha256).toBeUndefined();
+    expect(peekDigestDiagnostics().some((d) => d.source === 'App-1.0-setup.exe')).toBe(true);
+    // Absent stays absent: no digest in, no digest out, no magic.
+    const absent = official(
+      { name: 'App-1.0-setup.exe', url: 'https://v.example/a.exe', size: 10 },
+      '1.0',
+      'https://v.example/download'
+    );
+    expect(absent.expectedSha256).toBeUndefined();
+    expect(absent.expectedSha512).toBeUndefined();
   });
 });
 

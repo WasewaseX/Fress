@@ -51,7 +51,12 @@ export interface AppItem {
   offlineReady?: boolean;
   /** Date (YYYY-MM-DD) a human last re-checked this entry's links, releases
    * and metadata. Optional until the entry is next reviewed; the detail
-   * modal shows it when present so freshness is never pretended. */
+   * modal shows it when present so freshness is never pretended.
+   * Timezone policy: the Asia/Tehran (project) local calendar date on
+   * which the live verification ran - audit scripts log the UTC instant
+   * alongside, so 2026-10-11T19:15Z stamps as 2026-10-12. The catalog
+   * validator rejects future dates relative to that zone; a stamp moves
+   * only when a real verification re-runs. */
   lastVerifiedAt?: string;
   /** Per-platform asset-name regexes (case-insensitive) for projects whose
    * release files follow no common naming scheme. When one matches, it

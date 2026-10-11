@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { AppItem, Platform } from '../types';
 import { isTauri } from './downloads';
-import { attachTrustedDigests } from './release/digests';
+import { attachTrustedDigests, failClosedConflictingDigests } from './release/digests';
 import {
   ReleaseAsset,
   ResolvedDownload,
@@ -198,19 +198,36 @@ function toAssets(items: { name: string; url: string; size?: number }[]): Releas
  * archive, the right arch wins) but NEVER flags the result weak: the vendor
  * manifest is the naming authority. Architecture incompatibility is still a
  * hard refusal, shared with the GitHub path.
+ *
+ * Exported for the resolver determinism tests: the ordering and digest
+ * conflict rules here are contract, not implementation detail.
  */
-function pickOfficial(
+export function pickOfficial(
   items: { name: string; url: string; size?: number; sha256?: string; sha512?: string }[],
   platform: Platform,
   arch: string | undefined
 ): { name: string; url: string; size: number; sha256?: string; sha512?: string } | null {
+  // Fail closed BEFORE ranking: the same filename appearing twice with
+  // different digests must never resolve to a trust state that depends on
+  // manifest row order. Conflicting rows keep competing for the pick (the
+  // file itself is fine) but leave the race UNVERIFIED, with a diagnostic.
+  const safe = failClosedConflictingDigests(items, 'official-manifest');
   let best: { name: string; url: string; size: number; sha256?: string; sha512?: string } | null = null;
   let bestScore = -Infinity;
-  for (const item of items) {
+  for (const item of safe) {
     if (!assetCompatibleWithDevice(item.name, platform, arch)) continue;
     const s = scoreAsset(item.name, platform, arch);
     if (s === -1) continue;
-    if (s > bestScore) {
+    // Strictly-greater alone would make equal-score candidates
+    // order-dependent (the API returning rows in a different order could
+    // flip the pick). Ties resolve lexicographically by name, then URL,
+    // so the same candidate set always yields the SAME winner.
+    if (
+      s > bestScore ||
+      (s === bestScore &&
+        best &&
+        (item.name < best.name || (item.name === best.name && item.url < best.url)))
+    ) {
       bestScore = s;
       best = { name: item.name, url: item.url, size: item.size ?? 0, sha256: item.sha256, sha512: item.sha512 };
     }
@@ -389,7 +406,13 @@ const resolvers: Record<string, Partial<Record<Platform, OfficialResolver>>> = {
 /* Individual vendor resolvers                                         */
 /* ------------------------------------------------------------------ */
 
-function official(
+/**
+ * The one constructor every vendor resolver's final download goes through,
+ * so every vendor digest passes attachTrustedDigests exactly once.
+ * Exported for the digest-normalization tests: what may enter a download
+ * as "trusted" is contract.
+ */
+export function official(
   picked: { name: string; url: string; size: number; sha256?: string; sha512?: string },
   version: string,
   page: string
@@ -602,15 +625,20 @@ export function parseSignalYml(yaml: string): { version: string; files: { url: s
 async function resolveSignalAndroid(_app: AppItem): Promise<ResolvedDownload | null> {
   const d = await fetchJson<{ url?: string; versionName?: string; sha256sum?: string }>('https://updates.signal.org/android/latest.json');
   if (!d.url) return null;
-  return {
-    source: 'official',
+  const download = {
+    source: 'official' as const,
     url: d.url,
     filename: basename(d.url),
     size: 0,
     version: d.versionName ?? '',
     releasePageUrl: 'https://signal.org/android/apk/',
-    expectedSha256: d.sha256sum,
   };
+  // The one digest entry point, like every other resolver path: a
+  // malformed sha256sum from latest.json must be DISCARDED with a
+  // diagnostic (download stays unverified), never flow raw into the
+  // engine looking trusted. This used to assign expectedSha256 directly,
+  // bypassing normalization entirely.
+  return attachTrustedDigests(download, { sha256: d.sha256sum }, download.filename);
 }
 
 /** Tor's per-platform update manifests name the exact current bundle.

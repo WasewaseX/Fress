@@ -701,6 +701,7 @@ fn every_strict_policy_refuses_private_redirect_literals_consistently() {
         UrlPolicy::api_github(),
         UrlPolicy::api_fdroid(),
         UrlPolicy::resolver_manifest(),
+        UrlPolicy::self_update_feed(),
         UrlPolicy::executable_download(),
     ] {
         assert!(
@@ -1063,5 +1064,157 @@ async fn address_literal_requests_never_consult_the_resolver() {
         calls.load(Ordering::SeqCst),
         0,
         "the DNS resolver must never be consulted for an address literal"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Self-update feed policy (github.com + release-asset hosts only)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn self_update_feed_admission_is_pinned_to_the_github_asset_hosts() {
+    // The policy-level allowlist for the native self-update reads (the
+    // releases.atom fallback and the SHA256SUMS.txt document). The
+    // command-layer repo-path pin lives in lib.rs and is tested there;
+    // THIS test pins which HOSTS the policy admits at all.
+    let policy = UrlPolicy::self_update_feed();
+    assert_eq!(policy.label, "self-update-feed");
+    for url in [
+        "https://github.com/WasewaseX/Fress/releases.atom",
+        "https://github.com/WasewaseX/Fress/releases/download/v1.0.7-beta/SHA256SUMS.txt",
+        "https://release-assets.githubusercontent.com/github-production-release-asset/2e0c64",
+        "https://objects.githubusercontent.com/some/legacy/asset/path",
+    ] {
+        assert!(policy.validate(url).is_ok(), "must admit {url}");
+    }
+    for url in [
+        // Look-alikes and neighbors of the two allowed hosts.
+        "https://evil.example/WasewaseX/Fress/releases.atom",
+        "https://github.com.evil.example/WasewaseX/Fress/releases.atom",
+        "https://api.github.com/repos/WasewaseX/Fress/releases",
+        "https://raw.githubusercontent.com/WasewaseX/Fress/main/SHA256SUMS.txt",
+        "https://gist.githubusercontent.com/someone/abc/raw/x",
+        // Cleartext, credentials, private literals: refused like everywhere.
+        "http://github.com/WasewaseX/Fress/releases.atom",
+        "https://user:pw@github.com/WasewaseX/Fress/releases.atom",
+        "https://127.0.0.1/WasewaseX/Fress/releases.atom",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://[::1]/x",
+    ] {
+        assert!(policy.validate(url).is_err(), "must refuse {url}");
+    }
+}
+
+#[test]
+fn self_update_feed_redirects_stay_on_the_github_asset_hosts() {
+    // Every hop re-satisfies the two-host allowlist; a hop to a private
+    // literal is refused BY NAME before any connection; the classic
+    // downgrade and credential tricks are refused like in every other
+    // strict class.
+    let policy = UrlPolicy::self_update_feed();
+    let rules = policy.redirects;
+    let origin: Url = "https://github.com/WasewaseX/Fress/releases.atom"
+        .parse()
+        .unwrap();
+
+    // Legitimate hop: github.com -> release-assets.githubusercontent.com.
+    assert!(evaluate_redirect_hop(
+        &rules,
+        std::slice::from_ref(&origin),
+        &"https://release-assets.githubusercontent.com/github-production-release-asset/x"
+            .parse()
+            .unwrap()
+    )
+    .is_ok());
+
+    // Off the allowlist: refused as LeftAllowlist.
+    for next in [
+        "https://evil.example/steer",
+        "https://raw.githubusercontent.com/WasewaseX/Fress/main/SHA256SUMS.txt",
+        "https://api.github.com/repos/WasewaseX/Fress/releases",
+    ] {
+        assert!(
+            matches!(
+                evaluate_redirect_hop(
+                    &rules,
+                    std::slice::from_ref(&origin),
+                    &next.parse().unwrap()
+                ),
+                Err(RedirectRejection::LeftAllowlist { .. })
+            ),
+            "{next} must be refused as an off-allowlist hop"
+        );
+    }
+
+    // Private literal hops: the early, named refusal.
+    for next in [
+        "https://169.254.169.254/latest/meta-data/",
+        "https://10.1.2.3/x",
+        "https://[::1]/x",
+    ] {
+        assert!(
+            matches!(
+                evaluate_redirect_hop(
+                    &rules,
+                    std::slice::from_ref(&origin),
+                    &next.parse().unwrap()
+                ),
+                Err(RedirectRejection::PrivateDestination { .. })
+            ),
+            "{next} must be refused as a private literal hop"
+        );
+    }
+
+    // Downgrade and credentials.
+    assert!(matches!(
+        evaluate_redirect_hop(
+            &rules,
+            std::slice::from_ref(&origin),
+            &"http://github.com/WasewaseX/Fress/SHA256SUMS.txt"
+                .parse()
+                .unwrap()
+        ),
+        Err(RedirectRejection::InsecureScheme { .. })
+    ));
+    assert!(matches!(
+        evaluate_redirect_hop(
+            &rules,
+            std::slice::from_ref(&origin),
+            &"https://user:pw@github.com/x".parse().unwrap()
+        ),
+        Err(RedirectRejection::EmbeddedCredentials)
+    ));
+
+    // The loop guard applies to this class too.
+    assert!(matches!(
+        evaluate_redirect_hop(&rules, std::slice::from_ref(&origin), &origin),
+        Err(RedirectRejection::Loop)
+    ));
+}
+
+#[tokio::test]
+async fn the_self_update_client_refuses_an_off_allowlist_redirect_before_any_connection() {
+    // Client-level proof that the refusal happens at the redirect policy:
+    // the 302 points at a non-allowlisted host and reqwest must turn the
+    // request into a redirect-kind error without dialing that host.
+    let port = spawn_one_shot_http(
+        b"HTTP/1.1 302 Found\r\n\
+          Location: https://evil.example/steer\r\n\
+          Content-Length: 0\r\n\
+          Connection: close\r\n\r\n",
+    );
+    let client = UrlPolicy::self_update_feed()
+        .http_client()
+        .expect("policy client builds");
+    let err = client
+        .get(format!("http://127.0.0.1:{port}/feed"))
+        .send()
+        .await
+        .expect_err("a redirect off the self-update hosts must be refused");
+    assert!(err.is_redirect(), "got: {err}");
+    let text = error_chain_text(&err);
+    assert!(
+        text.contains("not on the"),
+        "the allowlist reason must surface: {text}"
     );
 }

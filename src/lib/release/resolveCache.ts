@@ -4,7 +4,8 @@
 //
 import { AppItem, Platform } from '../../types';
 import { effectiveRepo } from './repo';
-import { ResolvedDownload } from './types';
+import { ResolveFailureKind, ResolvedDownload } from './types';
+import { revalidatePersistedDigests } from './digests';
 
 /**
  * Resolver caches and error bookkeeping.
@@ -43,6 +44,18 @@ const FAIL_TTL_MS = 30_000;
  */
 const resolveErrors = new Map<string, string>();
 
+/**
+ * The same failures, typed. resolveErrors carries the human message for the
+ * existing UI; resolveFailureKinds additionally records WHAT KIND of
+ * failure it was so the typed outcome contract (ResolveOutcome in
+ * release/types.ts) can tell a rate limit from a network blip from an API
+ * error instead of forcing the UI to regex the message.
+ *
+ * A failure kind is always paired with a message in resolveErrors under
+ * the same key; only recordResolveFailure writes here.
+ */
+const resolveFailureKinds = new Map<string, ResolveFailureKind>();
+
 /** The error-map key for a repo|platform pair; kept in one place so the
  * writer and peekResolveError can never drift apart again. */
 export function resolveErrorKey(repo: string, platform: Platform): string {
@@ -56,16 +69,95 @@ export function peekResolveError(app: AppItem, platform: Platform): string | nul
   return resolveErrors.get(resolveErrorKey(repo, platform)) ?? null;
 }
 
-/** Record an actionable failure for a repo|platform pair. Kept next to the
- * map and its key so the contract stays in one module. */
+/** The typed failure for a repo|platform lookup, or null when the last
+ * null result was a genuine "no compatible asset" (no error recorded).
+ * F-Droid lookups record under their own namespace (no repo is involved);
+ * the repo record wins when both exist - it is the quota-limited source. */
+export function peekResolveFailure(app: AppItem, platform: Platform): { kind: ResolveFailureKind; message: string } | null {
+  const repo = effectiveRepo(app, platform);
+  if (repo) {
+    const key = resolveErrorKey(repo, platform);
+    const kind = resolveFailureKinds.get(key);
+    const message = resolveErrors.get(key);
+    if (kind && message !== undefined) return { kind, message };
+  }
+  if (app.fdroidId) {
+    const key = fdroidFailureKey(app.fdroidId);
+    const kind = resolveFailureKinds.get(key);
+    const message = resolveErrors.get(key);
+    if (kind && message !== undefined) return { kind, message };
+  }
+  return null;
+}
+
+/** Record an actionable failure for a repo|platform pair (message form).
+ * Kept next to the map and its key so the contract stays in one module. */
 export function recordResolveError(repo: string, platform: Platform, message: string): void {
-  resolveErrors.set(resolveErrorKey(repo, platform), message);
+  recordResolveFailure(repo, platform, 'api', message);
+}
+
+/** Record an actionable failure together with its KIND. This is the writer
+ * every resolver path should use; recordResolveError delegates here with
+ * kind 'api' for backward compatibility. */
+export function recordResolveFailure(
+  repo: string,
+  platform: Platform,
+  kind: ResolveFailureKind,
+  message: string
+): void {
+  const key = resolveErrorKey(repo, platform);
+  resolveErrors.set(key, message);
+  resolveFailureKinds.set(key, kind);
+}
+
+/** Clear the failure record for a repo|platform pair. Each NEW lookup run
+ * clears the previous run's record before it starts, so the record always
+ * describes the LATEST completed attempt - a run that ends in a genuine
+ * no-match must not be misreported as failed because an earlier run hit a
+ * rate limit. */
+export function clearResolveFailure(repo: string, platform: Platform): void {
+  const key = resolveErrorKey(repo, platform);
+  resolveErrors.delete(key);
+  resolveFailureKinds.delete(key);
+}
+
+/** The failure-record namespace for F-Droid package lookups (which have no
+ * repo and no per-IP quota, but still fail: unreachable index, HTTP 5xx). */
+export function fdroidFailureKey(pkgId: string): string {
+  return `fdroid|${pkgId.trim()}`;
+}
+
+export function recordFdroidFailure(pkgId: string, kind: ResolveFailureKind, message: string): void {
+  const key = fdroidFailureKey(pkgId);
+  resolveErrors.set(key, message);
+  resolveFailureKinds.set(key, kind);
+}
+
+export function clearFdroidFailure(pkgId: string): void {
+  const key = fdroidFailureKey(pkgId);
+  resolveErrors.delete(key);
+  resolveFailureKinds.delete(key);
 }
 
 /** The session memo key for a GitHub resolve; also the namespace under
- * which persistent entries are partitioned. */
+ * which persistent entries are partitioned.
+ *
+ * The key carries EVERY app configuration that changes what a lookup
+ * fetches or how a result is picked:
+ *   repo | platform | tag-stream pattern | prerelease vouch | asset
+ *   naming overrides. Leaving any of these out would let an edited
+ *   catalog entry (or a second app sharing the repo) read a result that
+ *   was selected under different rules - an override change MUST NOT
+ *   reuse an old cached pick. The persistent store appends the host arch
+ *   on top (see resolve.ts). */
 export function ghCacheKey(app: AppItem, platform: Platform, repo: string): string {
-  return `${repo}|${platform}|${app.tagPatterns?.[platform] ?? ''}|${app.includeFlaggedReleases ? 'flagged' : ''}`;
+  return [
+    repo,
+    platform,
+    app.tagPatterns?.[platform] ?? '',
+    app.includeFlaggedReleases ? 'flagged' : '',
+    app.assetPatterns?.[platform] ?? '',
+  ].join('|');
 }
 
 export { ghCache, fdCache, FAIL_TTL_MS };
@@ -99,7 +191,11 @@ export function loadPersisted(key: string): ResolvedDownload | null | undefined 
     if (!e) return undefined;
     const ttl = e.url === null ? FAIL_PERSIST_TTL_MS : SUCCESS_TTL_MS;
     if (Date.now() - e.t > ttl) return undefined;
-    return e.hit;
+    // Digests that were persisted by an older build (or hand-edited
+    // storage) must not re-enter the engine looking trusted: malformed
+    // values are dropped here, with a diagnostic (revalidatePersisted-
+    // Digests). A hit without digests is returned unchanged.
+    return revalidatePersistedDigests(e.hit, key) as ResolvedDownload | null;
   } catch {
     return undefined;
   }
@@ -139,4 +235,69 @@ export function cacheSet(
       }, FAIL_TTL_MS);
     }
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Explicit retry support (typed retry/invalidation contract)          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Evict session-memo entries under `prefix` whose promise settles to null
+ * (a failed lookup), so an explicit user-facing Retry genuinely re-fetches
+ * instead of instantly reading the cached failure back. Pending entries are
+ * awaited and evicted when they fail; succeeded entries are never touched.
+ *
+ * Returns once every matching failed entry is removed. Safe to call when
+ * nothing matches: it is a no-op then. This is the session half of the
+ * retry contract; purgePersistedFailures is the persistent half. Callers
+ * go through retryGitHubResolve / retryFdroidResolve / retryOfficialResolve
+ * (release/resolve.ts, officialResolvers.ts) rather than open-coding this.
+ */
+export async function evictFailedLookups(
+  cache: Map<string, Promise<ResolvedDownload | null>>,
+  prefix: string
+): Promise<void> {
+  const doomed: string[] = [];
+  for (const [key, p] of Array.from(cache.entries())) {
+    if (!key.startsWith(prefix)) continue;
+    await p.then(
+      (r) => {
+        if (r === null) doomed.push(key);
+      },
+      () => {
+        // A rejected memo entry is a failure by definition.
+        doomed.push(key);
+      }
+    );
+  }
+  for (const key of doomed) {
+    // Another caller may have replaced the entry meanwhile; only drop what
+    // is still the promise we inspected.
+    cache.delete(key);
+  }
+}
+
+/**
+ * Remove persisted FAILURE entries (url === null) under `prefix` from the
+ * localStorage store. Without this, a Retry after a failed lookup would
+ * re-read the 5-minute persisted failure and return null without any
+ * network request, making the button a lie. Successes are never purged.
+ */
+export function purgePersistedFailures(prefix: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return;
+    const store = JSON.parse(raw) as Record<string, CacheEntry>;
+    let changed = false;
+    for (const key of Object.keys(store)) {
+      if (key.startsWith(prefix) && store[key].url === null) {
+        delete store[key];
+        changed = true;
+      }
+    }
+    if (changed) localStorage.setItem(CACHE_KEY, JSON.stringify(store));
+  } catch {
+    // Blocked or full storage: the session eviction above still applies.
+  }
 }

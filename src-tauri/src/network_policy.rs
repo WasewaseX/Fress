@@ -40,8 +40,62 @@
 //! [`UrlPolicy::api_fdroid`], [`UrlPolicy::resolver_manifest`] and
 //! [`UrlPolicy::executable_download`] for the reasoning behind each.
 //!
-//! Known residual limitations are documented at the bottom of this file and
-//! in the PR description; none of them are silently ignored.
+//! # Ports
+//!
+//! The scheme is the security boundary, not the port. `https` on ANY port
+//! is admissible (vendors do serve downloads from non-default ports, e.g.
+//! `https://mirror.example:8443/app.exe`), and `http` on ANY port -
+//! including 443 - is refused. TLS semantics do not depend on the port
+//! number, the connect-time public-address filter applies to every port
+//! equally, and the resolver/API allowlists match by HOST, independent of
+//! port. A future port restriction would have to be a conscious policy
+//! change; tests pin the current decision.
+//!
+//! # Browser links are not a native request path
+//!
+//! `UrlPolicy::external_link` exists to give catalog links one shared
+//! vocabulary; it never fetches. Opening a project/release link goes
+//! through the Tauri opener plugin straight from the webview (scoped to
+//! `https://**` in the capability manifest, owned by the bridge/packaging
+//! owner), which hands the URL to the USER'S BROWSER - no native HTTP
+//! client is built for it. The permissive `external_link` rules (private
+//! literals allowed, any HTTPS host) therefore cannot become a native
+//! fetch path that bypasses the strict policies: the only HTTP clients
+//! that exist are the ones `http_client()` builds from the strict
+//! policies, and every outbound call site in `lib.rs` constructs its
+//! client through one of them.
+//!
+//! # Address literals skip DNS - by design
+//!
+//! reqwest/hyper resolve only hostnames; a URL whose host is an address
+//! literal never consults [`PublicOnlyResolver`] (pinned by a test). The
+//! literal therefore cannot lean on the connect-time filter - which is
+//! why [`UrlPolicy::validate`] and every redirect hop
+//! ([`evaluate_redirect_hop`]) parse and classify literals themselves.
+//! Both halves of that split are load-bearing and tested.
+//!
+//! # Residual limitations (documented, not ignored)
+//!
+//! - **DNS answers are trusted for reachability, not for identity.** The
+//!   public-address filter refuses answers that point into private space,
+//!   but a resolver (or attacker on the resolver path) answering with a
+//!   DIFFERENT public address cannot be detected at this layer; identity
+//!   rests on TLS certificate validation and, for the API and manifest
+//!   classes, on the exact host allowlists.
+//! - **The download class is destination-host-agnostic by design** (see
+//!   [`UrlPolicy::executable_download`]): any public HTTPS host may serve
+//!   an installer. Trust in the FILE comes from publisher checksums and
+//!   the transactional engine, not from the host name.
+//! - **Address literals never reach the resolver** (see above), so their
+//!   private-space guard lives entirely in admission and the per-hop
+//!   check - both tested; a future reqwest that routed literals through
+//!   the resolver would be caught by the regression test, not silently
+//!   change behavior.
+//! - **Redirect hops see literals only.** A hop to a HOSTNAME that
+//!   resolves into private space passes the hop decision and is refused
+//!   at connect time by [`PublicOnlyResolver`] instead - the refusal
+//!   message is then a connect failure rather than the early, named
+//!   redirect refusal. No path exists that connects to such a target.
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
@@ -219,6 +273,13 @@ enum RedirectHostRule {
 struct RedirectRules {
     max_hops: usize,
     host_rule: RedirectHostRule,
+    /// Refuse hops whose destination is a private/loopback/link-local
+    /// address LITERAL (IPv4 or IPv6). Hostnames that merely resolve into
+    /// private space are caught at connect time by [`PublicOnlyResolver`]
+    /// regardless - this admission check exists so a redirect to e.g.
+    /// `https://169.254.169.254/` fails with a precise reason at the hop
+    /// decision instead of surfacing as a DNS/connect failure afterwards.
+    block_private_literals: bool,
 }
 
 /// The request classes Fress's native layer makes, each with its own rules.
@@ -260,6 +321,7 @@ impl UrlPolicy {
             redirects: RedirectRules {
                 max_hops: 5,
                 host_rule: RedirectHostRule::AnyHttps,
+                block_private_literals: false,
             },
             block_private_addrs: false,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -279,6 +341,7 @@ impl UrlPolicy {
             redirects: RedirectRules {
                 max_hops: 3,
                 host_rule: RedirectHostRule::PinToOrigin,
+                block_private_literals: true,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -295,6 +358,7 @@ impl UrlPolicy {
             redirects: RedirectRules {
                 max_hops: 3,
                 host_rule: RedirectHostRule::PinToOrigin,
+                block_private_literals: true,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -313,6 +377,7 @@ impl UrlPolicy {
             redirects: RedirectRules {
                 max_hops: 5,
                 host_rule: RedirectHostRule::Allowlist(RESOLVER_ALLOWED_HOSTS),
+                block_private_literals: true,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -335,6 +400,7 @@ impl UrlPolicy {
             redirects: RedirectRules {
                 max_hops: 8,
                 host_rule: RedirectHostRule::AnyHttps,
+                block_private_literals: true,
             },
             block_private_addrs: true,
             request_timeout: None,
@@ -425,11 +491,19 @@ impl UrlPolicy {
     /// agent, connect timeout, redirect policy, and the public-address-only
     /// DNS resolver that constrains what the socket actually connects to.
     pub fn http_client(&self) -> Result<reqwest::Client, String> {
+        self.http_client_with_resolver(PublicOnlyResolver::default())
+    }
+
+    /// Same client with an explicit resolver (test injection point).
+    fn http_client_with_resolver(
+        &self,
+        resolver: PublicOnlyResolver,
+    ) -> Result<reqwest::Client, String> {
         let mut builder = reqwest::Client::builder()
             .user_agent(user_agent())
             .connect_timeout(CONNECT_TIMEOUT)
             .redirect(self.redirect_policy())
-            .dns_resolver(Arc::new(PublicOnlyResolver));
+            .dns_resolver(Arc::new(resolver));
         if let Some(timeout) = self.request_timeout {
             builder = builder.timeout(timeout);
         }
@@ -475,6 +549,28 @@ fn evaluate_redirect_hop(
     // of masking it as "too many redirects" after burning the budget.
     if previous.iter().any(|visited| visited == next) {
         return Err(RedirectRejection::Loop);
+    }
+
+    // Private/local address literals are refused as redirect destinations
+    // for the policies that refuse them at admission. The connect-time
+    // resolver would refuse the CONNECTION anyway (the literal parses to
+    // exactly one address), so this is early-and-precise rather than the
+    // only line of defense - but a hop to e.g. the cloud metadata address
+    // deserves its own named reason.
+    if rules.block_private_literals {
+        if let Some(host) = next.host_str() {
+            if let Ok(ip) = host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<IpAddr>()
+            {
+                if !is_publicly_routable(ip) {
+                    return Err(RedirectRejection::PrivateDestination {
+                        host: host.to_string(),
+                    });
+                }
+            }
+        }
     }
 
     // Destination-host rule for this request class.
@@ -525,6 +621,7 @@ enum RedirectRejection {
     Loop,
     HostMismatch { host: String },
     LeftAllowlist { host: String },
+    PrivateDestination { host: String },
 }
 
 impl RedirectRejection {
@@ -545,6 +642,9 @@ impl RedirectRejection {
             }
             RedirectRejection::LeftAllowlist { host } => {
                 format!("Host {host} is not on the resolver allowlist")
+            }
+            RedirectRejection::PrivateDestination { host } => {
+                format!("Redirect to a private or local address ({host}) is not allowed")
             }
         }
     }
@@ -591,24 +691,25 @@ fn is_publicly_routable_v4(ip: std::net::Ipv4Addr) -> bool {
 
 fn is_publicly_routable_v6(ip: std::net::Ipv6Addr) -> bool {
     let s = ip.segments();
-    // :: (unspecified), ::1 (loopback)
-    !(ip.is_unspecified() || ip.is_loopback())
-        // ::/96 (IPv4-compatible, deprecated) and ::ffff:0:0/96 (IPv4-mapped):
-        // rejected outright rather than re-checking the embedded IPv4 - the
-        // connected address must be a NATIVE global unicast address.
-        && !(s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0 && (s[5] == 0 || s[5] == 0xffff))
-        // 64:ff9b::/96 (well-known NAT64) and 64:ff9b:1::/48 (local-use):
-        // the gateway is public but the EFFECTIVE destination is a
-        // translated IPv4 address this module never evaluated.
-        && !(s[0] == 0x0064 && s[1] == 0xff9b && (s[2] == 0 || s[2] == 1))
-        // fc00::/7 unique local
-        && !(s[0] & 0xfe00 == 0xfc00)
-        // fe80::/10 link-local
-        && !(s[0] & 0xffc0 == 0xfe80)
-        // ff00::/8 multicast
-        && !(s[0] & 0xff00 == 0xff00)
-        // 2001:db8::/32 documentation
-        && !(s[0] == 0x2001 && s[1] == 0x0db8)
+    // Globally routable unicast lives in 2000::/3. Every other top-level
+    // block is special-purpose: 0::/8 holds the unspecified/loopback
+    // addresses and the TRANSLATION families (::/96 IPv4-compatible,
+    // ::ffff:0:0/96 IPv4-mapped, 64:ff9b::/96 + 64:ff9b:1::/48 NAT64) whose
+    // effective destination is an IPv4 address this module never evaluated;
+    // 100::/8 is discard-only/reserved; 200::/7, 400::/6, 800::/5 and
+    // 1000::/4 are reserved by the IETF; fc00::/7 is unique-local;
+    // fe80::/10 is link-local; ff00::/8 is multicast. One gate refuses all
+    // of it - a TCP destination must be NATIVE global unicast.
+    s[0] & 0xe000 == 0x2000
+        // Inside 2000::/3, the IANA special-purpose assignments are refused
+        // explicitly (IANA IPv6 Special-Purpose Address Registry, RFC 6890
+        // and successors, as of 2026-10):
+        && !(s[0] == 0x2001 && (s[1] & 0xfe00) == 0) // 2001::/23 IETF protocol assignments (Teredo, benchmarking, ORCHID + ORCHIDv2, AS112, ...)
+        && !(s[0] == 0x2001 && s[1] == 0x0db8) // 2001:db8::/32 documentation
+        && !(s[0] == 0x2002) // 2002::/16 6to4 (decommissioned RFC 7526; embedded IPv4 never evaluated)
+        && !(s[0] == 0x3ffe) // 3ffe::/16 former 6bone (returned to IANA)
+        && !(s[0] == 0x3fff && (s[1] & 0xf000) == 0) // 3fff::/20 documentation (RFC 9637): top 4 bits of s[1] complete the /20 prefix
+        && !(s[0] == 0x5f00) // 5f00::/16 SRv6 segment-routing SIDs
 }
 
 /// Filter a resolved address set down to publicly routable addresses.
@@ -636,20 +737,56 @@ where
 /// so a hostname that re-resolves into private space mid-session - DNS
 /// rebinding - is re-filtered at exactly the moment it would be used. There
 /// is no separate "validated earlier" address set to drift away from; the
-/// validation and the connection share this single code path.
-#[derive(Debug, Default, Clone, Copy)]
-struct PublicOnlyResolver;
+/// validation and the connection share this single code path, and no
+/// resolved address is ever cached between attempts.
+///
+/// The lookup function is injectable so the test suite can script DNS
+/// answer sets (mixed public/private, re-resolve flips, lookup failures)
+/// deterministically without any network; production builds use the
+/// system resolver through `tokio::net::lookup_host`.
+#[derive(Clone, Default)]
+struct PublicOnlyResolver {
+    /// `None` = production system resolver. `Some` = scripted lookup for
+    /// tests. The shape (host -> future of SocketAddr list or reason) is
+    /// the same either way; only the source of the answer differs.
+    lookup: Option<ScriptedLookup>,
+}
+
+/// The injectable lookup: host -> future of the resolved SocketAddr set
+/// (or a failure reason). Test-only construction.
+type LookupFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<SocketAddr>, String>> + Send>>;
+#[derive(Clone)]
+struct ScriptedLookup(Arc<dyn Fn(String) -> LookupFuture + Send + Sync>);
+
+impl PublicOnlyResolver {
+    /// A resolver driven by a scripted lookup (unit tests only).
+    #[cfg(test)]
+    fn scripted<F>(f: F) -> Self
+    where
+        F: Fn(String) -> LookupFuture + Send + Sync + 'static,
+    {
+        PublicOnlyResolver {
+            lookup: Some(ScriptedLookup(Arc::new(f))),
+        }
+    }
+}
 
 impl Resolve for PublicOnlyResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = name.as_str().to_string();
+        let lookup = self.lookup.clone();
         Box::pin(async move {
             // Port 0 is a placeholder; hyper combines the resolved IP with
             // the URL's port when it opens the socket.
-            let looked_up = tokio::net::lookup_host((host.as_str(), 0))
-                .await
-                .map_err(|e| format!("DNS lookup failed for {host}: {e}"))?;
-            let public = filter_public_addrs(looked_up, &host)?;
+            let looked_up: Vec<SocketAddr> = match lookup {
+                Some(scripted) => scripted.0(host.clone()).await?,
+                None => tokio::net::lookup_host((host.as_str(), 0))
+                    .await
+                    .map_err(|e| format!("DNS lookup failed for {host}: {e}"))?
+                    .collect(),
+            };
+            let public = filter_public_addrs(looked_up.into_iter(), &host)?;
             Ok(Box::new(public.into_iter()) as Box<dyn Iterator<Item = SocketAddr> + Send>)
         })
     }

@@ -29,7 +29,8 @@ dirs = "5"
 # adds no package to Cargo.lock. Pinning the test module's required feature
 # surface explicitly (net/fs/rt) keeps the integration tests compiling even
 # if a future dependency change stops enabling those features transitively.
-tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
+# `test-util` powers the paused-clock stall-timeout test (tokio::time::advance).
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "test-util", "time"] }
 
 [features]
 default = ["custom-protocol"]

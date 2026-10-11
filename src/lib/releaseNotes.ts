@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.8-beta',
+    date: '2026-10-12',
+    title: 'The integration release',
+    items: [
+      'The self-update picker got strict in both directions: version tags must be real versions now (trailing junk like "1.0.7junk" used to ride in as 1.0.7), and an update is only offered when the release carries a file your machine can actually run. The old picker could hand an Intel Mac an ARM64-only build as a fully "verified" download when that was the only file in the release — now Fress links to the Releases page instead. Release artifacts for Windows and Linux also gained a native minisign verification path against the key embedded in the app.',
+      'The last English-only strings speak five languages now: Privacy Pack category names, download-option labels in the detail dialog ("Thunderbird für Windows", not "Thunderbird for Windows"), the export dialog and the detail category badge all follow your language. Cards and the table show translated category labels, ghost text like the zero-star placeholder is readable in light mode, and long app names can no longer stretch a card to four lines.',
+      'CI now runs the full browser suite on every change: all ten user workflows against the production build with a sealed fixture network, plus performance invariants (a progress burst may not repaint unrelated cards, persistence stays coalesced) and the security-config validator as required gates.',
+    ],
+  },
+  {
     version: '1.0.7-beta',
     date: '2026-10-12',
     title: 'The machine-truth release, and a polished surface',

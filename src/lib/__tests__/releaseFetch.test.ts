@@ -508,4 +508,112 @@ describe('pickAssetDetailed, override and confidence', () => {
       expect(pickAsset([asset('app-arm64-release.apk')], 'android', undefined)).toBeNull();
     });
   });
+
+  describe('release shape fixtures (catalog-audit contract, 2026-10-12)', () => {
+    // The one correct Windows installer surrounded by every decoy family
+    // the live audits actually found in the wild: source archive, wrong
+    // arch, wrong OS, help pack, debug build, CLI companion, server
+    // product, legacy build, and the signature/checksum/blockmap exhaust.
+    const CORRECT = 'App-1.0-windows-x64-setup.exe';
+    const decoys = [
+      'App-1.0-Sources.tar.gz',          // source archive (plural variant)
+      'App-1.0-arm64-setup.exe',         // wrong arch for an x64 host
+      'App-1.0-macos.dmg',               // wrong OS (cross-OS guard)
+      'App-1.0-helppack-en.msi',         // help pack add-on
+      'App-1.0-langpack-de.msi',         // language pack add-on
+      'App-1.0-debug-setup-x64.exe',     // debug artefact
+      'App-CLI-1.0-x64.exe',             // CLI companion
+      'App-1.0-server-win-x64.zip',      // server product in a multi-product repo
+      'App-1.0-windows-x64-setup.exe.sig',      // signature
+      'App-1.0-windows-x64-setup.exe.blockmap', // updater blockmap
+      'App-1.0.sha256',                  // checksum file
+    ];
+    // Installable but DISPREFERRED: a legacy-named build is a real
+    // installer, so a legacy-only release legitimately picks it (it is
+    // NOT in the incompatible sweep above) - but the current installer
+    // must outrank it in every order below.
+    const DISPREFERRED = 'App-1.0-legacy-setup-x64.exe';
+
+    it('a release of ONLY one incompatible asset never yields a direct pick', () => {
+      // Each decoy ALONE must be hard-refused on the platform it pretends
+      // to serve - this is the "release ships exactly one unusable file"
+      // shape, whose correct outcome is no direct pick plus the
+      // official-page fallback (proven at the outcome layer in
+      // resolveOutcome.test.ts: pickAsset null + a download page exists =>
+      // status 'official-page', why 'no-direct-asset').
+      for (const d of decoys) {
+        expect(pickAsset([asset(d)], 'windows', 'x86_64'), d).toBeNull();
+      }
+      // ...and the whole pile of decoys together is equally empty.
+      expect(pickAsset(decoys.map((n) => asset(n)), 'windows', 'x86_64')).toBeNull();
+    });
+
+    it('one correct asset plus many decoys wins IRRESPECTIVE of asset order', () => {
+      // Seeded LCG Fisher-Yates: deterministic across runs and machines,
+      // broad enough to cover decoys-first, decoys-last and interleaved
+      // orderings. Scoring must be order-invariant because eligibility is
+      // a hard gate and the score is only a preference among survivors.
+      let seed = 0x5f3759df;
+      const rand = () => {
+        // xorshift for a reproducible shuffle sequence
+        seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+        return ((seed >>> 0) % 10_000) / 10_000;
+      };
+      const orders: string[][] = [];
+      const base = [CORRECT, ...decoys, DISPREFERRED];
+      // Canonical adversarial orders first.
+      orders.push([...base]);                                     // correct first
+      orders.push([...base].reverse());                           // correct last
+      orders.push([...decoys.slice(0, 6), CORRECT, ...decoys.slice(6)]); // correct buried mid-pile
+      // Plus 32 deterministic shuffles.
+      for (let i = 0; i < 32; i++) {
+        const a = [...base];
+        for (let j = a.length - 1; j > 0; j--) {
+          const k = Math.floor(rand() * (j + 1));
+          [a[j], a[k]] = [a[k], a[j]];
+        }
+        orders.push(a);
+      }
+      for (const order of orders) {
+        const pick = pickAsset(order.map((n) => asset(n)), 'windows', 'x86_64');
+        expect(pick?.name, `order started with: ${order.slice(0, 3).join(', ')}`).toBe(CORRECT);
+      }
+    });
+
+    it('the same shape on Android: correct ABI APK beats decoys in every order', () => {
+      const correct = 'App-1.0-arm64-v8a-release.apk';
+      const androidDecoys = [
+        'App-1.0-armeabi-v7a-release.apk',   // wrong ABI for an arm64-only view? (runnable - see below)
+        'App-1.0-x86_64-release.apk',        // wrong family entirely
+        'App-1.0-debug.apk',                 // debug artefact
+        'App-1.0-release.apk.idsig',         // sig scheme metadata
+        'App-1.0-Sources.tar.gz',            // source archive
+      ];
+      // arm64 device: armv7 apks are runnable (graded lower), so the arm64
+      // split must STILL win; the x86_64 split, debug build, idsig and the
+      // source archive can never win.
+      let seed = 0x1234567;
+      const rand = () => {
+        seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+        return ((seed >>> 0) % 10_000) / 10_000;
+      };
+      const base = [correct, ...androidDecoys];
+      const orders = [[...base], [...base].reverse()];
+      for (let i = 0; i < 24; i++) {
+        const a = [...base];
+        for (let j = a.length - 1; j > 0; j--) {
+          const k = Math.floor(rand() * (j + 1));
+          [a[j], a[k]] = [a[k], a[j]];
+        }
+        orders.push(a);
+      }
+      for (const order of orders) {
+        const pick = pickAsset(order.map((n) => asset(n)), 'android', 'aarch64');
+        expect(pick?.name, `order started with: ${order.slice(0, 3).join(', ')}`).toBe(correct);
+      }
+      // Unknown-ABI browser: the per-ABI splits are all refused, so the
+      // release yields no direct pick at all (universal contract).
+      expect(pickAsset(base.map((n) => asset(n)), 'android', undefined)).toBeNull();
+    });
+  });
 });

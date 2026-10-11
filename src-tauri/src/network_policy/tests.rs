@@ -559,17 +559,18 @@ fn routability_matrix_v6() {
         "ff02::1",
         "2001:db8::1",
         // 2001::/23 (IETF protocol assignments): the boundary rows.
-        "2001::1",          // Teredo range start
-        "2001:1ff:ffff::1", // last address of 2001::/23
-        "2001:200::1",      // first global block ABOVE /23 - must stay public
+        // (2001:200::1, the first global block ABOVE /23, is exercised in
+        // the public list below.)
+        "2001::1",
+        "2001:1ff:ffff::1",
         // 6to4 and 6bone (decommissioned)
         "2002:c000:201::1",
         "3ffe::1",
         // 3fff::/20 documentation (RFC 9637): the whole /20, not just /28.
-        "3fff::1",        // range start
-        "3fff:1::1",      // inside /20 (bits 16-19 still zero)
-        "3fff:f::1",      // inside /20 - last hex digit row
-        "3fff:fff:ffff::1", // inside /20 (bits 16-19 zero, lower bits set)
+        "3fff::1",
+        "3fff:1::1",
+        "3fff:f::1",
+        "3fff:fff:ffff::1",
         // 5f00::/16 SRv6
         "5f00::1",
     ] {
@@ -578,11 +579,11 @@ fn routability_matrix_v6() {
             "{raw} must NOT be routable"
         );
     }
-    // Just above 3fff::/20 (bits 16-19 nonzero, still inside 2000::/3) the
-    // addresses are NOT part of the documentation range and must stay
-    // public. (Blocks at 4000:: and beyond are refused by the 2000::/3 gate
-    // itself and are covered by the refused list above.)
-    for raw in ["3fff:8000::1", "3fff:ffff::1"] {
+    // Public rows that flank the special ranges: the first global block
+    // above 2001::/23, and the first blocks just above 3fff::/20 (bits
+    // 16-19 nonzero, still inside 2000::/3). Blocks at 4000:: and beyond
+    // are refused by the 2000::/3 gate itself and sit in the refused list.
+    for raw in ["2001:200::1", "3fff:8000::1", "3fff:ffff::1"] {
         assert!(
             is_publicly_routable(raw.parse().unwrap()),
             "{raw} must be routable"

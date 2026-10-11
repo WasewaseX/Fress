@@ -62,6 +62,50 @@ What that means per platform:
   back gesture, the app-private downloads folder, RTL system settings) is
   manual device testing.
 
+### Android signing secrets: maintainer procedure (new requirement)
+
+The Android release job signs with the PERSISTENT keystore - the identity
+every installed device from the 1.0.6-beta baseline on verifies updates
+against. Two repository Actions secrets carry it:
+
+| Secret | Content |
+|---|---|
+| `ANDROID_KEYSTORE_B64` | base64 of `fress.keystore` (alias `fress`) - unchanged |
+| `ANDROID_KEYSTORE_PASSWORD` | the keystore's store AND key password - **required since the hardcoded-password removal; the release job fails closed without it** |
+
+The release job validates, in order, before anything is signed: the
+password secret is present (explicit error if absent), the keystore opens
+with that password under alias `fress`, and the certificate SHA-256
+fingerprint equals the pinned permanent key
+(`b0fd578d669171af2830dcc91707d92267eea44f2a79651e2614d975e4cbdf27`). A
+fresh keystore with the right alias and password still cannot sign: the
+fingerprint pin rejects it, preserving update-over-install for every
+existing install.
+
+**One-time rotation required** (the pre-secret workflow ran the old short
+password through shell command lines, so it must be treated as exposed):
+
+1. On a trusted machine, with the ORIGINAL `fress.keystore`:
+   `keytool -storepasswd -keystore fress.keystore -alias fress`
+   (old password → new strong password), then
+   `keytool -keypasswd -keystore fress.keystore -alias fress`
+   (same new password for the key). This preserves the key and certificate
+   - do NOT generate a new keystore.
+2. Verify the identity survived:
+   `keytool -list -v -keystore fress.keystore -alias fress` must print the
+   SAME SHA-256 fingerprint as above.
+3. Update `ANDROID_KEYSTORE_B64` with `base64 -w0 fress.keystore` of the
+   rotated file, and create `ANDROID_KEYSTORE_PASSWORD` with the new
+   password.
+4. Run a release (or a dry run of the Android job) and confirm the restore
+   step passes. Until step 3 lands, every Android release job fails at the
+   restore step BY DESIGN - the failure names the missing secret.
+
+The secret is only ever exposed to steps through step-level `env:`; it is
+never interpolated into shell source text, never echoed, and never part of
+an artifact. Debug/PR workflows have no keystore references at all.
+
+
 ## 3. What is automated end to end
 
 The Playwright suite (`tests/e2e/`) drives the production build through real
@@ -128,10 +172,17 @@ the component owners and added there.
 - **J - Updater asset truth, fail closed** (`i-self-update.spec.ts`): a
   release whose only files are incompatible (ARM64 AppImage/exe on an
   x86_64 host) must yield NO direct download - the pill opens the releases
-  page. A usable asset whose checksum cannot be established (no
-  SHA256SUMS.txt) must ALSO be refused in-app ('unverifiable' → releases
-  page). See section 8 finding 1: the incompatible-asset half is currently
-  pinned `test.fail()` because `pickOwnAsset` leaks a cross-platform file.
+  page ('no-asset'). A usable asset whose checksum cannot be established
+  is ALSO refused in-app, at BOTH failure levels: the manifest missing
+  entirely (404) and the manifest present but with no line for the chosen
+  asset ('unverifiable' → releases page). The delivery-layer integrity
+  contract is exercised end to end: with a PUBLISHED-BUT-WRONG digest the
+  transfer starts, fails with kind=checksum, never reports verified in the
+  UI or the persisted history, never opens anything externally, and the
+  only offered recovery is a fresh Retry of the same update asset.
+  (The incompatible-asset half was pinned `test.fail()` against the
+  v1.0.7-beta picker; the two-phase eligibility picker landed in PR #29,
+  the annotation is lifted and the contract is asserted directly.)
 - **Visual regression** (`z-visual.spec.ts`): main catalog light+dark;
   catalog at 390/768/1366/1600/1920 CSS px; Privacy Pack light+dark;
   detail modal; download manager with active+failed items; command palette
@@ -140,16 +191,19 @@ the component owners and added there.
   disabled, fonts awaited) make one antialiasing pixel between OSes a
   non-event while real layout regressions fail.
 
-**Screenshot authenticity rules** (learned the hard way this round): the
-  theme is asserted in the DOM before capture (`html` carries the `dark`
-  class / the stored preference), fonts and fixture data are awaited, and
-  the settings popover is explicitly closed after a theme switch - an
-  earlier baseline accidentally baked the open menu into the "dark
-  catalog" shot and the diff could not tell theme truth from popover
-  placement. Baselines are reviewed BY EYE when regenerated (the diff
-  images live in the Playwright report); a baseline update is a reviewed
-  artifact, not a chore. Note: baselines contain the version badge
-  (`v1.0.7-beta`), so a version bump legitimately requires a scoped
+**Screenshot authenticity rules** (learned the hard way this round): EVERY
+  capture asserts its theme immediately before the screenshot through two
+  independent signals - the app's own theme class on `html` AND the
+  computed `colorScheme` the browser resolves from it (light captures
+  assert the absence of the dark class and `colorScheme: light`; dark
+  captures assert both present). A filename alone proved nothing once: an
+  earlier dark baseline accidentally baked the open settings menu into the
+  "dark catalog" shot and the diff could not tell theme truth from popover
+  placement, so the menu is also explicitly closed after a theme switch.
+  Fonts and fixture data are awaited. Baselines are reviewed BY EYE when
+  regenerated (the diff images live in the Playwright report); a baseline
+  update is a reviewed artifact, not a chore. Note: baselines contain the
+  version badge, so a version bump legitimately requires a scoped
   `--update-snapshots` pass in the same PR.
 
 The Tauri-mode tests inject a faithful `window.__TAURI_INTERNALS__` mock
@@ -273,31 +327,36 @@ hold on the integrated commit:
    (see below) - a known-broken contract cannot ride into a release
    silently.
 
-## 8. Open findings routed to owners (as of v1.0.7 integration)
+## 8. Open findings routed to owners (as of the v1.0.8-beta integration)
 
-These are recorded by the suite itself and are the reason for its current
-annotations:
+Three findings; the first is the load-bearing one for release evidence.
+The fixed list follows at the end of the section.
 
-1. **Self-update offers an incompatible installer when no compatible asset
-   exists (`pickOwnAsset`, `src/lib/selfUpdate.ts`)** - pinned as
-   `test.fail()` in `i-self-update.spec.ts` (Workflow J).
-   CONTRACT: a release containing only unusable files (wrong arch, wrong
-   platform) must yield NO direct download - `planUpdateDelivery` should
-   see `asset: null` and open the releases page ('no-asset').
-   ACTUAL: the best-candidate loop accepts any score above `-Infinity`;
-   "not a Linux format" scores -1 and "wrong Windows arch" scores 3 (5
-   more if the name contains "setup"), so an ARM64-only release hands an
-   x64 Windows machine its own arm64 installer (score 8) - and with the
-   digest published in SHA256SUMS.txt the download is even delivered as
-   "verified". Unit tests cover "x64 PREFERS x64" but not "only
-   incompatible → null". Unit-level repro:
-   `pickOwnAsset(release(['Fress_1.0.8_arm64-setup.exe']), 'x86_64')`
-   with a Windows UA returns the arm64 installer; expected `null`.
-   FIX DIRECTION (owner's call): refuse best-candidates whose score came
-   from a format the host platform cannot run (the -Infinity refusal
-   pattern already exists for the Linux ARM case). Owner: self-update /
-   release engineering. The moment this is fixed the test passes
-   unexpectedly, CI turns red, and the annotation must be lifted.
+1. **Signature verification is not wired into the self-update delivery UI**
+   (`src/lib/selfUpdate.ts` + delivery UI; owner: self-update/release
+   engineering, per the CODE_SIGNING.md "current platform limitations"
+   note). STATE: the native `verify_self_update_signature` command is
+   implemented, verify-only, and fully tested in Rust (genuine signature
+   verifies; flipped bit, truncated artifact, wrong-key signature and
+   malformed documents all refuse; the streaming verifier is exercised
+   over the real file). But no frontend code calls it: the in-app update
+   delivery contract today is the SHA-256 gate (published digest travels
+   with `start_download`; the engine refuses a mismatch and the transfer
+   can never complete as "verified" - asserted end to end in
+   `i-self-update.spec.ts`). CONSEQUENCE for the E2E signature matrix:
+   scenarios that need a `.sig` document to reach the UI (missing
+   signature document; valid checksum + invalid signature; signature
+   attached to a different artifact) are guarded at the Rust layer and
+   CANNOT be exercised through the browser UI until the wiring lands.
+   The Rust-layer accept/refuse matrix is the enforcement evidence for
+   them; the E2E suite covers every observable delivery-layer scenario
+   (valid checksummed update, missing manifest, partial manifest, wrong
+   published digest, incompatible-arch-only, malformed feed, retry after
+   failure). FIX DIRECTION: call `verify_self_update_signature` on the
+   completed update artifact before offering install/run, surface a
+   distinct failure state, and the E2E bridge grows a matching mock so
+   the three UI-level signature scenarios become testable. Until then
+   this is a documented limitation, not a hidden failure.
 2. **In-app rate-limit messaging** - Tauri v2 rejects command errors as
    plain strings (`Result<T, String>` serializes `Err` verbatim), and the
    resolver reads `(e as Error).message`, which is `undefined` for a
@@ -315,6 +374,14 @@ annotations:
 
 ### Fixed this round (annotations lifted)
 
+- **Self-update offered an incompatible installer when no compatible
+  asset existed** (`pickOwnAsset`, v1.0.7-beta finding): the two-phase
+  asset-eligibility picker (PR #29) made compatibility a hard gate -
+  every asset of an ARM-only release is refused, `pickOwnAsset` returns
+  null, and delivery routes to the releases page. The `test.fail()`
+  annotation on Workflow J was lifted and the contract (including the
+  worst case: a published digest for the incompatible file cannot make it
+  downloadable) is asserted directly.
 - **Privacy Pack focus return** (v1.0.6 finding): the alternatives
   dropdown now returns focus to the trigger on EVERY close path (pick,
   Escape, Tab, outside click) and moves focus into the list on open - the

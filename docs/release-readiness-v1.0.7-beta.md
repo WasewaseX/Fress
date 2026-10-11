@@ -1,5 +1,12 @@
 # Release readiness — v1.0.7-beta integration (Agent 6 final QA)
 
+> **SUPERSEDED** by `release-readiness-v1.0.8-beta.md`, which covers the
+> fully integrated candidate (all six quality PRs #27–#32 + the v1.0.8-beta
+> version bump merged) and the completed Android signing-secret remediation.
+> This document is kept as the v1.0.7-era record; its F1 finding
+> (`pickOwnAsset` incompatible-asset leak) was FIXED by PR #29 and the
+> `test.fail()` annotation was lifted.
+
 Status of every required quality gate for the integrated commit at the head
 of `quality/final-integration-qa` (integrated on top of the released
 v1.0.7-beta, `5557065`). Dated 2026-10-12.

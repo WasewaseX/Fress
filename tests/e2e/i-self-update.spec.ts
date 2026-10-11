@@ -40,6 +40,8 @@ import {
   OWN_RELEASE_ARM_ONLY,
   OWN_SUMS_ARM_ONLY,
   OWN_RELEASE_NO_SUMS,
+  OWN_SUMS_WRONG_HASH,
+  OWN_SUMS_PARTIAL,
 } from './fixtures/data';
 
 const d = DICTS.en;
@@ -68,6 +70,12 @@ async function drainToasts(page: import('@playwright/test').Page): Promise<void>
   await expect
     .poll(async () => page.locator('[data-sonner-toast]').count(), { timeout: 15_000 })
     .toBe(0);
+}
+
+/** Ids the engine has registered so far (the bridge is the source of truth). */
+async function registeredDownloadIds(page: import('@playwright/test').Page): Promise<number[]> {
+  const b = (await bridge(page))!;
+  return Object.keys(b.downloads).map(Number);
 }
 
 test.describe('Workflow I: valid release fixture', () => {
@@ -241,6 +249,111 @@ test.describe('Workflow J: unverifiable asset (checksum fail-closed)', () => {
 
     // Same poll discipline as the ARM-only sibling above: the opener
     // records through an async import, never race the bridge read.
+    await page.locator('#header-update-pill').click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
+    const b = (await bridge(page))!;
+    expect(Object.keys(b.downloads)).toHaveLength(0);
+
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(d['update.releasesPage']);
+    await expect(toast).toContainText(d['update.unverifiableHint']);
+  });
+});
+
+test.describe('Workflow J: published digest is wrong (corrupted release)', () => {
+  // The manifest exists, the line for the platform-matched AppImage exists,
+  // and the published hash is simply NOT the digest of the artifact. This is
+  // the delivery-layer integrity contract: the engine compares the fetched
+  // bytes' digest against THE PUBLISHED reference and refuses on mismatch -
+  // a corrupted or substituted update can never complete as "verified",
+  // never open anything, and the only sound recovery is a fresh Retry.
+  test.use({ ownReleases: { list: OWN_RELEASES_VALID }, ownSums: OWN_SUMS_WRONG_HASH });
+
+  test('wrong published hash: transfer fails with kind=checksum, never verified, retry is a fresh request', async ({ gotoApp, page }) => {
+    await gotoApp();
+
+    await checkForUpdates(page);
+    await expect(page.locator('#header-update-pill')).toBeVisible();
+    await drainToasts(page);
+
+    // The planner hands the engine the PUBLISHED (wrong) digest as the
+    // verification reference - the trust root is the release manifest,
+    // exactly as in production. The registry records that reference.
+    await page.locator('#header-update-pill').click();
+    await expect
+      .poll(async () => (await registeredDownloadIds(page)).length, { timeout: 10_000 })
+      .toBe(1);
+    await openDownloads(page);
+    const [id] = await registeredDownloadIds(page);
+    const b0 = (await bridge(page))!;
+    expect(b0.downloads[id].expectedSha256).toBe('d'.repeat(64));
+    expect(b0.downloads[id].filename).toBe('Fress_1.0.9_amd64.AppImage');
+
+    // The engine fetches the artifact, computes its real digest, compares,
+    // refuses: kind=checksum, corrupt bytes deleted, resume is pointless.
+    await page.evaluate((did) => window.__fressTest!.emitProgress(did, 22_000_000, 22_000_000, 0, 0), id);
+    await page.evaluate((did) => window.__fressTest!.emitError(did, 'SHA-256 mismatch: artifact is corrupt and was deleted', 'checksum'), id);
+
+    // UI state: failed row with the mismatch message; no completed row.
+    const errRow = page.locator(sel.downloadRow('error')).first();
+    await expect(errRow).toContainText(d['downloads.failed']);
+    await expect(errRow).toContainText('SHA-256 mismatch');
+    await expect(page.locator(sel.downloadRow('completed'))).toHaveCount(0);
+    // No row may claim the verified label either (verified rows carry their
+    // own status marker; zero completed rows already implies it, asserted
+    // for a precise failure message if the contract ever breaks).
+    expect(await page.locator(sel.downloadRows).allTextContents())
+      .not.toContain(d['downloads.verified']);
+
+    // Registry state: no download-complete event ever reached the UI.
+    const cur = (await bridge(page))!;
+    expect(cur.emits.filter((e) => e.event === 'download-complete')).toHaveLength(0);
+
+    // Persisted history (what a restart would show): an error, never a
+    // verified completion, for this update transfer.
+    const persisted = await page.evaluate(() => localStorage.getItem('fress.downloadItems.v1') ?? '');
+    expect(persisted).toContain('"status":"error"');
+    expect(persisted).not.toContain('"status":"completed"');
+    expect(persisted).not.toContain('"verified":true');
+
+    // No external escape hatch fired: the failure stays in the manager.
+    expect(cur.openedUrls).toEqual([]);
+
+    // The offered action is Retry (fresh), not Resume - and the fresh
+    // request targets the same update asset.
+    await expect(errRow.getByRole('button', { name: d['downloads.retry'] })).toBeVisible();
+    await expect(errRow.getByRole('button', { name: d['downloads.resume'] })).toHaveCount(0);
+    await errRow.getByRole('button', { name: d['downloads.retry'] }).click();
+    await expect
+      .poll(async () => {
+        const cur2 = (await bridge(page))!;
+        const calls = cur2.calls.filter((c) => c.cmd === 'start_download');
+        const last = calls[calls.length - 1]?.args as { resume?: boolean; url?: string } | null;
+        return calls.length >= 2 && last?.resume === false && last?.url === 'https://github.com/WasewaseX/Fress/releases/download/v1.0.9-beta/Fress_1.0.9_amd64.AppImage';
+      })
+      .toBe(true);
+  });
+});
+
+test.describe('Workflow J: SHA256SUMS.txt omits the chosen asset (partial manifest)', () => {
+  // Sibling of the 404 case above, but the manifest EXISTS and answers 200:
+  // it simply carries no line for the platform-matched AppImage (truncated
+  // or partially published). "The file exists" is not the contract - the
+  // LINE for the chosen asset is. Delivery must fail closed to the releases
+  // page with the unverifiable reason, never start an unreferenceable
+  // download.
+  test.use({ ownReleases: { list: OWN_RELEASES_VALID }, ownSums: OWN_SUMS_PARTIAL });
+
+  test('partial manifest: releases page with unverifiable hint, no download', async ({ gotoApp, page }) => {
+    await gotoApp();
+
+    await checkForUpdates(page);
+    await expect(page.locator('#header-update-pill')).toBeVisible();
+    await drainToasts(page);
+
     await page.locator('#header-update-pill').click();
     await expect
       .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })

@@ -147,7 +147,11 @@ its documentation. If a password was ever committed anywhere, rotate the
 keystore and treat every past release as publisher-unverified on Android.
 (Repository hygiene note: an earlier revision of this document named the
 keystore password in plaintext; that reference has been removed, and the
-workflow step that still hardcodes it is flagged for the CI owner.)
+release workflow now reads the password from the `ANDROID_KEYSTORE_PASSWORD`
+Actions secret instead of hardcoding it - every keystore command fails
+closed when the secret is absent or wrong. Maintainers should still rotate
+that password to a strong value and update the secret, because the old
+value appeared in command lines of past CI runs.)
 
 ## In-app updates: the Tauri updater key
 

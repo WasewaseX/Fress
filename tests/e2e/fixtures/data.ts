@@ -103,6 +103,26 @@ export const OWN_SUMS_ARM_ONLY = [
   `${GOOD_SHA256}  Fress_1.0.9_arm64-setup.exe`,
 ].join('\n');
 
+/** A PUBLISHED-BUT-WRONG digest for the platform-matched AppImage: the
+ * manifest exists, the line for the chosen asset exists, and the hash is
+ * simply not the digest of the artifact the engine will fetch. This is the
+ * corrupted-release scenario the engine's digest gate exists for: the
+ * transfer must fail with kind=checksum, never complete as "verified". */
+export const OWN_SUMS_WRONG_HASH = [
+  `dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  Fress_1.0.9_amd64.AppImage`,
+  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Fress_1.0.9_x64-setup.exe`,
+  `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  Fress_1.0.9_aarch64.AppImage`,
+].join('\n');
+
+/** A manifest that 200s but OMITS the line for the platform-matched asset
+ * (a truncated or partially published SHA256SUMS.txt). The delivery planner
+ * must treat "no line for the chosen asset" exactly like "no manifest":
+ * the digest cannot be established, so the in-app download is refused. */
+export const OWN_SUMS_PARTIAL = [
+  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Fress_1.0.9_x64-setup.exe`,
+  `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  Fress_1.0.9_aarch64.AppImage`,
+].join('\n');
+
 /** A newer release this (x86_64, Linux) install can update into: a
  * platform-matched AppImage among the other desktop files, plus the checksum
  * document. pickOwnAsset must pick the amd64 AppImage on the Linux runner. */

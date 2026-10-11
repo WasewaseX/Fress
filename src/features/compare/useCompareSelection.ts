@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AppItem } from '../../types';
+import { useI18n } from '../../lib/i18n';
 
 /**
  * Comparison selection state: which apps sit in the compare matrix.
@@ -25,6 +26,7 @@ export interface CompareSelection {
 }
 
 export function useCompareSelection(apps: AppItem[]): CompareSelection {
+  const { t } = useI18n();
   // Compare IDs
   const [comparedAppIds, setComparedAppIds] = useState<string[]>([]);
 
@@ -40,14 +42,16 @@ export function useCompareSelection(apps: AppItem[]): CompareSelection {
         return prev.filter((id) => id !== appId);
       }
       if (prev.length >= MAX_COMPARE) {
-        toast.info('Maximum 4 applications can be compared simultaneously.');
+        toast.info(t('compare.maxReached'));
         return prev;
       }
       const app = apps.find((a) => a.id === appId);
-      toast.success(`Added "${app?.name || 'app'}" to comparison matrix.`);
+      // Unreachable fallback: toggles always come from rendered cards, so
+      // the app exists; the id is language-neutral data if it ever fires.
+      toast.success(t('compare.addedToMatrix').replace('{name}', app?.name || appId));
       return [...prev, appId];
     });
-  }, [apps]);
+  }, [apps, t]);
 
   const removeApp = useCallback((appId: string) => {
     setComparedAppIds((prev) => prev.filter((id) => id !== appId));

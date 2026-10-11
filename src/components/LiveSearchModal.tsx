@@ -4,7 +4,8 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
+import { translateAppTextDefault } from '../lib/appText';
 import { openExternal } from '../lib/external';
 import { 
   Search, 
@@ -350,13 +351,13 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                     )}
                     {item.license && (
                       <span className="text-[11px] text-slate-400 font-mono">
-                        {item.license}
+                        {translateLicenseDisplay(t, item.license)}
                       </span>
                     )}
                   </div>
 
                   <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
-                    {item.tagline || item.description}
+                    {translateAppTextDefault(t, item.tagline || item.description)}
                   </p>
 
                   <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-400">

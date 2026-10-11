@@ -111,6 +111,9 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'pp.cat.twofa',
     'pp.cat.vpn',
     'pp.cat.dns',
+    // "Open Source" is the standard French term for the license class
+    // (used as-is in French software writing, e.g. Wikipedia FR).
+    'license.openSource',
   ]),
   de: new Set([
     'header.downloads',
@@ -158,6 +161,9 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'pp.cat.twofa',
     'pp.cat.vpn',
     'pp.cat.dns',
+    // "Open Source" is the standard German loanword for the license class
+    // (Duden lists it; used as-is in German software writing).
+    'license.openSource',
   ]),
 };
 

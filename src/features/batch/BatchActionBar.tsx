@@ -23,7 +23,7 @@ export function BatchActionBar(props: {
   return (
     <aside
       id="floating-batch-action-bar"
-      aria-label="Batch operations bar"
+      aria-label={t('batch.barAria')}
       className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border border-slate-950/[0.14] dark:border-white/[0.14] rounded-xl shadow-2xl px-4 py-2.5 flex items-center gap-3 backdrop-blur-md max-w-xl w-[92%]"
     >
       <div className="flex items-center gap-2 mr-auto">
@@ -63,7 +63,7 @@ export function BatchActionBar(props: {
           type="button"
           onClick={onCompareSelected}
           className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] text-slate-200 px-2.5 py-1.5 rounded-md transition-colors"
-          title="Compare up to 4 selected tools side-by-side"
+          title={t('batch.compareHint')}
         >
           <Columns className="w-3.5 h-3.5 text-indigo-400" />
           <span>{t('bar.compare')}</span>
@@ -73,8 +73,8 @@ export function BatchActionBar(props: {
           type="button"
           onClick={onClear}
           className="p-1.5 text-slate-400 hover:text-slate-100 rounded hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] transition-colors"
-          title="Clear selection"
-          aria-label="Clear batch selection"
+          title={t('batch.clearSelection')}
+          aria-label={t('batch.clearSelectionAria')}
         >
           <X className="w-4 h-4" />
         </button>

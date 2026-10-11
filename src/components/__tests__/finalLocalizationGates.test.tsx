@@ -27,6 +27,8 @@ import { COMBOS } from '../../data/combos';
 import { ReplaceTab } from '../ReplaceTab';
 import { AppDetailModal } from '../AppDetailModal';
 import { AddAppModal } from '../AddAppModal';
+import { BatchActionBar } from '../../features/batch/BatchActionBar';
+import { CompareDock } from '../../features/compare/CompareDock';
 import { AppItem } from '../../types';
 import { DownloadOption } from '../../lib/appDownloads';
 
@@ -264,5 +266,38 @@ describe('add/edit form consumes the existing highlight key', () => {
       </I18nProvider>
     );
     expect(screen.getByText('Punto destacado')).toBeTruthy();
+  });
+});
+
+describe('floating docks and bars expose localized accessible names', () => {
+  it('the batch bar names itself, its compare hint and its clear action in German', () => {
+    setLang('de');
+    render(
+      <I18nProvider>
+        <BatchActionBar
+          selectedCount={2}
+          resolving={false}
+          onDownload={() => {}}
+          onOpenScriptModal={() => {}}
+          onCompareSelected={() => {}}
+          onClear={() => {}}
+        />
+      </I18nProvider>
+    );
+    expect(screen.getByLabelText('Leiste für Sammelaktionen')).toBeTruthy();
+    expect(screen.getByTitle('Bis zu 4 ausgewählte Werkzeuge nebeneinander vergleichen')).toBeTruthy();
+    expect(screen.getByLabelText('Sammelauswahl aufheben')).toBeTruthy();
+  });
+
+  it('the compare dock names itself and its count in Persian, RTL-safe copy', () => {
+    setLang('fa');
+    render(
+      <I18nProvider>
+        <CompareDock count={2} onOpenMatrix={() => {}} onClear={() => {}} />
+      </I18nProvider>
+    );
+    expect(screen.getByLabelText('داک مقایسه')).toBeTruthy();
+    expect(screen.getByText('2 در مقایسه')).toBeTruthy();
+    expect(screen.getByText('نمایش ماتریس')).toBeTruthy();
   });
 });

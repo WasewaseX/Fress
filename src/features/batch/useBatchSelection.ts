@@ -67,8 +67,8 @@ export function useBatchSelection(apps: AppItem[], openDownloads: () => void): B
 
   const selectAll = useCallback(() => {
     setSelectedBatchAppIds(apps.map((a) => a.id));
-    toast.success(`Selected all ${apps.length} applications for batch operations.`);
-  }, [apps]);
+    toast.success(t('batch.selectedAll').replace('{count}', String(apps.length)));
+  }, [apps, t]);
 
   const clear = useCallback(() => {
     setSelectedBatchAppIds([]);

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import { FilterState } from '../../types';
+import { useI18n } from '../../lib/i18n';
 
 /**
  * Catalog browsing/search/filter state.
@@ -64,6 +65,7 @@ export interface CatalogFilters {
 }
 
 export function useCatalogFilters(): CatalogFilters {
+  const { t } = useI18n();
   const [filters, setFilters] = useState<FilterState>(() => ({
     ...DEFAULT_FILTERS,
     platform: initialPlatform(),
@@ -87,7 +89,7 @@ export function useCatalogFilters(): CatalogFilters {
       // ignore
     }
     setFilters({ ...DEFAULT_FILTERS, platform: deviceDefaultPlatform });
-    toast.info('Filters reset to default.');
+    toast.info(t('filters.resetDone'));
   };
 
   return { filters, handleFilterChange, resetFilters };

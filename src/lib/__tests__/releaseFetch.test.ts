@@ -422,5 +422,90 @@ describe('pickAssetDetailed, override and confidence', () => {
         'OpenSource-1.0-x86_64.AppImage'
       );
     });
+
+    it('help and language packs are never the app (LibreOffice-style add-ons)', () => {
+      const lo = [
+        asset('LibreOffice_25.8.1_Win_x86-64_install-msi_en-US.msi'),
+        asset('LibreOffice_25.8.1_Win_x86-64_install-msi_helppack_en-US.msi'),
+        asset('LibreOffice_25.8.1_Win_x86-64_install-msi_langpack_de.msi'),
+      ];
+      expect(pickAsset(lo, 'windows', 'x86_64')?.name).toBe('LibreOffice_25.8.1_Win_x86-64_install-msi_en-US.msi');
+      // When ONLY the addon packs exist, nothing resolves - the packs are
+      // not the app and must not become a weak last-resort pick.
+      expect(pickAsset([asset('LibreOffice_25.8.1_Win_x86-64_install-msi_helppack_en-US.msi')], 'windows', 'x86_64')).toBeNull();
+      expect(pickAsset([asset('App-1.0-langpack-fr.msi')], 'windows', 'x86_64')).toBeNull();
+    });
+
+    it('debug builds are never the stable download (except a +flavor-debug release name)', () => {
+      // gradle's debug artifact and -debug- named installers are developer
+      // artefacts; a release build beats them, and they never serve as the
+      // weak last resort.
+      expect(pickAsset([asset('app-debug.apk'), asset('app-release-universal.apk')], 'android', 'aarch64')?.name).toBe(
+        'app-release-universal.apk'
+      );
+      expect(pickAsset([asset('app-debug.apk')], 'android', 'aarch64')).toBeNull();
+      expect(pickAsset([asset('App-1.0-debug-setup-x64.exe'), asset('App-1.0-setup-x64.exe')], 'windows', 'x86_64')?.name).toBe(
+        'App-1.0-setup-x64.exe'
+      );
+      expect(pickAsset([asset('App-1.0-debug-setup-x64.exe')], 'windows', 'x86_64')).toBeNull();
+      // EXCEPTION (live-audited 2026-10-12): Termux publishes its stable
+      // GitHub releases as "termux-app_v0.118.3+github-debug_<abi>.apk" -
+      // "debug" there is the plus-prefixed release FLAVOR, not a build
+      // kind. Excluding it cut Termux Android users off from the only APKs
+      // the project ships. The flavor designator keeps the pick confident.
+      const termux = [
+        asset('termux-app_v0.118.3+github-debug_arm64-v8a.apk'),
+        asset('termux-app_v0.118.3+github-debug_universal.apk'),
+      ];
+      expect(pickAsset(termux, 'android', 'aarch64')?.name).toBe('termux-app_v0.118.3+github-debug_arm64-v8a.apk');
+      expect(pickAsset(termux, 'android', undefined)?.name).toBe('termux-app_v0.118.3+github-debug_universal.apk');
+      // A plain "-debug-" installer gains nothing from a plus elsewhere.
+      expect(pickAsset([asset('App+nightly-1.0-debug-setup-x64.exe')], 'windows', 'x86_64')).toBeNull();
+    });
+
+    it('server binaries are hard-refused for a desktop-client selection', () => {
+      // Multi-product repos ship the server and the client from one release
+      // (jellyfin-style). The client selection must never land on the
+      // server product - not confidently, not as a weak last resort.
+      const multi = [
+        asset('jellyfin-server_10.10.3_windows-x64.zip'),
+        asset('Jellyfin-Media-Player-1.11.1-x64.exe'),
+      ];
+      expect(pickAsset(multi, 'windows', 'x86_64')?.name).toBe('Jellyfin-Media-Player-1.11.1-x64.exe');
+      // Server-only release: null (page fallback), never a weak pick.
+      expect(pickAsset([asset('jellyfin-server_10.10.3_windows-x64.zip')], 'windows', 'x86_64')).toBeNull();
+      // An override pinning the server file cannot resurrect it either.
+      const pinned = pickAssetDetailed(
+        [asset('jellyfin-server_10.10.3_windows-x64.zip')],
+        'windows',
+        'x86_64',
+        { windows: 'jellyfin-server_.*_windows-x64\\.zip' }
+      );
+      expect(pinned).toBeNull();
+      // ...but an app that IS the server product (repo named "*server*")
+      // vouches via allowServer and keeps its own assets.
+      expect(pickAssetDetailed([asset('jellyfin-server_10.10.3_windows-x64.zip')], 'windows', 'x86_64', undefined, { allowServer: true })?.pick.name).toBe(
+        'jellyfin-server_10.10.3_windows-x64.zip'
+      );
+      // Token-boundary: names merely containing "server" inside a larger
+      // token (observers, preservers) are untouched.
+      expect(pickAsset([asset('Observers-1.0-x64.exe')], 'windows', 'x86_64')?.name).toBe('Observers-1.0-x64.exe');
+    });
+
+    it('a low-confidence score never overrides a hard incompatibility', () => {
+      // Only wrong-arch and source assets exist: the weak-pick fallback
+      // must yield NOTHING instead of the arm64 build on an x86_64 host or
+      // the source archive on Linux.
+      const wrong = [
+        asset('App-1.0-arm64-setup.exe'),
+        asset('App-1.0-Sources.tar.gz'),
+      ];
+      expect(pickAsset(wrong, 'windows', 'x86_64')).toBeNull();
+      expect(pickAsset(wrong, 'linux', 'x86_64')).toBeNull();
+      // Same for an Intel Mac facing an arm64-only dmg.
+      expect(pickAsset([asset('App-1.0-arm64.dmg')], 'mac', 'x86_64')).toBeNull();
+      // And an unknown-ABI browser facing only per-ABI splits.
+      expect(pickAsset([asset('app-arm64-release.apk')], 'android', undefined)).toBeNull();
+    });
   });
 });

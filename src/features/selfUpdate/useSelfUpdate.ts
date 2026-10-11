@@ -51,8 +51,8 @@ export function useSelfUpdate(
   const handleUpdateChannelChange = (channel: UpdateChannel) => {
     setUpdateChannelState(channel);
     setUpdateChannel(channel);
-    toast.info(`Update channel: ${channel}`, {
-      description: 'Re-check for updates to apply the new channel.',
+    toast.info(t('update.channelSet').replace('{channel}', channel), {
+      description: t('update.channelSetHint'),
     });
   };
 
@@ -63,11 +63,11 @@ export function useSelfUpdate(
     setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset, expectedSha256: res.expectedSha256 } : null);
     if (announce) {
       if (res.kind === 'available') {
-        toast.info(`Fress v${res.release.version} is available.`, {
-          description: 'Use the Update button in the header. Your apps and data are kept.',
+        toast.info(t('update.availableToast').replace('{version}', res.release.version), {
+          description: t('update.availableToastHint'),
         });
       } else if (res.kind === 'latest') {
-        toast.success(`You are on the latest version (v${pkg.version}).`);
+        toast.success(t('update.latestToast').replace('{version}', pkg.version));
       } else {
         // Both the API and the atom fallback failed (offline, firewall). This
         // is normal and must not look like the app is broken: quiet note, no
@@ -115,15 +115,15 @@ export function useSelfUpdate(
     const plan = planUpdateDelivery(ownUpdate.release, ownUpdate.asset, ownUpdate.expectedSha256);
     if (plan.kind === 'download') {
       void startDownload(plan.asset.url, plan.asset.name, { expectedSha256: plan.sha256 });
-      toast.success('Update downloading…', {
-        description: 'When it finishes, open the file to update Fress. Your apps and data stay.',
+      toast.success(t('update.downloading'), {
+        description: t('update.downloadingHint'),
       });
     } else {
-      toast.info('Opening the releases page instead', {
+      toast.info(t('update.releasesPage'), {
         description:
           plan.reason === 'unverifiable'
-            ? 'This update could not be verified against the published SHA256SUMS.txt, so it will not be downloaded automatically. Verify manually, then install.'
-            : 'No file for this platform could be picked automatically. Download it from the releases page.',
+            ? t('update.unverifiableHint')
+            : t('update.noAssetHint'),
       });
       void openExternal(plan.release.htmlUrl);
     }

@@ -40,8 +40,62 @@
 //! [`UrlPolicy::api_fdroid`], [`UrlPolicy::resolver_manifest`] and
 //! [`UrlPolicy::executable_download`] for the reasoning behind each.
 //!
-//! Known residual limitations are documented at the bottom of this file and
-//! in the PR description; none of them are silently ignored.
+//! # Ports
+//!
+//! The scheme is the security boundary, not the port. `https` on ANY port
+//! is admissible (vendors do serve downloads from non-default ports, e.g.
+//! `https://mirror.example:8443/app.exe`), and `http` on ANY port -
+//! including 443 - is refused. TLS semantics do not depend on the port
+//! number, the connect-time public-address filter applies to every port
+//! equally, and the resolver/API allowlists match by HOST, independent of
+//! port. A future port restriction would have to be a conscious policy
+//! change; tests pin the current decision.
+//!
+//! # Browser links are not a native request path
+//!
+//! `UrlPolicy::external_link` exists to give catalog links one shared
+//! vocabulary; it never fetches. Opening a project/release link goes
+//! through the Tauri opener plugin straight from the webview (scoped to
+//! `https://**` in the capability manifest, owned by the bridge/packaging
+//! owner), which hands the URL to the USER'S BROWSER - no native HTTP
+//! client is built for it. The permissive `external_link` rules (private
+//! literals allowed, any HTTPS host) therefore cannot become a native
+//! fetch path that bypasses the strict policies: the only HTTP clients
+//! that exist are the ones `http_client()` builds from the strict
+//! policies, and every outbound call site in `lib.rs` constructs its
+//! client through one of them.
+//!
+//! # Address literals skip DNS - by design
+//!
+//! reqwest/hyper resolve only hostnames; a URL whose host is an address
+//! literal never consults [`PublicOnlyResolver`] (pinned by a test). The
+//! literal therefore cannot lean on the connect-time filter - which is
+//! why [`UrlPolicy::validate`] and every redirect hop
+//! ([`evaluate_redirect_hop`]) parse and classify literals themselves.
+//! Both halves of that split are load-bearing and tested.
+//!
+//! # Residual limitations (documented, not ignored)
+//!
+//! - **DNS answers are trusted for reachability, not for identity.** The
+//!   public-address filter refuses answers that point into private space,
+//!   but a resolver (or attacker on the resolver path) answering with a
+//!   DIFFERENT public address cannot be detected at this layer; identity
+//!   rests on TLS certificate validation and, for the API and manifest
+//!   classes, on the exact host allowlists.
+//! - **The download class is destination-host-agnostic by design** (see
+//!   [`UrlPolicy::executable_download`]): any public HTTPS host may serve
+//!   an installer. Trust in the FILE comes from publisher checksums and
+//!   the transactional engine, not from the host name.
+//! - **Address literals never reach the resolver** (see above), so their
+//!   private-space guard lives entirely in admission and the per-hop
+//!   check - both tested; a future reqwest that routed literals through
+//!   the resolver would be caught by the regression test, not silently
+//!   change behavior.
+//! - **Redirect hops see literals only.** A hop to a HOSTNAME that
+//!   resolves into private space passes the hop decision and is refused
+//!   at connect time by [`PublicOnlyResolver`] instead - the refusal
+//!   message is then a connect failure rather than the early, named
+//!   redirect refusal. No path exists that connects to such a target.
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};

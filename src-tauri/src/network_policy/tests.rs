@@ -874,3 +874,169 @@ fn scripted_resolvers_only_exist_in_tests() {
     // builds cannot be built with a scripted DNS answer set.
     let _ = PublicOnlyResolver::default();
 }
+
+// ---------------------------------------------------------------------------
+// Ports: the scheme is the boundary, not the port (documented decision)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn non_443_https_ports_are_a_documented_decision() {
+    // TLS semantics do not depend on the port; vendors occasionally serve
+    // from non-default ports. The current decision admits https on any
+    // port and refuses http on any port - pinning it so a future
+    // restriction has to be a conscious change, not an accident.
+    UrlPolicy::executable_download()
+        .validate("https://vendor.example:8443/app.exe")
+        .expect("https on a non-default port is admissible for downloads");
+    UrlPolicy::resolver_manifest()
+        .validate("https://download.kde.org:8443/manifest.yml")
+        .expect("allowlist matching is by host, independent of port");
+    UrlPolicy::executable_download()
+        .validate("https://api.github.com:8443/repos/x/y/releases/latest")
+        .expect("pinned API hosts are likewise port-independent");
+
+    // Cleartext on the DEFAULT port is still cleartext.
+    let err = UrlPolicy::executable_download()
+        .validate("http://example.com:443/app.exe")
+        .expect_err("http on port 443 must stay refused");
+    assert_eq!(
+        err,
+        PolicyError::InsecureScheme {
+            scheme: "http".to_string()
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end wiring: the policy-built client really runs every redirect
+// hop through the validation function. The first hop below is cleartext
+// LOOPBACK purely so a plain test server can answer it (admission is a
+// separate, tested layer); production first hops are https by admission.
+// No test here reaches a non-loopback address: the refused hops are cut
+// at the policy decision, before any connection is attempted.
+// ---------------------------------------------------------------------------
+
+/// Answers exactly one request with `response`, on an ephemeral loopback
+/// port. Returns the port.
+fn spawn_one_shot_http(response: &'static [u8]) -> u16 {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("local addr").port();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(response);
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+/// Collect an error's Display plus its whole source chain, so policy
+/// reasons are asserted wherever reqwest decided to put them.
+fn error_chain_text(e: &reqwest::Error) -> String {
+    use std::error::Error;
+    let mut text = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        text.push_str("; caused by: ");
+        text.push_str(&s.to_string());
+        source = s.source();
+    }
+    text
+}
+
+#[tokio::test]
+async fn the_policy_client_refuses_a_redirect_to_a_private_address_literal() {
+    // The redirect points at the cloud-metadata address. A plain client
+    // would try to CONNECT there; the policy client must refuse at the
+    // hop decision, which is observable as a redirect-kind error naming
+    // the private destination.
+    let port = spawn_one_shot_http(
+        b"HTTP/1.1 302 Found\r\n\
+          Location: https://169.254.169.254/latest/meta-data/\r\n\
+          Content-Length: 0\r\n\
+          Connection: close\r\n\r\n",
+    );
+    let client = UrlPolicy::executable_download()
+        .http_client()
+        .expect("policy client builds");
+    let err = client
+        .get(format!("http://127.0.0.1:{port}/payload"))
+        .send()
+        .await
+        .expect_err("a redirect to a private literal must be refused");
+    assert!(
+        err.is_redirect(),
+        "the refusal must come from the redirect policy, got: {err}"
+    );
+    let text = error_chain_text(&err);
+    assert!(
+        text.contains("private or local address"),
+        "the named reason must surface: {text}"
+    );
+}
+
+#[tokio::test]
+async fn the_policy_client_refuses_a_downgrade_redirect() {
+    let port = spawn_one_shot_http(
+        b"HTTP/1.1 302 Found\r\n\
+          Location: http://example.com/payload\r\n\
+          Content-Length: 0\r\n\
+          Connection: close\r\n\r\n",
+    );
+    let client = UrlPolicy::executable_download()
+        .http_client()
+        .expect("policy client builds");
+    let err = client
+        .get(format!("http://127.0.0.1:{port}/payload"))
+        .send()
+        .await
+        .expect_err("a https-to-http downgrade redirect must be refused");
+    assert!(err.is_redirect(), "got: {err}");
+    let text = error_chain_text(&err);
+    assert!(
+        text.contains("non-https"),
+        "the downgrade reason must surface: {text}"
+    );
+}
+
+#[tokio::test]
+async fn address_literal_requests_never_consult_the_resolver() {
+    // hyper resolves hostnames only: a loopback-literal URL must reach
+    // the socket WITHOUT a DNS lookup. This is the documented split from
+    // the module docs - the private-space guard for literals lives in
+    // admission and the per-hop check, not in the resolver. The test
+    // fails (request errors, or the call counter moves) if a future
+    // reqwest starts routing literals through the resolver, which would
+    // silently relocate where the guard lives.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let watcher = Arc::clone(&calls);
+    let resolver = PublicOnlyResolver::scripted(move |host| {
+        let calls = Arc::clone(&watcher);
+        Box::pin(async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err(format!(
+                "resolver must not be consulted, was asked for {host}"
+            ))
+        }) as LookupFuture
+    });
+    let client = UrlPolicy::executable_download()
+        .http_client_with_resolver(resolver)
+        .expect("policy client builds");
+    let port =
+        spawn_one_shot_http(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+    let resp = client
+        .get(format!("http://127.0.0.1:{port}/payload"))
+        .send()
+        .await
+        .expect("a literal-host request must reach the loopback server");
+    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "the DNS resolver must never be consulted for an address literal"
+    );
+}

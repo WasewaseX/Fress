@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { AppItem, Platform } from '../types';
 import { isTauri } from './downloads';
+import { attachTrustedDigests } from './release/digests';
 import {
   ReleaseAsset,
   ResolvedDownload,
@@ -14,6 +15,7 @@ import {
   loadPersisted,
   persist,
 } from './releaseFetch';
+import { evictFailedLookups, purgePersistedFailures } from './release/resolveCache';
 
 /**
  * Official download resolvers for projects whose installers do NOT live on
@@ -392,16 +394,22 @@ function official(
   version: string,
   page: string
 ): ResolvedDownload {
-  return {
-    source: 'official',
-    url: picked.url,
-    filename: picked.name,
-    size: picked.size,
-    version,
-    releasePageUrl: page,
-    expectedSha256: picked.sha256,
-    expectedSha512: picked.sha512,
-  };
+  // The digests ride on the SAME manifest row that named the file: they are
+  // attached through attachTrustedDigests so a malformed value is discarded
+  // (download stays unverified) and a digest can never be glued on from a
+  // different asset or version - this call site has no other inputs.
+  return attachTrustedDigests(
+    {
+      source: 'official',
+      url: picked.url,
+      filename: picked.name,
+      size: picked.size,
+      version,
+      releasePageUrl: page,
+    },
+    picked,
+    picked.name
+  );
 }
 
 async function resolveBlender(platform: Platform, arch: string | undefined, _app: AppItem): Promise<ResolvedDownload | null> {
@@ -869,4 +877,19 @@ export function resolveOfficialDownload(app: AppItem, platform: Platform): Promi
     });
   }
   return officialCache.get(key)!;
+}
+
+/**
+ * Retry entry point for the detail modal's explicit failure state: evicts
+ * this app|platform's FAILED official lookup from the session memo and the
+ * persisted store, then re-runs the normal resolver. Successes stay cached,
+ * and no other app's lookups are touched. GitHub and F-Droid caches are
+ * never invalidated here (their retry wrappers live in release/resolve.ts).
+ */
+export async function retryOfficialResolve(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
+  if (!officialSupported(app, platform)) return resolveOfficialDownload(app, platform);
+  const key = `official|${app.id}|${platform}`;
+  await evictFailedLookups(officialCache, key);
+  purgePersistedFailures(`${key}|`);
+  return resolveOfficialDownload(app, platform);
 }

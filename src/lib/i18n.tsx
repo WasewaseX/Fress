@@ -335,6 +335,7 @@ const en: Dict = {
   'hero.countAndroid': 'with Android builds',
   'empty.catalogTitle': 'Your catalog is empty',
   'empty.catalogDesc': 'Nothing has been added yet. Search official sources or enter an app by hand to start your catalog.',
+  'a11y.skipToContent': 'Skip to main content',
 };
 
 const fa: Dict = {
@@ -654,6 +655,7 @@ const fa: Dict = {
   'hero.countAndroid': 'آماده برای اندروید',
   'empty.catalogTitle': 'فهرست شما خالی است',
   'empty.catalogDesc': 'هنوز چیزی افزوده نشده است. برای شروع، از منابع رسمی جست‌وجو کنید یا برنامه را دستی وارد کنید.',
+  'a11y.skipToContent': 'پرش به محتوای اصلی',
 };
 
 const es: Dict = {
@@ -973,6 +975,7 @@ const es: Dict = {
   'hero.countAndroid': 'listas para Android',
   'empty.catalogTitle': 'Tu catálogo está vacío',
   'empty.catalogDesc': 'Aún no se ha añadido nada. Busca en fuentes oficiales o introduce una app a mano para empezar.',
+  'a11y.skipToContent': 'Saltar al contenido principal',
 };
 
 const fr: Dict = {
@@ -1292,6 +1295,7 @@ const fr: Dict = {
   'hero.countAndroid': 'prêtes pour Android',
   'empty.catalogTitle': 'Votre catalogue est vide',
   'empty.catalogDesc': 'Rien n’a encore été ajouté. Cherchez parmi les sources officielles ou saisissez une app à la main pour commencer.',
+  'a11y.skipToContent': 'Aller au contenu principal',
 };
 
 const de: Dict = {
@@ -1611,6 +1615,7 @@ const de: Dict = {
   'hero.countAndroid': 'für Android bereit',
   'empty.catalogTitle': 'Ihr Katalog ist leer',
   'empty.catalogDesc': 'Noch nichts vorhanden. Suchen Sie in offiziellen Quellen oder tragen Sie eine App von Hand ein.',
+  'a11y.skipToContent': 'Zum Hauptinhalt springen',
 };
 
 export const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

@@ -28,9 +28,9 @@ export const SpotlightSection: React.FC<SpotlightSectionProps> = ({ totalApps, a
       /* Phones: the platform chip bar is fixed directly under the header and
          overlays the top of this section, so the hero clears it with its own
          top padding. Desktop has no fixed bar and keeps the compact rhythm. */
-      className="bg-fr-bg border-b border-fr-border py-5 max-md:pt-12 px-4 sm:px-6"
+      className="bg-fr-bg border-b border-fr-border py-5 max-md:pt-12"
     >
-      <div className="max-w-7xl mx-auto">
+      <div className="fr-shell">
         <div className="min-w-0">
           <h1
             id="spotlight-main-heading"

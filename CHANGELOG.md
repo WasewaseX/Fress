@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.6-beta (2026-10-11): a catalog that uses its desktop, and a table that speaks
+
+The main window learned what a 1920-pixel monitor is for. Header, hero, filter bar and catalog now share one wide content boundary, the grid grows a fourth column on large desktops, and the last untranslated surface — the table view — speaks five languages. A long-standing page-switch bug is fixed with a regression suite. Nothing about what Fress does with your data changed: filters, favorites, batch selection, comparison and every download behave exactly as before.
+
+### Added
+- **A desktop-width catalog.** One shared content boundary (1536px) unifies the header, spotlight, filter bar and catalog; on large desktops the grid grows to four columns while a ~365px card stays comfortably readable, keeping three columns on medium desktops, two on tablets and one on phones. Zero horizontal overflow verified at every width from 320 to 1920 pixels, dark and light.
+- **Touch-sized controls.** Every icon-only control on the cards and in the table — compare, edit, delete, bookmarks, source links, checkboxes — grows to a 44px touch box on coarse pointers while desktop keeps its compact density.
+
+### Changed
+- **Cards are fully keyboard-operable and fully translated.** The application title is a real button inside the heading (a clickable heading was invisible to keyboards and screen readers), every tooltip, accessible name and toast on the card speaks five languages — including the download flow's "showing the download options" and "opening the official download page" notices, the last hardcoded strings flagged in 1.0.5.
+- **The table view joined the design system.** Column headers, the copy-command control, the direct-download marker, the pick/trend badges and the versus chips are translated; platform names use the same localized words as the filter bar; taglines respect per-language overrides for custom entries; and every row's name is a keyboard-focusable button. Surfaces, borders and focus rings come from the shared tokens.
+- **One focus look everywhere.** The filter bar's thinner ring was the last deviator; every focusable control in the app now shares the single 2px outline treatment, and the app root, card surfaces and filter bar ride the semantic token layer end to end.
+
+### Fixed
+- **Switching Apps ↔ Privacy Pack no longer buries the heading.** Scrolling deep into one page and switching to the other kept the old scroll offset, so the fixed header covered the new page's title; every page change now lands at the top instantly, view-mode toggles still never scroll, and a four-test regression suite (including "switch pages after a deep scroll") locks it in.
+
 ## 1.0.5-beta (2026-10-11): a coherent interface, and downloads that run quiet
 
 The interface got a real design-token system, a header that knows what is primary, and catalog cards that keep their footing while transfers stream — while the download engine stopped writing to storage on every progress tick. Nothing changes about what Fress does with your data: favorites, filters, the download folder, the custom catalog and every download you had running behave exactly as before.

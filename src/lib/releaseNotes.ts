@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.6-beta',
+    date: '2026-10-11',
+    title: 'A catalog that uses its desktop, and a table that speaks',
+    items: [
+      'On a wide monitor Fress finally spreads out: header, hero, filters and the catalog share one wide content boundary, and the grid grows a fourth column on large desktops. Narrow screens keep the exact layout they had — three columns on medium desktops, two on tablets, one on phones — and nothing overflows sideways at any width.',
+      'The table view was the last untranslated corner of the app; its headers, copy-command button, badges and platform names speak all five languages now, and every row\'s name is a real keyboard-focusable button. Card titles became proper buttons too, so the whole catalog is keyboard-operable, and every small icon control is sized for real fingers on touch screens.',
+      'Switching between Apps and Privacy Pack no longer leaves you stranded mid-page after a deep scroll — the new page always starts at the top with its heading fully visible, while switching grid/table never scrolls at all. Filters, favorites, batch selection and downloads behave exactly as before.',
+    ],
+  },
+  {
     version: '1.0.5-beta',
     date: '2026-10-11',
     title: 'A coherent interface, and downloads that run quiet',

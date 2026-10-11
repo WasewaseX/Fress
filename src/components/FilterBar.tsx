@@ -54,8 +54,13 @@ const PLATFORM_OPTIONS: Array<{ id: Platform | 'all'; labelKey: string }> = [
   { id: 'web', labelKey: 'common.platform.web' }
 ];
 
-// Keyboard focus indicator shared by every interactive control in the bar.
-const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-500';
+// Focus treatment: deliberately EMPTY. The global `:focus-visible` rule in
+// index.css (2px --fr-focus outline, 2px offset) is the one keyboard-focus
+// look for the whole app; the bar's chips previously overrode it with a
+// thinner ring, which made focus inconsistent between the filter row and
+// every other control. Keeping the interpolation points so the class list
+// stays byte-stable for the id-scoped tests.
+const FOCUS_RING = '';
 
 export const FilterBar: React.FC<FilterBarProps> = ({
   filters,
@@ -218,9 +223,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         aria-label={t('filter.sort')}
         className={`bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] text-slate-200 text-xs rounded-md px-2 py-1${touchCls(layout)} ${FOCUS_RING} cursor-pointer`}
       >
-        <option value="stars" className="bg-slate-950 text-slate-200">{t('filter.sortStars')}</option>
-        <option value="name" className="bg-slate-950 text-slate-200">{t('filter.sortName')}</option>
-        <option value="newest" className="bg-slate-950 text-slate-200">{t('filter.sortNewest')}</option>
+        <option value="stars" className="bg-fr-bg text-fr-text">{t('filter.sortStars')}</option>
+        <option value="name" className="bg-fr-bg text-fr-text">{t('filter.sortName')}</option>
+        <option value="newest" className="bg-fr-bg text-fr-text">{t('filter.sortNewest')}</option>
       </select>
 
       {isFiltered && (
@@ -245,10 +250,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   return (
     <div
       id="filter-bar-container"
-      className="md:sticky md:z-20 bg-slate-950 border-b border-slate-950/10 dark:border-white/[0.08] py-2.5 px-4 sm:px-6"
+      className="md:sticky md:z-20 bg-fr-bg border-b border-fr-border py-2.5"
       style={{ top: 'var(--fress-header-h, 0px)' }}
     >
-      <div className="max-w-7xl mx-auto space-y-2">
+      <div className="fr-shell space-y-2">
         {/* Categories Bar */}
         <div id="categories-scroll-row" className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs scrollbar-none">
           <span className="text-slate-400 font-semibold text-[11px] uppercase tracking-wider me-1 shrink-0">
@@ -283,7 +288,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             position. */}
         <div
           id="platform-bar-mobile"
-          className="md:hidden fixed left-0 right-0 z-20 bg-slate-950 border-b border-slate-950/10 dark:border-white/[0.08] px-4 py-1.5"
+          className="md:hidden fixed left-0 right-0 z-20 bg-fr-bg border-b border-fr-border px-4 py-1.5"
           style={{ top: 'var(--fress-header-h, 0px)' }}
         >
           <div

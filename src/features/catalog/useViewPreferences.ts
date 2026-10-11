@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Device-level view preferences: grid vs table, and which top-level tab
@@ -66,6 +66,25 @@ export function useViewPreferences(): ViewPreferences {
       // ignore
     }
   };
+
+  // Regression guard for the page-switch scroll bug: switching Apps <->
+  // Privacy Pack used to keep the previous page's scroll offset, so a deep
+  // scroll left the new page's heading half-hidden under the fixed header.
+  // Every page CHANGE now resets the window to the top, where the in-flow
+  // spacer already clears the fixed header; the very first effect run is
+  // the initial mount and must not yank a restored position. View-mode
+  // toggles (grid <-> table) are deliberately NOT wired to this effect, so
+  // switching layout never scrolls the page.
+  const isFirstPageEffect = useRef(true);
+  useEffect(() => {
+    if (isFirstPageEffect.current) {
+      isFirstPageEffect.current = false;
+      return;
+    }
+    // 'instant' on purpose: a page swap must land immediately, and it is
+    // also the correct treatment for prefers-reduced-motion users.
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [page]);
 
   return { viewMode, page, toggleViewMode, changePage };
 }

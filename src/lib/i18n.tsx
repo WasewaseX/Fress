@@ -382,6 +382,10 @@ const en: Dict = {
   'table.pick': 'Pick',
   'table.trend': 'Trend',
   'table.vs': 'vs {app}',
+  'card.badge.pick.tip': 'Our single recommendation in the whole catalog',
+  'card.badge.trending.tip': 'Popular in open-source right now',
+  'table.website.tip': 'Open the official website',
+  'table.website.aria': 'Open {name}\'s official website',
 };
 
 const fa: Dict = {
@@ -748,6 +752,10 @@ const fa: Dict = {
   'table.pick': 'برگزیده',
   'table.trend': 'پرطرفدار',
   'table.vs': 'در برابر {app}',
+  'card.badge.pick.tip': 'تنها انتخاب ما در کل کاتالوگ',
+  'card.badge.trending.tip': 'همین حالا در متن‌باز پرطرفدار است',
+  'table.website.tip': 'بازکردن وب‌سایت رسمی',
+  'table.website.aria': 'بازکردن وب‌سایت رسمی {name}',
 };
 
 const es: Dict = {
@@ -1114,6 +1122,10 @@ const es: Dict = {
   'table.pick': 'Elección',
   'table.trend': 'Tendencia',
   'table.vs': 'vs {app}',
+  'card.badge.pick.tip': 'Nuestra única recomendación de todo el catálogo',
+  'card.badge.trending.tip': 'Popular en el código abierto ahora mismo',
+  'table.website.tip': 'Abrir el sitio oficial',
+  'table.website.aria': 'Abrir el sitio oficial de {name}',
 };
 
 const fr: Dict = {
@@ -1480,6 +1492,10 @@ const fr: Dict = {
   'table.pick': 'Le choix',
   'table.trend': 'Tendance',
   'table.vs': 'vs {app}',
+  'card.badge.pick.tip': 'Notre seule recommandation de tout le catalogue',
+  'card.badge.trending.tip': 'Populaire dans l’open source en ce moment',
+  'table.website.tip': 'Ouvrir le site officiel',
+  'table.website.aria': 'Ouvrir le site officiel de {name}',
 };
 
 const de: Dict = {
@@ -1846,6 +1862,10 @@ const de: Dict = {
   'table.pick': 'Tipp',
   'table.trend': 'Trend',
   'table.vs': 'vs. {app}',
+  'card.badge.pick.tip': 'Unsere einzige Empfehlung im gesamten Katalog',
+  'card.badge.trending.tip': 'Gerade in der Open-Source-Welt beliebt',
+  'table.website.tip': 'Offizielle Website öffnen',
+  'table.website.aria': 'Offizielle Website von {name} öffnen',
 };
 
 export const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

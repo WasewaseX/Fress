@@ -1439,6 +1439,14 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
             // is not). The staging file is intentionally KEPT: a full
             // disk is recoverable, and the .part resumes from exactly
             // the bytes that made it to disk (see the cleanup policy).
+            // The bytes the sink already accepted must be ON DISK when
+            // this returns: tokio::fs::File buffers, and its drop-flush
+            // runs asynchronously in the background, so a caller that
+            // inspects the .part right after the failure could observe a
+            // shorter file and compute a wrong resume offset. Flushing
+            // here only persists bytes the sink ACCEPTED; a flush that
+            // cannot land (disk genuinely full) keeps the original error.
+            let _ = file.flush().await;
             drop(file);
             return Err((format!("Disk write failed: {}", e), None));
         }

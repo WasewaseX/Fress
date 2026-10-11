@@ -641,6 +641,76 @@ const en: Dict = {
   'detail.unavailable.noIos': 'No iOS build of this app',
   'detail.unavailable.noAndroid': 'No Android build; check the desktop or web options',
   'detail.unavailable.noBuild': 'No {platform} build; the app ships for: {list}',
+  // ---- Final pass: announcements and feedback that still bypassed the
+  // dictionaries (downloads context toasts, feature hooks, floating docks)
+  // plus the known data-default fallbacks translated at render time. ----
+  'downloads.toast.completedTitle': 'Downloaded {name}',
+  'downloads.toast.fileFallback': 'file',
+  'downloads.toast.downloadFallback': 'download',
+  'downloads.toast.verifiedDesc': 'SHA-256 verified against the published checksum. {path}',
+  'downloads.toast.reconnectingTitle': 'Reconnecting {name} (attempt {attempt})',
+  'downloads.toast.reconnectingDesc': 'The connection dropped. Continuing from where it stopped.',
+  'downloads.toast.pausedResume': 'Download paused. Use Resume to continue.',
+  'downloads.toast.integrityFailed': 'Integrity check failed',
+  'downloads.toast.resumeInvalid': 'Resume not possible',
+  'downloads.toast.failed': 'Download failed',
+  'downloads.toast.startFailed': 'Could not start download',
+  'downloads.toast.notDirectLink': 'This link is not a direct download',
+  'downloads.toast.browserTabTitle': 'Opened the download in a new browser tab',
+  'downloads.toast.browserTabDesc': 'The Fress desktop app adds a download manager with live progress and SHA-256 verification.',
+  'downloads.toast.startedTitle': 'Download started',
+  'downloads.toast.openFileFailed': 'Could not open the file',
+  'downloads.toast.openFolderFailed': 'Could not open the folder',
+  'downloads.toast.folderPickerDesktop': 'Folder picker is available in the desktop app',
+  'downloads.toast.chooseFolderTitle': 'Choose download folder',
+  'downloads.toast.folderUpdated': 'Download folder updated',
+  'downloads.toast.folderReset': 'Download folder reset to your Downloads folder',
+  'batch.barAria': 'Batch operations bar',
+  'batch.compareHint': 'Compare up to 4 selected tools side-by-side',
+  'batch.clearSelection': 'Clear selection',
+  'batch.clearSelectionAria': 'Clear batch selection',
+  'batch.selectedAll': 'Selected all {count} applications for batch operations.',
+  // Key supplied for BatchInstallModal (Agent 4 wires the title; the
+  // dictionary stays the single source).
+  'batch.removeFromBatch': 'Remove from batch',
+  'compare.dockAria': 'Comparison dock',
+  'compare.countInDock': '{count} in comparison',
+  'compare.viewMatrix': 'View Matrix',
+  'compare.clearHint': 'Clear comparison',
+  'compare.maxReached': 'Maximum 4 applications can be compared simultaneously.',
+  'compare.addedToMatrix': 'Added "{name}" to comparison matrix.',
+  'catalog.updatedOk': 'Updated "{name}" successfully.',
+  'catalog.addedOk': 'Added "{name}" to your application catalog.',
+  'catalog.removedOk': 'Removed "{name}" from your catalog.',
+  'catalog.exportOk': 'Catalog exported successfully as JSON backup.',
+  'catalog.importParseFailed': 'Failed to parse backup JSON file.',
+  'catalog.importInvalidRoot': 'Invalid backup file: expected a JSON object.',
+  'catalog.importAppsNotArray': 'Invalid backup file: the apps list is not an array.',
+  'catalog.importFavoritesCorrupt': 'Invalid backup file: the favorites list is corrupted (not an array).',
+  'catalog.importNewerVersion': 'This backup was written by a newer Fress (schema {version}) and cannot be read safely.',
+  'catalog.importImported': '{count} imported',
+  'catalog.importPresent': '{count} already present',
+  'catalog.importInvalid': '{count} skipped as invalid',
+  'catalog.importRestored': '{count} favorites restored',
+  'catalog.importDone': 'Backup imported: {list}.',
+  'catalog.importNothingNew': 'Nothing new to import ({list}).',
+  'catalog.importStripped': '{count} package command(s) in the backup were removed as unsafe. Only plain "<manager> install <package>" commands are accepted.',
+  'catalog.trendingSynced': 'Synced live GitHub trending software ({source}).',
+  'catalog.trendingOffline': 'Using verified offline curated trending list.',
+  'filters.resetDone': 'Filters reset to default.',
+  // Known data-default fallbacks: the stored app data keeps the English
+  // source string (it is the identifier of "nothing was entered"), while
+  // the words the user reads follow the active language (appText.ts and
+  // the license badge).
+  'license.openSource': 'Open Source',
+  'license.freePersonal': 'Free for Personal Use',
+  'license.sourceAvailable': 'Source-available',
+  'app.defaultWhy': 'Curated community open-source application.',
+  'app.defaultGuide': 'Download and install from the official release page.',
+  'search.defaultTagline': 'Open-source application',
+  'search.defaultDescription': 'Community open-source repository.',
+  'search.defaultWhy': 'Community-backed open-source project with {stars} stars on GitHub.',
+  'search.defaultGuide': 'Visit the GitHub project page for release downloads and setup instructions.',
 };
 
 const fa: Dict = {
@@ -1262,6 +1332,75 @@ const fa: Dict = {
   'detail.unavailable.noIos': 'نسخهٔ iOS برای این برنامه وجود ندارد',
   'detail.unavailable.noAndroid': 'نسخهٔ اندروید وجود ندارد؛ گزینه‌های رایانه یا وب را ببینید',
   'detail.unavailable.noBuild': 'نسخهٔ {platform} وجود ندارد؛ این برنامه برای این سکوها منتشر می‌شود: {list}',
+  // ---- گذر نهایی: اعلان‌ها و بازخوردهایی که از فرهنگ‌ها بیرون مانده بودند
+  // (توست‌های زمینه دریافت‌ها، قلاب‌های امکان‌ها، داک‌های شناور) به‌علاوه
+  // پیش‌فرض‌های شناخته‌شده داده که در زمان نمایش ترجمه می‌شوند. ----
+  'downloads.toast.completedTitle': '{name} دانلود شد',
+  'downloads.toast.fileFallback': 'فایل',
+  'downloads.toast.downloadFallback': 'دانلود',
+  'downloads.toast.verifiedDesc': 'SHA-256 با جمع‌آزمایی منتشرشده تأیید شد. {path}',
+  'downloads.toast.reconnectingTitle': 'در حال اتصال مجدد {name} (تلاش {attempt})',
+  'downloads.toast.reconnectingDesc': 'اتصال قطع شد. از همان‌جا که متوقف شده بود ادامه می‌یابد.',
+  'downloads.toast.pausedResume': 'دانلود متوقف شد. برای ادامه از «ادامه» استفاده کنید.',
+  'downloads.toast.integrityFailed': 'بررسی یکپارچگی ناموفق بود',
+  'downloads.toast.resumeInvalid': 'ادامه دادن ممکن نیست',
+  'downloads.toast.failed': 'دانلود ناموفق بود',
+  'downloads.toast.startFailed': 'شروع دانلود ممکن نشد',
+  'downloads.toast.notDirectLink': 'این پیوند یک دریافت مستقیم نیست',
+  'downloads.toast.browserTabTitle': 'دریافت در زبانی جدید مرورگر باز شد',
+  'downloads.toast.browserTabDesc': 'برنامه دسکتاپ فریس مدیریتی برای دریافت‌ها با پیشرفت زنده و تأیید SHA-256 دارد.',
+  'downloads.toast.startedTitle': 'دریافت آغاز شد',
+  'downloads.toast.openFileFailed': 'باز کردن فایل ممکن نشد',
+  'downloads.toast.openFolderFailed': 'باز کردن پوشه ممکن نشد',
+  'downloads.toast.folderPickerDesktop': 'انتخابگر پوشه در برنامه دسکتاپ موجود است',
+  'downloads.toast.chooseFolderTitle': 'انتخاب پوشه دریافت',
+  'downloads.toast.folderUpdated': 'پوشه دریافت به‌روز شد',
+  'downloads.toast.folderReset': 'پوشه دریافت به پوشه Downloads شما برگردانده شد',
+  'batch.barAria': 'نوار عملیات دسته‌ای',
+  'batch.compareHint': 'مقایسه حداکثر ۴ ابزار انتخاب‌شده کنار هم',
+  'batch.clearSelection': 'پاک کردن انتخاب',
+  'batch.clearSelectionAria': 'پاک کردن انتخاب دسته‌ای',
+  'batch.selectedAll': 'هر {count} برنامه برای عملیات دسته‌ای انتخاب شد.',
+  // کلید برای BatchInstallModal فراهم شد (اتصال آن بر عهده عامل ۴ است؛
+  // فرهنگ منبع یکتا می‌ماند).
+  'batch.removeFromBatch': 'حذف از دسته',
+  'compare.dockAria': 'داک مقایسه',
+  'compare.countInDock': '{count} در مقایسه',
+  'compare.viewMatrix': 'نمایش ماتریس',
+  'compare.clearHint': 'پاک کردن مقایسه',
+  'compare.maxReached': 'حداکثر ۴ برنامه می‌توانند هم‌زمان مقایسه شوند.',
+  'compare.addedToMatrix': '«{name}» به ماتریس مقایسه افزوده شد.',
+  'catalog.updatedOk': '«{name}» با موفقیت به‌روزرسانی شد.',
+  'catalog.addedOk': '«{name}» به فهرست برنامه‌های شما افزوده شد.',
+  'catalog.removedOk': '«{name}» از فهرست شما حذف شد.',
+  'catalog.exportOk': 'فهرست با موفقیت به‌عنوان پشتیبان JSON برون‌بری شد.',
+  'catalog.importParseFailed': 'خواندن فایل پشتیبان JSON ناموفق بود.',
+  'catalog.importInvalidRoot': 'فایل پشتیبان نامعتبر است: باید یک شیء JSON باشد.',
+  'catalog.importAppsNotArray': 'فایل پشتیبان نامعتبر است: فهرست برنامه‌ها آرایه نیست.',
+  'catalog.importFavoritesCorrupt': 'فایل پشتیبان نامعتبر است: فهرست نشان‌شده‌ها خراب است (آرایه نیست).',
+  'catalog.importNewerVersion': 'این پشتیبان با نسخه جدیدتری از فریس (اسکیمای {version}) نوشته شده و به‌طور ایمن خوانده نمی‌شود.',
+  'catalog.importImported': '{count} وارد شد',
+  'catalog.importPresent': '{count} از قبل موجود بود',
+  'catalog.importInvalid': '{count} نامعتبر و رد شد',
+  'catalog.importRestored': '{count} نشان‌شده بازیابی شد',
+  'catalog.importDone': 'پشتیبان وارد شد: {list}.',
+  'catalog.importNothingNew': 'چیز جدیدی برای وارد کردن نیست ({list}).',
+  'catalog.importStripped': '{count} فرمان بسته در پشتیبان به‌عنوان ناامن حذف شد. فقط فرمان‌های ساده «<manager> install <package>» پذیرفته می‌شوند.',
+  'catalog.trendingSynced': 'نرم‌افزارهای پرمخاطب گیت‌هاب همگام‌سازی شد ({source}).',
+  'catalog.trendingOffline': 'از فهرست پرمخاطب بررسی‌شده آفلاین استفاده می‌شود.',
+  'filters.resetDone': 'پالایه‌ها به حالت پیش‌فرض برگشت.',
+  // پیش‌فرض‌های شناخته‌شده داده: داده ذخیره‌شده رشته انگلیسی را نگه
+  // می‌دارد (شناسهٔ «چیزی وارد نشده» است)، در حالی که واژه‌هایی که کاربر
+  // می‌خواند از زبان فعال پیروی می‌کنند.
+  'license.openSource': 'متن‌باز',
+  'license.freePersonal': 'رایگان برای استفاده شخصی',
+  'license.sourceAvailable': 'متن در دسترس',
+  'app.defaultWhy': 'برنامه متن‌باز جامعه‌محور برگزیده.',
+  'app.defaultGuide': 'دریافت و نصب از صفحه انتشار رسمی.',
+  'search.defaultTagline': 'برنامه متن‌باز',
+  'search.defaultDescription': 'مخزن متن‌باز جامعه‌محور.',
+  'search.defaultWhy': 'پروژه متن‌باز با پشتوانه جامعه با {stars} ستاره در گیت‌هاب.',
+  'search.defaultGuide': 'برای دریافت نسخه‌ها و راهنمای نصب به صفحه پروژه در گیت‌هاب بروید.',
 };
 
 const es: Dict = {
@@ -1883,6 +2022,76 @@ const es: Dict = {
   'detail.unavailable.noIos': 'No hay compilación de esta app para iOS',
   'detail.unavailable.noAndroid': 'No hay compilación para Android; revise las opciones de escritorio o web',
   'detail.unavailable.noBuild': 'No hay compilación para {platform}; la app se publica para: {list}',
+  // ---- Pase final: anuncios y comentarios que seguían fuera de los
+  // diccionarios (toasts del contexto de descargas, hooks de features,
+  // docks flotantes) más los valores predeterminados de datos conocidos
+  // que se traducen en el momento de mostrarlos. ----
+  'downloads.toast.completedTitle': 'Descargado {name}',
+  'downloads.toast.fileFallback': 'archivo',
+  'downloads.toast.downloadFallback': 'descarga',
+  'downloads.toast.verifiedDesc': 'SHA-256 verificado contra la suma publicada. {path}',
+  'downloads.toast.reconnectingTitle': 'Reconectando {name} (intento {attempt})',
+  'downloads.toast.reconnectingDesc': 'La conexión se cortó. Continúa desde donde se detuvo.',
+  'downloads.toast.pausedResume': 'Descarga en pausa. Usa Reanudar para continuar.',
+  'downloads.toast.integrityFailed': 'Falló la verificación de integridad',
+  'downloads.toast.resumeInvalid': 'No es posible reanudar',
+  'downloads.toast.failed': 'Descarga fallida',
+  'downloads.toast.startFailed': 'No se pudo iniciar la descarga',
+  'downloads.toast.notDirectLink': 'Este enlace no es una descarga directa',
+  'downloads.toast.browserTabTitle': 'Descarga abierta en una pestaña nueva del navegador',
+  'downloads.toast.browserTabDesc': 'La app de escritorio Fress añade un gestor de descargas con progreso en vivo y verificación SHA-256.',
+  'downloads.toast.startedTitle': 'Descarga iniciada',
+  'downloads.toast.openFileFailed': 'No se pudo abrir el archivo',
+  'downloads.toast.openFolderFailed': 'No se pudo abrir la carpeta',
+  'downloads.toast.folderPickerDesktop': 'El selector de carpetas está disponible en la app de escritorio',
+  'downloads.toast.chooseFolderTitle': 'Elegir carpeta de descargas',
+  'downloads.toast.folderUpdated': 'Carpeta de descargas actualizada',
+  'downloads.toast.folderReset': 'Carpeta de descargas restablecida a tu carpeta de descargas',
+  'batch.barAria': 'Barra de operaciones por lotes',
+  'batch.compareHint': 'Compara hasta 4 herramientas seleccionadas lado a lado',
+  'batch.clearSelection': 'Limpiar selección',
+  'batch.clearSelectionAria': 'Limpiar selección por lotes',
+  'batch.selectedAll': 'Se seleccionaron las {count} aplicaciones para operaciones por lotes.',
+  // Clave suministrada para BatchInstallModal (el agente 4 la conecta; el
+  // diccionario sigue siendo la fuente única).
+  'batch.removeFromBatch': 'Quitar del lote',
+  'compare.dockAria': 'Panel de comparación',
+  'compare.countInDock': '{count} en comparación',
+  'compare.viewMatrix': 'Ver matriz',
+  'compare.clearHint': 'Limpiar comparación',
+  'compare.maxReached': 'Se pueden comparar 4 aplicaciones como máximo a la vez.',
+  'compare.addedToMatrix': '«{name}» se añadió a la matriz de comparación.',
+  'catalog.updatedOk': '«{name}» se actualizó correctamente.',
+  'catalog.addedOk': '«{name}» se añadió a tu catálogo de aplicaciones.',
+  'catalog.removedOk': '«{name}» se quitó de tu catálogo.',
+  'catalog.exportOk': 'Catálogo exportado correctamente como copia de seguridad JSON.',
+  'catalog.importParseFailed': 'No se pudo leer el archivo JSON de copia de seguridad.',
+  'catalog.importInvalidRoot': 'Archivo de copia de seguridad no válido: se esperaba un objeto JSON.',
+  'catalog.importAppsNotArray': 'Archivo de copia de seguridad no válido: la lista de apps no es un array.',
+  'catalog.importFavoritesCorrupt': 'Archivo de copia de seguridad no válido: la lista de favoritos está dañada (no es un array).',
+  'catalog.importNewerVersion': 'Esta copia fue escrita por una versión más nueva de Fress (esquema {version}) y no puede leerse de forma segura.',
+  'catalog.importImported': '{count} importadas',
+  'catalog.importPresent': '{count} ya presentes',
+  'catalog.importInvalid': '{count} descartadas por no válidas',
+  'catalog.importRestored': '{count} favoritos restaurados',
+  'catalog.importDone': 'Copia importada: {list}.',
+  'catalog.importNothingNew': 'Nada nuevo que importar ({list}).',
+  'catalog.importStripped': '{count} comandos de gestor de paquetes de la copia se quitaron por inseguros. Solo se aceptan comandos simples «<manager> install <package>».',
+  'catalog.trendingSynced': 'Software en tendencia de GitHub sincronizado ({source}).',
+  'catalog.trendingOffline': 'Usando la lista de tendencias verificada sin conexión.',
+  'filters.resetDone': 'Filtros restablecidos a los valores predeterminados.',
+  // Valores predeterminados de datos conocidos: el dato guardado conserva
+  // la cadena inglesa (es el identificador de «no se escribió nada»),
+  // mientras que las palabras que lee el usuario siguen el idioma activo.
+  'license.openSource': 'Código abierto',
+  'license.freePersonal': 'Gratis para uso personal',
+  'license.sourceAvailable': 'Código disponible',
+  'app.defaultWhy': 'Aplicación de código abierto curada de la comunidad.',
+  'app.defaultGuide': 'Descarga e instala desde la página oficial de lanzamientos.',
+  'search.defaultTagline': 'Aplicación de código abierto',
+  'search.defaultDescription': 'Repositorio de código abierto de la comunidad.',
+  'search.defaultWhy': 'Proyecto de código abierto respaldado por la comunidad con {stars} estrellas en GitHub.',
+  'search.defaultGuide': 'Visita la página del proyecto en GitHub para descargas de lanzamientos e instrucciones de instalación.',
 };
 
 const fr: Dict = {
@@ -2504,6 +2713,76 @@ const fr: Dict = {
   'detail.unavailable.noIos': 'Pas de version iOS de cette app',
   'detail.unavailable.noAndroid': 'Pas de version Android ; consultez les options de bureau ou web',
   'detail.unavailable.noBuild': 'Pas de version {platform} ; l’app existe pour : {list}',
+  // ---- Passe finale : annonces et retours qui contournaient encore les
+  // dictionnaires (toasts du contexte de téléchargement, hooks des
+  // modules, docks flottants) plus les valeurs par défaut des données
+  // connues, traduites au moment de l’affichage. ----
+  'downloads.toast.completedTitle': 'Téléchargement terminé : {name}',
+  'downloads.toast.fileFallback': 'fichier',
+  'downloads.toast.downloadFallback': 'téléchargement',
+  'downloads.toast.verifiedDesc': 'SHA-256 vérifié contre la somme publiée. {path}',
+  'downloads.toast.reconnectingTitle': 'Reconnexion de {name} (tentative {attempt})',
+  'downloads.toast.reconnectingDesc': 'La connexion a été interrompue. Reprise là où elle s’était arrêtée.',
+  'downloads.toast.pausedResume': 'Téléchargement en pause. Utilisez Reprendre pour continuer.',
+  'downloads.toast.integrityFailed': 'Échec de la vérification d’intégrité',
+  'downloads.toast.resumeInvalid': 'Reprise impossible',
+  'downloads.toast.failed': 'Échec du téléchargement',
+  'downloads.toast.startFailed': 'Impossible de démarrer le téléchargement',
+  'downloads.toast.notDirectLink': 'Ce lien n’est pas un téléchargement direct',
+  'downloads.toast.browserTabTitle': 'Téléchargement ouvert dans un nouvel onglet du navigateur',
+  'downloads.toast.browserTabDesc': 'L’application de bureau Fress ajoute un gestionnaire de téléchargements avec progression en direct et vérification SHA-256.',
+  'downloads.toast.startedTitle': 'Téléchargement lancé',
+  'downloads.toast.openFileFailed': 'Impossible d’ouvrir le fichier',
+  'downloads.toast.openFolderFailed': 'Impossible d’ouvrir le dossier',
+  'downloads.toast.folderPickerDesktop': 'Le sélecteur de dossier est disponible dans l’application de bureau',
+  'downloads.toast.chooseFolderTitle': 'Choisir le dossier de téléchargement',
+  'downloads.toast.folderUpdated': 'Dossier de téléchargement mis à jour',
+  'downloads.toast.folderReset': 'Dossier de téléchargement rétabli à votre dossier de téléchargements',
+  'batch.barAria': 'Barre d’opérations par lot',
+  'batch.compareHint': 'Comparez jusqu’à 4 outils sélectionnés côte à côte',
+  'batch.clearSelection': 'Effacer la sélection',
+  'batch.clearSelectionAria': 'Effacer la sélection par lot',
+  'batch.selectedAll': 'Les {count} applications ont été sélectionnées pour les opérations par lot.',
+  // Clé fournie pour BatchInstallModal (l’agent 4 la câble ; le
+  // dictionnaire reste la source unique).
+  'batch.removeFromBatch': 'Retirer du lot',
+  'compare.dockAria': 'Dock de comparaison',
+  'compare.countInDock': '{count} en comparaison',
+  'compare.viewMatrix': 'Voir la matrice',
+  'compare.clearHint': 'Effacer la comparaison',
+  'compare.maxReached': '4 applications au maximum peuvent être comparées à la fois.',
+  'compare.addedToMatrix': '« {name} » a été ajouté à la matrice de comparaison.',
+  'catalog.updatedOk': '« {name} » a été mis à jour avec succès.',
+  'catalog.addedOk': '« {name} » a été ajouté à votre catalogue d’applications.',
+  'catalog.removedOk': '« {name} » a été retiré de votre catalogue.',
+  'catalog.exportOk': 'Catalogue exporté avec succès en sauvegarde JSON.',
+  'catalog.importParseFailed': 'Impossible de lire le fichier JSON de sauvegarde.',
+  'catalog.importInvalidRoot': 'Fichier de sauvegarde non valide : un objet JSON était attendu.',
+  'catalog.importAppsNotArray': 'Fichier de sauvegarde non valide : la liste des applications n’est pas un tableau.',
+  'catalog.importFavoritesCorrupt': 'Fichier de sauvegarde non valide : la liste des favoris est corrompue (pas un tableau).',
+  'catalog.importNewerVersion': 'Cette sauvegarde provient d’une version plus récente de Fress (schéma {version}) et ne peut pas être lue sans risque.',
+  'catalog.importImported': '{count} importées',
+  'catalog.importPresent': '{count} déjà présentes',
+  'catalog.importInvalid': '{count} écartées comme non valides',
+  'catalog.importRestored': '{count} favoris restaurés',
+  'catalog.importDone': 'Sauvegarde importée : {list}.',
+  'catalog.importNothingNew': 'Rien de nouveau à importer ({list}).',
+  'catalog.importStripped': '{count} commandes de gestionnaire de paquets de la sauvegarde ont été retirées comme non sûres. Seules les commandes simples « <manager> install <package> » sont acceptées.',
+  'catalog.trendingSynced': 'Logiciels en tendance de GitHub synchronisés ({source}).',
+  'catalog.trendingOffline': 'Utilisation de la liste de tendances hors ligne vérifiée.',
+  'filters.resetDone': 'Filtres rétablis aux valeurs par défaut.',
+  // Valeurs par défaut des données connues : la donnée stockée conserve
+  // la chaîne anglaise (c’est l’identifiant de « rien n’a été saisi »),
+  // tandis que les mots lus par l’utilisateur suivent la langue active.
+  'license.openSource': 'Open Source',
+  'license.freePersonal': 'Gratuit pour usage personnel',
+  'license.sourceAvailable': 'Source disponible',
+  'app.defaultWhy': 'Application open source communautaire choisie avec soin.',
+  'app.defaultGuide': 'Téléchargez et installez depuis la page officielle des versions.',
+  'search.defaultTagline': 'Application open source',
+  'search.defaultDescription': 'Dépôt open source communautaire.',
+  'search.defaultWhy': 'Projet open source porté par la communauté avec {stars} étoiles sur GitHub.',
+  'search.defaultGuide': 'Visitez la page du projet sur GitHub pour les téléchargements et les instructions d’installation.',
 };
 
 const de: Dict = {
@@ -3125,6 +3404,76 @@ const de: Dict = {
   'detail.unavailable.noIos': 'Kein iOS-Build dieser App',
   'detail.unavailable.noAndroid': 'Kein Android-Build; prüfen Sie die Desktop- oder Web-Optionen',
   'detail.unavailable.noBuild': 'Kein {platform}-Build; die App erscheint für: {list}',
+  // ---- Letzter Durchgang: Ansagen und Rückmeldungen, die die
+  // Wörterbücher weiterhin umgingen (Toasts des Download-Kontexts, Hooks
+  // der Feature-Module, schwebende Docks) sowie die bekannten
+  // Daten-Standardwerte, die beim Anzeigen übersetzt werden. ----
+  'downloads.toast.completedTitle': 'Download abgeschlossen: {name}',
+  'downloads.toast.fileFallback': 'Datei',
+  'downloads.toast.downloadFallback': 'Download',
+  'downloads.toast.verifiedDesc': 'SHA-256 gegen die veröffentlichte Prüfsumme verifiziert. {path}',
+  'downloads.toast.reconnectingTitle': 'Neuverbindung von {name} (Versuch {attempt})',
+  'downloads.toast.reconnectingDesc': 'Die Verbindung wurde unterbrochen. Es geht dort weiter, wo sie abriss.',
+  'downloads.toast.pausedResume': 'Download pausiert. Verwenden Sie „Fortsetzen“, um weiterzumachen.',
+  'downloads.toast.integrityFailed': 'Integritätsprüfung fehlgeschlagen',
+  'downloads.toast.resumeInvalid': 'Fortsetzen nicht möglich',
+  'downloads.toast.failed': 'Download fehlgeschlagen',
+  'downloads.toast.startFailed': 'Download konnte nicht gestartet werden',
+  'downloads.toast.notDirectLink': 'Dieser Link ist kein direkter Download',
+  'downloads.toast.browserTabTitle': 'Download in neuem Browser-Tab geöffnet',
+  'downloads.toast.browserTabDesc': 'Die Fress-Desktop-App ergänzt einen Download-Manager mit Live-Fortschritt und SHA-256-Verifizierung.',
+  'downloads.toast.startedTitle': 'Download gestartet',
+  'downloads.toast.openFileFailed': 'Datei konnte nicht geöffnet werden',
+  'downloads.toast.openFolderFailed': 'Ordner konnte nicht geöffnet werden',
+  'downloads.toast.folderPickerDesktop': 'Die Ordnerauswahl ist in der Desktop-App verfügbar',
+  'downloads.toast.chooseFolderTitle': 'Download-Ordner wählen',
+  'downloads.toast.folderUpdated': 'Download-Ordner aktualisiert',
+  'downloads.toast.folderReset': 'Download-Ordner auf Ihren Downloads-Ordner zurückgesetzt',
+  'batch.barAria': 'Leiste für Sammelaktionen',
+  'batch.compareHint': 'Bis zu 4 ausgewählte Werkzeuge nebeneinander vergleichen',
+  'batch.clearSelection': 'Auswahl aufheben',
+  'batch.clearSelectionAria': 'Sammelauswahl aufheben',
+  'batch.selectedAll': 'Alle {count} Anwendungen für Sammelaktionen ausgewählt.',
+  // Schlüssel für BatchInstallModal bereitgestellt (Agent 4 verdrahtet
+  // ihn; das Wörterbuch bleibt die einzige Quelle).
+  'batch.removeFromBatch': 'Aus der Sammlung entfernen',
+  'compare.dockAria': 'Vergleichs-Dock',
+  'compare.countInDock': '{count} im Vergleich',
+  'compare.viewMatrix': 'Matrix anzeigen',
+  'compare.clearHint': 'Vergleich löschen',
+  'compare.maxReached': 'Es können maximal 4 Anwendungen gleichzeitig verglichen werden.',
+  'compare.addedToMatrix': '„{name}“ zur Vergleichsmatrix hinzugefügt.',
+  'catalog.updatedOk': '„{name}“ erfolgreich aktualisiert.',
+  'catalog.addedOk': '„{name}“ zu Ihrem Anwendungskatalog hinzugefügt.',
+  'catalog.removedOk': '„{name}“ aus Ihrem Katalog entfernt.',
+  'catalog.exportOk': 'Katalog erfolgreich als JSON-Backup exportiert.',
+  'catalog.importParseFailed': 'JSON-Backup-Datei konnte nicht gelesen werden.',
+  'catalog.importInvalidRoot': 'Ungültige Backup-Datei: ein JSON-Objekt wurde erwartet.',
+  'catalog.importAppsNotArray': 'Ungültige Backup-Datei: die App-Liste ist kein Array.',
+  'catalog.importFavoritesCorrupt': 'Ungültige Backup-Datei: die Favoritenliste ist beschädigt (kein Array).',
+  'catalog.importNewerVersion': 'Dieses Backup stammt von einer neueren Fress-Version (Schema {version}) und kann nicht sicher gelesen werden.',
+  'catalog.importImported': '{count} importiert',
+  'catalog.importPresent': '{count} bereits vorhanden',
+  'catalog.importInvalid': '{count} als ungültig übersprungen',
+  'catalog.importRestored': '{count} Favoriten wiederhergestellt',
+  'catalog.importDone': 'Backup importiert: {list}.',
+  'catalog.importNothingNew': 'Nichts Neues zu importieren ({list}).',
+  'catalog.importStripped': '{count} Paketverwalter-Befehle im Backup wurden als unsicher entfernt. Nur einfache „<manager> install <package>“-Befehle werden akzeptiert.',
+  'catalog.trendingSynced': 'GitHub-Trendsoftware synchronisiert ({source}).',
+  'catalog.trendingOffline': 'Verifizierte Offline-Kuratliste wird verwendet.',
+  'filters.resetDone': 'Filter auf Standard zurückgesetzt.',
+  // Bekannte Daten-Standardwerte: die gespeicherten Daten behalten die
+  // englische Zeichenkette (sie kennzeichnet „nichts eingegeben“),
+  // während die gelesenen Worte der aktiven Sprache folgen.
+  'license.openSource': 'Open Source',
+  'license.freePersonal': 'Kostenlos für persönliche Nutzung',
+  'license.sourceAvailable': 'Quellcode verfügbar',
+  'app.defaultWhy': 'Sorgfältig ausgewählte Open-Source-Anwendung aus der Community.',
+  'app.defaultGuide': 'Über die offizielle Release-Seite herunterladen und installieren.',
+  'search.defaultTagline': 'Open-Source-Anwendung',
+  'search.defaultDescription': 'Community-Open-Source-Repository.',
+  'search.defaultWhy': 'Von der Community getragenes Open-Source-Projekt mit {stars} Sternen auf GitHub.',
+  'search.defaultGuide': 'Besuchen Sie die Projektseite auf GitHub für Release-Downloads und Installationsanleitungen.',
 };
 
 export const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };
@@ -3198,6 +3547,28 @@ export const PP_CATEGORY_I18N_KEYS: Record<string, string> = {
   'Office Suite': 'pp.cat.office',
   'Domain Hosting': 'pp.cat.hosting',
 };
+
+/**
+ * Known license-string DEFAULTS that are English display copy rather than
+ * SPDX identifiers. Real SPDX ids ("MIT", "GPL-3.0-only", "Apache-2.0")
+ * are proper nouns and pass through untouched; the generated default
+ * "Open Source" (written into user-added apps when the field was left
+ * blank) and the two English-phrase catalog values translate. Shared so
+ * cards, the table, the comparison matrix and the detail modal resolve
+ * the SAME translation instead of growing per-component maps.
+ * Render-time only - the stored data keeps the original string.
+ */
+export const LICENSE_DISPLAY_KEYS: Record<string, string> = {
+  'Open Source': 'license.openSource',
+  'Free for Personal Use': 'license.freePersonal',
+  'Source-available': 'license.sourceAvailable',
+};
+
+/** Resolve one license string for display through the shared mapping. */
+export function translateLicenseDisplay(t: (key: string) => string, license: string): string {
+  const key = LICENSE_DISPLAY_KEYS[license];
+  return key ? t(key) : license;
+}
 
 /**
  * Translation coverage guard: an unexpected runtime key falls back to the

@@ -212,17 +212,31 @@ export function keepFocusInside(
       // (by now removed) panel, or the panel's removal dropped it onto the
       // body, which is where focus lands when the element holding it leaves
       // the document. If the user already clicked somewhere else, leave them
-      // where they are. A disconnected opener (its row was filtered away
-      // while the dialog stood open) is skipped: focusing it would no-op.
+      // where they are.
       const active = document.activeElement;
       const stillInside = active instanceof Node && panel.contains(active);
       const fellBackToBody = active === document.body;
+      if (!stillInside && !fellBackToBody) return;
+      // A <body> "opener" is not a page control (body.focus() is a no-op):
+      // it must not count as restorable, or every programmatic open would
+      // silently restore nothing.
       const openerAlive =
         previouslyFocused !== null &&
         previouslyFocused instanceof HTMLElement &&
+        previouslyFocused !== document.body &&
         previouslyFocused.isConnected;
-      if ((stillInside || fellBackToBody) && openerAlive) {
+      if (openerAlive) {
         previouslyFocused.focus();
+        return;
+      }
+      // The opener no longer exists (a palette row consumed by Enter, a
+      // control unmounted mid-flow). A parent dialog is often still open
+      // beneath this one - park focus inside the topmost remaining panel
+      // instead of dropping the keyboard user onto the page behind it.
+      const parent = openPanels[openPanels.length - 1];
+      if (parent && parent.isConnected) {
+        const target = visibleFocusable(parent)[0] ?? parent;
+        target.focus();
       }
     };
   }, [open, panelRef, initialFocus]);

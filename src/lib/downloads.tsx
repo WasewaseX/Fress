@@ -13,6 +13,7 @@ import { formatBytes, formatSpeed, formatEta } from './format';
 import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
 import { serializeItems, deserializeItems, DOWNLOAD_ITEMS_KEY } from './downloadItemsStore';
 import { createDownloadPersistence } from './downloadPersistence';
+import { useI18n } from './i18n';
 
 export { formatBytes, formatSpeed, formatEta };
 
@@ -180,6 +181,13 @@ export interface DownloadsStateValue extends DownloadSummaryValue {
 }
 
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
+  // Toast wording follows the active language. The translator lives in a
+  // ref so the command callbacks below keep their documented stable
+  // identity (see DownloadActionsValue) instead of re-creating on every
+  // language switch; the ref always holds the current t.
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   // The panel survives restarts: completed/failed entries come back (the
   // .part files and finished files are on disk). Ids are re-assigned to
   // fresh negatives so they can never collide with the Rust side's ids,
@@ -363,12 +371,13 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       applyItemUpdate(p.id, (it) => ({ ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, verified: p.verified === true ? true : undefined, total: p.bytes, speed: 0, eta: 0, canResume: false }));
       const item = itemsRef.current.find((it) => it.id === p.id);
       activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
+      const tt = tRef.current;
       if (p.verified === true) {
-        toast.success(`Downloaded ${item?.name || 'file'}`, {
-          description: `SHA-256 verified against the published checksum. ${p.path}`,
+        toast.success(tt('downloads.toast.completedTitle').replace('{name}', item?.name || tt('downloads.toast.fileFallback')), {
+          description: tt('downloads.toast.verifiedDesc').replace('{path}', p.path),
         });
       } else {
-        toast.success(`Downloaded ${item?.name || 'file'}`, {
+        toast.success(tt('downloads.toast.completedTitle').replace('{name}', item?.name || tt('downloads.toast.fileFallback')), {
           description: p.path,
         });
       }
@@ -382,8 +391,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const p = event.payload;
       const item = itemsRef.current.find((it) => it.id === p.id);
       applyItemUpdate(p.id, (it) => ({ ...it, status: 'active', canResume: false }));
-      toast.info(`Reconnecting ${item?.name || 'download'} (attempt ${p.attempt})`, {
-        description: 'The connection dropped. Continuing from where it stopped.',
+      const tt = tRef.current;
+      toast.info(tt('downloads.toast.reconnectingTitle').replace('{name}', item?.name || tt('downloads.toast.downloadFallback')).replace('{attempt}', String(p.attempt)), {
+        description: tt('downloads.toast.reconnectingDesc'),
       });
     }).then((un) => unlisteners.push(un));
 
@@ -392,24 +402,25 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       // Every terminal Rust state (cancelled, failed, checksum-mismatch)
       // frees the slot this transfer occupied.
       activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
+      const tt = tRef.current;
       if (p.message === 'Cancelled') {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'cancelled', canResume: true }));
-        toast.info('Download paused. Use Resume to continue');
+        toast.info(tt('downloads.toast.pausedResume'));
       } else if (p.kind === 'checksum') {
         // The file failed verification and was deleted on disk. A resume is
         // pointless; the source itself must be retried.
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: false, sha256: undefined }));
-        toast.error('Integrity check failed', { description: p.message });
+        toast.error(tt('downloads.toast.integrityFailed'), { description: p.message });
       } else if (p.kind === 'resume-invalid') {
         // The server answered the resume in a way that cannot be trusted
         // (protocol-invalid Content-Range, HTTP 416) and the staging bytes
         // were discarded. Offering Resume would replay the same broken
         // exchange - only a fresh Retry is sound.
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: false }));
-        toast.error('Resume not possible', { description: p.message });
+        toast.error(tt('downloads.toast.resumeInvalid'), { description: p.message });
       } else {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'error', error: p.message, canResume: true }));
-        toast.error('Download failed', { description: p.message });
+        toast.error(tt('downloads.toast.failed'), { description: p.message });
       }
       // A finished (or failed) transfer frees a slot for the next in line.
       promoteQueued();
@@ -490,7 +501,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           {
             id,
             url,
-            name: guessedName || 'download',
+            name: guessedName || tRef.current('downloads.toast.downloadFallback'),
             dir: dir || '',
             bytes: 0,
             total: 0,
@@ -504,7 +515,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           ...prev,
         ]);
       } catch (e) {
-        toast.error('Could not start download', { description: String(e) });
+        toast.error(tRef.current('downloads.toast.startFailed'), { description: String(e) });
         throw e;
       }
     },
@@ -514,7 +525,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const startDownload = useCallback(
     async (url: string, nameHint?: string, opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null }) => {
       if (!url || !/^https?:\/\//i.test(url)) {
-        toast.error('This link is not a direct download');
+        toast.error(tRef.current('downloads.toast.notDirectLink'));
         return;
       }
 
@@ -544,8 +555,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           },
           ...prev,
         ]);
-        toast.info('Opened the download in a new browser tab', {
-          description: 'The Fress desktop app adds a download manager with live progress and SHA-256 verification.',
+        toast.info(tRef.current('downloads.toast.browserTabTitle'), {
+          description: tRef.current('downloads.toast.browserTabDesc'),
         });
         return;
       }
@@ -569,7 +580,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             {
               id: makeLocalItemId(),
               url,
-              name: guessedName || 'download',
+              name: guessedName || tRef.current('downloads.toast.downloadFallback'),
               dir: 'Queued',
               bytes: 0,
               total: 0,
@@ -590,7 +601,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         await startTauriDownload(url, nameHint, opts);
         // Only a transfer that actually started announces itself; queued
         // entries are visible in the manager and would only spam toasts.
-        toast.info('Download started', { description: nameHint || url });
+        toast.info(tRef.current('downloads.toast.startedTitle'), { description: nameHint || url });
       } catch {
         // The start failed; the error toast is already up. A slot may have
         // been conceptually freed (nothing is running in its place).
@@ -656,7 +667,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const openFile = useCallback((path: string) => {
     if (isTauri()) {
-      openPath(path).catch(() => toast.error('Could not open the file'));
+      openPath(path).catch(() => toast.error(tRef.current('downloads.toast.openFileFailed')));
     }
   }, []);
 
@@ -680,20 +691,20 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         try {
           await openPath(await dirname(path));
         } catch {
-          toast.error('Could not open the folder');
+          toast.error(tRef.current('downloads.toast.openFolderFailed'));
         }
       });
     } else {
-      openPath(target).catch(() => toast.error('Could not open the folder'));
+      openPath(target).catch(() => toast.error(tRef.current('downloads.toast.openFolderFailed')));
     }
   }, []);
 
   const chooseFolder = useCallback(async () => {
     if (!isTauri()) {
-      toast.info('Folder picker is available in the desktop app');
+      toast.info(tRef.current('downloads.toast.folderPickerDesktop'));
       return;
     }
-    const selected = await openDialog({ directory: true, multiple: false, title: 'Choose download folder' });
+    const selected = await openDialog({ directory: true, multiple: false, title: tRef.current('downloads.toast.chooseFolderTitle') });
     if (typeof selected === 'string') {
       setDownloadDir(selected);
       try {
@@ -701,7 +712,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // ignore
       }
-      toast.success('Download folder updated', { description: selected });
+      toast.success(tRef.current('downloads.toast.folderUpdated'), { description: selected });
     }
   }, []);
 
@@ -714,7 +725,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     try {
       const dir = await invoke<string>('default_download_dir');
       setDownloadDir(dir);
-      toast.success('Download folder reset to your Downloads folder', { description: dir });
+      toast.success(tRef.current('downloads.toast.folderReset'), { description: dir });
     } catch {
       setDownloadDir(null);
     }

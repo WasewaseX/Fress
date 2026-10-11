@@ -4,7 +4,7 @@
 //
 import React, { useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n, CATEGORY_I18N_KEYS, RATING_I18N_KEYS } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS, RATING_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
 import {
@@ -205,7 +205,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   <div className="font-semibold text-slate-400">{t('table.head.license')}</div>
                   {appsToCompare.map((app) => (
                     <div key={app.id} className="px-3">
-                      <span className="font-mono text-emerald-400">{app.license}</span>
+                      <span className="font-mono text-emerald-400">{translateLicenseDisplay(t, app.license)}</span>
                     </div>
                   ))}
                 </div>

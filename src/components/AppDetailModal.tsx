@@ -42,7 +42,7 @@ import {
 // what a retry does (including evicting the failed memo entry) is resolver-
 // side code behind this interface. See src/lib/resolveRetry.ts.
 import { resolverRetry } from '../lib/resolveRetry';
-import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
@@ -661,7 +661,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 {t(CATEGORY_I18N_KEYS[app.category])}
               </span>
               <span id="detail-license-badge" className="text-xs font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] text-slate-300 px-2 py-0.5 rounded">
-                {app.license}
+                {translateLicenseDisplay(t, app.license)}
               </span>
               {app.lastVerifiedAt && (
                 // Freshness is only ever claimed when a human actually
@@ -854,12 +854,12 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 <Check className="w-3 h-3 text-emerald-400 shrink-0" />
                 <span>
                   {licenseClass === 'foss'
-                    ? t('detail.resolver.licenseFoss').replace('{license}', app.license)
+                    ? t('detail.resolver.licenseFoss').replace('{license}', translateLicenseDisplay(t, app.license))
                     : app.license === 'Free for Personal Use'
                       ? t('detail.resolver.licensePersonal')
                       : app.license === 'Source-available'
                         ? t('detail.resolver.licenseSourceAvailable')
-                        : t('detail.resolver.licenseOther').replace('{license}', app.license)}
+                        : t('detail.resolver.licenseOther').replace('{license}', translateLicenseDisplay(t, app.license))}
                 </span>
               </li>
               {app.proprietaryAlternative && (

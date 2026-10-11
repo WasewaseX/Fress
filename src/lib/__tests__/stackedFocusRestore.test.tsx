@@ -68,3 +68,52 @@ describe('stacked dialog focus restore', () => {
     expect(document.activeElement).toBe(getByTestId('detail-ctrl'));
   });
 });
+
+/**
+ * Destroyed-opener restore: a child dialog whose opener was REMOVED while
+ * it stood open (a palette row consumed by Enter, a list entry unmounted
+ * mid-flow) must still park focus inside the parent dialog on close -
+ * never drop the keyboard user onto the page behind the parent.
+ */
+const VanishingOpenerShell: React.FC = () => {
+  const [detail, setDetail] = useState(false);
+  const [child, setChild] = useState(false);
+  return (
+    <>
+      <button type="button" data-testid="outer-opener" onClick={() => setDetail(true)}>
+        Open detail
+      </button>
+      <Panel open={detail} onClose={() => setDetail(false)} testId="detail2">
+        {/*
+          The child's opener only exists while the child is closed, exactly
+          like a palette row that the activation itself removes.
+        */}
+        {!child && (
+          <button type="button" data-testid="child-opener" onClick={() => setChild(true)}>
+            Open child
+          </button>
+        )}
+        <Panel open={child} onClose={() => setChild(false)} testId="child" />
+      </Panel>
+    </>
+  );
+};
+
+describe('destroyed opener while stacked', () => {
+  it('parks focus inside the parent dialog when the opener was removed', () => {
+    const { getByTestId } = render(<VanishingOpenerShell />);
+    fireEvent.click(getByTestId('outer-opener'));
+    expect(document.activeElement).toBe(getByTestId('detail2-ctrl'));
+    const childOpener = getByTestId('child-opener');
+    fireEvent.click(childOpener);
+    expect(document.activeElement).toBe(getByTestId('child-ctrl'));
+    expect(childOpener.isConnected).toBe(false);
+    // Escape closes the child; its opener is gone, so focus must land back
+    // INSIDE the parent dialog, not on the page behind it.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const parent = getByTestId('detail2');
+    const focusInsideParent = parent.contains(document.activeElement);
+    expect(focusInsideParent).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});

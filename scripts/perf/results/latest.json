@@ -1,0 +1,48 @@
+{
+  "catalogEntries": 575,
+  "measured": {
+    "usableMs": 2085.848878,
+    "searchLatencyMs": [
+      109.88739199999964,
+      41.569994999999835,
+      36.31985799999984
+    ],
+    "gridToTableMs": 1014.5509319999983,
+    "tableToGridMs": 1051.3198359999951,
+    "burstMutations": 0,
+    "cadenceMutations": 0,
+    "progressEventsBurst": 1000,
+    "writesDuringTransfer": 0,
+    "progressEventsCadence": 100,
+    "writesDuringCadence": 0,
+    "historyLoadMs": 2001.8304659999994,
+    "historyBurstMutations": 0,
+    "heapUsedMB": null,
+    "heapTotalMB": null
+  },
+  "assertions": {
+    "burstCardMutations": {
+      "value": 0,
+      "bound": 0,
+      "pass": true
+    },
+    "historyBurstCardMutations": {
+      "value": 0,
+      "bound": 0,
+      "pass": true
+    },
+    "persistenceWritesPer100Events": {
+      "value": 0,
+      "bound": 12,
+      "pass": true
+    },
+    "usableCatalogMs": {
+      "value": 2086,
+      "guardMs": 15000,
+      "pass": true,
+      "machineSensitive": true
+    }
+  },
+  "recordedAt": "2026-10-11T21:32:39.384Z",
+  "node": "v24.21.0"
+}

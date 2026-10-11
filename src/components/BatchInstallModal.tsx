@@ -187,6 +187,9 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
       ref={panelRef}
       id="batch-install-modal-backdrop"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="batch-install-title"
       onClick={onClose}
     >
       <div 
@@ -201,7 +204,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               <Terminal className="w-5 h-5" aria-hidden="true" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-100 tracking-tight">
+              <h2 id="batch-install-title" className="text-base font-bold text-slate-100 tracking-tight">
                 {t('bs.title')}
               </h2>
               <p className="text-xs text-slate-400">

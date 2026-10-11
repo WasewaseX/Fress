@@ -11,6 +11,17 @@
  * platform than the app claims, apps without icons or without
  * translations, and the same app listed twice.
  *
+ * WARNING POLICY (deliberate, documented - warnings never fail CI):
+ *   - "single-platform app": a GitHub-hosted entry claiming exactly one
+ *     desktop platform is suspicious but sometimes correct (ShareX and
+ *     PowerToys are Windows-only by design; the Android-only entries ship
+ *     through F-Droid). Each of the current 13 warnings was individually
+ *     re-checked during the live audit (see PR #20 / the audit notes in
+ *     the data files); a NEW single-platform entry should expect review.
+ *   - "possible duplicate application": two entries with the same normal-
+ *     ized name. Legitimate when the apps genuinely differ (a client and
+ *     its companion); a human decides.
+ *
  * Run: npm run validate:catalog   (CI runs it on every PR)
  * Exit code 1 = errors that must be fixed; warnings do not fail CI.
  */
@@ -23,6 +34,7 @@ import { INITIAL_APPS } from '../src/data/appsData';
 import { APP_DESCRIPTIONS } from '../src/data/appDescriptions';
 import { APP_ICONS } from '../src/data/appIcons';
 import { sanitizeInstallCommand, PkgManager } from '../src/lib/installCommands';
+import { compileSafePattern } from '../src/lib/patternSafety';
 import type { AppItem, Category, Platform } from '../src/types';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -94,6 +106,27 @@ function checkCommand(app: string, field: string, manager: PkgManager, raw: stri
   const relevant = COMMAND_PLATFORMS[manager].some((p) => platforms.includes(p));
   if (!relevant) {
     err(app, `${field} is a ${manager} command but the app lists none of: ${COMMAND_PLATFORMS[manager].join(', ')}`);
+    return;
+  }
+  // And the package id must have the CANONICAL shape that manager's
+  // registry uses. A plausible-looking string that no registry could ever
+  // resolve is a silent lie in the UI; each manager has its own grammar.
+  // The canonical package id is the command's LAST token: flatpak carries
+  // a remote name ("flatpak install flathub org.videolan.VLC"), brew an
+  // optional --cask flag, winget/scoop/apt are bare. The sanitizer has
+  // already guaranteed "<manager> install [flags] <id>".
+  const id = raw.trim().split(/\s+/).pop() ?? '';
+  const shapes: Record<PkgManager, { re: RegExp; hint: string }> = {
+    winget: { re: /^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+$/, hint: 'Publisher.Package (e.g. VideoLAN.VLC)' },
+    brew: { re: /^(--cask\s+)?[a-z0-9@._+-]+$/, hint: 'formula or --cask name (e.g. --cask vlc)' },
+    // Flatpak ids allow hyphens inside segments (io.gitlab.librewolf-community);
+    // Android package names do not, which is why fdroidId uses the stricter regex.
+    flatpak: { re: /^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z][A-Za-z0-9_-]*)+$/, hint: 'reverse-DNS app id (e.g. org.videolan.VLC)' },
+    scoop: { re: /^[a-z0-9][a-z0-9._-]*$/, hint: 'lowercase manifest name (e.g. sharex)' },
+    apt: { re: /^[a-z0-9][a-z0-9+._-]*$/, hint: 'lowercase package name (e.g. gimp)' },
+  };
+  if (!shapes[manager].re.test(id)) {
+    err(app, `${field} package id does not look like a canonical ${manager} id (expected ${shapes[manager].hint}): "${id}"`);
   }
 }
 
@@ -199,6 +232,50 @@ for (const app of apps) {
         new RegExp(pattern as string, 'i');
       } catch {
         err(label, `assetPatterns.${plat} is not a valid regex: ${pattern}`);
+        continue;
+      }
+      // A pattern that compiles but fails the SAFE subset would be silently
+      // disabled at resolve time (compileSafePattern returns null there) -
+      // the entry would quietly lose its override. Flag it as the defect
+      // it is instead of letting the resolver shrug.
+      if (!compileSafePattern(pattern as string)) {
+        err(label, `assetPatterns.${plat} is not in the safe regex subset (it would be ignored at resolve time): ${pattern}`);
+      }
+    }
+  }
+
+  // Tag-stream patterns follow the exact same rules as asset patterns.
+  if (app.tagPatterns) {
+    for (const [plat, pattern] of Object.entries(app.tagPatterns)) {
+      if (!VALID_PLATFORMS.includes(plat as Platform)) {
+        err(label, `tagPatterns has an unknown platform: ${plat}`);
+        continue;
+      }
+      if (!app.platforms?.includes(plat as Platform)) {
+        err(label, `tagPatterns.${plat} is set but the app does not list that platform`);
+      }
+      try {
+        new RegExp(pattern as string, 'i');
+      } catch {
+        err(label, `tagPatterns.${plat} is not a valid regex: ${pattern}`);
+        continue;
+      }
+      if (!compileSafePattern(pattern as string)) {
+        err(label, `tagPatterns.${plat} is not in the safe regex subset (it would be ignored at resolve time): ${pattern}`);
+      }
+    }
+  }
+
+  // The architectures claim must use the vocabulary the UI and resolver
+  // understand - a stray "x64" or "ARM" here silently filters nothing.
+  if (app.architectures !== undefined) {
+    if (!Array.isArray(app.architectures)) {
+      err(label, 'architectures must be an array when present');
+    } else {
+      for (const a of app.architectures) {
+        if (!['x86_64', 'arm64', 'universal'].includes(a)) {
+          err(label, `architectures contains an unknown value: ${a} (expected x86_64, arm64 or universal)`);
+        }
       }
     }
   }
@@ -233,7 +310,26 @@ for (const app of apps) {
   }
 }
 
-// 4. Translation coverage: a catalog entry is not "done" until its
+// 4. Store identities must be unique ACROSS apps: two entries claiming the
+// same F-Droid package or Play id would both stream the same APK under two
+// different names, and a repoOverride pointing at another app's repo makes
+// both entries fight over one release stream.
+const seenFdroid = new Map<string, string>();
+const seenPlay = new Map<string, string>();
+for (const app of apps) {
+  if (app.fdroidId) {
+    const prev = seenFdroid.get(app.fdroidId);
+    if (prev) err(app.id, `fdroidId ${app.fdroidId} is already used by "${prev}"`);
+    else seenFdroid.set(app.fdroidId, app.id);
+  }
+  if (app.playStoreId) {
+    const prev = seenPlay.get(app.playStoreId);
+    if (prev) err(app.id, `playStoreId ${app.playStoreId} is already used by "${prev}"`);
+    else seenPlay.set(app.playStoreId, app.id);
+  }
+}
+
+// 5. Translation coverage: a catalog entry is not "done" until its
 // description exists in every supported language.
 for (const lang of TRANSLATED_LANGS) {
   for (const app of apps) {

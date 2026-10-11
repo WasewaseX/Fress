@@ -9,6 +9,109 @@ import { DICTS } from '../i18n';
 const LANGS = ['en', 'fa', 'es', 'fr', 'de'] as const;
 const enKeys = Object.keys(DICTS.en).sort();
 
+/**
+ * Keys whose translation is ALLOWED to be byte-identical to the English
+ * source. Every entry here is either a proper noun, a product name, a
+ * package-manager label, or a word that genuinely is the same word in that
+ * language. Anything NOT in this list that a future change copies straight
+ * from English fails CI - the whole point of the coverage gate is that
+ * "paste the en string into the other dict" is a conscious, reviewed
+ * decision, never a shortcut.
+ */
+const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<string>> = {
+  en: new Set<string>(),
+  fa: new Set([
+    'downloads.hash',
+    'detail.googlePlay',
+    'detail.fdroid',
+    'bs.tab.brewfile',
+    'common.platform.windows',
+    'common.platform.mac',
+    'common.platform.linux',
+    'common.platform.android',
+    'common.platform.ios',
+  ]),
+  es: new Set([
+    'card.portable',
+    'downloads.hash',
+    'common.beta',
+    'detail.googlePlay',
+    'detail.fdroid',
+    'bar.script',
+    'bs.tab.wingetPs',
+    'bs.tab.brew',
+    'bs.tab.brewfile',
+    'bs.tab.flatpak',
+    'bs.tab.scoop',
+    'bs.tab.apt',
+    'header.tabApps',
+    'palette.vs',
+    'detail.resolver.wingetLabel',
+    'detail.resolver.brewLabel',
+    'detail.resolver.flatpakLabel',
+    'common.platform.windows',
+    'common.platform.mac',
+    'common.platform.linux',
+    'common.platform.android',
+    'common.platform.web',
+    'common.platform.ios',
+  ]),
+  fr: new Set([
+    'card.guide',
+    'card.portable',
+    'downloads.hash',
+    'detail.googlePlay',
+    'detail.fdroid',
+    'bar.script',
+    'bs.tab.wingetPs',
+    'bs.tab.brew',
+    'bs.tab.brewfile',
+    'bs.tab.flatpak',
+    'bs.tab.scoop',
+    'bs.tab.apt',
+    'palette.actionBadge',
+    'palette.vs',
+    'detail.resolver.wingetLabel',
+    'detail.resolver.brewLabel',
+    'detail.resolver.flatpakLabel',
+    'common.platform.windows',
+    'common.platform.mac',
+    'common.platform.linux',
+    'common.platform.android',
+    'common.platform.web',
+    'common.platform.ios',
+    'header.section',
+  ]),
+  de: new Set([
+    'header.downloads',
+    'filter.sortName',
+    'card.details',
+    'downloads.title',
+    'downloads.hash',
+    'detail.googlePlay',
+    'detail.fdroid',
+    'bs.tab.wingetPs',
+    'bs.tab.brew',
+    'bs.tab.brewfile',
+    'bs.tab.flatpak',
+    'bs.tab.scoop',
+    'bs.tab.apt',
+    'header.tabApps',
+    'detail.resolver.wingetLabel',
+    'detail.resolver.brewLabel',
+    'detail.resolver.flatpakLabel',
+    'downloads.a11y.summary',
+    'downloads.a11y.summaryEmpty',
+    'common.platform.windows',
+    'common.platform.mac',
+    'common.platform.linux',
+    'common.platform.android',
+    'common.platform.web',
+    'common.platform.ios',
+    'menu.updates',
+  ]),
+};
+
 describe('i18n dictionary parity', () => {
   it('exposes DICTS with exactly the five supported languages', () => {
     expect(Object.keys(DICTS).sort()).toEqual([...LANGS].sort());
@@ -44,4 +147,55 @@ describe('i18n dictionary parity', () => {
       }
     });
   }
+
+  // Translation coverage: a non-empty English source string must not be
+  // copied verbatim into another dictionary unless the pair is explicitly
+  // allowlisted above. New verbatim copies fail CI and must either be
+  // translated or consciously added to the allowlist with a reason.
+  describe('translation coverage (no English passthrough)', () => {
+    for (const lang of LANGS.filter((l) => l !== 'en')) {
+      it(`${lang} translates every non-allowlisted key`, () => {
+        const copied: string[] = [];
+        for (const [key, enValue] of Object.entries(DICTS.en)) {
+          if (enValue.trim() === '') continue; // empty source: nothing to say
+          if (DICTS[lang][key] === enValue && !IDENTICAL_TO_EN_ALLOWLIST[lang].has(key)) {
+            copied.push(key);
+          }
+        }
+        expect(
+          copied,
+          `${lang} copies these keys verbatim from en - translate them or allowlist them with a reason`
+        ).toEqual([]);
+      });
+
+      it(`${lang} never leaves a translation empty when en has content`, () => {
+        for (const [key, enValue] of Object.entries(DICTS.en)) {
+          if (enValue.trim() === '') continue;
+          expect(DICTS[lang][key].trim().length, `${lang}.${key} is empty`).toBeGreaterThan(0);
+        }
+      });
+    }
+  });
+
+  // The command palette's localized search aliases must stay usable: each
+  // action needs several alias phrases, and none may carry placeholders
+  // (alias matching is plain substring work, not interpolation).
+  describe('palette search aliases', () => {
+    const ALIAS_KEYS = [
+      'palette.aliasBatch',
+      'palette.aliasCompare',
+      'palette.aliasExport',
+      'palette.aliasView',
+    ];
+    for (const lang of LANGS) {
+      it(`${lang} provides multi-phrase, placeholder-free aliases`, () => {
+        for (const key of ALIAS_KEYS) {
+          const value = DICTS[lang][key];
+          expect(value.trim().length, `${lang}.${key} is empty`).toBeGreaterThan(0);
+          expect(value.split(/\s+/).length, `${lang}.${key} needs several alias words`).toBeGreaterThanOrEqual(3);
+          expect(value, `${lang}.${key} must not contain {placeholders}`).not.toMatch(/\{[a-z]+\}/);
+        }
+      });
+    }
+  });
 });

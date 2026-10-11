@@ -166,7 +166,7 @@ const en: Dict = {
   'grade.basic.blurb': 'A real step up from the mainstream app, but closed source or weaker defaults. Fine as a first move.',
   'pp.youUseNow': 'You use now',
   'pp.replaceWith': 'Replace with',
-  'pp.pick': '[Pick]',
+  'pp.pick': 'Choose a replacement…',
   'pp.startHere': 'Start here',
   'pp.get': 'Get',
   'pp.guideOnly': 'Guide only',
@@ -336,6 +336,22 @@ const en: Dict = {
   'empty.catalogTitle': 'Your catalog is empty',
   'empty.catalogDesc': 'Nothing has been added yet. Search official sources or enter an app by hand to start your catalog.',
   'a11y.skipToContent': 'Skip to main content',
+
+  // Agent 2: accessibility, dialogs, palette aliases, privacy-pack guidance
+  'palette.title': 'Command palette',
+  'palette.resultsAria': 'Search results',
+  'palette.aliasBatch': 'batch install script generator powershell bash brewfile flatpak apt scoop',
+  'palette.aliasCompare': 'compare side by side matrix comparison versus',
+  'palette.aliasExport': 'export markdown readme csv json spreadsheet backup file',
+  'palette.aliasView': 'switch toggle view mode table grid cards layout',
+  'common.copyFailed': 'Copy failed',
+  'detail.resolver.lookupFailed': 'The automatic lookup failed. Check your connection and try again, or use one of the official options below.',
+  'downloads.completedUnverified': 'Done (unverified)',
+  'downloads.a11y.sizeUnknown': 'Size unknown, transfer in progress',
+  'pp.maxHint': 'Up to three replacements per category. The counter on each card shows how many you have picked.',
+  'pp.batchHint': 'Picking a replacement with a Get button adds it to the batch selection; removing it takes it out again. Add to selection on the maximum-privacy card does the same for the whole set at once.',
+  'pp.counterAria': '{n} of {max} alternatives selected',
+  'pp.gradesHeading': 'What the dots mean',
 };
 
 const fa: Dict = {
@@ -486,7 +502,7 @@ const fa: Dict = {
   'grade.basic.blurb': 'یک گام واقعی بهتر از برنامه رایج، اما متن‌باز نیست یا پیش‌فرض‌های ضعیف‌تری دارد. برای شروع مناسب است.',
   'pp.youUseNow': 'الان استفاده می‌کنید',
   'pp.replaceWith': 'جایگزین با',
-  'pp.pick': '[انتخاب]',
+  'pp.pick': 'جایگزینی انتخاب کنید…',
   'pp.startHere': 'از اینجا شروع کنید',
   'pp.get': 'دریافت',
   'pp.guideOnly': 'فقط راهنما',
@@ -656,6 +672,22 @@ const fa: Dict = {
   'empty.catalogTitle': 'فهرست شما خالی است',
   'empty.catalogDesc': 'هنوز چیزی افزوده نشده است. برای شروع، از منابع رسمی جست‌وجو کنید یا برنامه را دستی وارد کنید.',
   'a11y.skipToContent': 'پرش به محتوای اصلی',
+
+  // Agent 2: accessibility, dialogs, palette aliases, privacy-pack guidance
+  'palette.title': 'پالت فرمان',
+  'palette.resultsAria': 'نتایج جستجو',
+  'palette.aliasBatch': 'نصب گروهی دسته‌ای اسکریپت نصب اسکریپت پاورشل brewfile flatpak',
+  'palette.aliasCompare': 'مقایسه کنار هم جدول مقایسه در برابر',
+  'palette.aliasExport': 'خروجی گرفتن مارک‌داون readme csv json پشتیبان فایل',
+  'palette.aliasView': 'تغییر جابه‌جایی حالت نمایش جدول کارت شبکه‌ای چیدمان',
+  'common.copyFailed': 'کپی نشد',
+  'detail.resolver.lookupFailed': 'جستجوی خودکار ناموفق بود. اتصال خود را بررسی کنید و دوباره تلاش کنید، یا از یکی از گزینه‌های رسمی زیر استفاده کنید.',
+  'downloads.completedUnverified': 'انجام شد (تأیید نشده)',
+  'downloads.a11y.sizeUnknown': 'حجم نامشخص، انتقال در جریان است',
+  'pp.maxHint': 'در هر دسته حداکثر سه جایگزین می‌توانید انتخاب کنید. شمارندهٔ روی هر کارت نشان می‌دهد چند مورد برگزیده‌اید.',
+  'pp.batchHint': 'انتخاب جایگزینی که دکمهٔ «گرفتن» دارد، آن را مستقیماً به گزینش دسته‌ای اضافه می‌کند؛ برداشتن آن دوباره خارجش می‌کند. «افزودن به گزینش» روی کارت حداکثر حریم خصوصی همین کار را برای کل مجموعه یک‌جا انجام می‌دهد.',
+  'pp.counterAria': '{n} از {max} جایگزین انتخاب شده است',
+  'pp.gradesHeading': 'نقاط چه معنایی دارند',
 };
 
 const es: Dict = {
@@ -806,7 +838,7 @@ const es: Dict = {
   'grade.basic.blurb': 'Un paso real sobre la app convencional, pero cerrada o con valores por defecto más débiles. Sirve como primer movimiento.',
   'pp.youUseNow': 'Usas ahora',
   'pp.replaceWith': 'Sustituir con',
-  'pp.pick': '[Elegir]',
+  'pp.pick': 'Elige un reemplazo…',
   'pp.startHere': 'Empieza aquí',
   'pp.get': 'Obtener',
   'pp.guideOnly': 'Solo guía',
@@ -976,6 +1008,22 @@ const es: Dict = {
   'empty.catalogTitle': 'Tu catálogo está vacío',
   'empty.catalogDesc': 'Aún no se ha añadido nada. Busca en fuentes oficiales o introduce una app a mano para empezar.',
   'a11y.skipToContent': 'Saltar al contenido principal',
+
+  // Agent 2: accessibility, dialogs, palette aliases, privacy-pack guidance
+  'palette.title': 'Paleta de comandos',
+  'palette.resultsAria': 'Resultados de búsqueda',
+  'palette.aliasBatch': 'instalación por lotes lote script guion generador powershell bash brewfile flatpak',
+  'palette.aliasCompare': 'comparar lado a lado matriz comparación frente a',
+  'palette.aliasExport': 'exportar markdown readme csv json hoja de cálculo copia de seguridad archivo',
+  'palette.aliasView': 'cambiar alternar vista modo tabla cuadrícula tarjetas diseño',
+  'common.copyFailed': 'No se pudo copiar',
+  'detail.resolver.lookupFailed': 'La búsqueda automática falló. Comprueba tu conexión e inténtalo de nuevo, o usa una de las opciones oficiales de abajo.',
+  'downloads.completedUnverified': 'Completado (sin verificar)',
+  'downloads.a11y.sizeUnknown': 'Tamaño desconocido, transferencia en curso',
+  'pp.maxHint': 'Hasta tres reemplazos por categoría. El contador de cada tarjeta muestra cuántos has elegido.',
+  'pp.batchHint': 'Elegir un reemplazo con botón «Obtener» lo añade directamente a la selección por lotes; quitarlo lo retira de nuevo. «Añadir a la selección» en la tarjeta de máxima privacidad hace lo mismo con todo el conjunto de una vez.',
+  'pp.counterAria': '{n} de {max} alternativas seleccionadas',
+  'pp.gradesHeading': 'Qué significan los puntos',
 };
 
 const fr: Dict = {
@@ -1126,7 +1174,7 @@ const fr: Dict = {
   'grade.basic.blurb': 'Un vrai pas en avant face à l’appli grand public, mais fermé ou avec des réglages plus faibles. Bien comme premier pas.',
   'pp.youUseNow': 'Vous utilisez',
   'pp.replaceWith': 'Remplacer par',
-  'pp.pick': '[Choisir]',
+  'pp.pick': 'Choisissez un remplacement…',
   'pp.startHere': 'Commencer ici',
   'pp.get': 'Obtenir',
   'pp.guideOnly': 'Guide seul',
@@ -1296,6 +1344,22 @@ const fr: Dict = {
   'empty.catalogTitle': 'Votre catalogue est vide',
   'empty.catalogDesc': 'Rien n’a encore été ajouté. Cherchez parmi les sources officielles ou saisissez une app à la main pour commencer.',
   'a11y.skipToContent': 'Aller au contenu principal',
+
+  // Agent 2: accessibility, dialogs, palette aliases, privacy-pack guidance
+  'palette.title': 'Palette de commandes',
+  'palette.resultsAria': 'Résultats de recherche',
+  'palette.aliasBatch': 'installation par lot lots script générateur powershell bash brewfile flatpak',
+  'palette.aliasCompare': 'comparer côte à côte matrice comparaison face à',
+  'palette.aliasExport': 'exporter markdown readme csv json tableur sauvegarde fichier',
+  'palette.aliasView': 'basculer changer vue mode tableau grille cartes disposition',
+  'common.copyFailed': 'Échec de la copie',
+  'detail.resolver.lookupFailed': 'La recherche automatique a échoué. Vérifiez votre connexion et réessayez, ou utilisez l\'une des options officielles ci-dessous.',
+  'downloads.completedUnverified': 'Terminé (non vérifié)',
+  'downloads.a11y.sizeUnknown': 'Taille inconnue, transfert en cours',
+  'pp.maxHint': 'Jusqu\'à trois remplacements par catégorie. Le compteur de chaque carte indique combien vous en avez choisis.',
+  'pp.batchHint': 'Choisir un remplacement avec un bouton « Obtenir » l\'ajoute directement à la sélection par lot ; le retirer le supprime à nouveau. « Ajouter à la sélection » sur la carte de confidentialité maximale fait de même pour tout l\'ensemble d\'un coup.',
+  'pp.counterAria': '{n} sur {max} alternatives sélectionnées',
+  'pp.gradesHeading': 'Que signifient les points',
 };
 
 const de: Dict = {
@@ -1446,7 +1510,7 @@ const de: Dict = {
   'grade.basic.blurb': 'Ein echter Schritt über die Mainstream-App hinaus, aber geschlossen oder mit schwächeren Vorgaben. Als Einstieg okay.',
   'pp.youUseNow': 'Nutzen Sie jetzt',
   'pp.replaceWith': 'Ersetzen durch',
-  'pp.pick': '[Wählen]',
+  'pp.pick': 'Ersetzung auswählen…',
   'pp.startHere': 'Hier starten',
   'pp.get': 'Holen',
   'pp.guideOnly': 'Nur Hinweis',
@@ -1616,6 +1680,22 @@ const de: Dict = {
   'empty.catalogTitle': 'Ihr Katalog ist leer',
   'empty.catalogDesc': 'Noch nichts vorhanden. Suchen Sie in offiziellen Quellen oder tragen Sie eine App von Hand ein.',
   'a11y.skipToContent': 'Zum Hauptinhalt springen',
+
+  // Agent 2: accessibility, dialogs, palette aliases, privacy-pack guidance
+  'palette.title': 'Befehlspalette',
+  'palette.resultsAria': 'Suchergebnisse',
+  'palette.aliasBatch': 'stapelinstallation stapel skript script generator powershell bash brewfile flatpak',
+  'palette.aliasCompare': 'vergleichen vergleich gegenüber seite an seite matrix',
+  'palette.aliasExport': 'exportieren markdown readme csv json tabelle backup sicherung datei',
+  'palette.aliasView': 'wechseln umschalten ansicht modus tabelle raster karten layout',
+  'common.copyFailed': 'Kopieren fehlgeschlagen',
+  'detail.resolver.lookupFailed': 'Die automatische Suche ist fehlgeschlagen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut, oder nutzen Sie eine der offiziellen Optionen unten.',
+  'downloads.completedUnverified': 'Abgeschlossen (unbestätigt)',
+  'downloads.a11y.sizeUnknown': 'Größe unbekannt, Übertragung läuft',
+  'pp.maxHint': 'Bis zu drei Ersetzungen pro Kategorie. Der Zähler auf jeder Karte zeigt, wie viele Sie gewählt haben.',
+  'pp.batchHint': 'Eine Ersetzung mit „Holen“-Button zu wählen, fügt sie direkt zur Stapelauswahl hinzu; das Entfernen nimmt sie wieder heraus. „Zur Auswahl hinzufügen“ auf der Maximal-Privatsphäre-Karte macht dasselbe für das ganze Set auf einmal.',
+  'pp.counterAria': '{n} von {max} Alternativen ausgewählt',
+  'pp.gradesHeading': 'Was die Punkte bedeuten',
 };
 
 export const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

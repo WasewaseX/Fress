@@ -35,10 +35,15 @@
 //!      DNS-rebinding switcheroo between "validation" and "connection" has
 //!      nothing to slip through - there is no separate unfiltered lookup.
 //!
-//! The four request classes have deliberately different rules; see
+//! The six request classes have deliberately different rules; see
 //! [`UrlPolicy::external_link`], [`UrlPolicy::api_github`],
-//! [`UrlPolicy::api_fdroid`], [`UrlPolicy::resolver_manifest`] and
-//! [`UrlPolicy::executable_download`] for the reasoning behind each.
+//! [`UrlPolicy::api_fdroid`], [`UrlPolicy::resolver_manifest`],
+//! [`UrlPolicy::self_update_feed`] and [`UrlPolicy::executable_download`]
+//! for the reasoning behind each. The self-update feed class is also the
+//! ONLY policy that may read the release's artifact-signature documents
+//! (the `.sig` sidecars verified by `verify_self_update_signature`): they
+//! are release assets like SHA256SUMS.txt, so they ride the same
+//! two-host allowlist and per-hop checks rather than growing a new client.
 //!
 //! # Ports
 //!

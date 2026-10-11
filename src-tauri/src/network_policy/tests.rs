@@ -1106,6 +1106,42 @@ fn self_update_feed_admission_is_pinned_to_the_github_asset_hosts() {
 }
 
 #[test]
+fn a_signature_document_rides_the_restrictive_self_update_policy() {
+    // The updater's artifact-signature documents (the `.sig` sidecars the
+    // `verify_self_update_signature` command consumes) are release assets
+    // exactly like SHA256SUMS.txt. Regression pin for the post-integration
+    // audit: signature retrieval introduced NO new policy path - the same
+    // two-host self_update_feed policy admits the document, and every
+    // redirect hop obeys the same rules. The generic resolver-manifest
+    // text command must NOT be able to fetch it: github.com is not on
+    // that allowlist, so a signature URL can never ride the looser class.
+    let feed = UrlPolicy::self_update_feed();
+    let sig_url = "https://github.com/WasewaseX/Fress/releases/download/v1.0.8-beta/Fress_1.0.8_amd64.AppImage.sig";
+    let parsed = feed
+        .validate(sig_url)
+        .expect("the .sig release asset must be admitted by the self-update policy");
+
+    // The legitimate asset redirect (github.com ->
+    // release-assets.githubusercontent.com) is followed for a .sig too.
+    assert!(evaluate_redirect_hop(
+        &feed.redirects,
+        std::slice::from_ref(parsed.raw()),
+        &"https://release-assets.githubusercontent.com/github-production-release-asset/sig-asset"
+            .parse()
+            .unwrap()
+    )
+    .is_ok());
+
+    // Contrast: the signature document cannot be fetched through the
+    // generic resolver-manifest text policy.
+    let manifest = UrlPolicy::resolver_manifest();
+    assert!(
+        manifest.validate(sig_url).is_err(),
+        "github.com must stay off the resolver-manifest allowlist"
+    );
+}
+
+#[test]
 fn self_update_feed_redirects_stay_on_the_github_asset_hosts() {
     // Every hop re-satisfies the two-host allowlist; a hop to a private
     // literal is refused BY NAME before any connection; the classic

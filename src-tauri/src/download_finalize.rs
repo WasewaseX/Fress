@@ -168,6 +168,16 @@ pub(crate) struct CompletePayload {
     /// matched. Some(false)/None = no trusted reference hash was supplied,
     /// so the digest was computed but NOT verified. The UI must never show
     /// "verified" for a hash that was only calculated.
+    ///
+    /// This field carries the CHECKSUM verdict and nothing else. A trusted
+    /// checksum match is not a publisher-signature verdict: artifact
+    /// signature verification is a separate native command with its own
+    /// result (see `verify_self_update_signature` in lib.rs), and its
+    /// outcome never merges into this flag. The two self-update trust
+    /// states the UI distinguishes - "checksummed" and
+    /// "signature-verified" - therefore stay distinguishable end to end:
+    /// `verified` can only ever attest the former, and a local SHA-256
+    /// calculation (expected hash absent) can never attest even that.
     pub(crate) verified: Option<bool>,
 }
 

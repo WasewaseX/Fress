@@ -216,7 +216,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-100 rounded-md hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]"
-            aria-label="Close dialog"
+            aria-label={t('common.closeDialog')}
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>

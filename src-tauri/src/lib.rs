@@ -389,8 +389,8 @@ fn verify_signature_document(
 ) -> Result<(), String> {
     let pk = decode_updater_public_key(key_file_b64)?;
     let document = decode_document_b64(signature_b64)?;
-    let sig =
-        Signature::decode(&document).map_err(|e| format!("Malformed updater signature document: {e}"))?;
+    let sig = Signature::decode(&document)
+        .map_err(|e| format!("Malformed updater signature document: {e}"))?;
     pk.verify(data, &sig, false)
         .map_err(|e| format!("Updater signature verification failed: {e}"))
 }
@@ -406,8 +406,8 @@ fn verify_signature_over_file(
     use std::io::Read;
     let pk = decode_updater_public_key(key_file_b64)?;
     let document = decode_document_b64(signature_b64)?;
-    let sig =
-        Signature::decode(&document).map_err(|e| format!("Malformed updater signature document: {e}"))?;
+    let sig = Signature::decode(&document)
+        .map_err(|e| format!("Malformed updater signature document: {e}"))?;
     let mut file = std::fs::File::open(file_path)
         .map_err(|e| format!("Cannot open the downloaded file: {e}"))?;
     let mut verifier = pk
@@ -453,7 +453,11 @@ async fn verify_self_update_signature(
     signature_base64: String,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        verify_signature_over_file(UPDATER_PUBLIC_KEY_FILE_B64, &signature_base64, file_path.trim())
+        verify_signature_over_file(
+            UPDATER_PUBLIC_KEY_FILE_B64,
+            &signature_base64,
+            file_path.trim(),
+        )
     })
     .await
     .map_err(|e| format!("Signature verification task failed: {e}"))?
@@ -929,7 +933,9 @@ mod self_update_signature_tests {
     #[test]
     fn a_truncated_artifact_fails_verification() {
         let truncated = &FIXTURE_PAYLOAD[..FIXTURE_PAYLOAD.len() - 1];
-        assert!(verify_signature_document(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, truncated).is_err());
+        assert!(
+            verify_signature_document(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, truncated).is_err()
+        );
     }
 
     #[test]
@@ -951,14 +957,17 @@ mod self_update_signature_tests {
         // Garbage base64.
         assert!(decode_document_b64("!!!not-base64!!!").is_err());
         // Valid base64 that is not a minisign document.
+        assert!(
+            verify_signature_document("aGVsbG8gd29ybGQ=", FIXTURE_SIG_B64, FIXTURE_PAYLOAD)
+                .is_err()
+        );
+        // Valid key document, garbage signature document.
         assert!(verify_signature_document(
+            FIXTURE_KEY_DOC_B64,
             "aGVsbG8gd29ybGQ=",
-            FIXTURE_SIG_B64,
             FIXTURE_PAYLOAD
         )
         .is_err());
-        // Valid key document, garbage signature document.
-        assert!(verify_signature_document(FIXTURE_KEY_DOC_B64, "aGVsbG8gd29ybGQ=", FIXTURE_PAYLOAD).is_err());
         // Truncated signature document (cut mid-base64).
         assert!(verify_signature_document(
             FIXTURE_KEY_DOC_B64,
@@ -975,7 +984,11 @@ mod self_update_signature_tests {
         let mut path = std::env::temp_dir();
         path.push(format!("fress-sig-fixture-{}.bin", std::process::id()));
         std::fs::write(&path, FIXTURE_PAYLOAD).expect("write fixture file");
-        let ok = verify_signature_over_file(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, path.to_string_lossy().as_ref());
+        let ok = verify_signature_over_file(
+            FIXTURE_KEY_DOC_B64,
+            FIXTURE_SIG_B64,
+            path.to_string_lossy().as_ref(),
+        );
         std::fs::remove_file(&path).ok();
         ok.expect("streaming verification must accept the exact artifact bytes");
 
@@ -985,9 +998,15 @@ mod self_update_signature_tests {
         let mut bad = FIXTURE_PAYLOAD.to_vec();
         bad.extend_from_slice(b"x");
         std::fs::write(&path, &bad).expect("write tampered fixture file");
-        let bad_result =
-            verify_signature_over_file(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, path.to_string_lossy().as_ref());
+        let bad_result = verify_signature_over_file(
+            FIXTURE_KEY_DOC_B64,
+            FIXTURE_SIG_B64,
+            path.to_string_lossy().as_ref(),
+        );
         std::fs::remove_file(&path).ok();
-        assert!(bad_result.is_err(), "a one-byte-append artifact must NOT verify");
+        assert!(
+            bad_result.is_err(),
+            "a one-byte-append artifact must NOT verify"
+        );
     }
 }

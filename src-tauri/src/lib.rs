@@ -920,7 +920,10 @@ mod self_update_signature_tests {
         tampered[0] ^= 0x01;
         let err = verify_signature_document(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, &tampered)
             .expect_err("tampered artifact bytes must NOT verify");
-        assert!(err.contains("verification failed"), "unexpected error: {err}");
+        assert!(
+            err.contains("verification failed"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

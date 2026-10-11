@@ -21,6 +21,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.5-beta',
+    date: '2026-10-11',
+    title: 'A coherent interface, and downloads that run quiet',
+    items: [
+      'The header learned a hierarchy: Add App and Downloads are the primary actions, tabs and view toggles are secondary, and one More menu routes every utility on every screen size — theme, language, updates, backup and restore included. A skip-to-content link is the first thing on the page for keyboard users, and the menu hands focus back to its button when you press Escape.',
+      'The catalog cards were rebuilt: icon, name and at most two curation badges on top, a quiet category label, an aligned metadata row, and one dominant Download button. Broken artwork now falls back to a designed letter tile, and the removal confirmation is translated into all five languages and keyboard-safe (focus starts on Cancel, Escape dismisses).',
+      'Downloads got quieter under the hood: while a file streams, Fress no longer writes to storage on every progress tick — terminal events still save instantly, everything else coalesces and dedupes. And a byte-count update no longer re-renders catalog cards; only the card whose download actually started or finished repaints. Your download panel behaves exactly the same.',
+      'The hero now shows real catalog numbers — how many open-source apps are in it and how many ship Android builds — and an empty view tells you honestly whether your filters hid everything or the catalog is truly empty, with the way back one click away.',
+    ],
+  },
+  {
     version: '1.0.4-beta',
     date: '2026-10-11',
     title: 'The app speaks five languages now',

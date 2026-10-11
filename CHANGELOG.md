@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.5-beta (2026-10-11): a coherent interface, and downloads that run quiet
+
+The interface got a real design-token system, a header that knows what is primary, and catalog cards that keep their footing while transfers stream — while the download engine stopped writing to storage on every progress tick. Nothing changes about what Fress does with your data: favorites, filters, the download folder, the custom catalog and every download you had running behave exactly as before.
+
+### Added
+- **Semantic design tokens under the interface.** A `--fr-*` role layer (background, surface, elevated surface, text, muted text, border, primary, success, warning, danger, focus) is registered as real Tailwind utilities and themed for both the dark and the warm-paper light mode. The header, hero, empty state and shared controls now style by meaning instead of by whichever slate step looked right, and a documented size scale gives main actions, secondary controls, inputs and mobile touch targets consistent heights.
+- **A universal More menu.** Every utility is reachable on every screen size through one menu with labeled groups — Section and View, Catalog & data (backup, restore, README export, batch generator), Updates (What's new, check now, channel), Download folder, Language, Theme and Help. The theme toggle moved into it, the 768–1023px band finds its section tabs there, and nothing is hidden without an equivalent route. The menu announces its state (`aria-expanded`/`aria-controls`), closes on Escape with focus returned to its button, and closes on outside click or item activation.
+- **A skip-to-content link.** The first focusable element on the page jumps straight to the catalog, and the content area accepts focus so the jump actually lands.
+- **Real catalog counts in the hero.** The spotlight states what Fress is in one heading and one honest sentence, then shows live numbers: how many open-source apps the catalog holds and how many of them ship Android builds. No buttons, no second navigation.
+- **An empty state that answers three questions.** When a search or filter combination hides every app, the screen says so, offers Reset as the recovery action and Add a missing app as the secondary route; when the catalog itself is empty, the filters story is dropped honestly because resetting cannot help.
+
+### Changed
+- **Streaming downloads no longer hammer storage.** Terminal states (completed, failed, cancelled, page opens, removals) flush immediately; ordinary progress snapshots coalesce on a 750ms window that never starves a continuous transfer; and because the persisted payload only contains what survives a restart, identical payloads never touch storage at all — a streaming download performs zero writes. A refused write (full quota) retries once with the newest 20 entries and degrades to "panel forgets on close" without ever touching the running download. Quitting right after a terminal event cannot lose it: unmount and pagehide flush once.
+- **Cards stop processing every transfer update.** Download state was split into focused subscriptions: actions (stable identities), a summary (active count + folder) and the live item list (download manager only). Each card subscribes through a selector store whose snapshot is the per-app boolean — a byte-count update re-renders zero cards, and a start or finish flips exactly the one matching card. The grid is memoized behind stable callbacks, and favorites/batch/compare membership checks are O(1) Sets now.
+- **Redesigned catalog cards.** Icon (38px), clamped name and at most the two curation badges on top; a quiet uppercase category label under the name; the Custom badge moved to the metadata row; stars, license, the proprietary alternative it replaces, the offline marker and the custom marker always in the same order with platforms at the edge; one dominant Download button per card with quiet source icons beside it. Descriptions reserve a fixed two-line height so adjacent cards keep their metadata and footers aligned, and broken artwork falls back to a designed letter tile instead of an empty gap.
+- **The removal confirmation speaks five languages.** "Remove {name} from your library?" and its action are real translations now, the dialog starts focus on Cancel — never on the destructive button — and Escape dismisses it.
+
+### Fixed
+- The skip-to-content link rendered its raw key string (`a11y.skipToContent`) because the key never landed in the dictionary; it is translated in all five languages now, and the key-coverage scan keeps every `t()` reference pinned to a real entry.
+- The CI test gate crashed on Node 20: jsdom 30 requires Node ≥ 22 and imports undici, whose module-load path calls a function Node 20 does not have. The gate runs jsdom 26 now, and all 284 tests load cleanly on it.
+- The lockfile's root version trailed the release bump (1.0.3 while package.json said 1.0.4); every version-carrying file including the lockfile is bumped together from now on.
+
 ## 1.0.4-beta (2026-10-11): the app speaks five languages — filter bar, palette, and a download context split
 
 The last English-only corners of the interface are localized now, and the download context grew a real API boundary. Nothing about how filtering or downloading behaves has changed: the categories and platforms you select, the platform filter your device remembers, and the favorites you keep are all the same values as before — only the words around them learned five languages.

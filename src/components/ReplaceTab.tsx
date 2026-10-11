@@ -77,8 +77,18 @@ const AltLogo: React.FC<{ alt: PpAlternative; name: string; size?: number }> = (
   return <PPLogo id={alt.id} name={name} size={size} />;
 };
 
-const LevelDots: React.FC<{ level: PpLevel; title?: string }> = ({ level, title }) => (
-  <span className="inline-flex items-center gap-0.5 shrink-0" title={title}>
+/**
+ * The three-dot privacy grade. Decorative dots plus a text alternative:
+ * without role="img" + aria-label a screen reader user gets three silent
+ * circles and loses the grade entirely.
+ */
+const LevelDots: React.FC<{ level: PpLevel; gradeLabel?: string; title?: string }> = ({ level, gradeLabel, title }) => (
+  <span
+    className="inline-flex items-center gap-0.5 shrink-0"
+    title={title ?? gradeLabel}
+    role={gradeLabel ? 'img' : undefined}
+    aria-label={gradeLabel}
+  >
     {[1, 2, 3].map((i) => (
       <span
         key={i}
@@ -94,6 +104,175 @@ const PP_LEVEL_DOT: Record<PpLevel, string> = {
   1: 'bg-amber-400',
   2: 'bg-sky-400',
   3: 'bg-emerald-400',
+};
+
+export interface PpListboxOption {
+  id: string;
+  selected: boolean;
+  content: React.ReactNode;
+}
+
+interface PpDropdownProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  triggerId: string;
+  triggerAriaLabel: string;
+  triggerContent: React.ReactNode;
+  /** Rendered after triggerContent (e.g. the n/3 counter). */
+  triggerSuffix?: React.ReactNode;
+  listboxId: string;
+  listboxLabel: string;
+  options: PpListboxOption[];
+  onPick: (id: string) => void;
+  /** Layout class of the trigger (fills its row in both call sites). */
+  triggerClassName?: string;
+}
+
+/**
+ * The Privacy Pack's themed dropdown, as a real keyboard-operable listbox.
+ *
+ * The native select popup ignores the app theme on Windows, so these stay
+ * custom - but custom used to mean click-only. This component keeps the
+ * custom paint and restores the contract: the trigger exposes
+ * aria-expanded/aria-controls/aria-haspopup, opening moves focus to the
+ * selected option, arrows/Home/End move through the options (real DOM
+ * focus, so screen readers follow), Enter/Space activate, Escape closes
+ * and hands focus back to the trigger, outside click closes the same way,
+ * and Tab closes while moving on. Options are real buttons with
+ * role="option" + aria-selected, so the currently-selected alternative is
+ * exposed as selected, not merely painted.
+ */
+export const PpDropdown: React.FC<PpDropdownProps> = ({
+  open,
+  onOpenChange,
+  triggerId,
+  triggerAriaLabel,
+  triggerContent,
+  triggerSuffix,
+  listboxId,
+  listboxLabel,
+  options,
+  onPick,
+  triggerClassName = 'flex-1 min-w-0 inline-flex items-center justify-between gap-1.5 text-xs font-medium text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] rounded-md px-2 py-1.5 transition-colors',
+}) => {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Every close path (Escape, outside click, pick, Tab) funnels through
+  // this cleanup: focus goes back to the trigger, exactly like a native
+  // select hands focus back after its popup closes.
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      triggerRef.current?.focus();
+    };
+  }, [open]);
+
+  // Opening moves focus to the selected option (or the first one when
+  // nothing is selected yet) so the next Arrow key starts from somewhere
+  // meaningful instead of leaving focus on the trigger.
+  useEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+    const buttons = Array.from(list.querySelectorAll<HTMLButtonElement>('button[role="option"]'));
+    const target = buttons.find((b) => b.getAttribute('aria-selected') === 'true') ?? buttons[0];
+    target?.focus();
+  }, [open]);
+
+  const optionButtons = (): HTMLButtonElement[] =>
+    Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('button[role="option"]') ?? []);
+
+  const focusAt = (index: number) => {
+    const buttons = optionButtons();
+    if (buttons.length === 0) return;
+    const clamped = Math.max(0, Math.min(buttons.length - 1, index));
+    buttons[clamped].focus();
+  };
+
+  const focusedIndex = (): number => {
+    const buttons = optionButtons();
+    return buttons.findIndex((b) => b === document.activeElement);
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusAt(focusedIndex() + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusAt(focusedIndex() - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      focusAt(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      focusAt(optionButtons().length - 1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      onOpenChange(false);
+    } else if (e.key === 'Tab') {
+      // Close while Tab moves focus on - a listbox is not a focus trap.
+      onOpenChange(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        id={triggerId}
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls={open ? listboxId : undefined}
+        aria-label={triggerAriaLabel}
+        className={triggerClassName}
+      >
+        <span className="truncate">{triggerContent}</span>
+        {triggerSuffix}
+      </button>
+
+      {open && (
+        <>
+          {/* Outside click: one overlay under the listbox, same closing
+              contract as every other popover in the app. */}
+          <div className="fixed inset-0 z-30" onClick={() => onOpenChange(false)} aria-hidden="true" />
+          <ul
+            ref={listRef}
+            id={listboxId}
+            role="listbox"
+            aria-label={listboxLabel}
+            tabIndex={-1}
+            onKeyDown={onListKeyDown}
+            className="absolute end-0 top-full mt-1 z-40 w-full min-w-[14rem] max-h-60 overflow-y-auto bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl py-1 list-none m-0"
+          >
+            {options.map((opt) => (
+              <li key={opt.id} role="presentation" className="list-none">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={opt.selected}
+                  tabIndex={-1}
+                  id={`${listboxId}-opt-${opt.id}`}
+                  onClick={() => onPick(opt.id)}
+                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                    opt.selected
+                      ? 'bg-sky-500/10 text-sky-400'
+                      : 'text-slate-200 hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.06]'
+                  }`}
+                >
+                  {opt.content}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </>
+  );
 };
 
 /**
@@ -279,7 +458,27 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
             </button>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{t('pp.subtitle')}</p>
+          {/* First-use guidance, stated once up front instead of hidden in
+              About: the per-category limit and the batch-selection effect. */}
+          <p className="text-[11px] text-slate-400 leading-relaxed mt-1.5">{t('pp.maxHint')}</p>
+          <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">{t('pp.batchHint')}</p>
         </div>
+      </div>
+
+      {/* Grade legend, always visible: the dots mean nothing on first sight
+          and the full About panel should not be required to decode them. */}
+      <div
+        className="flex flex-wrap items-center gap-x-3.5 gap-y-1 mb-4 bg-slate-950/[0.03] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded-lg px-3 py-2"
+        role="group"
+        aria-label={t('pp.gradesHeading')}
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{t('pp.gradesHeading')}</span>
+        {([3, 2, 1] as PpLevel[]).map((lvl) => (
+          <span key={lvl} className="inline-flex items-center gap-1.5">
+            <LevelDots level={lvl} gradeLabel={LEVEL_INFO[lvl].label} />
+            <span className="text-[11px] text-slate-300">{LEVEL_INFO[lvl].label}</span>
+          </span>
+        ))}
       </div>
 
       {/* About: what this list is, where it comes from, what the dots mean. */}
@@ -319,7 +518,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               const info = LEVEL_INFO[lvl];
               return (
                 <div key={lvl} className="flex items-start gap-2.5 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.06] rounded-lg px-3 py-2.5">
-                  <LevelDots level={lvl} />
+                  <LevelDots level={lvl} gradeLabel={info.label} />
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-slate-100">{info.label}</p>
                     <p className="text-[11px] text-slate-400 leading-snug mt-0.5">{info.blurb}</p>
@@ -413,7 +612,10 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                       : 'text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.05] border-slate-950/10 dark:border-white/[0.08]'
                   }`}
                 >
-                  {picked.length}/{MAX_PICKS_PER_CATEGORY}
+                  <span aria-hidden="true">{picked.length}/{MAX_PICKS_PER_CATEGORY}</span>
+                  <span className="sr-only">
+                    {t('pp.counterAria').replace('{n}', String(picked.length)).replace('{max}', String(MAX_PICKS_PER_CATEGORY))}
+                  </span>
                 </span>
                 {picked.length > 0 && (
                   <button
@@ -435,56 +637,36 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{t('pp.youUseNow')}</p>
                 <div className="relative flex items-center gap-2">
                   <PPLogo id={mainstream.id} name={mainstream.name} size={22} />
-                  <button
-                    type="button"
-                    id={`pp-main-${cat.id}`}
-                    onClick={() => setOpenPicker(mainOpen ? null : `main:${cat.id}`)}
-                    aria-expanded={mainOpen}
-                    aria-haspopup="listbox"
-                    aria-label={`${t('pp.youUseNow')}: ${cat.name}`}
-                    className="flex-1 min-w-0 inline-flex items-center justify-between gap-1.5 text-xs font-medium text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] rounded-md px-2 py-1.5 transition-colors"
-                  >
-                    <span className="truncate">{mainstream.name}</span>
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${mainOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-                  </button>
-
-                  {mainOpen && (
-                    <>
-                      <div className="fixed inset-0 z-30" onClick={() => setOpenPicker(null)} aria-hidden="true" />
-                      <div
-                        id={`pp-main-dropdown-${cat.id}`}
-                        role="listbox"
-                        aria-label={`${t('pp.youUseNow')}: ${cat.name}`}
-                        className="absolute right-0 top-full mt-1 z-40 w-full min-w-[14rem] max-h-60 overflow-y-auto bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl py-1"
-                      >
-                        {cat.mainstream.map((m) => {
-                          const selected = state.m === m.id;
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              role="option"
-                              aria-selected={selected}
-                              id={`pp-main-opt-${cat.id}-${m.id}`}
-                              onClick={() => {
-                                setMainstream(cat, m.id);
-                                setOpenPicker(null);
-                              }}
-                              className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
-                                selected
-                                  ? 'bg-sky-500/10 text-sky-400'
-                                  : 'text-slate-200 hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.06]'
-                              }`}
-                            >
-                              <PPLogo id={m.id} name={m.name} size={18} />
-                              <span className="truncate flex-1">{m.name}</span>
-                              {selected && <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
+                  <PpDropdown
+                    open={mainOpen}
+                    onOpenChange={(o) => setOpenPicker(o ? `main:${cat.id}` : null)}
+                    triggerId={`pp-main-${cat.id}`}
+                    triggerAriaLabel={`${t('pp.youUseNow')}: ${cat.name}`}
+                    triggerContent={mainstream.name}
+                    triggerSuffix={
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${mainOpen ? 'rotate-180' : ''}`}
+                        aria-hidden="true"
+                      />
+                    }
+                    listboxId={`pp-main-dropdown-${cat.id}`}
+                    listboxLabel={`${t('pp.youUseNow')}: ${cat.name}`}
+                    options={cat.mainstream.map((m) => ({
+                      id: m.id,
+                      selected: state.m === m.id,
+                      content: (
+                        <>
+                          <PPLogo id={m.id} name={m.name} size={18} />
+                          <span className="truncate flex-1">{m.name}</span>
+                          {state.m === m.id && <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
+                        </>
+                      ),
+                    }))}
+                    onPick={(mid) => {
+                      setMainstream(cat, mid);
+                      setOpenPicker(null);
+                    }}
+                  />
                 </div>
               </div>
 
@@ -495,67 +677,56 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               {/* Private side */}
               <div className="relative">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{t('pp.replaceWith')}</p>
-                <button
-                  type="button"
-                  id={`pp-picker-${cat.id}`}
-                  onClick={() => setOpenPicker(altOpen ? null : `alt:${cat.id}`)}
-                  aria-expanded={altOpen}
-                  aria-haspopup="listbox"
-                  className="w-full inline-flex items-center justify-between gap-2 text-xs font-medium text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] rounded-md px-2.5 py-1.5 transition-colors"
-                >
-                  <span className="truncate">
-                    {picked.length === 0
+                <PpDropdown
+                  open={altOpen}
+                  onOpenChange={(o) => setOpenPicker(o ? `alt:${cat.id}` : null)}
+                  triggerId={`pp-picker-${cat.id}`}
+                  triggerAriaLabel={`${t('pp.replaceWith')}: ${cat.name}`}
+                  triggerContent={
+                    picked.length === 0
                       ? t('pp.pick')
                       : picked.length === 1
                         ? picked[0].name
-                        : `${picked[0].name} +${picked.length - 1}`}
-                  </span>
-                  <span className="text-slate-400 text-[10px]">{picked.length}/{MAX_PICKS_PER_CATEGORY}</span>
-                </button>
-
-                {altOpen && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setOpenPicker(null)} aria-hidden="true" />
-                    <div
-                      id={`pp-dropdown-${cat.id}`}
-                      role="listbox"
-                      aria-label={`${t('pp.replaceWith')}: ${cat.name}`}
-                      className="absolute right-0 top-full mt-1 z-40 w-full min-w-[17rem] max-h-72 overflow-y-auto bg-slate-800 border border-slate-950/10 dark:border-white/[0.12] rounded-xl shadow-2xl py-1"
-                    >
-                      {cat.alternatives.map((alt) => {
-                        const selected = state.a.includes(alt.id);
-                        return (
-                          <button
-                            key={alt.id}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            id={`pp-alt-${cat.id}-${alt.id}`}
-                            onClick={() => toggleAlt(cat, alt)}
-                            className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
-                              selected
-                                ? 'bg-sky-500/10 text-sky-400'
-                                : 'text-slate-200 hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.06]'
-                            }`}
-                          >
-                            <AltLogo alt={alt} name={alt.name} size={18} />
-                            <span className="truncate flex-1">{alt.name}</span>
-                            {cat.pick === alt.id && (
-                              <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 dark:text-emerald-400 shrink-0">
-                                {t('pp.startHere')}
-                              </span>
-                            )}
-                            <LevelDots level={alt.level} title={`${LEVEL_INFO[alt.level].label}: ${LEVEL_INFO[alt.level].blurb}`} />
-                            {alt.catalogId && (
-                              <Download className="w-3 h-3 text-slate-400 shrink-0" aria-label={t('pp.inCatalog')} />
-                            )}
-                            {selected && <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
+                        : `${picked[0].name} +${picked.length - 1}`
+                  }
+                  triggerSuffix={
+                    <span className="text-slate-400 text-[10px] shrink-0">
+                      <span aria-hidden="true">{picked.length}/{MAX_PICKS_PER_CATEGORY}</span>
+                      <span className="sr-only">
+                        {t('pp.counterAria').replace('{n}', String(picked.length)).replace('{max}', String(MAX_PICKS_PER_CATEGORY))}
+                      </span>
+                    </span>
+                  }
+                  triggerClassName="w-full inline-flex items-center justify-between gap-2 text-xs font-medium text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] rounded-md px-2.5 py-1.5 transition-colors"
+                  listboxId={`pp-dropdown-${cat.id}`}
+                  listboxLabel={`${t('pp.replaceWith')}: ${cat.name}`}
+                  options={cat.alternatives.map((alt) => ({
+                    id: alt.id,
+                    selected: state.a.includes(alt.id),
+                    content: (
+                      <>
+                        <AltLogo alt={alt} name={alt.name} size={18} />
+                        <span className="truncate flex-1">{alt.name}</span>
+                        {cat.pick === alt.id && (
+                          <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 dark:text-emerald-400 shrink-0">
+                            {t('pp.startHere')}
+                          </span>
+                        )}
+                        <LevelDots level={alt.level} gradeLabel={LEVEL_INFO[alt.level].label} />
+                        {alt.catalogId && (
+                          <Download className="w-3 h-3 text-slate-400 shrink-0" aria-label={t('pp.inCatalog')} />
+                        )}
+                        {state.a.includes(alt.id) && <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
+                      </>
+                    ),
+                  }))}
+                  onPick={(altId) => {
+                    // Multi-select: the popup stays open so several
+                    // alternatives can be picked in one pass.
+                    const alt = cat.alternatives.find((x) => x.id === altId);
+                    if (alt) toggleAlt(cat, alt);
+                  }}
+                />
               </div>
 
               {/* Picked replacements with actions */}
@@ -571,7 +742,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                       >
                         <AltLogo alt={alt} name={alt.name} size={18} />
                         <span className="text-xs font-medium text-slate-200 truncate flex-1">{alt.name}</span>
-                        <LevelDots level={alt.level} title={`${LEVEL_INFO[alt.level].label}: ${LEVEL_INFO[alt.level].blurb}`} />
+                        <LevelDots level={alt.level} gradeLabel={`${LEVEL_INFO[alt.level].label}: ${LEVEL_INFO[alt.level].blurb}`} />
                         {app ? (
                           <button
                             type="button"

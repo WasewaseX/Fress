@@ -24,7 +24,31 @@ import { PAYLOAD_SHA256 } from './fixtures/data';
 
 const VIEWPORTS = [390, 768, 1366, 1600, 1920];
 
-async function shoot(page: import('@playwright/test').Page, name: string): Promise<void> {
+async function shoot(
+  page: import('@playwright/test').Page,
+  name: string,
+  expected: 'light' | 'dark' = 'light',
+): Promise<void> {
+  // Theme authenticity: the capture must show the theme its filename claims.
+  // Both signals are asserted immediately before the screenshot - the app's
+  // own theme class AND the computed colorScheme token the browser resolves
+  // from it (a filename alone proved nothing once: an earlier dark baseline
+  // had the settings popover baked in and still "passed").
+  if (expected === 'dark') {
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await expect
+      .poll(async () =>
+        page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+      )
+      .toBe('dark');
+  } else {
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await expect
+      .poll(async () =>
+        page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+      )
+      .toBe('light');
+  }
   await fontsReady(page);
   await expect(page).toHaveScreenshot([`${name}.png`], { fullPage: false });
 }
@@ -58,7 +82,7 @@ test.describe('visual: catalog', () => {
   test('main catalog, dark theme', async ({ gotoApp, page }) => {
     await gotoApp();
     await switchToDark(page);
-    await shoot(page, 'catalog-dark');
+    await shoot(page, 'catalog-dark', 'dark');
   });
 
   for (const width of VIEWPORTS) {
@@ -83,7 +107,7 @@ test.describe('visual: privacy pack', () => {
     await page.locator(sel.privacyTab).click();
     await expect(page.locator('#replace-tab')).toBeVisible();
     await switchToDark(page);
-    await shoot(page, 'privacy-dark');
+    await shoot(page, 'privacy-dark', 'dark');
   });
 });
 

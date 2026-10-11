@@ -967,13 +967,21 @@ jobs:
         # silently broke update-over-install for existing users. The
         # keystore is stored once as a repository secret (ANDROID_KEYSTORE_B64,
         # base64 of the .keystore file) and reused for every release.
+        # Its password lives in the ANDROID_KEYSTORE_PASSWORD secret and is
+        # handed to every keystore command through step-level env vars -
+        # never as a literal in this file and never echoed into logs.
         if: env.FRESS_KEYSTORE_CONFIGURED == 'true'
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo '::error::ANDROID_KEYSTORE_PASSWORD is not configured. Set the repository Actions secret ANDROID_KEYSTORE_PASSWORD to the store/key password of the permanent fress.keystore. The workflow fails closed rather than guessing a password.'
+            exit 1
+          fi
           echo "${ANDROID_KEYSTORE_B64}" | base64 -d > fress.keystore
-          keytool -list -keystore fress.keystore -storepass fressandroid -alias fress >/dev/null \
-            || { echo '::error::ANDROID_KEYSTORE_B64 is not a valid fress.keystore (alias fress, storepass fressandroid)'; exit 1; }
+          keytool -list -keystore fress.keystore -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias fress >/dev/null 2>&1 \
+            || { echo '::error::ANDROID_KEYSTORE_B64 cannot be opened as fress.keystore (alias fress) with the ANDROID_KEYSTORE_PASSWORD secret. Either the password secret is wrong for this keystore or the keystore secret is wrong. Rotate the keystore password locally with keytool -storepasswd/-keypasswd while KEEPING the signing key, or fix the secret; do not mint a new keystore.'; exit 1; }
           # Identity check: only THE permanent key may sign a release. The
           # check above proves the secret's SHAPE (a keystore with that alias
           # and password); this proves its IDENTITY, so a freshly generated
@@ -983,8 +991,12 @@ jobs:
           # Certificate fingerprints are public by design (they ship inside
           # every signed APK); pinning one here costs no secrecy.
           EXPECTED_FP="b0fd578d669171af2830dcc91707d92267eea44f2a79651e2614d975e4cbdf27"
-          ACTUAL_FP=$(keytool -list -v -keystore fress.keystore -storepass fressandroid -alias fress \
+          ACTUAL_FP=$(keytool -list -v -keystore fress.keystore -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias fress 2>/dev/null \
             | grep -m1 'SHA256:' | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-Z' 'a-z')
+          if [ -z "$ACTUAL_FP" ]; then
+            echo '::error::could not read the certificate fingerprint from fress.keystore with the ANDROID_KEYSTORE_PASSWORD secret; refusing to sign.'
+            exit 1
+          fi
           if [ "$ACTUAL_FP" != "$EXPECTED_FP" ]; then
             echo "::error::keystore certificate fingerprint mismatch: expected the permanent Fress key ($EXPECTED_FP), got ($ACTUAL_FP). ANDROID_KEYSTORE_B64 holds the wrong keystore; restore the backup before releasing."
             exit 1
@@ -997,23 +1009,33 @@ jobs:
         # without the persistent keystore FAILS LOUDLY instead of silently
         # generating a temporary identity.
         #
-        # One-time setup (local machine):
+        # One-time setup (local machine) - choose a STRONG password, never a
+        # short literal, and keep it out of this repository:
         #   keytool -genkeypair -v -keystore fress.keystore -alias fress \
         #     -keyalg RSA -keysize 2048 -validity 10000 \
-        #     -storepass fressandroid -keypass fressandroid \
+        #     -storepass '<strong-password>' -keypass '<strong-password>' \
         #     -dname "CN=Fress, OU=Fress, O=Fress, L=Internet, ST=Internet, C=US"
-        #   base64 -w0 fress.keystore   # paste as the ANDROID_KEYSTORE_B64 secret
+        #   base64 -w0 fress.keystore              # ANDROID_KEYSTORE_B64 secret
+        #   <strong-password>                      # ANDROID_KEYSTORE_PASSWORD secret
         if: env.FRESS_KEYSTORE_CONFIGURED != 'true'
         run: |
-          echo '::error::ANDROID_KEYSTORE_B64 is not configured, so the Android build cannot proceed. Releases must never be signed with a freshly generated keystore: a changed signing key breaks in-place updates for every installed device. Generate the keystore ONCE locally, store it base64-encoded as the ANDROID_KEYSTORE_B64 secret (alias fress, storepass fressandroid - see the comments above), then re-run this job.'
+          echo '::error::ANDROID_KEYSTORE_B64 is not configured, so the Android build cannot proceed. Releases must never be signed with a freshly generated keystore: a changed signing key breaks in-place updates for every installed device. Generate the keystore ONCE locally (alias fress), store it base64-encoded as the ANDROID_KEYSTORE_B64 secret and its password as the ANDROID_KEYSTORE_PASSWORD secret - see the comments above - then re-run this job.'
           exit 1
       - name: Build Android APKs (per-ABI splits + universal)
         env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           TAURI_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/fress.keystore
-          TAURI_ANDROID_KEYSTORE_PASSWORD: fressandroid
           TAURI_ANDROID_KEY_ALIAS: fress
-          TAURI_ANDROID_KEY_PASSWORD: fressandroid
         run: |
+          if [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo '::error::ANDROID_KEYSTORE_PASSWORD is not configured; refusing to build the signed APKs.'
+            exit 1
+          fi
+          # The gradle build signs through Tauri's keystore env vars. The
+          # secret stays an environment variable end to end - it is never
+          # baked into this script text or printed.
+          export TAURI_ANDROID_KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          export TAURI_ANDROID_KEY_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
           npx tauri android init
           # Stamp our own launcher icon (blue leaf) into the generated Android
           # project. Without this the APK ships the Tauri template icon.
@@ -1031,7 +1053,14 @@ jobs:
         # universal APK. Now every unsigned APK is classified by its output
         # directory and mapped to its release asset name; universal is
         # mandatory, per-ABI files upload when present.
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo '::error::ANDROID_KEYSTORE_PASSWORD is not configured; refusing to sign the APKs.'
+            exit 1
+          fi
           VERSION="${{ needs.version.outputs.version }}"
           OUT="src-tauri/gen/android/app/build/outputs/apk"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
@@ -1068,8 +1097,8 @@ jobs:
             if [ -z "$kind" ]; then continue; fi
             if [ -n "${SIGNED[$kind]:-}" ]; then continue; fi
             "$BT/zipalign" -f -p 4 "$apk" aligned.apk
-            "$BT/apksigner" sign --ks fress.keystore --ks-pass pass:fressandroid \
-              --ks-key-alias fress --key-pass pass:fressandroid --out "Fress_${VERSION}_${kind}.apk" aligned.apk
+            "$BT/apksigner" sign --ks fress.keystore --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+              --ks-key-alias fress --key-pass "pass:$ANDROID_KEYSTORE_PASSWORD" --out "Fress_${VERSION}_${kind}.apk" aligned.apk
             "$BT/apksigner" verify "Fress_${VERSION}_${kind}.apk"
             SIGNED[$kind]="Fress_${VERSION}_${kind}.apk"
           done
@@ -1081,8 +1110,6 @@ jobs:
           done
           ls -la Fress_*.apk
           gh release upload "${{ needs.version.outputs.tag }}" $UPLOADS --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   updater-manifest:
     permissions:

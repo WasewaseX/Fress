@@ -47,6 +47,8 @@
   --color-fr-primary: var(--fr-primary);
   --color-fr-primary-hover: var(--fr-primary-hover);
   --color-fr-success: var(--fr-success);
+  --color-fr-success-strong: var(--fr-success-strong);
+  --color-fr-success-strong-hover: var(--fr-success-strong-hover);
   --color-fr-warning: var(--fr-warning);
   --color-fr-danger: var(--fr-danger);
   --color-fr-focus: var(--fr-focus);
@@ -76,6 +78,8 @@
   --fr-primary: var(--color-sky-600);
   --fr-primary-hover: var(--color-sky-500);
   --fr-success: var(--color-emerald-500);
+  --fr-success-strong: var(--color-emerald-700);
+  --fr-success-strong-hover: var(--color-emerald-800);
   --fr-warning: var(--color-amber-400);
   --fr-danger: var(--color-rose-500);
   --fr-focus: var(--color-sky-500);
@@ -84,6 +88,11 @@
   --fr-h-secondary: 36px;
   --fr-h-input: 40px;
   --fr-touch-target: 44px;
+
+  /* Dark inset (code wells): a lift of white haze over midnight, the
+     exact mirror of the light block's ink tint. */
+  --fr-inset: rgba(255, 255, 255, 0.05);
+  --fr-inset-border: rgba(255, 255, 255, 0.08);
 }
 
 /* ------------------------------------------------------------------
@@ -101,31 +110,37 @@
   --color-slate-700: #e9e4d8;   /* chips, subtle buttons */
   --color-slate-600: #d8d1c1;   /* strong borders */
 
-  /* Text scale: warm charcoal instead of inverted white */
-  --color-slate-500: #847e70;   /* faint text */
-  --color-slate-400: #6b6557;   /* secondary text */
+  /* Text scale: warm charcoal instead of inverted white.
+     slate-500 is DECORATIVE-ONLY (icon idle states, separators, disabled
+     chrome): at #847e70 it sits below 4.5:1 on every paper surface, so no
+     TEXT may use it. Real text floors at slate-400 (#6b6557, >= 4.5:1). */
+  --color-slate-500: #847e70;   /* icons / separators only - not text */
+  --color-slate-400: #6b6557;   /* secondary text (AA floor) */
   --color-slate-300: #4c473d;   /* body text */
   --color-slate-200: #35322b;   /* headings */
   --color-slate-100: #27241e;   /* bright headings */
 
-  /* Accents: deepened for contrast on light surfaces */
+  /* Accents: deepened for contrast on light surfaces. Every step that can
+     appear as TEXT passes 4.5:1 against the page, bands, cards, and the
+     matching tinted chips (measured, see src/lib/__tests__/
+     lightThemeContrast.test.ts). Sky-500 doubles as the focus ring. */
   --color-sky-950: #e6f1f7;     /* tinted backgrounds */
-  --color-sky-400: #1f8ec2;
-  --color-sky-500: #0d7cb2;
+  --color-sky-400: #176990;
+  --color-sky-500: #0c73a6;
   --color-sky-600: #0a6a99;
   --color-sky-300: #0a6a99;
   --color-sky-200: #0d7cb2;
 
   --color-emerald-950: #e4f3e9;
-  --color-emerald-400: #2e9459;
-  --color-emerald-500: #288450;
+  --color-emerald-400: #267c4a;
+  --color-emerald-500: #257c4b;
   --color-emerald-300: #1f7449;
 
   --color-amber-400: #dda50e;
   --color-amber-500: #c48f08;
   --color-amber-300: #8a6206;
 
-  --color-rose-400: #d43a5f;
+  --color-rose-400: #c53659;
   --color-rose-500: #c92c51;
   --color-rose-300: #b02547;
   --color-rose-800: #f5c6d1;
@@ -139,6 +154,13 @@
      borders are dark ink on paper instead of light haze on midnight. */
   --fr-border: rgba(28, 24, 16, 0.14);
   --fr-border-strong: rgba(28, 24, 16, 0.26);
+
+  /* Inset surface for verbatim command / output wells (compare install
+     commands, export preview, batch script). A quiet tint of the local
+     ink: the block reads as sunken INTO its band, never as a black hole
+     next to it. Light sinks with warm ink. */
+  --fr-inset: rgba(28, 24, 16, 0.07);
+  --fr-inset-border: rgba(28, 24, 16, 0.12);
 }
 
 /* ------------------------------------------------------------------
@@ -164,6 +186,20 @@
   background: var(--fr-chip-active-bg);
   color: var(--fr-chip-active-text);
   border-color: var(--fr-chip-active-border);
+}
+
+/* ------------------------------------------------------------------
+   CODE WELL
+   One material for every verbatim command/output block. Previously
+   three modals each rolled their own "bg-black/40" well: in dark mode
+   it sat noticeably darker than every neighboring surface (the
+   compare-tab install command read as a black stripe), and in light
+   mode a 40% black overlay on warm paper was glaring. Token-driven:
+   dark lifts slightly with white haze, light sinks slightly with ink.
+   ------------------------------------------------------------------ */
+.fr-code-well {
+  background-color: var(--fr-inset);
+  border-color: var(--fr-inset-border);
 }
 
 /* ------------------------------------------------------------------

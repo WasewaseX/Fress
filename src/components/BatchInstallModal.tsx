@@ -335,7 +335,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               </span>
             ))
           ) : (
-            <span className="text-slate-500 italic text-xs">
+            <span className="text-slate-400 italic text-xs">
               {t('bs.noneSelected')}
             </span>
           )}
@@ -343,7 +343,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
 
         {/* Code Preview */}
         <div className="flex-1 p-5 overflow-y-auto bg-slate-950">
-          <pre className="font-mono text-xs text-emerald-400 whitespace-pre-wrap leading-relaxed bg-black/40 border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
+          <pre className="font-mono text-xs text-emerald-400 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
             {scriptOutput}
           </pre>
         </div>

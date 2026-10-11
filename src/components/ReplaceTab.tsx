@@ -576,7 +576,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               type="button"
               id="max-privacy-batch-btn"
               onClick={sendComboToBatch}
-              className="inline-flex items-center gap-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-md transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-medium bg-fr-success-strong hover:bg-fr-success-strong-hover text-white px-2.5 py-1.5 rounded-md transition-colors"
             >
               <CheckSquare className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{t('pp.addToSelection')}</span>

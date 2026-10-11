@@ -615,7 +615,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             <p id="app-detail-tagline" className="text-xs text-slate-400 mt-0.5">
               {tx.tagline}
             </p>
-            <p className="text-[11px] text-slate-500 mt-1 font-mono">
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
               {t('detail.metaLine').replace('{d}', app.addedAt)}
             </p>
           </div>

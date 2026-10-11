@@ -1,0 +1,61 @@
+name: Live network smoke
+
+# OPTIONAL, scheduled live check - NEVER runs on pull requests.
+#
+# The PR gates (ci.yml) run the whole browser suite against deterministic
+# fixtures: shared GitHub quota must never decide whether a PR is green.
+# This workflow is the complement - a periodic probe that the app still
+# speaks to the REAL endpoints (GitHub Releases API, F-Droid index, the
+# Signal update manifest) from a plain browser context. It holds no secrets
+# (unauthenticated endpoints only) and its failure is a loud red X on the
+# schedule and on manual dispatch, not a warning, but it is explicitly NOT a
+# release requirement: rate limits and upstream outages are expected
+# occurrences, and the release evidence model in docs/quality-gates.md says
+# which gates must pass on an integrated commit before a release.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 06:20 UTC - offset from the security scan's 06:00.
+    - cron: "20 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-smoke:
+    name: Resolver smoke against live endpoints (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies from the lockfile
+        run: npm ci
+      - name: Production build
+        run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run the live resolver smoke suite
+        # Separate Playwright project (playwright.live.config.ts): real
+        # network, generous timeouts, no fixtures. Failures here mean an
+        # integration break OR an upstream/rate-limit event - the run log
+        # distinguishes them via the HTTP status each probe records.
+        run: npx playwright test --config=playwright.live.config.ts
+      - name: Upload the smoke report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: network-smoke-report
+          path: playwright-live-report/
+          retention-days: 30
+          if-no-files-found: ignore

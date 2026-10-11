@@ -75,7 +75,7 @@ sha256sum -c SHA256SUMS.txt
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header (for example `v1.0.6-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
+Each Fress app shows its exact version in the header (for example `v1.0.7-beta`), right next to the name. If your installed app does not show the version you expect, install the newest installer from this page. Old installers keep working and can silently sit on your machine next to the new one.
 
 ### Where downloads are saved (per operating system)
 

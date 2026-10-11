@@ -18,3 +18,10 @@ coverage/
 *.pfx
 *.pem
 *.key
+
+# QA tooling outputs (Agent 6): Playwright run artifacts and perf results are
+# attached as CI artifacts, never committed.
+test-results/
+playwright-report/
+playwright-live-report/
+scripts/perf/results/

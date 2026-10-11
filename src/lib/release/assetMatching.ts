@@ -411,12 +411,18 @@ export function pickAssetDetailed(
           .filter((a) => assetServesSelectionRole(a.name, platform, selection));
         if (matches.length > 0) {
           // Among surviving pattern matches the heuristic still breaks ties
-          // (x64 vs arm64 variants of the same pinned naming).
+          // (x64 vs arm64 variants of the same pinned naming). Equal scores
+          // resolve lexicographically by name, then URL, so a candidate set
+          // yields the SAME winner no matter what order the API returned.
           let best = matches[0];
           let bestScore = -Infinity;
           for (const a of matches) {
             const s = scoreAsset(a.name, platform, arch, selection);
-            if (s > bestScore) {
+            if (
+              s > bestScore ||
+              (s === bestScore &&
+                (a.name < best.name || (a.name === best.name && a.downloadUrl < best.downloadUrl)))
+            ) {
               bestScore = s;
               best = a;
             }
@@ -435,7 +441,16 @@ export function pickAssetDetailed(
   for (const a of usable) {
     const s = scoreAsset(a.name, platform, arch, selection);
     if (s === -1) continue;
-    if (s > bestScore) {
+    // Order-invariant resolution: equal scores must not flip with the API's
+    // asset order. Ties resolve lexicographically by name, then URL - a
+    // total order on (name, url) makes the winner a function of the
+    // candidate SET, not the sequence.
+    if (
+      s > bestScore ||
+      (s === bestScore &&
+        best &&
+        (a.name < best.name || (a.name === best.name && a.downloadUrl < best.downloadUrl)))
+    ) {
       bestScore = s;
       best = a;
     }

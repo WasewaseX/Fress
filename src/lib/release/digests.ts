@@ -102,6 +102,54 @@ export interface DigestBearing {
 }
 
 /**
+ * Fail closed on CONFLICTING duplicate manifest rows.
+ *
+ * A well-formed vendor manifest lists one row per file. When the same
+ * filename appears twice with DIFFERENT digest values (a broken mirror
+ * merge, a hand-edited manifest, a parsing bug), at most one of the two
+ * digests can be true - and picking one would be order-dependent, i.e.
+ * the same release could verify differently depending on the order the
+ * API returned rows in. Trust that flips with input order is not trust:
+ * every row of a conflicting name has its digests STRIPPED here (the
+ * download stays unverified) and a diagnostic is recorded. Rows whose
+ * digests agree byte-for-byte are duplicates, not conflicts - kept as-is.
+ *
+ * Rows with NO digest at all are untouched (absent stays absent).
+ */
+export function failClosedConflictingDigests<T extends { name: string } & DigestBearing>(
+  items: readonly T[],
+  source: string
+): T[] {
+  // One pass to collect the digest sets per name.
+  const seen = new Map<string, { sha256?: string; sha512?: string }>();
+  const conflicts = new Set<string>();
+  for (const it of items) {
+    if (it.sha256 === undefined && it.sha512 === undefined) continue;
+    const prev = seen.get(it.name);
+    if (!prev) {
+      seen.set(it.name, { sha256: it.sha256, sha512: it.sha512 });
+      continue;
+    }
+    if (prev.sha256 !== it.sha256 || prev.sha512 !== it.sha512) {
+      conflicts.add(it.name);
+    }
+  }
+  if (conflicts.size === 0) return items.slice();
+  for (const name of conflicts) {
+    recordDiagnostic(
+      source,
+      // An algo is required by the diagnostic shape; the conflict is about
+      // the row pair, so record it under the first algorithm that differs.
+      'sha256',
+      `conflicting duplicate digest entries for "${name}" - digest stripped (fail closed, unverified)`
+    );
+  }
+  return items.map((it) =>
+    conflicts.has(it.name) ? { ...it, sha256: undefined, sha512: undefined } : it
+  );
+}
+
+/**
  * Attach the digests of ONE manifest entry onto the download that entry
  * produced. `source` names the entry (filename is enough) for diagnostics.
  *

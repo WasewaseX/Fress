@@ -360,7 +360,20 @@ describe('pickAssetDetailed, override and confidence', () => {
       // The reported bug: hyphenated "arm-64" evaded the arm64 regexes, so
       // the CLI exe read as "unmarked + arm bonus" and beat the GUI app,
       // whose "x86-64" name was even penalized as 32-bit.
-      expect(pickAsset(localSendAssets, 'windows', 'aarch64')?.name).toBe('LocalSend-1.18.2-windows-x86-64.exe');
+      //
+      // The GUI's native arm-64 zip and the emulated x86-64 exe TIE in the
+      // current policy (zip 2 + arm 4 = 6; exe 6 + x64-on-arm 0 = 6). A tie
+      // must not be settled by the API's asset order: equal scores resolve
+      // lexicographically, so the ARM-native portable zip wins every time
+      // (it is the same current version, runs without emulation - and the
+      // real resolver only ever sees ONE release's assets, so this is
+      // always a within-version choice).
+      expect(pickAsset(localSendAssets, 'windows', 'aarch64')?.name).toBe('LocalSend-1.18.2-windows-arm-64.zip');
+      // Order-invariance proof for the tied pair: reverse the array and the
+      // pick is still the same asset.
+      expect(
+        pickAsset([...localSendAssets].reverse(), 'windows', 'aarch64')?.name
+      ).toBe('LocalSend-1.18.2-windows-arm-64.zip');
     });
 
     it('on x86_64 Windows the signed installer wins over the unsigned one', () => {
@@ -614,6 +627,69 @@ describe('pickAssetDetailed, override and confidence', () => {
       // Unknown-ABI browser: the per-ABI splits are all refused, so the
       // release yields no direct pick at all (universal contract).
       expect(pickAsset(base.map((n) => asset(n)), 'android', undefined)).toBeNull();
+    });
+
+    it('equal-score candidates resolve identically in EVERY ordering (small fixture: all permutations)', () => {
+      // A genuine policy tie: "install" and "setup" both read as installer
+      // tokens, so the two exes score identically on x86_64. The winner
+      // must be a function of the candidate SET, never of the API's asset
+      // order - ties resolve lexicographically (name, then URL).
+      const tieA = 'App-1.0-install.exe';
+      const tieB = 'App-1.0-setup.exe';
+      expect(tieA < tieB).toBe(true); // the lexicographic winner, pinned here
+      for (const order of [[tieA, tieB], [tieB, tieA]]) {
+        expect(pickAsset(order.map((n) => asset(n)), 'windows', 'x86_64')?.name).toBe(tieA);
+      }
+      // The tie rule composes with a decoy: the higher-scored msi would win
+      // outright, but a tied pair beneath it stays deterministic too.
+      const msi = 'App-1.0-setup.msi';
+      for (const order of [[tieA, tieB, msi], [msi, tieB, tieA], [tieB, msi, tieA]]) {
+        expect(pickAsset(order.map((n) => asset(n)), 'windows', 'x86_64')?.name).toBe(tieA);
+      }
+    });
+
+    it('identical asset names with ambiguous role metadata still resolve deterministically', () => {
+      // GitHub releases cannot carry two assets of the same name, but a
+      // mirrored manifest, a re-upload or a misbehaving API can hand us a
+      // doubled row. Same name => same score; the URL breaks the tie, so
+      // the pick (and its digest pairing) is stable in every order.
+      const a = { ...asset('App-1.0.zip'), downloadUrl: 'https://mirror-a.example/App-1.0.zip' };
+      const b = { ...asset('App-1.0.zip'), downloadUrl: 'https://mirror-b.example/App-1.0.zip' };
+      expect(a.downloadUrl < b.downloadUrl).toBe(true);
+      for (const order of [[a, b], [b, a]]) {
+        expect(pickAsset(order, 'windows', 'x86_64')?.downloadUrl).toBe(a.downloadUrl);
+      }
+    });
+
+    it('Android exact-ABI vs universal vs runnable armv7: all six orderings agree', () => {
+      // Policy order for a known arm64 device: exact-ABI split (7, smaller
+      // download) > universal (6, runs everywhere) > armv7 split (2, runs
+      // via 32-bit compat). Small fixture => permute ALL orderings.
+      const exact = 'App-1.0-arm64-v8a-release.apk';
+      const universal = 'App-1.0-universal-release.apk';
+      const armv7 = 'App-1.0-armeabi-v7a-release.apk';
+      const perms = [
+        [exact, universal, armv7],
+        [exact, armv7, universal],
+        [universal, exact, armv7],
+        [universal, armv7, exact],
+        [armv7, exact, universal],
+        [armv7, universal, exact],
+      ];
+      for (const order of perms) {
+        expect(pickAsset(order.map((n) => asset(n)), 'android', 'aarch64')?.name).toBe(exact);
+      }
+      // Unknown-ABI browser facing universal + splits: universal is the
+      // ONLY pick (the universal-only contract), never a split, in any
+      // order.
+      for (const order of perms) {
+        expect(pickAsset(order.map((n) => asset(n)), 'android', undefined)?.name).toBe(universal);
+      }
+      // An armv7 (32-bit) device: the exact armv7 match wins over
+      // universal; the arm64 split is refused outright.
+      for (const order of perms) {
+        expect(pickAsset(order.map((n) => asset(n)), 'android', 'arm')?.name).toBe(armv7);
+      }
     });
   });
 });

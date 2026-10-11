@@ -165,4 +165,36 @@ describe('light theme token contrast (WCAG AA)', () => {
     expect(contrastRatio('#38bdf8', '#090d16')).toBeGreaterThanOrEqual(3.0);
     expect(contrastRatio(light.get('sky-500')!, light.get('slate-950')!)).toBeGreaterThanOrEqual(3.0);
   });
+
+  it('danger and success note inks hold 4.5:1 on their own tinted wells (light)', () => {
+    // The detail modal renders resolver errors on bg-rose-500/10 and the
+    // F-Droid call-to-action on bg-emerald-500/10, both over the light
+    // card. Their light ink is a dark accent step (Tailwind defaults, NOT
+    // remapped by the light block); the previous pale inks (rose-200,
+    // emerald-200 - Tailwind defaults around 1.1:1 here) were unreadable.
+    const roseWell = mix(light.get('rose-500')!, 0.1, light.get('slate-800')!);
+    const emeraldWell = mix(light.get('emerald-500')!, 0.1, light.get('slate-800')!);
+    expect(contrastRatio('#881337', roseWell)).toBeGreaterThanOrEqual(4.5); // rose-900
+    expect(contrastRatio('#881337', light.get('slate-800')!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio('#064e3b', emeraldWell)).toBeGreaterThanOrEqual(4.5); // emerald-900
+    expect(contrastRatio('#064e3b', light.get('slate-800')!)).toBeGreaterThanOrEqual(4.5);
+    // And the pale steps that burned here are pinned as the failures they
+    // are, so nobody "restores" them believing they were readable.
+    expect(contrastRatio('#fecdd3', roseWell)).toBeLessThan(2.0); // rose-200
+    expect(contrastRatio('#d1fae5', emeraldWell)).toBeLessThan(2.0); // emerald-200
+  });
+
+  it('decorative-only steps never reappear as real text in the swept components', () => {
+    // slate-600's light value (#d8d1c1) measures ~1.2:1 on the paper card;
+    // it is a border/scrollbar step. TableView used to render the
+    // "Direct download" label and the zero-star placeholder with it -
+    // invisible text in light mode. Same failure family as rose-200 /
+    // emerald-200 above (dark-first leftovers that only the rendered
+    // screenshots exposed). Pin the sweep so the classes cannot return.
+    const tableView = readFileSync(join(__dirname, '..', '..', 'components', 'TableView.tsx'), 'utf8');
+    expect(tableView).not.toContain('text-slate-600');
+    const detailModal = readFileSync(join(__dirname, '..', '..', 'components', 'AppDetailModal.tsx'), 'utf8');
+    expect(detailModal).not.toContain('text-rose-200');
+    expect(detailModal).not.toContain('text-emerald-200');
+  });
 });

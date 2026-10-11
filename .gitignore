@@ -25,3 +25,7 @@ test-results/
 playwright-report/
 playwright-live-report/
 scripts/perf/results/
+
+# Agent QA captures (screenshots + measurement reports) stay local;
+# the durable visual regression baselines live in tests/e2e/*-snapshots/.
+qa-shots/

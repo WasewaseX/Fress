@@ -22,7 +22,7 @@ import type { PpAlternative, PpCategory, PpLevel } from '../data/privacyPack';
 import { COMBOS } from '../data/combos';
 import { AppItem } from '../types';
 import { AppIcon } from './AppCard';
-import { useI18n } from '../lib/i18n';
+import { useI18n, PP_CATEGORY_I18N_KEYS } from '../lib/i18n';
 
 const MAX_PICKS_PER_CATEGORY = 3;
 const STORAGE_KEY = 'fress.replace.picks';
@@ -284,6 +284,15 @@ export const PpDropdown: React.FC<PpDropdownProps> = ({
 export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAddToBatch, onRemoveFromBatch }) => {
   const { t } = useI18n();
 
+  // Category display name through the one shared mapping (headings, ARIA
+  // labels and dropdown labels all resolve here); a name missing from the
+  // map falls back to the raw data string, and the privacyPackLocalization
+  // test fails CI long before that can ship.
+  const ppCategoryName = (name: string): string => {
+    const key = PP_CATEGORY_I18N_KEYS[name];
+    return key ? t(key) : name;
+  };
+
   const byId = useMemo(() => {
     const m = new Map<string, AppItem>();
     for (const a of apps) m.set(a.id, a);
@@ -426,7 +435,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
     if (!maxPrivacyCombo) return;
     const ids = maxPrivacyCombo.appIds.filter((id) => byId.has(id));
     onAddToBatch(ids);
-    toast.success(`${ids.length} × "${maxPrivacyCombo.name}" ${t('pp.toastAdded')}`);
+    toast.success(`${ids.length} × "${t('pp.combo.maxPrivacy.name')}" ${t('pp.toastAdded')}`);
   };
 
   const LEVEL_INFO: Record<PpLevel, { label: string; blurb: string }> = {
@@ -537,7 +546,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
         <article
           id="replace-max-privacy-card"
           className="mb-5 bg-slate-900 dark:bg-slate-800 border border-emerald-500/25 dark:border-emerald-400/25 rounded-lg p-4 shadow-sm"
-          aria-label={maxPrivacyCombo.name}
+          aria-label={t('pp.combo.maxPrivacy.name')}
         >
           <div className="flex items-start gap-3">
             <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-emerald-500/15 text-emerald-400">
@@ -545,12 +554,12 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-100 tracking-tight">{maxPrivacyCombo.name}</h3>
+                <h3 className="text-sm font-bold text-slate-100 tracking-tight">{t('pp.combo.maxPrivacy.name')}</h3>
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2 py-0.5">
                   {t('pp.maxBadge')}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 leading-snug mt-0.5">{maxPrivacyCombo.purpose}</p>
+              <p className="text-[11px] text-slate-400 leading-snug mt-0.5">{t('pp.combo.maxPrivacy.purpose')}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5 mt-3">
@@ -600,10 +609,10 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               key={cat.id}
               id={`pp-card-${cat.id}`}
               className="group relative bg-slate-900 dark:bg-slate-800 border border-slate-950/10 dark:border-white/[0.08] hover:border-slate-950/30 dark:hover:border-white/[0.2] rounded-lg p-4 flex flex-col transition-all duration-150 shadow-sm hover:shadow-md dark:shadow-lg dark:shadow-black/40"
-              aria-label={cat.name}
+              aria-label={ppCategoryName(cat.name)}
             >
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-100 tracking-tight mr-auto">{cat.name}</h3>
+                <h3 className="text-sm font-bold text-slate-100 tracking-tight mr-auto">{ppCategoryName(cat.name)}</h3>
                 <span
                   id={`pp-counter-${cat.id}`}
                   className={`text-[10px] font-bold rounded-full px-2 py-0.5 border ${
@@ -624,7 +633,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                     onClick={() => clearCategory(cat)}
                     className="p-1 text-slate-400 hover:text-slate-100 rounded hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] transition-colors"
                     title={t('pp.clearPicks')}
-                    aria-label={`${t('pp.clearPicks')}: ${cat.name}`}
+                    aria-label={`${t('pp.clearPicks')}: ${ppCategoryName(cat.name)}`}
                   >
                     <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
@@ -641,7 +650,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                     open={mainOpen}
                     onOpenChange={(o) => setOpenPicker(o ? `main:${cat.id}` : null)}
                     triggerId={`pp-main-${cat.id}`}
-                    triggerAriaLabel={`${t('pp.youUseNow')}: ${cat.name}`}
+                    triggerAriaLabel={`${t('pp.youUseNow')}: ${ppCategoryName(cat.name)}`}
                     triggerContent={mainstream.name}
                     triggerSuffix={
                       <ChevronDown
@@ -650,7 +659,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                       />
                     }
                     listboxId={`pp-main-dropdown-${cat.id}`}
-                    listboxLabel={`${t('pp.youUseNow')}: ${cat.name}`}
+                    listboxLabel={`${t('pp.youUseNow')}: ${ppCategoryName(cat.name)}`}
                     options={cat.mainstream.map((m) => ({
                       id: m.id,
                       selected: state.m === m.id,
@@ -681,7 +690,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                   open={altOpen}
                   onOpenChange={(o) => setOpenPicker(o ? `alt:${cat.id}` : null)}
                   triggerId={`pp-picker-${cat.id}`}
-                  triggerAriaLabel={`${t('pp.replaceWith')}: ${cat.name}`}
+                  triggerAriaLabel={`${t('pp.replaceWith')}: ${ppCategoryName(cat.name)}`}
                   triggerContent={
                     picked.length === 0
                       ? t('pp.pick')
@@ -699,7 +708,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                   }
                   triggerClassName="w-full inline-flex items-center justify-between gap-2 text-xs font-medium text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] rounded-md px-2.5 py-1.5 transition-colors"
                   listboxId={`pp-dropdown-${cat.id}`}
-                  listboxLabel={`${t('pp.replaceWith')}: ${cat.name}`}
+                  listboxLabel={`${t('pp.replaceWith')}: ${ppCategoryName(cat.name)}`}
                   options={cat.alternatives.map((alt) => ({
                     id: alt.id,
                     selected: state.a.includes(alt.id),
@@ -714,7 +723,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                         )}
                         <LevelDots level={alt.level} gradeLabel={LEVEL_INFO[alt.level].label} />
                         {alt.catalogId && (
-                          <Download className="w-3 h-3 text-slate-400 shrink-0" aria-label={t('pp.inCatalog')} />
+                          <Download className="w-3 h-3 text-slate-400 shrink-0" role="img" aria-label={t('pp.inCatalog')} />
                         )}
                         {state.a.includes(alt.id) && <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
                       </>
@@ -731,7 +740,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
 
               {/* Picked replacements with actions */}
               {picked.length > 0 && (
-                <ul className="mt-2.5 flex flex-col gap-1.5" aria-label={`${t('pp.replaceWith')}: ${cat.name}`}>
+                <ul className="mt-2.5 flex flex-col gap-1.5" aria-label={`${t('pp.replaceWith')}: ${ppCategoryName(cat.name)}`}>
                   {picked.map((alt) => {
                     const app = alt.catalogId ? byId.get(alt.catalogId) : undefined;
                     return (

@@ -25,7 +25,7 @@ import { openExternal } from '../lib/external';
 import { resolveDownloadFor, guessUserPlatform } from '../lib/releaseFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { toast } from 'sonner';
-import { useI18n } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars, formatStarCount } from '../lib/starFetch';
 import { iconFor } from '../data/appIcons';
@@ -215,15 +215,20 @@ const AppCardImpl: React.FC<AppCardProps> = ({
               <div className="flex items-center gap-1.5 flex-wrap">
                 {/* Native button inside the heading: identical look, but
                     keyboard-focusable and announced as an action (a plain
-                    clickable heading is invisible to keyboards and AT). */}
+                    clickable heading is invisible to keyboards and AT).
+                    The two-line clamp lives ON the button: the button is
+                    the text's box, and a clamp on the h3 is defeated by
+                    the inline-block child (pathological names grew the
+                    card to four+ lines in the stress fixture). */}
                 <h3
                   id={`app-title-${app.id}`}
-                  className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors line-clamp-2 break-words"
+                  className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors break-words"
                 >
                   <button
                     type="button"
                     onClick={() => onOpenDetail(app)}
-                    className="text-left text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer"
+                    title={app.name}
+                    className="text-left text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer line-clamp-2 break-words"
                   >
                     {app.name}
                   </button>
@@ -251,12 +256,14 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 )}
               </div>
 
-              {/* Quiet category label: metadata, not a badge. */}
+              {/* Quiet category label: metadata, not a badge. The stored
+                  domain value is translated through the shared mapping -
+                  the same label the filters, table and detail modal use. */}
               <span
                 id={`app-cat-badge-${app.id}`}
                 className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 truncate mt-0.5"
               >
-                {app.category}
+                {t(CATEGORY_I18N_KEYS[app.category])}
               </span>
             </div>
           </div>

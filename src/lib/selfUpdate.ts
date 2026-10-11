@@ -121,20 +121,53 @@ export interface ParsedVersion {
   patch: number;
   /** Dot-separated prerelease identifiers; empty for a stable release. */
   prerelease: string[];
+  /** Dot-separated build-metadata identifiers; empty when absent. Build
+   * metadata NEVER takes part in precedence comparisons (SemVer rule 10). */
+  build: string[];
 }
 
-/** "0.12.0-beta.2" / "v0.12.0" -> structured parts; null when unparsable. */
+/**
+ * The exact SemVer subset Fress accepts, anchored on BOTH ends.
+ *
+ * This is the official semver.org grammar with one documented project
+ * addition: an optional leading "v" is stripped before matching (GitHub
+ * release tags use both conventions).
+ *
+ * Why the end anchor matters: the previous pattern was anchored at the
+ * start only, so "1.0.7junk" matched the "1.0.7" prefix and entered the
+ * candidate list as a 1.0.7 stable release. Trailing junk is now a
+ * rejection, not a truncation.
+ *
+ * - Core numbers: "0" or a nonzero leading digit followed by digits, so
+ *   "01.2.3" is malformed (SemVer forbids leading zeros in the core).
+ * - Prerelease identifiers: numeric identifiers follow the same no-leading-
+ *   zero rule ("beta.02" is malformed) while ALPHANUMERIC identifiers may
+ *   start with a digit ("beta.02a" is valid, per the SemVer spec). Empty
+ *   identifiers and empty segments ("1.0.7-beta..2", "1.0.7-") cannot match.
+ * - Build metadata: alphanumerics and hyphens, no empty segments; leading
+ *   zeros are allowed there because build metadata is informational.
+ */
+const SEMVER_RE =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+/** Strip the optional, case-insensitive leading "v" the same way everywhere
+ * (parsing, comparing, display) so "v1.0.7" and "1.0.7" are one version. */
+function stripVPrefix(v: string): string {
+  return v.trim().replace(/^v/i, '');
+}
+
+/** Strict release-tag parser. Returns null for ANYTHING that is not exactly
+ * the accepted SemVer subset above - an unparsable tag must never be
+ * interpreted as "some kind of 1.0.7" or treated as stable. */
 export function parseVersion(v: string): ParsedVersion | null {
-  const m = v
-    .trim()
-    .replace(/^v/i, '')
-    .match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/);
+  const m = stripVPrefix(v).match(SEMVER_RE);
   if (!m) return null;
   return {
     major: Number(m[1]),
     minor: Number(m[2]),
     patch: Number(m[3]),
-    prerelease: m[4] ? m[4].split('.').filter(Boolean) : [],
+    prerelease: m[4] ? m[4].split('.') : [],
+    build: m[5] ? m[5].split('.') : [],
   };
 }
 
@@ -166,8 +199,19 @@ function comparePrerelease(a: string[], b: string[]): number {
   return a.length < b.length ? -1 : 1;
 }
 
-/** -1 older, 0 equal, 1 newer. Full SemVer prerelease ordering; falls back
- * to string inequality when either side is unparsable. */
+/**
+ * -1 older, 0 equal, 1 newer. Full SemVer prerelease ordering; build
+ * metadata is ignored (SemVer rule 10: "1.0.7+build.9" == "1.0.7").
+ *
+ * The fallback for unparsable input is a TOTAL order, not the old one-sided
+ * "-1": the previous shape returned -1 in BOTH directions when exactly one
+ * side parsed, which is antisymmetry-breaking and made sort results depend
+ * on input order. Now a parsable SemVer always outranks garbage, and two
+ * garbage tags compare by their normalized strings - deterministic and
+ * consistent whichever way the arguments are swapped. Release feeds are
+ * filtered to parsable tags before sorting anyway (see fetchFromApi /
+ * fetchFromAtom), so this branch is a defensive contract for direct calls.
+ */
 export function compareVersions(a: string, b: string): number {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
@@ -177,7 +221,11 @@ export function compareVersions(a: string, b: string): number {
     if (pa.patch !== pb.patch) return pa.patch < pb.patch ? -1 : 1;
     return comparePrerelease(pa.prerelease, pb.prerelease);
   }
-  return a.trim().replace(/^v/i, '') === b.trim().replace(/^v/i, '') ? 0 : -1;
+  if (pa && !pb) return 1;
+  if (!pa && pb) return -1;
+  const na = stripVPrefix(a);
+  const nb = stripVPrefix(b);
+  return na < nb ? -1 : na > nb ? 1 : 0;
 }
 
 /**
@@ -193,10 +241,17 @@ function prereleaseStage(v: ParsedVersion): number {
 }
 
 /** Which versions the channel surfaces. Stable sees only stable releases;
- * Beta adds beta/rc; Alpha (the pre-stable default) sees everything. */
+ * Beta adds beta/rc; Alpha (the pre-stable default) sees everything.
+ *
+ * An UNPARSABLE tag matches NO channel: the previous "stay visible" shape
+ * made a malformed tag ("1.0.7junk", "beta-build") eligible on every
+ * channel including Stable, which is a policy-boundary hole - the channel
+ * gate is exactly where malformed tags must be rejected, not waved through.
+ * fetchFromApi/fetchFromAtom additionally drop unparsable tags before
+ * sorting, so a malformed release can never become an update candidate. */
 export function releaseMatchesChannel(version: string, channel: UpdateChannel): boolean {
   const p = parseVersion(version);
-  if (!p) return true; // an unparsable version stays visible rather than hidden
+  if (!p) return false; // malformed tags are never eligible, on any channel
   const stage = prereleaseStage(p);
   switch (channel) {
     case 'stable':
@@ -232,17 +287,66 @@ function isJunkAsset(name: string): boolean {
   return /\.sig$|blockmap|checksum|sha256|latest\.json|symbols|\.zip$/i.test(name);
 }
 
-/** Pick the file a user on this platform actually needs.
+/* ------------------------------------------------------------------ */
+/* Architecture marker regexes (Windows / macOS / Linux assets)        */
+/* ------------------------------------------------------------------ */
+/* Kept classification-compatible with the catalog resolver's hard gate
+ * (release/assetMatching.ts): hyphenated markers ("arm-64", "x86-64")
+ * classify the same as their underscore siblings. Android deliberately
+ * does NOT use these - it shares androidAssetFlags/androidDeviceAbi with
+ * the catalog instead, so the two pickers cannot drift apart. */
+
+const WIN_ARM_ASSET_RE = /arm64|aarch64|arm[_-]?64/;
+const WIN_X64_ASSET_RE = /x64|x86[_-]?64|amd64|win64/;
+const MAC_ARM_ASSET_RE = /arm64|aarch64|arm[_-]?64|apple[-_. ]?silicon/;
+const MAC_X64_ASSET_RE = /x64|x86_64|intel/;
+const MAC_UNIVERSAL_RE = /universal/;
+const LINUX_ARM_ASSET_RE = /arm64|aarch64|(^|[^a-z0-9])arm([^a-z0-9]|$)/;
+const LINUX_X64_ASSET_RE = /x86[_-]?64|x64|amd64/;
+
+/** Command-line companions never name the GUI app. Same token rule as the
+ * catalog's CLI gate: a "-cli-" / "_cli." / trailing "cli" token excludes
+ * the asset ("client"/"click" do not match - the token must end at a
+ * separator or the string end). LocalSend-style repos ship
+ * "<App>-CLI-<v>-windows-arm-64.exe" next to the GUI installer; a CLI
+ * binary must never become the app installer candidate, no matter how
+ * well its name scores otherwise. */
+const CLI_NAME_RE = /(^|[^a-z0-9])cli([-_.0-9]|$)/i;
+
+/**
+ * Pick the file a user on this platform actually needs - in TWO explicit
+ * phases:
  *
- * `archHint` is the Tauri host_arch result ("x86_64"/"aarch64"/"arm"/...)
- * when available. A WebView user agent is not a reliable architecture
- * signal (macOS WebKit claims "Intel" even on Apple Silicon), so the real
- * host arch must be threaded in from the caller; the UA heuristic below is
- * only the browser-mode fallback.
+ *   Phase 1 - ELIGIBILITY. Hard platform/architecture/role gates decide
+ *   what MAY be delivered at all. An asset that fails its gate is excluded,
+ *   not down-ranked: "the only candidate" must never rescue an incompatible
+ *   installer. The old single-pass scoring kept ineligible assets alive at
+ *   low or negative scores, and because the scan started at -Infinity a
+ *   lone ARM64-only dmg could win on an Intel Mac.
  *
- * Android ABI classification is shared with the catalog resolver
- * (androidAssetFlags/androidDeviceAbi in releaseFetch.ts) so the two
- * pickers cannot drift apart. */
+ *   Phase 2 - RANKING among eligible candidates only. Rank is
+ *   architecture-certainty first (exact match > universal > unmarked >
+ *   emulated), packaging preference second (setup > portable, dmg > pkg,
+ *   AppImage > deb > rpm), with a final lexicographic name tie-break so
+ *   asset ORDER in the release can never change the selection.
+ *
+ * `archHint` semantics - what the reported architecture IS:
+ *   - Windows: the native MACHINE architecture (GetNativeSystemInfo), even
+ *     when the Fress process itself is an emulated x64 build.
+ *   - macOS/Linux/Android: the Fress PROCESS architecture
+ *     (std::env::consts::ARCH). Under Rosetta an x64 Fress build reports
+ *     "x86_64" - the policy below therefore hands that process the x64 dmg
+ *     (it keeps updating as an x64 app under Rosetta; switching to the
+ *     arm64-native build needs one manual install from the releases page).
+ *     This is a deliberate, tested policy - never the WebView user agent,
+ *     which macOS WebKit reports as "Intel" even on Apple Silicon.
+ *   - undefined: unknown (browser mode; modern user agents hide the CPU
+ *     arch). Unknown never selects a marked artifact on a GUESS - each
+ *     platform's unknown policy below is explicit.
+ *
+ * Returns null when nothing eligible exists; the UI then routes the user
+ * to the official Releases page instead of offering a wrong installer.
+ */
 export function pickOwnAsset(
   release: OwnRelease,
   archHint?: string
@@ -253,97 +357,164 @@ export function pickOwnAsset(
     ua.includes('android') ? 'android' :
     ua.includes('mac os') || ua.includes('macintosh') ? 'mac' :
     ua.includes('linux') ? 'linux' : 'windows';
+  // A positive ARM signal from the user agent is usable in browser mode;
+  // the ABSENCE of one is not an Intel signal (UA reduction hides arch),
+  // so no-Arm-UA means "unknown", never "x64".
   const isArmHost = archHint ? archHint === 'aarch64' || archHint === 'arm' : /arm|aarch/i.test(ua);
-  const score = (n: string): number => {
+
+  /* Phase 1 + 2 helper: null = ineligible, otherwise the candidate's rank.
+   * Rank layout: tier * 100 + packaging bonus. Tiers encode architecture
+   * certainty (higher = more certain the artifact runs natively), the
+   * packaging bonus only breaks ties WITHIN a tier. */
+  const rankOf = (n: string): number | null => {
     const s = n.toLowerCase();
     switch (platform) {
       case 'windows': {
-        if (!s.endsWith('.exe')) return -1;
-        // "setup" is a BONUS, never an early return: the architecture
-        // check below must apply to every exe, installer or portable. The
-        // previous shape (`if (!s.includes('setup')) return 5;`) exempted
-        // portable exes from arch matching entirely, so on an ARM host two
-        // portables (x64 + arm64) tied at 5 and list order decided.
-        let v = s.includes('setup') ? 5 : 0;
-        // Architecture must match the host: an x64 machine must never be
-        // handed the ARM64 installer just because it sorts earlier in the
-        // asset list (regression caught by unit tests).
-        const armAsset = s.includes('arm64') || s.includes('aarch64');
-        const x64Asset = s.includes('x64') || s.includes('x86_64') || s.includes('amd64');
-        // x64 Windows-on-ARM still runs x64 installers through emulation,
-        // hence the graded 6 instead of a refusal.
-        if (isArmHost) return v + (armAsset ? 10 : x64Asset ? 6 : 4);
-        return v + (x64Asset ? 10 : armAsset ? 3 : 7);
+        // Setup installers AND portable exes go through the same gates -
+        // "setup" is a packaging bonus (below), never an eligibility bypass.
+        if (!s.endsWith('.exe')) return null;
+        const armAsset = WIN_ARM_ASSET_RE.test(s);
+        const x64Asset = WIN_X64_ASSET_RE.test(s);
+        const hostIs32 = archHint === 'x86' || archHint === 'i686';
+        let tier: number;
+        if (archHint === 'aarch64') {
+          // Windows-on-ARM. Project policy (documented in the test suite):
+          // x64 installers/ executables RUN on ARM64 Windows through the
+          // OS emulation layer, so they stay eligible - but a native ARM64
+          // build always outranks an emulated x64 one, and emulation is a
+          // tier-2 fallback, never the first choice.
+          tier = armAsset ? 3 : x64Asset ? 2 : 1;
+        } else if (archHint === 'x86_64') {
+          // Native x64 Windows cannot run ARM64 binaries (WoA emulates
+          // x64/x86, not the reverse): an ARM64-marked exe is INELIGIBLE
+          // here, even when it is the only asset in the release. A name
+          // ending in .exe alone proves nothing - only a positive x64
+          // marker makes an artifact certain, and an unmarked exe stays a
+          // documented last resort (Fress CI always marks the arch).
+          if (armAsset) return null;
+          tier = x64Asset ? 3 : 1;
+        } else if (hostIs32) {
+          // A 32-bit host runs neither arm64 nor x64 builds; only an
+          // unmarked exe remains as the last resort.
+          if (armAsset || x64Asset) return null;
+          tier = 1;
+        } else {
+          // Unknown host (browser mode, reduced UA). x64 is the safe
+          // superset on Windows - it runs natively on x64 machines and via
+          // emulation on ARM64 - so a marked x64 exe is deliverable.
+          // An ARM64-marked exe needs a POSITIVE aarch64 signal: on the
+          // far more common x64 host it cannot run at all.
+          if (armAsset) return null;
+          tier = x64Asset ? 3 : 1;
+        }
+        return tier * 100 + (s.includes('setup') ? 5 : 0);
       }
       case 'android': {
-        if (!s.endsWith('.apk')) return -1;
+        if (!s.endsWith('.apk')) return null;
+        const flags = androidAssetFlags(s);
         const device = androidDeviceAbi(archHint);
         // Universal is release-required (CI fails without it) and runs on
-        // every device, so it is the safe floor at 9.
-        if (androidAssetFlags(s).universal) return 9;
+        // every device, so it is eligible even when the device ABI is
+        // unknown - the safe floor for reduced-UA browser sessions.
+        if (flags.universal) return 300;
         // Browser mode usually cannot know the device ABI (reduced user
         // agents carry no architecture). An unknown device gets universal
         // ONLY - never an ABI-specific split it cannot install, and never
         // an unmarked apk either: "no ABI marker" is exactly the unknown
-        // we are trying to resolve, so the unmarked gamble (score 4 below)
-        // must only apply once the device ABI is known. This check MUST
-        // precede the unmarked acceptance; with neither universal nor a
-        // known ABI match, pickOwnAsset returns null and the UI links to
-        // the releases page instead of downloading a guess.
-        if (device === 'unknown') return -Infinity;
+        // we are trying to resolve. With no universal on the release,
+        // pickOwnAsset returns null and the UI links to the releases page
+        // instead of downloading a guess.
+        if (device === 'unknown') return null;
         const abi = androidAssetAbi(s);
-        if (!abi) return 4; // unmarked apk: a gamble, below universal
-        if (abi === device) return 10; // exact ABI match: smaller than universal
-        // arm64 devices can run armv7 apks; nothing else cross-runs.
-        return device === 'arm64' && abi === 'arm' ? 7 : 2; // wrong ABI: never beats universal
+        if (!abi) return 100; // unmarked apk: a documented gamble BELOW universal
+        if (abi === device) return 400; // exact ABI match: smaller than universal
+        // Documented cross-ABI compatibility: armv7 apks run on arm64
+        // devices and 32-bit x86 apks run on x86_64 devices. Everything
+        // else is a guaranteed install failure and is REJECTED - a
+        // known-incompatible ABI must never survive as a low-ranked
+        // candidate that wins by being alone.
+        const compatible = (device === 'arm64' && abi === 'arm') || (device === 'x86_64' && abi === 'x86');
+        return compatible ? 200 : null;
       }
       case 'mac': {
+        // .pkg and .dmg are both legitimate installer formats; dmg stays
+        // the friendlier default (packaging bonus 4 vs 1) so a pkg-only
+        // release still offers a direct download instead of nothing.
         const isDmg = s.endsWith('.dmg');
-        // .pkg is a usable fallback so a pkg-only release still offers a
-        // direct download instead of silently returning nothing; dmg stays
-        // the friendlier default (base 4 vs 1).
-        if (!isDmg && !s.endsWith('.pkg')) return -1;
-        let v = isDmg ? 4 : 1;
-        if (s.includes('aarch64') || s.includes('arm64')) v += isArmHost ? 6 : -7;
-        else if (s.includes('x64') || s.includes('x86_64')) v += isArmHost ? -7 : 6;
-        return v;
+        if (!isDmg && !s.endsWith('.pkg')) return null;
+        const armAsset = MAC_ARM_ASSET_RE.test(s);
+        const x64Asset = MAC_X64_ASSET_RE.test(s);
+        const universal = MAC_UNIVERSAL_RE.test(s);
+        // archHint is the Fress PROCESS architecture here (see the
+        // function doc): an arm64-native build gets arm64/universal
+        // artifacts, an x64 build (Intel Mac, or Fress running under
+        // Rosetta on Apple Silicon) gets x64/universal artifacts. The
+        // opposite arch's marked artifact is INELIGIBLE in both
+        // directions - notably an x64-only dmg is never handed to an
+        // arm64 process "because Rosetta exists": self-update never moves
+        // a native install onto the emulated side of the fence.
+        // Universal binaries run natively on both architectures.
+        // With NO arch signal (browser mode) nothing marked is eligible:
+        // the WebView user agent is exactly the unreliable "Intel" claim
+        // this picker exists to avoid, so unknown gets universal and
+        // unmarked artifacts only.
+        let tier: number | null;
+        if (isArmHost) {
+          tier = armAsset ? 3 : universal ? 2 : x64Asset ? null : 1;
+        } else if (archHint === 'x86_64') {
+          tier = x64Asset ? 3 : universal ? 2 : armAsset ? null : 1;
+        } else {
+          // Unknown process arch (browser mode).
+          tier = universal ? 2 : armAsset || x64Asset ? null : 1;
+        }
+        if (tier === null) return null;
+        return tier * 100 + (isDmg ? 4 : 1);
       }
       case 'linux': {
-        const fmt = s.endsWith('.appimage') ? 10 : s.endsWith('.deb') ? 7 : s.endsWith('.rpm') ? 5 : -1;
-        if (fmt === -1) return -1;
-        const armAsset = s.includes('aarch64') || s.includes('arm64') || /(^|[^a-z0-9])arm([^a-z0-9]|$)/.test(s);
-        const x64Asset = s.includes('amd64') || s.includes('x86_64') || s.includes('x64');
+        const fmt = s.endsWith('.appimage') ? 10 : s.endsWith('.deb') ? 7 : s.endsWith('.rpm') ? 5 : 0;
+        if (fmt === 0) return null; // not an installer format this updater delivers
+        const armAsset = LINUX_ARM_ASSET_RE.test(s);
+        const x64Asset = LINUX_X64_ASSET_RE.test(s);
         const archLc = (archHint || '').toLowerCase();
+        const hostIsArm = archLc === 'aarch64' || archLc === 'arm';
         const hostIs32 = archLc === 'x86' || archLc === 'i686';
-        // Linux has no emulation safety net (unlike Windows-on-ARM): an
-        // amd64 AppImage on an ARM64 host is a wasted download that cannot
-        // start. Refuse it outright - returning -Infinity for every asset
-        // makes pickOwnAsset return null and the UI links to the releases
-        // page instead of downloading something unusable.
-        if (isArmHost) return armAsset ? fmt : -Infinity;
-        if (hostIs32) return !armAsset && !x64Asset ? fmt : -Infinity;
-        if (x64Asset) return fmt;
-        if (armAsset) return -Infinity;
-        return fmt - 1; // untagged: selectable on the assumed-x86_64 host, below a tagged match
+        // Linux has no emulation safety net (unlike Windows-on-ARM): the
+        // strict ARM/x64 incompatibility gates are preserved exactly. An
+        // unmarked asset is treated as compatible ONLY where the
+        // documented fallback policy supports the assumption (an
+        // assumed-x86_64 desktop host); on ARM or 32-bit hosts the
+        // assumption collapses and unmarked is rejected too.
+        if (hostIsArm) return armAsset ? 200 + fmt : null;
+        if (hostIs32) return !armAsset && !x64Asset ? 100 + fmt : null;
+        if (x64Asset) return 200 + fmt;
+        if (armAsset) return null;
+        return 100 + fmt; // untagged: the documented assumed-x86_64 fallback, below a marked match
       }
       default:
-        return -1;
+        return null;
     }
   };
-  // -Infinity, not 0: the catalog resolver starts at -Infinity, and a 0
-  // baseline silently dropped any release whose best candidate scored 0 or
-  // less (e.g. a pkg-only macOS release) - the updater reported "no file"
-  // while a perfectly usable download existed.
-  let best: { name: string; size: number; url: string } | null = null;
-  let bestScore = -Infinity;
-  for (const a of assets) {
-    const s = score(a.name);
-    if (s > bestScore) {
-      best = a;
-      bestScore = s;
-    }
-  }
-  return best;
+
+  // Phase 1: eligibility - drop every asset that failed its hard gate.
+  const candidates = assets
+    .filter((a) => !CLI_NAME_RE.test(a.name))
+    .map((a) => ({ asset: a, rank: rankOf(a.name) }))
+    .filter((c): c is { asset: { name: string; size: number; url: string }; rank: number } => c.rank !== null);
+
+  // No eligible candidate: the caller (and the UI) must fall back to the
+  // official Releases page instead of offering a wrong installer.
+  if (candidates.length === 0) return null;
+
+  // Phase 2: deterministic ranking. Descending rank, then ascending asset
+  // name as the final tie-break - permuting the assets array can never
+  // change which artifact is selected, even between candidates that rank
+  // identically.
+  candidates.sort(
+    (a, b) =>
+      b.rank - a.rank ||
+      (a.asset.name < b.asset.name ? -1 : a.asset.name > b.asset.name ? 1 : 0)
+  );
+  return candidates[0].asset;
 }
 
 /** Newest published release (drafts dropped, channel-filtered, SemVer order).
@@ -358,6 +529,11 @@ async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
   const raw = (await res.json()) as RawRelease[];
   const published = (raw || []).filter((r) => {
     if (r.draft) return false;
+    // Malformed release tags NEVER enter the candidate list: a tag that
+    // does not parse as the accepted SemVer subset ("1.0.7junk", a
+    // date-stamped tag, "beta-build") is excluded before sorting, so it
+    // can neither win the sort nor be displayed as an eligible update.
+    if (!parseVersion(r.tag_name)) return false;
     // The tag is not the only stability signal - GitHub's own prerelease
     // flag is. A manually published release with a stable-looking tag
     // ("v1.0.7") but prerelease=true must never surface on the Stable
@@ -367,6 +543,8 @@ async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
     return releaseMatchesChannel(r.tag_name.replace(/^v/i, ''), channel);
   });
   if (published.length === 0) throw new Error('No published releases');
+  // Every surviving tag is parsable, so the SemVer comparator below is
+  // total and deterministic over the whole input (no fallback branches).
   published.sort((a, b) => compareVersions(a.tag_name, b.tag_name));
   return mapRelease(published[published.length - 1]);
 }
@@ -409,7 +587,13 @@ async function fetchFromAtom(channel: UpdateChannel): Promise<OwnRelease> {
       assets: [],
     });
   }
-  const matching = releases.filter((r) => releaseMatchesChannel(r.version, channel));
+  const matching = releases.filter((r) => {
+    // Same policy as the API path: a malformed atom tag (they are free-form
+    // tag names here) is never an eligible candidate, so the sort below
+    // only ever sees parsable SemVer tags.
+    if (!parseVersion(r.tag)) return false;
+    return releaseMatchesChannel(r.version, channel);
+  });
   if (matching.length === 0) throw new Error('Atom feed has no matching release');
   matching.sort((a, b) => compareVersions(a.tag, b.tag));
   return matching[matching.length - 1];
@@ -437,9 +621,26 @@ export async function fetchOwnLatestRelease(channel: UpdateChannel = getUpdateCh
  * hash" into an actual verification: the hash is compared against the value
  * CI published next to the file, not merely computed and shown.
  *
+ * Trust properties (all fail closed):
+ *   - The lookup is tied to THIS release and the SELECTED filename: the
+ *     manifest is found among this release's own assets, and only an entry
+ *     whose name matches `assetName` exactly (byte-for-byte, the same string
+ *     the download will carry) yields a digest.
+ *   - A missing manifest, an unreachable document, an entry for a different
+ *     name, or a malformed document all return null - and null means the
+ *     delivery layer refuses the in-app download (planUpdateDelivery).
+ *   - Malformed lines (wrong hash length, non-hex, free text) can never
+ *     yield a digest: they are skipped by the strict line grammar.
+ *   - Duplicate entries for the same filename with CONFLICTING digests
+ *     return null: two different "expected" hashes for one file means the
+ *     manifest itself cannot be trusted, so nothing is verified. A byte-
+ *     identical duplicate is harmless and accepted.
+ *
  * Routed through the native text fetch inside the app (see
  * fetchSelfUpdateText): a WebView fetch of this release asset fails on
- * CORS, which silently degraded every self-update to "unverified".
+ * CORS, which silently degraded every self-update to "unverified". Both
+ * the manifest URL and the asset URL stay inside the native layer's
+ * self-update host allowlist and repo path pin.
  */
 async function fetchExpectedSha256(release: OwnRelease, assetName: string): Promise<string | null> {
   const sums = release.assets.find((a) => /^sha256sums\.txt$/i.test(a.name));
@@ -452,12 +653,20 @@ async function fetchExpectedSha256(release: OwnRelease, assetName: string): Prom
     // unverified installer (fail closed).
     return null;
   }
+  const matches: string[] = [];
   for (const line of text.split('\n')) {
-    // "<hex>  <name>" (two spaces, sha256sum format)
+    // Strict sha256sum grammar: "<64 hex chars>  <name>" (two spaces, an
+    // optional binary-mode marker before the name). Anything else - a
+    // 63-char hash, non-hex text, an empty line - is malformed and can
+    // never produce an expected digest for ANY file.
     const m = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
-    if (m && m[2].trim() === assetName) return m[1].toLowerCase();
+    if (!m) continue;
+    if (m[2].trim() === assetName) matches.push(m[1].toLowerCase());
   }
-  return null;
+  if (matches.length === 0) return null;
+  const first = matches[0];
+  // Conflicting duplicates = untrustworthy manifest = fail closed.
+  return matches.every((h) => h === first) ? first : null;
 }
 
 export async function checkForUpdate(currentVersion: string): Promise<UpdateState> {

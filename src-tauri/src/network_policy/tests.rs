@@ -288,22 +288,36 @@ fn fdroid_api_is_pinned_with_exact_match() {
 // Redirect decisions
 // ---------------------------------------------------------------------------
 
-fn rules(max_hops: usize, host_rule: RedirectHostRule) -> RedirectRules {
-    RedirectRules {
-        max_hops,
-        host_rule,
-    }
-}
-
 fn hop_result(
     max_hops: usize,
     host_rule: RedirectHostRule,
     previous: &[&str],
     next: &str,
 ) -> Result<(), RedirectRejection> {
+    hop_result_flagged(max_hops, host_rule, true, previous, next)
+}
+
+/// Same decision with an explicit private-literal flag (the external-link
+/// policy deliberately allows private destinations - browser-context
+/// semantics).
+fn hop_result_flagged(
+    max_hops: usize,
+    host_rule: RedirectHostRule,
+    block_private_literals: bool,
+    previous: &[&str],
+    next: &str,
+) -> Result<(), RedirectRejection> {
     let previous: Vec<Url> = previous.iter().map(|p| Url::parse(p).unwrap()).collect();
     let next = Url::parse(next).unwrap();
-    evaluate_redirect_hop(&rules(max_hops, host_rule), &previous, &next)
+    evaluate_redirect_hop(
+        &RedirectRules {
+            max_hops,
+            host_rule,
+            block_private_literals,
+        },
+        &previous,
+        &next,
+    )
 }
 
 #[test]
@@ -585,4 +599,278 @@ fn local_hostname_detection() {
     for host in ["notlocalhost", "localhost.example.com", "example.com"] {
         assert!(!is_local_hostname(host), "{host}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial admission: ambiguous / look-alike host forms (table-driven)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ambiguous_host_forms_are_handled_predictably() {
+    let policy = UrlPolicy::api_github();
+    // Trailing dot: a normalization trick that would bypass a naive
+    // equality check. The WHATWG parser keeps it, so it is NOT the pinned
+    // host and must be refused.
+    assert!(
+        matches!(
+            policy.validate("https://api.github.com./repos/x/y"),
+            Err(PolicyError::DisallowedHost { .. })
+        ),
+        "trailing-dot host is not the pinned host"
+    );
+    // Uppercase is normalized by the parser and therefore admitted as the
+    // genuine host (the connection target is really api.github.com).
+    policy
+        .validate("https://API.GITHUB.COM/repos/x/y")
+        .expect("case-normalized pinned host must validate");
+    // Percent-encoding in the host is decoded BEFORE the allowlist
+    // comparison, so an encoded form of the pinned host IS the pinned host
+    // (no bypass in either direction).
+    policy
+        .validate("https://api.github%2Ecom/repos/x/y")
+        .expect("percent-decoded host is the genuine pinned host");
+    // A punycode host that is NOT the pinned host is refused byte-exactly.
+    assert!(policy.validate("https://xn--80ak6aa92e.com/x").is_err());
+    // The port is not part of the host: a pinned-host URL on a different
+    // port still connects to the pinned host's addresses. Documented so
+    // the behavior is a decision, not an accident.
+    policy
+        .validate("https://api.github.com:8443/repos/x/y")
+        .expect("port variations of the pinned host stay on the pinned host");
+}
+
+#[test]
+fn userinfo_disguises_are_refused_across_policies() {
+    // "https://trusted.example:443@evil.example/" reads like the trusted
+    // host but everything before the @ is USERINFO.
+    for raw in [
+        "https://api.github.com:443@evil.example/repos/x/y",
+        "https://api.github.com@evil.example/repos/x/y",
+        "https://f-droid.org@api.github.com/x",
+    ] {
+        let result = UrlPolicy::api_github().validate(raw);
+        assert!(
+            matches!(result, Err(PolicyError::EmbeddedCredentials)),
+            "{raw} must be refused as embedded credentials"
+        );
+    }
+}
+
+#[test]
+fn ipv6_zone_ids_are_not_admitted() {
+    // Scoped addresses ("[fe80::1%25eth0]") name a machine-local interface.
+    // The WHATWG host parser rejects the zone id outright, so the URL is
+    // refused at admission (either as malformed or as private - both are
+    // safe; the invariant is: never admitted, never connected).
+    let result = UrlPolicy::executable_download().validate("https://[fe80::1%25eth0]/x");
+    assert!(result.is_err(), "zone-id host must be refused");
+}
+
+#[test]
+fn every_strict_policy_refuses_private_redirect_literals_consistently() {
+    // Guards against future drift: any policy that refuses private
+    // address literals at admission must refuse them on redirect hops
+    // too. external_link deliberately allows them (browser-context
+    // semantics, see its constructor docs).
+    for policy in [
+        UrlPolicy::api_github(),
+        UrlPolicy::api_fdroid(),
+        UrlPolicy::resolver_manifest(),
+        UrlPolicy::executable_download(),
+    ] {
+        assert!(
+            policy.redirects.block_private_literals,
+            "policy {} must refuse private redirect literals",
+            policy.label
+        );
+        assert!(
+            policy.block_private_addrs,
+            "policy {} must refuse private literals at admission",
+            policy.label
+        );
+    }
+    assert!(!UrlPolicy::external_link().redirects.block_private_literals);
+}
+
+// ---------------------------------------------------------------------------
+// Redirect destinations: private literals vs. legitimate public hosts
+// ---------------------------------------------------------------------------
+
+#[test]
+fn redirects_refuse_private_and_metadata_address_literals() {
+    // The cloud-metadata address is THE SSRF prize; every private family
+    // must get the same named refusal.
+    for next in [
+        "https://169.254.169.254/latest/meta-data/",
+        "https://10.0.0.5/setup.exe",
+        "https://192.168.1.1/setup.exe",
+        "https://127.0.0.1/setup.exe",
+        "https://[fe80::1]/setup.exe",
+        "https://[fd00::1]/setup.exe",
+        "https://[::ffff:10.0.0.1]/setup.exe",
+        "https://[64:ff9b::10.0.0.1]/setup.exe",
+    ] {
+        assert_eq!(
+            hop_result(
+                8,
+                RedirectHostRule::AnyHttps,
+                &["https://origin.example/setup.exe"],
+                next
+            )
+            .err(),
+            Some(RedirectRejection::PrivateDestination {
+                host: host_of(next).to_string()
+            }),
+            "{next}"
+        );
+    }
+}
+
+#[test]
+fn redirects_still_follow_legitimate_public_hosts_and_literals() {
+    // Public IP literals and public hostnames must NOT be broken by the
+    // private-literal rule (vendors bounce installers across CDNs).
+    for next in [
+        "https://93.184.216.34/setup.exe",
+        "https://[2606:4700:4700::1111]/setup.exe",
+        "https://release-assets.githubusercontent.com/xx/setup.exe",
+    ] {
+        assert!(
+            hop_result(
+                8,
+                RedirectHostRule::AnyHttps,
+                &["https://github.com/x/y/releases/download/v1/setup.exe"],
+                next
+            )
+            .is_ok(),
+            "{next} must be followed"
+        );
+    }
+}
+
+#[test]
+fn external_link_redirects_deliberately_allow_private_literals() {
+    // The external-link policy is a browser-context rule: it never fetches
+    // natively, so a user pasting a private URL as a project link is not
+    // attack surface. The permissive flag is documented behavior.
+    assert!(
+        hop_result_flagged(
+            5,
+            RedirectHostRule::AnyHttps,
+            false,
+            &["https://router.example/admin"],
+            "https://192.168.1.1/admin"
+        )
+        .is_ok(),
+        "external-link policy follows private literals by design"
+    );
+}
+
+/// Host part of a test URL, used to build expected PrivateDestination
+/// values without hand-copying strings.
+fn host_of(raw: &str) -> String {
+    let url = Url::parse(raw).unwrap();
+    url.host_str().unwrap_or("").to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Connect-time resolver: scripted DNS answer sets (no network anywhere)
+// ---------------------------------------------------------------------------
+
+fn sa(raw: &str) -> SocketAddr {
+    SocketAddr::new(raw.parse().expect("test ip"), 443)
+}
+
+async fn resolve_with(
+    answers: Result<Vec<SocketAddr>, String>,
+    host: &str,
+) -> Result<Vec<SocketAddr>, String> {
+    use std::str::FromStr;
+    let resolver = PublicOnlyResolver::scripted(move |_| {
+        let answers = answers.clone();
+        Box::pin(async move { answers }) as LookupFuture
+    });
+    let name = reqwest::dns::Name::from_str(host).expect("test name");
+    let resolving = Resolve::resolve(&resolver, name);
+    let result = resolving.await;
+    match result {
+        Ok(iter) => Ok(iter.collect()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tokio::test]
+async fn resolver_hands_out_only_the_public_part_of_mixed_answers() {
+    let answers = vec![
+        sa("192.168.1.1"),
+        sa("8.8.8.8"),
+        sa("::1"),
+        sa("fe80::1"),
+        sa("2606:4700:4700::1111"),
+        sa("2002::1"), // 6to4: refused by the classification
+    ];
+    let public = resolve_with(Ok(answers), "mixed.example")
+        .await
+        .expect("a mixed answer set still has public addresses");
+    assert_eq!(public.len(), 2);
+    assert!(public.contains(&sa("8.8.8.8")));
+    assert!(public.contains(&sa("2606:4700:4700::1111")));
+}
+
+#[tokio::test]
+async fn resolver_fails_the_request_when_nothing_public_remains() {
+    let answers = vec![sa("127.0.0.1"), sa("10.0.0.2"), sa("fd00::1")];
+    let err = resolve_with(Ok(answers), "private.example")
+        .await
+        .expect_err("an all-private answer set must fail the request");
+    assert!(
+        err.contains("only resolves to private or local network addresses"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn resolver_rechecks_every_lookup_so_rebinding_cannot_slip_through() {
+    use std::str::FromStr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // First lookup: public. Second lookup (what reqwest would issue for
+    // the next connection attempt - a redirect hop, a reconnect): private.
+    // The resolver must re-filter per call; caching would let hop two
+    // connect into private space.
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let resolver = PublicOnlyResolver::scripted(move |_| {
+        let call = CALLS.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            if call == 0 {
+                Ok(vec![sa("93.184.216.34")])
+            } else {
+                Ok(vec![sa("169.254.169.254")])
+            }
+        }) as LookupFuture
+    });
+    let name = || reqwest::dns::Name::from_str("rebind.example").expect("test name");
+    let first = Resolve::resolve(&resolver, name()).await;
+    assert!(first.is_ok(), "the first lookup is public and passes");
+
+    let second = Resolve::resolve(&resolver, name()).await;
+    assert!(
+        second.is_err(),
+        "the re-resolved private answer must be refused, not cached"
+    );
+}
+
+#[tokio::test]
+async fn resolver_surfaces_lookup_failures_to_the_caller() {
+    let err = resolve_with(Err("resolver is down".to_string()), "dead.example")
+        .await
+        .expect_err("a failed lookup must surface as a failed request");
+    assert!(err.contains("resolver is down"), "unexpected error: {err}");
+}
+
+#[test]
+fn scripted_resolvers_only_exist_in_tests() {
+    // Guardrail for the injection point: the production constructor is
+    // Default (system resolver), and `scripted` is cfg(test) so release
+    // builds cannot be built with a scripted DNS answer set.
+    let _ = PublicOnlyResolver::default();
 }

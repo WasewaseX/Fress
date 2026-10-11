@@ -3088,4 +3088,341 @@ mod tests {
         assert_eq!(payload_a.sha256, sha256_hex(&body_a));
         assert_eq!(payload_b.sha256, sha256_hex(&body_b));
     }
+
+    // -----------------------------------------------------------------------
+    // Adversarial additions (Agent 3 hardening round)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transfer_with_no_data_for_the_stall_window_is_not_finalized() {
+        // The mock promises 100 KB, delivers 1 KiB, then holds the socket.
+        // Paused time lets the 60s stall window fire deterministically: the
+        // attempt must fail as a RETRYABLE network stall (the .part stays
+        // resumable), the retry names the stall, and after the retry budget
+        // is spent the download lands in Failed - never a partial file.
+        let tmp = TempDir::new("e2e-stall");
+        let mut first = MockReply::full_200(&pattern(100_000));
+        first.send_body_bytes = Some(1024);
+        first.hold_ms = 30_000; // real-time hold; the paused clock is ours
+        let server = spawn_mock(vec![first]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let task_session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = Arc::new(EventLog::default());
+        let task_log = Arc::clone(&log);
+        let plan = plan_for(&server.url, tmp.path(), Some("stall.bin"));
+
+        let task = tokio::spawn(async move {
+            execute_with_retries(&task_log, &task_session, 1, plan, cancel_rx, test_backoff()).await
+        });
+
+        // Cross the stall window: the 60s body timeout fires, attempt 1
+        // fails as retryable, the backoff elapses on the paused clock, the
+        // retry runs against the exhausted mock and fails, and the loop
+        // reaches its terminal state.
+        tokio::time::advance(Duration::from_secs(61)).await;
+        for _ in 0..4000 {
+            tokio::time::advance(Duration::from_millis(50)).await;
+            if task.is_finished() {
+                break;
+            }
+        }
+        let result = task.await.expect("retry loop must finish");
+        assert!(result.is_err(), "a stalled download must never complete");
+        assert_eq!(result.unwrap_err().1.as_deref(), Some("network"));
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+
+        // The retries are the stall itself, named as such, followed by the
+        // retry's connection failure against the exhausted mock.
+        let retries = log.retries.lock().unwrap();
+        assert_eq!(retries.len(), 2);
+        assert!(
+            retries[0].message.contains("Connection stalled"),
+            "the first retry must name the stall, got: {}",
+            retries[0].message
+        );
+        assert!(
+            tmp.path().join("stall.bin.part").exists(),
+            "the staging file must survive a stall (resumable)"
+        );
+        assert!(!tmp.path().join("stall.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_signalled_before_the_transfer_cannot_report_success() {
+        // The cancellation channel is latched BEFORE the engine runs. The
+        // biased select sees the pending signal on the very first loop
+        // iteration, so no byte is processed and the final checkpoint
+        // (try_recv) would catch it even then: the download must land in
+        // Cancelled with nothing at the final name.
+        let tmp = TempDir::new("e2e-pre-cancel");
+        let mut first = MockReply::full_200(&pattern(10_000));
+        first.send_body_bytes = Some(2048);
+        first.hold_ms = 800;
+        let server = spawn_mock(vec![first]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        registry.request_cancel(id).await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("early.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, id, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a pre-cancelled download must not complete");
+        assert_eq!(message, CANCEL_SENTINEL);
+        assert_eq!(kind, None);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Cancelled));
+        assert!(!tmp.path().join("early.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_corrupted_sidecar_is_discarded_instead_of_trusted() {
+        // "{not json" parses to nothing: no validator is carried into the
+        // resume request, and (without a trusted checksum) the byte-identity
+        // rule refuses to resume staging bytes whose origin cannot be
+        // proven. The download restarts cleanly from zero.
+        let tmp = TempDir::new("e2e-bad-sidecar");
+        let full = pattern(500);
+        let server = spawn_mock(vec![MockReply::full_200(&full)]);
+        let part = tmp.path().join("file.bin.part");
+        tokio::fs::write(&part, b"UNPROVABLE-PREFIX").await.unwrap();
+        tokio::fs::write(meta_path_for(&part), "{not json")
+            .await
+            .unwrap();
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("file.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a corrupted sidecar must degrade to a fresh download");
+        assert_eq!(payload.bytes, full.len() as u64);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("file.bin")).await.unwrap(),
+            full
+        );
+        assert_eq!(payload.verified, None);
+        let head = request_head(&server, 0);
+        assert!(!head.contains("range:"), "must restart from byte zero");
+        assert!(
+            !head.contains("if-range:"),
+            "a corrupted sidecar must not produce a validator"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sidecar_from_another_url_is_never_trusted_for_the_resume() {
+        // The staging file belongs to a DIFFERENT resource than the one now
+        // requested: its ETag is meaningless here, so it must neither be
+        // sent as If-Range nor keep the staging bytes alive.
+        let tmp = TempDir::new("e2e-sidecar-url");
+        let full = pattern(500);
+        let server = spawn_mock(vec![MockReply::full_200(&full)]);
+        let part = tmp.path().join("file.bin.part");
+        seed_staging(
+            &part,
+            "https://other.example/file.bin",
+            Some("\"someone-elses-etag\""),
+            b"FOREIGN-PREFIX",
+        )
+        .await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("file.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let _payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a foreign sidecar must degrade to a fresh download");
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("file.bin")).await.unwrap(),
+            full,
+            "the assembled file must be exactly the requested resource"
+        );
+        // The foreign validator was neither sent as If-Range nor allowed to
+        // keep the staging bytes alive: the request restarted from zero.
+        let head = request_head(&server, 0);
+        assert!(!head.contains("if-range:"));
+        assert!(!head.contains("range:"));
+        assert!(!part.exists(), "unprovable staging bytes must be discarded");
+    }
+
+    #[tokio::test]
+    async fn resume_preserves_the_trusted_digest_and_reports_verified() {
+        // The trusted digest travels through the resume path (and the
+        // automatic retry loop, via the cloned plan) unchanged: a resumed
+        // download that satisfies it completes as verified, not unverified.
+        let tmp = TempDir::new("e2e-resume-digest");
+        let full = pattern(1000);
+        let server = spawn_mock(vec![MockReply::partial_206(
+            "bytes 600-999/1000",
+            &full[600..],
+        )]);
+        let part = tmp.path().join("setup.exe.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &full[..600]).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.resume = true;
+        plan.expected_sha256 = Some(sha256_hex(&full));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a resumed download with a trusted digest must complete");
+        assert_eq!(payload.verified, Some(true));
+        assert_eq!(payload.sha256, sha256_hex(&full));
+    }
+
+    #[tokio::test]
+    async fn an_auto_retry_keeps_the_trusted_digest_for_the_final_verdict() {
+        // Truncated first attempt (retryable) + a trusted digest: the
+        // retried attempt must still be judged against the SAME digest,
+        // and the assembled file must complete as verified.
+        let tmp = TempDir::new("e2e-retry-digest");
+        let full = pattern(1000);
+        let mut first = MockReply::full_200(&full);
+        first.send_body_bytes = Some(400);
+        let second = MockReply::partial_206("bytes 400-999/1000", &full[400..]);
+        let server = spawn_mock(vec![first, second]);
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("retry.bin"));
+        plan.expected_sha256 = Some(sha256_hex(&full));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("the retry must complete the download");
+        assert_eq!(payload.bytes, full.len() as u64);
+        assert_eq!(payload.verified, Some(true));
+        assert_eq!(log.retries.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_chunked_response_without_content_length_completes_at_eof() {
+        // Real chunked framing: hyper decodes the chunks; the engine sees
+        // the decoded stream and finalizes exactly the delivered bytes.
+        let tmp = TempDir::new("e2e-chunked");
+        let expected: Vec<u8> = pattern(512);
+        let mut raw = Vec::new();
+        for chunk in [&expected[..300], &expected[300..]] {
+            raw.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            raw.extend_from_slice(chunk);
+            raw.extend_from_slice(b"\r\n");
+        }
+        raw.extend_from_slice(b"0\r\n\r\n");
+        let server = spawn_mock(vec![MockReply::raw(
+            "HTTP/1.1 200 OK",
+            vec![("Transfer-Encoding", "chunked".to_string())],
+            raw,
+        )]);
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("chunked.bin"));
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a chunked body must complete at the terminal chunk");
+        assert_eq!(payload.bytes, expected.len() as u64);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("chunked.bin"))
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unwritable_directory_fails_without_creating_artifacts() {
+        // Permission errors surface as a final (non-retryable) failure
+        // naming the problem, and leave NOTHING behind - not at the final
+        // name, not as a staging file. Skips itself when running with
+        // filesystem privileges that ignore directory permissions.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new("e2e-unwritable");
+        let body = pattern(100);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        tokio::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500))
+            .await
+            .unwrap();
+        let probe = tmp.path().join(".probe");
+        if std::fs::write(&probe, b"x").is_ok() {
+            // Privileged environment (root): permissions don't apply.
+            let _ = tokio::fs::remove_file(&probe).await;
+            tokio::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700))
+                .await
+                .unwrap();
+            return;
+        }
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("denied.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("an unwritable directory must fail the download");
+        assert!(
+            message.contains("Cannot write file"),
+            "unexpected error: {message}"
+        );
+        assert_eq!(kind, None, "a disk/permission error is final, not retried");
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("denied.bin").exists());
+        assert!(!tmp.path().join("denied.bin.part").exists());
+        tokio::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700))
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn sidecars_cannot_carry_or_alter_the_trusted_digest() {
+        // The .part.meta contract is exactly {url, etag, last_modified}.
+        // There is no digest-shaped field: verification input comes ONLY
+        // from the caller's DownloadPlan on every attempt, so no sidecar
+        // (and no stale persisted state that survives in one) can ever
+        // downgrade a trusted checksum to unverified or upgrade a plain
+        // calculation to a verified match.
+        let meta = PartMeta {
+            url: "https://example.com/a".to_string(),
+            etag: Some("\"e\"".to_string()),
+            last_modified: None,
+        };
+        let json = serde_json::to_value(&meta).expect("sidecar serializes");
+        let keys: Vec<String> = json
+            .as_object()
+            .expect("sidecar is an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys.len(), 3, "the sidecar shape is fixed: {keys:?}");
+        for key in ["url", "etag", "last_modified"] {
+            assert!(keys.iter().any(|k| k == key), "missing {key}");
+        }
+        for key in &keys {
+            assert!(
+                !key.to_ascii_lowercase().contains("sha"),
+                "sidecar key {key} must never carry digest material"
+            );
+        }
+        // Hand-edited or future sidecars with extra fields deserialize
+        // harmlessly: unknown fields are ignored and cannot inject a
+        // verification verdict.
+        let extra = r#"{"url":"https://x/a","etag":"\"e\"","last_modified":null,"sha256":"00","verified":true}"#;
+        let parsed: PartMeta = serde_json::from_str(extra).expect("unknown fields are ignored");
+        assert_eq!(parsed.etag.as_deref(), Some("\"e\""));
+        assert!(parsed.last_modified.is_none());
+    }
 }

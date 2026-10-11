@@ -117,11 +117,19 @@ test.describe('Workflow I: malformed tag fixture', () => {
 
     await checkForUpdates(page);
 
-    // The updater reports "latest" - the malformed tag ranks below the
-    // running version - and no pill, no download, no releases-page open.
+    // The updater FAILS CLOSED on a feed with zero parsable tags: the tag
+    // drops out of the candidate list (selfUpdate drops unparsable tags
+    // before sorting), the feed filters to empty, and the pre-existing
+    // "No published releases" contract reports the check as UNAVAILABLE -
+    // the honest machine-truth answer (claiming "you are on the latest
+    // version" would be a guess about a feed we could not read). No pill,
+    // no download, no releases-page open, no crash. (Before the strict
+    // parser, this fixture produced the "latest" toast by ranking garbage
+    // below the running version; that leniency is what the updater no
+    // longer has.)
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText(d['update.latestToast'].replace('{version}', '1.0.7-beta'));
+    await expect(toast).toContainText(d['update.unavailable']);
     await expect(page.locator('#header-update-pill')).toHaveCount(0);
 
     const b = (await bridge(page))!;
@@ -175,35 +183,22 @@ test.describe('Workflow J: incompatible-asset release', () => {
   test.use({ ownReleases: { list: OWN_RELEASE_ARM_ONLY }, ownSums: OWN_SUMS_ARM_ONLY });
 
   /**
-   * KNOWN DEFECT - pinned with test.fail, routed to the self-update owner.
-   *
    * CONTRACT (Workflow 10): when a release contains ONLY files the running
    * machine cannot use (wrong architecture, wrong platform), the updater
    * must still detect the update but offer NO direct download - the pill
    * opens the releases page (planUpdateDelivery reason 'no-asset').
    *
-   * ACTUAL: pickOwnAsset's best-candidate loop accepts ANY score above
-   * -Infinity, and "not a Linux format" scores -1 while "wrong Windows
-   * arch" scores 3 (arm64 on an x64 host; 5 more if the name says setup).
-   * So on an x86_64 Linux host the ARM-only release below resolves to
-   * Fress_1.0.8_arm64-setup.exe, and on an x64 WINDOWS host the same class
-   * of release resolves to the arm64 installer (score 8). With the digest
-   * published in SHA256SUMS.txt (this fixture) the result is a fully
-   * "verified" in-app download of a file the machine cannot run - the
-   * exact outcome Workflow 10 forbids.
-   *
-   * Reproduction (unit level, no browser needed):
-   *   pickOwnAsset(release(['Fress_1.0.8_arm64-setup.exe']), 'x86_64')
-   *   with a Windows UA -> returns the arm64 installer; expected null.
-   * (The Linux -Infinity path already refuses correctly when the asset is
-   * at least a Linux format - it is the cross-format leak at -1/3 that
-   * defeats the contract.)
-   *
-   * Encoded as test.fail: the suite stays honest in BOTH directions. The
-   * moment pickOwnAsset refuses incompatible-only releases this test passes
-   * unexpectedly, CI turns red, and the annotation MUST be lifted.
+   * This was pinned as test.fail against the v1.0.7-beta picker (a
+   * best-candidate loop that accepted any score above -Infinity, so an
+   * ARM-only release resolved to an uninstallable file on an x64 host).
+   * The two-phase picker (PR #29) made eligibility a hard gate: every
+   * asset in this fixture is refused, pickOwnAsset returns null, and the
+   * delivery planner routes to the releases page - the annotation is
+   * lifted exactly as its original instruction required. The SHA256SUMS
+   * fixture below keeps the worst case covered: even a digest published
+   * for the incompatible file cannot make it downloadable.
    */
-  test.fail('ARM-only release: pill shows, clicking opens the releases page, no download starts', async ({ gotoApp, page }) => {
+  test('ARM-only release: pill shows, clicking opens the releases page, no download starts', async ({ gotoApp, page }) => {
     await gotoApp();
 
     await checkForUpdates(page);

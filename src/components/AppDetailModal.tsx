@@ -42,7 +42,7 @@ import {
 // what a retry does (including evicting the failed memo entry) is resolver-
 // side code behind this interface. See src/lib/resolveRetry.ts.
 import { resolverRetry } from '../lib/resolveRetry';
-import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
+import { useI18n } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
@@ -584,7 +584,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
               <span id="detail-category-badge" className="text-xs font-medium text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2.5 py-0.5 rounded">
-                {t(CATEGORY_I18N_KEYS[app.category])}
+                {app.category}
               </span>
               <span id="detail-license-badge" className="text-xs font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] text-slate-300 px-2 py-0.5 rounded">
                 {app.license}

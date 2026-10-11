@@ -199,7 +199,7 @@ export const Header: React.FC<HeaderProps> = ({
         id="main-app-header"
         className="fixed inset-x-0 top-0 z-30 md:sticky border-b border-fr-border bg-fr-surface"
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2">
+        <div className="fr-shell py-2">
           {/*
             Two-tier action hierarchy.
             Mobile (<md):   row 1 = brand · Add App · Downloads · More

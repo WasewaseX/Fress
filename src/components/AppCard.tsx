@@ -132,7 +132,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
         key={platform}
         id={`platform-${platform}-${app.id}`}
         className="text-[11px] text-slate-400"
-        title={`${label} supported`}
+        title={t('card.platform.supported').replace('{platform}', label)}
       >
         {label}
       </span>
@@ -157,7 +157,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
         // 3) Curated targets: direct links stream in the app
         const target = bestDownloadFor(app, platform);
         if (!target) {
-          toast.info(`Showing the download options for ${app.name}`);
+          toast.info(t('card.toast.options').replace('{name}', app.name));
           onOpenDetail(app);
           return;
         }
@@ -169,14 +169,14 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           // old behavior) read as "the download button opens a help
           // window instead of downloading".
           recordExternalOpen(`${app.name}: ${target.label}`, target.url);
-          toast.info(`Opening the official download page for ${app.name}`, {
-            description: `${target.label} opens in your browser.`,
+          toast.info(t('card.toast.officialPage').replace('{name}', app.name), {
+            description: t('card.toast.inBrowser').replace('{label}', target.label),
           });
           void openExternal(target.url);
         }
       } catch {
         // No click may end in silence: worst case, show the in-app guide.
-        toast.info(`Showing the download options for ${app.name}`);
+        toast.info(t('card.toast.options').replace('{name}', app.name));
         onOpenDetail(app);
       } finally {
         setResolving(false);
@@ -187,12 +187,11 @@ const AppCardImpl: React.FC<AppCardProps> = ({
   return (
     <article
       id={`app-card-${app.id}`}
-      className={`group relative bg-slate-900 dark:bg-slate-800 border rounded-lg p-4 flex flex-col justify-between transition-all duration-150 shadow-sm hover:shadow-md dark:shadow-lg dark:shadow-black/40 ${
+      className={`group relative bg-fr-surface-elevated border rounded-lg p-4 flex flex-col justify-between transition-all duration-150 shadow-sm hover:shadow-md dark:shadow-lg dark:shadow-black/40 ${
         isBatchSelected
           ? 'border-sky-500/60 bg-sky-950/15 ring-1 ring-sky-500/40'
-          : 'border-slate-950/10 dark:border-white/[0.08] hover:border-slate-950/30 dark:hover:border-white/[0.2]'
+          : 'border-fr-border hover:border-fr-border-strong'
       }`}
-      aria-label={`Tool entry for ${app.name}`}
     >
       <div>
         {/* ---- Top: icon, name, and at most the two curation badges ---- */}
@@ -204,9 +203,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 id={`batch-check-${app.id}`}
                 checked={isBatchSelected}
                 onChange={() => onToggleBatchSelect(app.id)}
-                className="mt-3 w-3.5 h-3.5 rounded border-slate-950/20 dark:border-white/20 bg-slate-950/5 dark:bg-white/5 text-sky-500 focus:ring-sky-500 focus:ring-offset-0 cursor-pointer accent-sky-500"
-                title="Select for batch install or export"
-                aria-label={`Select ${app.name} for batch actions`}
+                className="mt-3 w-3.5 h-3.5 fr-touch-target rounded border-slate-950/20 dark:border-white/20 bg-slate-950/5 dark:bg-white/5 text-sky-500 focus:ring-sky-500 focus:ring-offset-0 cursor-pointer accent-sky-500"
+                title={t('card.batch.aria').replace('{name}', app.name)}
+                aria-label={t('card.batch.aria').replace('{name}', app.name)}
               />
             )}
 
@@ -214,18 +213,26 @@ const AppCardImpl: React.FC<AppCardProps> = ({
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Native button inside the heading: identical look, but
+                    keyboard-focusable and announced as an action (a plain
+                    clickable heading is invisible to keyboards and AT). */}
                 <h3
                   id={`app-title-${app.id}`}
-                  onClick={() => onOpenDetail(app)}
-                  className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors cursor-pointer line-clamp-2 break-words"
+                  className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors line-clamp-2 break-words"
                 >
-                  {app.name}
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetail(app)}
+                    className="text-left text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer"
+                  >
+                    {app.name}
+                  </button>
                 </h3>
                 {app.isOwnerPick && (
                   <span
                     id={`app-owner-badge-${app.id}`}
                     className="text-[11px] font-bold bg-amber-400 text-slate-950 border border-amber-400 px-2 py-0.5 rounded flex items-center gap-1 whitespace-nowrap shadow-xs"
-                    title="Our single recommendation in the whole catalog"
+                    title={t('card.badge.pick.tip')}
                   >
                     <Award className="w-3 h-3" aria-hidden="true" />
                     <span>{t('card.badge.pick')}</span>
@@ -236,7 +243,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                   <span
                     id={`app-trending-badge-${app.id}`}
                     className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300 flex items-center gap-1 whitespace-nowrap"
-                    title="Popular in open-source right now"
+                    title={t('card.badge.trending.tip')}
                   >
                     <Flame className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
                     <span>{t('card.badge.trending')}</span>
@@ -262,13 +269,13 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 type="button"
                 id={`compare-toggle-btn-${app.id}`}
                 onClick={() => onToggleCompare(app.id)}
-                className={`p-1.5 rounded text-xs transition-colors ${
+                className={`p-1.5 fr-touch-target rounded text-xs transition-colors ${
                   isCompared
                     ? 'text-sky-800 bg-sky-800/[0.08] border border-sky-800/25 dark:text-sky-400 dark:bg-sky-400/15 dark:border-sky-400/30'
                     : 'text-slate-500 hover:text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
                 }`}
-                title={isCompared ? 'In compare matrix' : 'Add to compare matrix'}
-                aria-label={isCompared ? `Remove ${app.name} from the comparison matrix` : `Add ${app.name} to the comparison matrix`}
+                title={isCompared ? t('card.compare.on') : t('card.compare.off')}
+                aria-label={isCompared ? t('card.compare.ariaRemove').replace('{name}', app.name) : t('card.compare.ariaAdd').replace('{name}', app.name)}
                 aria-pressed={isCompared}
               >
                 <Columns className="w-3.5 h-3.5" aria-hidden="true" />
@@ -280,9 +287,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 id={`edit-app-btn-${app.id}`}
                 type="button"
                 onClick={() => onEditApp(app)}
-                className="p-1.5 rounded text-xs text-slate-500 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
-                title="Edit this application details"
-                aria-label={`Edit ${app.name}`}
+                className="p-1.5 fr-touch-target rounded text-xs text-slate-500 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
+                title={t('card.edit.tip')}
+                aria-label={t('card.edit.aria').replace('{name}', app.name)}
               >
                 <Edit2 className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
@@ -293,9 +300,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 id={`delete-app-btn-${app.id}`}
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="p-1.5 rounded text-xs text-slate-500 hover:text-rose-400 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
-                title="Delete this custom tool"
-                aria-label={`Delete ${app.name}`}
+                className="p-1.5 fr-touch-target rounded text-xs text-slate-500 hover:text-rose-400 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
+                title={t('card.delete.tip')}
+                aria-label={t('card.delete.aria').replace('{name}', app.name)}
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
@@ -305,14 +312,14 @@ const AppCardImpl: React.FC<AppCardProps> = ({
               id={`fav-toggle-btn-${app.id}`}
               type="button"
               onClick={() => onToggleFavorite(app.id)}
-              className={`p-1.5 rounded text-xs transition-colors ${
+              className={`p-1.5 fr-touch-target rounded text-xs transition-colors ${
                 isFavorite
                   ? 'text-rose-700 bg-rose-800/[0.08] dark:text-rose-400 dark:bg-rose-400/10'
                   : 'text-slate-500 hover:text-slate-200 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
               }`}
-              aria-label={isFavorite ? `Remove ${app.name} from favorites` : `Add ${app.name} to favorites`}
+              aria-label={isFavorite ? t('card.fav.ariaOn').replace('{name}', app.name) : t('card.fav.ariaOff').replace('{name}', app.name)}
               aria-pressed={isFavorite}
-              title={isFavorite ? "Bookmarked" : "Add to bookmarks"}
+              title={isFavorite ? t('card.fav.on') : t('card.fav.off')}
             >
               <Bookmark className={`w-3.5 h-3.5 ${isFavorite ? 'fill-rose-700 dark:fill-rose-400' : ''}`} aria-hidden="true" />
             </button>
@@ -373,7 +380,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           <span
             id={`app-stars-count-${app.id}`}
             className={`inline-flex items-center gap-1 font-mono text-xs text-slate-400 ${shownStars === 0 ? 'hidden' : ''}`}
-            title={app.githubUrl.includes('github.com') ? `${shownStars.toLocaleString()} stars on GitHub, fetched live` : `${shownStars.toLocaleString()} stars on the project's own code forge`}
+            title={app.githubUrl.includes('github.com') ? t('card.stars.tipGithub').replace('{count}', shownStars.toLocaleString()) : t('card.stars.tipForge').replace('{count}', shownStars.toLocaleString())}
           >
             <Star className="w-3 h-3 fill-slate-400 text-slate-400" aria-hidden="true" />
             <span>{formatStarCount(shownStars)}</span>
@@ -382,7 +389,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           <span
             id={`app-license-badge-${app.id}`}
             className="font-mono text-xs text-slate-400 max-w-[14ch] truncate"
-            title={`License: ${app.license}`}
+            title={t('card.license.tip').replace('{license}', app.license)}
           >
             {app.license}
           </span>
@@ -390,9 +397,19 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           {app.proprietaryAlternative && (
             <span
               className="text-[11px] font-medium text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded max-w-[20ch] truncate"
-              title={`Replaces: ${app.proprietaryAlternative}`}
+              title={t('card.replaces.tip').replace('{name}', app.proprietaryAlternative)}
             >
               {app.proprietaryAlternative}
+            </span>
+          )}
+
+          {app.offlineReady && (
+            <span
+              className="text-[11px] text-slate-400 inline-flex items-center gap-1"
+              title={t('card.offline.tip')}
+            >
+              <HardDrive className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+              <span>{t('card.offlineReady')}</span>
             </span>
           )}
 
@@ -400,23 +417,13 @@ const AppCardImpl: React.FC<AppCardProps> = ({
             <span
               id={`app-custom-badge-${app.id}`}
               className="text-[11px] font-medium bg-sky-400/10 text-sky-300 border border-sky-400/20 px-1.5 py-0.5 rounded"
-              title="Locally added custom software"
+              title={t('card.custom.tip')}
             >
               {t('card.badge.custom')}
             </span>
           )}
 
-          {app.offlineReady && (
-            <span
-              className="text-[11px] text-slate-400 inline-flex items-center gap-1"
-              title="Runs 100% offline with zero cloud dependency"
-            >
-              <HardDrive className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-              <span>{t('card.offlineReady')}</span>
-            </span>
-          )}
-
-          <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1.5 ml-auto flex-wrap" title="Available platforms">
+          <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1.5 ml-auto flex-wrap" title={t('card.platforms.tip')}>
             {app.platforms.map((p, i) => (
               <React.Fragment key={p}>
                 {i > 0 && <span className="text-slate-500 text-[11px]" aria-hidden="true">·</span>}
@@ -438,8 +445,8 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           type="button"
           onClick={handleDownload}
           className="flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-md transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-          title={isDownloading ? 'Downloading...' : resolving ? 'Finding the latest stable download...' : 'Download this app'}
-          aria-label={`Download ${app.name}`}
+          title={isDownloading ? t('card.download.busy') : resolving ? t('card.download.resolving') : t('card.download.tip')}
+          aria-label={t('card.download.aria').replace('{name}', app.name)}
           aria-live="polite"
         >
           <Download className={`w-3.5 h-3.5 shrink-0 ${isDownloading || resolving ? 'animate-pulse' : ''}`} aria-hidden="true" />
@@ -451,7 +458,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           type="button"
           onClick={() => onOpenDetail(app)}
           className="inline-flex items-center gap-1 shrink-0 text-xs font-medium text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border border-slate-950/10 dark:border-white/[0.08] px-2.5 py-2 rounded-md transition-colors"
-          aria-label={`View install instructions and details for ${app.name}`}
+          aria-label={t('card.details.aria').replace('{name}', app.name)}
         >
           <Info className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
           <span>{t('card.details')}</span>
@@ -467,9 +474,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
-              className="p-1.5 shrink-0 text-slate-500 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
-              aria-label={`View ${app.name} source code on ${link.label} (opens in new window)`}
-              title={`${link.label} source code`}
+              className="p-1.5 fr-touch-target shrink-0 text-slate-500 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
+              aria-label={t('card.source.aria').replace('{name}', app.name).replace('{host}', link.label)}
+              title={t('card.source.tip').replace('{host}', link.label)}
             >
               <Icon className="w-3.5 h-3.5" aria-hidden="true" />
             </a>

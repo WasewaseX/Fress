@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased: a catalog that still points where the world moved
+
+A live audit of all 75 catalog entries against the real GitHub, F-Droid, winget, Homebrew, Scoop and Flathub infrastructure found the quiet rot that time leaves behind: repositories that were renamed, package ids that moved, and package-manager commands that can no longer succeed. Every one is fixed, plus one asset-picker leak and two screen-reader gaps.
+
+### Fixed
+- **Renamed GitHub repos are referenced by their canonical names.** `jellyfin/jellyfin-media-player` → `jellyfin/jellyfin-desktop` (with the entry's star count corrected to the linked repo's real value), `ente-io/ente` → `ente/ente` (Ente Photos and Ente Auth), `Catfriend1/syncthing-android` → `researchxxl/syncthing-android` (the Syncthing-Fork), and `calcom/cal.com` → `calcom/cal.diy`. GitHub redirects kept the old names working, but a rename can be recycled — the catalog now states the truth.
+- **Dead package-manager commands removed or corrected.** `RustDesk.RustDesk` was removed from winget-pkgs (removal commit 2026-03-27), `mifi.LosslessCut` never had a winget manifest, and DevToys is in no Scoop bucket — those commands would always have failed, so they are gone (the remaining managers still cover each app). balenaEtcher's winget id is now correctly cased (`Balena.Etcher`), LocalSend's Flatpak id is `org.localsend.localsend_app` and Tuta's is `com.tutanota.Tutanota`, matching their current Flathub listings.
+- **Six dead or moved download pages re-pointed at live ones.** LibreOffice (`/download/download-libreoffice/`), LibreWolf (`/installation/`), SimpleX (`/downloads/`), Cake Wallet (GitHub releases — the site no longer hosts a downloads page), Immich (`docs.immich.app/install/script`), and NocoDB (GitHub releases).
+- **Source archives can no longer pose as the app.** The asset picker already excluded `-source-`/`-src-` files (the HandBrake incident), but the plural slipped past: OBS Studio's `-Sources.tar.gz` was the last-resort pick for Linux hosts of any architecture when a release carried no Linux binary. The name filter now catches `-sources-` too, a regression test locks it in, and hosts with no Linux build fall back to the project's own download page instead of a source tree.
+- **Two modals are real dialogs for screen readers.** Batch Install and Export rendered without `role="dialog"`, `aria-modal` or an accessible name — inconsistent with the other seven modals and invisible to assistive technology as a modal. All three attributes are in place now.
+
 ## 1.0.6-beta (2026-10-11): a catalog that uses its desktop, and a table that speaks
 
 The main window learned what a 1920-pixel monitor is for. Header, hero, filter bar and catalog now share one wide content boundary, the grid grows a fourth column on large desktops, and the last untranslated surface — the table view — speaks five languages. A long-standing page-switch bug is fixed with a regression suite. Nothing about what Fress does with your data changed: filters, favorites, batch selection, comparison and every download behave exactly as before.

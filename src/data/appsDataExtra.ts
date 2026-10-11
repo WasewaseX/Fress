@@ -286,7 +286,7 @@ export const EXTRA_APPS: AppItem[] = [
     isOwnerPick: false,
     isTrendingToday: false,
     tags: ['usb', 'iso', 'bootable', 'flash-tool'],
-    wingetCommand: 'winget install balena.Etcher',
+    wingetCommand: 'winget install Balena.Etcher',
     brewCommand: 'brew install --cask balenaetcher',
     proprietaryAlternative: 'Rufus (Windows only)',
     architectures: ['x86_64', 'arm64'],
@@ -376,7 +376,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     beginnerGuide: 'Run the install script on any always-on computer with Docker, install the mobile app, point it at your server address, and enable backup.',
     githubUrl: 'https://github.com/immich-app/immich',
     websiteUrl: 'https://immich.app',
-    downloadUrl: 'https://immich.app/docs/install/script-install',
+    downloadUrl: 'https://docs.immich.app/install/script',
     category: 'Media, Audio & Video',
     platforms: ['web', 'android', 'ios'],
     fdroidId: 'app.alextran.immich',
@@ -589,7 +589,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     beginnerGuide: 'Start a free cloud workspace or run the Docker image, create a base, add fields, and share a form to collect data.',
     githubUrl: 'https://github.com/nocodb/nocodb',
     websiteUrl: 'https://nocodb.com',
-    downloadUrl: 'https://nocodb.com/downloads',
+    downloadUrl: 'https://github.com/nocodb/nocodb/releases',
     category: 'Productivity & Office',
     platforms: ['web'],
     license: 'AGPL-3.0',
@@ -609,7 +609,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     description: 'Share a link, let people book time in your calendar. Event types, buffers, team scheduling, and video-call links, on their cloud or your server.',
     whyItsAwesome: 'Calendly\'s workflow with an open core you can self-host, so booking pages never leak your contacts to a third party.',
     beginnerGuide: 'Sign up on cal.com, connect your Google or Outlook calendar, create an event type, and share your booking link.',
-    githubUrl: 'https://github.com/calcom/cal.com',
+    githubUrl: 'https://github.com/calcom/cal.diy',
     websiteUrl: 'https://cal.com',
     downloadUrl: 'https://cal.com/signup',
     category: 'Productivity & Office',
@@ -716,7 +716,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     isTrendingToday: false,
     tags: ['email', 'encryption', 'e2ee', 'privacy', 'warrant-canary'],
     wingetCommand: 'winget install Tutanota.Tutanota',
-    flatpakCommand: 'flatpak install flathub de.tutao.tutanota',
+    flatpakCommand: 'flatpak install flathub com.tutanota.Tutanota',
     proprietaryAlternative: 'Gmail / Outlook',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
@@ -761,12 +761,12 @@ export const EXTRA_APPS_2: AppItem[] = [
     description: 'A photo storage app that encrypts every picture and video on your device before upload, so the company running the servers could not look at them even if it wanted to. The apps and the server code are both open source, and the team publishes transparency reports.',
     whyItsAwesome: 'Google Photos convenience without the scanning: end-to-end encryption by default, family sharing, a free tier that covers most phone libraries, and the whole stack passed a Cure53 audit. If the company vanished, the desktop app can still decrypt your archive locally, which almost no competitor offers.',
     beginnerGuide: 'Install the app or desktop client, sign up with just an email, and let it upload your camera folder. Recovery keys are shown once at signup: store them somewhere safe, since without them nobody, not even Ente, can unlock the backup.',
-    githubUrl: 'https://github.com/ente-io/ente',
+    githubUrl: 'https://github.com/ente/ente',
     websiteUrl: 'https://ente.io',
     downloadUrl: 'https://ente.io/download',
     category: 'Media, Audio & Video',
     platforms: ['windows', 'mac', 'linux', 'web', 'android', 'ios'],
-    // The Android APK ships from ente-io/ente under photos-* tags; the
+    // The Android APK ships from ente/ente under photos-* tags; the
     // desktop app is a separate repo with its own installers.
     repoOverrides: { windows: 'ente/photos-desktop', mac: 'ente/photos-desktop', linux: 'ente/photos-desktop' },
     assetPatterns: {
@@ -788,7 +788,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
     // The desktop repos and the mobile repo use plain v tags; the '^photos-'
-    // pin below only reaches the entries still resolved on ente-io/ente
+    // pin below only reaches the entries still resolved on ente/ente
     // (Android). The repoOverrides above point desktop at its own repo.
     tagPatterns: { android: '^photos-' },
     addedAt: '2026-09-21'
@@ -800,7 +800,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     description: 'An open-source authenticator that stores your 2FA tokens end-to-end encrypted and syncs them across phone and desktop, so losing your phone no longer locks you out of every account. Imports directly from Google Authenticator, Authy and dozens of other apps.',
     whyItsAwesome: 'Authy locked users out of the desktop app and Google Authenticator never offered backups you control. Ente Auth is the fix: offline code generation, encrypted cross-device sync, search and folders for big token lists, and a Cure53 audit behind it. Works with any site that accepts a standard TOTP app.',
     beginnerGuide: 'Install it, then use each site\'s "set up authenticator" QR code as normal. For migration, the built-in import can read the export file or screen from your old authenticator app in a few taps.',
-    githubUrl: 'https://github.com/ente-io/ente',
+    githubUrl: 'https://github.com/ente/ente',
     websiteUrl: 'https://ente.io/auth',
     downloadUrl: 'https://ente.io/auth',
     category: 'Privacy & Security',
@@ -883,7 +883,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     beginnerGuide: 'Install it, sign in to nothing, and browse. If a site breaks, click the shield icon and turn protections down for that one site only.',
     githubUrl: 'https://gitlab.com/librewolf-community/browser/bsys6',
     websiteUrl: 'https://librewolf.net',
-    downloadUrl: 'https://librewolf.net/install/',
+    downloadUrl: 'https://librewolf.net/installation/',
     category: 'Privacy & Security',
     platforms: ['windows', 'mac', 'linux'],
     license: 'MPL-2.0',
@@ -1000,7 +1000,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     beginnerGuide: 'Install it, create a profile, and share your one-time link or QR code with a friend. Both of you can route it over Tor or SOCKS proxies for the full treatment.',
     githubUrl: 'https://github.com/simplex-chat/simplex-chat',
     websiteUrl: 'https://simplex.chat',
-    downloadUrl: 'https://simplex.chat/download',
+    downloadUrl: 'https://simplex.chat/downloads/',
     category: 'Privacy & Security',
     platforms: ['windows', 'mac', 'linux', 'android', 'ios'],
     license: 'AGPL-3.0',
@@ -1052,13 +1052,15 @@ export const EXTRA_APPS_2: AppItem[] = [
     description: 'Jellyfin organizes your own media library and streams it to every screen in the house: web, phones, TVs and media players. There is no cloud account, no telemetry and no paid unlocks, because the server runs entirely at home.',
     whyItsAwesome: 'It is the Plex experience without the Plex account: hardware transcoding, watch-state sync, live TV and DVR, all free software maintained by thousands of contributors.',
     beginnerGuide: 'Install the server, point it at your movies folder and let it fetch artwork. Open the web app in a browser first, then add apps for your TV or phone.',
-    githubUrl: 'https://github.com/jellyfin/jellyfin-media-player',
+    // The desktop client repo was renamed (jellyfin-media-player is now
+    // jellyfin-desktop); stars follow the linked repo, not the server repo.
+    githubUrl: 'https://github.com/jellyfin/jellyfin-desktop',
     websiteUrl: 'https://jellyfin.org',
     downloadUrl: 'https://jellyfin.org/downloads/',
     category: 'Media, Audio & Video',
     platforms: ['windows', 'mac', 'linux'],
     license: 'GPL-2.0',
-    stars: 57367,
+    stars: 5854,
     beginnerRating: 'Advanced / Power User',
     isOwnerPick: false,
     isTrendingToday: false,
@@ -1186,7 +1188,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     beginnerGuide: 'Create a wallet, write the 25-word seed on paper and send a small test amount first. Restore works anywhere with the seed alone.',
     githubUrl: 'https://github.com/cake-tech/cake_wallet',
     websiteUrl: 'https://cakewallet.com',
-    downloadUrl: 'https://cakewallet.com/downloads/',
+    downloadUrl: 'https://github.com/cake-tech/cake_wallet/releases',
     category: 'Privacy & Security',
     // No macOS build is published anywhere by Cake Wallet; the platform is
     // not claimed.
@@ -1194,7 +1196,7 @@ export const EXTRA_APPS_2: AppItem[] = [
     assetPatterns: { linux: 'Cake_Wallet_v[\\d.]+_Linux\\.tar\\.xz$' },
     playStoreId: 'com.cakewallet.cake_wallet',
     license: 'MIT',
-    stars: 1926,
+    stars: 1963,
     beginnerRating: 'Quick Learning Curve',
     isOwnerPick: false,
     isTrendingToday: false,

@@ -392,5 +392,35 @@ describe('pickAssetDetailed, override and confidence', () => {
       expect(androidAssetFlags('app-arm-64-release.apk').arm64).toBe(true);
       expect(androidAssetFlags('app-arm-64-release.apk').arm32).toBe(false);
     });
+
+    it('plural -sources- archives are never the pick (OBS Studio regression)', () => {
+      // The singular rule excluded "-source-" (HandBrake incident) but the
+      // plural slipped past it: repos that publish no binary for a platform
+      // still tag "App-<v>-Sources.tar.gz" next to the binaries, and it used
+      // to win as the last-resort weak pick on Linux hosts of any arch.
+      const obsAssets = [
+        asset('OBS-Studio-32.2.2-Windows-Installer.exe'),
+        asset('OBS-Studio-32.2.2-Full-Installer-x64.exe'),
+        asset('OBS-Studio-32.2.2-Sources.tar.gz'),
+      ];
+      // No Linux build exists in this release: the Sources tarball used to be
+      // the weak last-resort pick on every Linux host; now nothing resolves
+      // and the UI falls back to the project's own download page.
+      expect(pickAsset(obsAssets, 'linux', 'aarch64')).toBeNull();
+      expect(pickAsset(obsAssets, 'linux', 'x86_64')).toBeNull();
+      // When a real Linux build IS present it wins over the source archive.
+      expect(
+        pickAsset([asset('OBS-Studio-32.2.2-Sources.tar.gz'), asset('OBS-Studio-32.2.2-x86_64.AppImage')], 'linux', 'x86_64')?.name
+      ).toBe('OBS-Studio-32.2.2-x86_64.AppImage');
+      // Singular and src variants stay excluded too; names merely CONTAINING
+      // "source" inside a larger token (opensource) are untouched.
+      expect(pickAsset([asset('App-1.0-source.tar.gz'), asset('App-1.0-x86_64.AppImage')], 'linux', 'x86_64')?.name).toBe(
+        'App-1.0-x86_64.AppImage'
+      );
+      expect(pickAsset([asset('App-1.0-src.tar.gz')], 'linux', 'x86_64')).toBeNull();
+      expect(pickAsset([asset('OpenSource-1.0-x86_64.AppImage')], 'linux', 'x86_64')?.name).toBe(
+        'OpenSource-1.0-x86_64.AppImage'
+      );
+    });
   });
 });

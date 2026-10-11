@@ -24,11 +24,13 @@ import {
 
 /** Files that can never be the app itself. */
 const BAD_EXT = /\.(sig|blockmap|sha256|sha512|sha256sum|md5|txt|json|yaml|yml|pub|pem|sbom|zsync|bittorrent|xml|map|dSYM|apk\.idsig|idsig)$/i;
-/** Metadata / tooling artefacts shipped next to installers. A -src-/-source-
- * token is ALSO excluded: projects that ship no binary for a platform still
- * tag their source tarball next to the binaries, and a source archive was
- * once served to a Linux user as "the app" (HandBrake). */
-const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy|(^|[^a-z0-9])(source|src)([-_.0-9]|$)/i;
+/** Metadata / tooling artefacts shipped next to installers. A -src-/-source-/
+ * -sources- token is ALSO excluded: projects that ship no binary for a
+ * platform still tag their source tarball next to the binaries, and a source
+ * archive was once served to a Linux user as "the app" (HandBrake); the
+ * plural form slipped past the singular-only rule and OBS Studio's
+ * "-Sources.tar.gz" became the last-resort pick for Linux hosts. */
+const BAD_NAME = /sha256|checksum|^latest\.json$|(^|[^a-z0-9])symbols([^a-z0-9]|$)|(^|[^a-z0-9])pdb([^a-z0-9]|$)|dont[-_.]?use|(^|[^a-z0-9])group[-_.]?policy|(^|[^a-z0-9])(sources|source|src)([-_.0-9]|$)/i;
 /** Command-line companions: repos like LocalSend ship "<App>-CLI-<v>-windows-arm-64.exe"
  * next to the GUI installer, and on an ARM64 host the CLI used to WIN the
  * scoring (hyphenated "arm-64" read as unmarked, bare /arm/ rewarded it) -

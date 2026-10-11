@@ -28,7 +28,7 @@ const BASE_APPS: AppItem[] = [
     tags: ['file-sharing', 'airdrop-alternative', 'local-network', 'privacy'],
     wingetCommand: 'winget install LocalSend.LocalSend',
     brewCommand: 'brew install --cask localsend',
-    flatpakCommand: 'flatpak install flathub org.localsend.localsend',
+    flatpakCommand: 'flatpak install flathub org.localsend.localsend_app',
     scoopCommand: 'scoop install localsend',
     proprietaryAlternative: 'Apple AirDrop / Nearby Share',
     isPortable: true,
@@ -290,7 +290,6 @@ const BASE_APPS: AppItem[] = [
     tags: ['developer-tools', 'json-formatter', 'jwt', 'regex', 'offline'],
     wingetCommand: 'winget install DevToys-app.DevToys',
     brewCommand: 'brew install --cask devtoys',
-    scoopCommand: 'scoop install devtoys',
     proprietaryAlternative: 'CyberChef / Various Online Converters',
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
@@ -348,7 +347,8 @@ const BASE_APPS: AppItem[] = [
     isOwnerPick: false,
     isTrendingToday: true,
     tags: ['remote-desktop', 'teamviewer-alternative', 'rust', 'network'],
-    wingetCommand: 'winget install RustDesk.RustDesk',
+    // No wingetCommand: RustDesk.RustDesk was REMOVED from winget-pkgs
+    // (removal commit landed 2026-03-27), so the command would always fail.
     brewCommand: 'brew install --cask rustdesk',
     flatpakCommand: 'flatpak install flathub com.rustdesk.RustDesk',
     scoopCommand: 'scoop install rustdesk',
@@ -432,7 +432,8 @@ const BASE_APPS: AppItem[] = [
     isOwnerPick: false,
     isTrendingToday: true,
     tags: ['video-cutter', 'ffmpeg', 'lossless', 'fast-trim'],
-    wingetCommand: 'winget install mifi.LosslessCut',
+    // No wingetCommand: mifi.LosslessCut has never had a winget-pkgs manifest
+    // (no manifests/m/mifi directory), so the command could never succeed.
     brewCommand: 'brew install --cask losslesscut',
     flatpakCommand: 'flatpak install flathub no.mifi.losslesscut',
     scoopCommand: 'scoop install losslesscut',
@@ -507,7 +508,7 @@ const BASE_APPS: AppItem[] = [
     beginnerGuide: 'Open LibreOffice Writer for essays and reports or Calc for spreadsheets. Use File > Save As to choose either open ODF format or standard Microsoft Office format.',
     githubUrl: 'https://github.com/LibreOffice/core',
     websiteUrl: 'https://www.libreoffice.org',
-    downloadUrl: 'https://www.libreoffice.org/download/download',
+    downloadUrl: 'https://www.libreoffice.org/download/download-libreoffice/',
     category: 'Productivity & Office',
     platforms: ['windows', 'mac', 'linux'],
     license: 'MPL-2.0',
@@ -652,8 +653,9 @@ const BASE_APPS: AppItem[] = [
     category: 'Utilities & System',
     platforms: ['windows', 'mac', 'linux', 'android'],
     // The official Android app was retired in December 2024; the Syncthing
-    // team points Android users to the maintained Syncthing-Fork.
-    repoOverrides: { android: 'Catfriend1/syncthing-android' },
+    // team points Android users to the maintained Syncthing-Fork. The fork's
+    // repo moved: Catfriend1/syncthing-android now redirects to researchxxl.
+    repoOverrides: { android: 'researchxxl/syncthing-android' },
     assetPatterns: { android: 'syncthingfork_release_v[\\d.]+\\.apk$' },
     fdroidId: 'com.github.catfriend1.syncthingfork',
     license: 'MPL-2.0',

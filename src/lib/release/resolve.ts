@@ -54,7 +54,7 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
   if (!repo || platform === 'web' || platform === 'ios') return Promise.resolve(null);
   // The cache key must carry everything that changes WHAT is fetched, not
   // just what is picked: two apps can share one repo while using different
-  // tag-stream filters (Ente Photos and Ente Auth both live on ente-io/
+  // tag-stream filters (Ente Photos and Ente Auth both live on ente/
   // ente), and a flagged-releases entry fetches a different release list.
   // (The persistent store additionally partitions by host arch, resolved
   // inside the async closure below: the same repo+platform resolves

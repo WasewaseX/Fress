@@ -235,18 +235,12 @@ struct TextFetch {
 
 const FETCH_TEXT_BODY_CAP: u64 = 2 * 1024 * 1024;
 
-#[tauri::command]
-async fn fetch_text(url: String) -> Result<TextFetch, String> {
-    let policy = network_policy::UrlPolicy::resolver_manifest();
-    // Admission first: parse + allowlist + scheme/credential checks, so a
-    // malformed or disallowed request is refused before any client exists.
-    let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
-    let client = policy.http_client()?;
-    let resp = client
-        .get(parsed.raw().clone())
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
+/// Streams a response body into a `TextFetch` under the shared 2 MiB cap:
+/// an oversized content-length refuses the body outright, and a body that
+/// grows past the cap mid-stream is truncated and reported. Shared by every
+/// text-fetching command (`fetch_text`, `fetch_self_update_text`) so the
+/// cap cannot drift between them.
+async fn read_capped_text(mut resp: reqwest::Response) -> Result<TextFetch, String> {
     let status = resp.status().as_u16();
     let final_url = resp.url().to_string();
     let content_length = resp.content_length();
@@ -258,7 +252,6 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
         // Stream at most the cap even without a content-length header.
         // resp.chunk() is reqwest's own streaming API - no extra dep needed.
         let mut buf: Vec<u8> = Vec::new();
-        let mut resp = resp;
         loop {
             match resp.chunk().await {
                 Ok(Some(chunk)) => {
@@ -282,6 +275,66 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
         body,
         truncated,
     })
+}
+
+#[tauri::command]
+async fn fetch_text(url: String) -> Result<TextFetch, String> {
+    let policy = network_policy::UrlPolicy::resolver_manifest();
+    // Admission first: parse + allowlist + scheme/credential checks, so a
+    // malformed or disallowed request is refused before any client exists.
+    let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
+    let client = policy.http_client()?;
+    let resp = client
+        .get(parsed.raw().clone())
+        .send()
+        .await
+        .map_err(|e| network_policy::describe_network_error(&e))?;
+    read_capped_text(resp).await
+}
+
+/// Reads one small text document from Fress's own GitHub release feed:
+/// `releases.atom` (the rate-limit-proof update-check fallback) and
+/// `SHA256SUMS.txt` (the checksum reference the self-update verification
+/// compares the downloaded installer against).
+///
+/// Why a native command: github.com and its release-asset CDN do not answer
+/// CORS, so the WebView cannot read either document (see the now-resolved
+/// "known limitation" in docs/security/tauri-security.md) - every shipped
+/// release silently degraded to unverified self-updates. Routing the two
+/// reads through the native layer fixes that without loosening anything.
+///
+/// Admission is deliberately NARROWER than the other text command:
+///   - the `self_update_feed` policy pins the host to the two GitHub-owned
+///     names (every redirect hop re-checked) and refuses private addresses;
+///   - the path on `github.com` is pinned here to the Fress repository, so
+///     the command cannot be turned into a general github.com reader even
+///     from a compromised WebView;
+///   - the 2 MiB body cap shared with `fetch_text` bounds the response.
+#[tauri::command]
+async fn fetch_self_update_text(url: String) -> Result<TextFetch, String> {
+    const REPO_PATH_PREFIX: &str = "/WasewaseX/Fress/";
+    let policy = network_policy::UrlPolicy::self_update_feed();
+    let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
+    // Repo pin: the only github.com documents the self-update flow ever
+    // needs are this repository's atom feed and release assets. The asset
+    // CDN hosts have opaque token paths, so the pin applies to the
+    // github.com origin only.
+    if parsed.raw().host_str() == Some("github.com")
+        && !parsed.raw().path().starts_with(REPO_PATH_PREFIX)
+        && parsed.raw().path() != "/WasewaseX/Fress"
+    {
+        return Err(format!(
+            "Only WasewaseX/Fress release documents are allowed, not {}",
+            parsed.raw().path()
+        ));
+    }
+    let client = policy.http_client()?;
+    let resp = client
+        .get(parsed.raw().clone())
+        .send()
+        .await
+        .map_err(|e| network_policy::describe_network_error(&e))?;
+    read_capped_text(resp).await
 }
 
 /// Resolves the suggested stable package version from the F-Droid index.
@@ -596,11 +649,6 @@ fn platform_download_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-#[tauri::command]
-fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -611,11 +659,11 @@ pub fn run() {
             start_download,
             cancel_download,
             default_download_dir,
-            app_version,
             fetch_latest_release,
             fetch_recent_releases,
             fetch_fdroid_package,
             fetch_text,
+            fetch_self_update_text,
             host_arch
         ])
         .run(tauri::generate_context!())
@@ -625,3 +673,75 @@ pub fn run() {
 // design (see the module's header comment); compiled only under `cargo test`.
 #[cfg(test)]
 mod download_integration;
+
+#[cfg(test)]
+mod self_update_text_tests {
+    // Admission tests for `fetch_self_update_text`'s URL gate: the exact
+    // documents the self-update flow may read, and the shapes it must
+    // refuse. The redirect-hop rules live in network_policy's own tests;
+    // this module pins the repo-path pin and the host allowlist as seen
+    // from the command layer.
+
+    use super::*;
+
+    fn admit(url: &str) -> Result<reqwest::Url, String> {
+        const REPO_PATH_PREFIX: &str = "/WasewaseX/Fress/";
+        let policy = network_policy::UrlPolicy::self_update_feed();
+        let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
+        if parsed.raw().host_str() == Some("github.com")
+            && !parsed.raw().path().starts_with(REPO_PATH_PREFIX)
+            && parsed.raw().path() != "/WasewaseX/Fress"
+        {
+            return Err(format!(
+                "Only WasewaseX/Fress release documents are allowed, not {}",
+                parsed.raw().path()
+            ));
+        }
+        Ok(parsed.raw().clone())
+    }
+
+    #[test]
+    fn admits_the_atom_feed_and_checksum_documents() {
+        for url in [
+            "https://github.com/WasewaseX/Fress/releases.atom",
+            "https://github.com/WasewaseX/Fress/releases/download/v1.0.6-beta/SHA256SUMS.txt",
+            "https://github.com/WasewaseX/Fress/releases/download/v1.0.6-beta/latest.json",
+        ] {
+            assert!(admit(url).is_ok(), "must admit {url}");
+        }
+    }
+
+    #[test]
+    fn refuses_github_paths_outside_the_fress_repository() {
+        for url in [
+            "https://github.com/someone-else/Other/releases.atom",
+            "https://github.com/WasewaseX/Other/releases/download/v1/SHA256SUMS.txt",
+            "https://github.com/",
+        ] {
+            assert!(admit(url).is_err(), "must refuse {url}");
+        }
+    }
+
+    #[test]
+    fn refuses_non_github_and_non_https_documents() {
+        for url in [
+            "https://evil.example/WasewaseX/Fress/releases.atom",
+            "http://github.com/WasewaseX/Fress/releases.atom",
+            "https://api.github.com/repos/WasewaseX/Fress/releases",
+            "https://raw.githubusercontent.com/WasewaseX/Fress/main/SHA256SUMS.txt",
+        ] {
+            assert!(admit(url).is_err(), "must refuse {url}");
+        }
+    }
+
+    #[test]
+    fn refuses_lookalike_hosts_and_embedded_credentials() {
+        for url in [
+            "https://github.com.evil.example/WasewaseX/Fress/releases.atom",
+            "https://user:pw@github.com/WasewaseX/Fress/releases.atom",
+            "https://release-assets.githubusercontent.com.evil.example/x",
+        ] {
+            assert!(admit(url).is_err(), "must refuse {url}");
+        }
+    }
+}

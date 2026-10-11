@@ -1,5 +1,22 @@
 # Signing on Windows and macOS
 
+## What each release mechanism actually establishes
+
+Three independent mechanisms touch a Fress release, and they answer three
+different questions. Do not conflate them:
+
+| Mechanism | Question it answers | Establishes | Consumed by | Current status (evidence: releases v1.0.4–v1.0.6-beta) |
+| --- | --- | --- | --- | --- |
+| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release; verified in-app via the native `fetch_self_update_text` command |
+| Minisign `.sig` + `latest.json` + embedded public key | "Who authorized this updater artifact?" | Authenticity: a signature that only the holder of the private key (a repository secret) can produce | The Tauri updater plugin — **not wired yet**; the artifacts wait for it | Produced for the Windows installers and Linux bundles; the macOS dmgs currently ship WITHOUT updater artifacts, so `latest.json` has no darwin entries |
+| Authenticode (Windows) | "Is the publisher accountable to a certificate authority Windows trusts?" | Publisher identity for Explorer/SmartScreen; tamper evidence tied to that identity | Windows itself at install time | **Not applied today** — no signing secrets are configured, and the published installers carry no Authenticode certificate table (checked against v1.0.6-beta). This is why Windows shows "Unknown publisher" |
+
+A checksum proves the file matches the manifest but not who made the manifest;
+a minisign signature proves who authorized the artifact but is only visible to
+the (future) in-app updater; Authenticode proves a publisher identity to
+Windows but says nothing about update integrity by itself. The app's update
+flow leans on the first two layers and never claims the third.
+
 ## Windows: signing and the "Unknown Publisher" warning
 
 ### Why Windows shows the blue warning
@@ -52,12 +69,14 @@ Fress meets their published conditions:
  (`submit-signing-request` GitHub Action; the key stays on their HSM), and
  the signed installer is uploaded to the release with the next version tag.
 
-### The persistent publisher certificate (current CI default)
+### The persistent publisher certificate (CI default once configured)
 
-CI no longer generates a throwaway self-signed certificate per release, a
-fresh identity every build proves nothing and accumulates no reputation with
-Defender or SmartScreen. Instead, one certificate is provided as repository
-secrets and reused for every release:
+CI is wired to reuse ONE persistent certificate for every release instead of
+generating a throwaway self-signed certificate per build (a fresh identity
+every build proves nothing and accumulates no reputation with Defender or
+SmartScreen). The steps run ONLY when the secrets exist — with no secrets set,
+the installers ship unsigned, which is the state every release so far
+(including v1.0.6-beta) actually shipped in:
 
 - `WINDOWS_PFX_B64`, the `.pfx` (certificate + private key), base64-encoded
 - `WINDOWS_PFX_PASSWORD`, the .pfx export password
@@ -74,11 +93,14 @@ Export-PfxCertificate -Cert $cert -FilePath "fress-sign.pfx" -Password $pwd
 ```
 
 Then set `WINDOWS_PFX_B64` to the clipboard contents and `WINDOWS_PFX_PASSWORD`
-to the export password. Every Windows build (x64 + ARM64, installer +
-portable) is then signed with the same publisher identity.
+to the export password. Every Windows installer build (x64 + ARM64) is then
+Authenticode-signed with the same publisher identity, and each installer's
+updater `.sig` is regenerated over the signed bytes (see the sequencing notes
+below). The portable zips are never signed — they are plain archives of the
+built exe, in every configuration.
 
 Honesty note: a self-signed publisher still shows "Unknown publisher", only
-a certificate chaining to a trusted root (SignPath Foundation below, Azure
+a certificate chaining to a trusted root (SignPath Foundation, Azure
 Trusted Signing, or a paid CA) removes it. What the persistent signature does
 buy: identical publisher across releases, tamper evidence, and a stable
 identity for allow-lists and Microsoft's false-positive reporting.
@@ -120,10 +142,14 @@ mismatch), forcing users to uninstall first.
 
 Fress ships two update paths. Today the app checks GitHub Releases itself,
 downloads the matching installer and verifies its SHA256 against
-`SHA256SUMS.txt` (see `src/lib/selfUpdate.ts`). The second path is the Tauri
-updater: a signed `latest.json` manifest plus `.sig` signatures that a future
-in-app updater verifies with minisign before installing anything, a bad or
-tampered download is refused and the old version keeps running (rollback).
+`SHA256SUMS.txt` (see `src/lib/selfUpdate.ts`); since the checksum document
+became readable through the native `fetch_self_update_text` command, that
+verification actually runs on every platform-matched update, and an update
+whose checksum cannot be established is NOT downloaded — the app opens the
+releases page instead. The second path is the Tauri updater: a signed
+`latest.json` manifest plus `.sig` signatures that a future in-app updater
+verifies with minisign before installing anything, a bad or tampered download
+is refused and the old version keeps running (rollback).
 
 The release pipeline is already wired for it: every `tauri-action` build in
 `release.yml` produces the updater artifacts (`latest.json`, `.AppImage.sig`,
@@ -132,13 +158,14 @@ configured. **The keypair was generated and the secrets were set on
 2026-09-22**, so from the next release on, the manifests and signatures ship
 automatically.
 
-Current status at a glance:
+Current status at a glance (evidence: releases v1.0.4–v1.0.6-beta):
 
 | Item | State |
 | --- | --- |
 | Private key | `TAURI_SIGNING_PRIVATE_KEY` secret (backup in the private `fress-state` repo, `updater-key-backup/`) |
 | Key password | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret (same backup) |
 | Public key | `fress-updater.key.pub` in this repo, also recorded below |
+| Updater signatures on releases | Windows installers (regenerated post-build) and Linux bundles; **macOS dmgs ship without updater artifacts so far** — `latest.json` therefore carries no darwin entries |
 | In-app updater plugin | not wired yet, the remaining step |
 
 Public key (safe to distribute; embed it in `tauri.conf.json` when the
@@ -178,6 +205,12 @@ one manual reinstall for everyone.
  via `--config`, but only when the key secret exists. On macOS and Linux the
  `tauri-action` builds pass it conditionally and sign the updater bundles at
  build time - safe there, because nothing rewrites those binaries afterwards.
+ Observed so far: the Linux releases carry their `.sig` files, while the macOS
+ releases (v1.0.4–v1.0.6-beta) shipped dmgs WITHOUT the `.app.tar.gz` + `.sig`
+ updater pair, so the manifest job had no darwin entries to embed. When wiring
+ the plugin for macOS users becomes relevant, that gap needs a CI investigation
+ (Agent 6's workstream) — until then macOS updates flow through the checksum-
+ verified manual path, never through `latest.json`.
 - The Windows jobs build WITHOUT updater artifacts: Authenticode (Trusted
  Signing or the .pfx) signs the installer AFTER the build, rewriting the exe
  bytes, so a build-time `.sig` would no longer match the shipped installer.

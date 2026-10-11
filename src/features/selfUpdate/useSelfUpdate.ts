@@ -11,6 +11,7 @@ import {
   checkForUpdate,
   getUpdateChannel,
   setUpdateChannel,
+  planUpdateDelivery,
   OwnRelease,
   UpdateChannel,
   UpdateState,
@@ -105,15 +106,26 @@ export function useSelfUpdate(
 
   const handleHeaderUpdateClick = () => {
     if (!ownUpdate) return;
-    if (ownUpdate.asset) {
-      // The download is verified against the release's published
-      // SHA256SUMS.txt entry before it counts as finished.
-      void startDownload(ownUpdate.asset.url, ownUpdate.asset.name, { expectedSha256: ownUpdate.expectedSha256 || undefined });
+    // ONE decision for both update buttons (this hook and the footer's
+    // UpdateButton): download only when the asset's published SHA-256 is
+    // in hand, otherwise open the releases page instead of shipping an
+    // unverified installer. A missing checksum never becomes a successful
+    // update - the file the user already has keeps working until they
+    // choose to verify and install manually from the releases page.
+    const plan = planUpdateDelivery(ownUpdate.release, ownUpdate.asset, ownUpdate.expectedSha256);
+    if (plan.kind === 'download') {
+      void startDownload(plan.asset.url, plan.asset.name, { expectedSha256: plan.sha256 });
       toast.success('Update downloading…', {
         description: 'When it finishes, open the file to update Fress. Your apps and data stay.',
       });
     } else {
-      void openExternal(ownUpdate.release.htmlUrl);
+      toast.info('Opening the releases page instead', {
+        description:
+          plan.reason === 'unverifiable'
+            ? 'This update could not be verified against the published SHA256SUMS.txt, so it will not be downloaded automatically. Verify manually, then install.'
+            : 'No file for this platform could be picked automatically. Download it from the releases page.',
+      });
+      void openExternal(plan.release.htmlUrl);
     }
   };
 

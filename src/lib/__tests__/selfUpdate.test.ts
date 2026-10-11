@@ -10,6 +10,8 @@ import {
   releaseMatchesChannel,
   pickOwnAsset,
   fetchOwnLatestRelease,
+  planUpdateDelivery,
+  checkForUpdate,
 } from '../selfUpdate';
 import type { OwnRelease } from '../selfUpdate';
 
@@ -607,5 +609,124 @@ describe('fetchOwnLatestRelease, atom fallback', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     const r = await fetchOwnLatestRelease('stable');
     expect(r).toBeNull();
+  });
+});
+
+describe('planUpdateDelivery, the fail-closed delivery rule shared by both update buttons', () => {
+  const release = (assets: OwnRelease['assets'] = []): OwnRelease => ({
+    tag: 'v1.0.7-alpha',
+    version: '1.0.7-alpha',
+    publishedAt: '2026-10-11T00:00:00Z',
+    htmlUrl: 'https://github.com/WasewaseX/Fress/releases',
+    assets,
+  });
+  const asset = { name: 'Fress_1.0.7-alpha_x64-setup.exe', size: 1000, url: 'https://example.com/x' };
+
+  it('downloads ONLY when a published checksum entry is in hand', () => {
+    const plan = planUpdateDelivery(release([asset]), asset, 'a'.repeat(64));
+    expect(plan.kind).toBe('download');
+    if (plan.kind === 'download') {
+      expect(plan.sha256).toBe('a'.repeat(64));
+      expect(plan.asset.name).toBe(asset.name);
+    }
+  });
+
+  it('a missing checksum NEVER becomes a download (releases page instead)', () => {
+    // The pre-audit behavior delivered the installer unverified whenever
+    // SHA256SUMS.txt was absent, listed the asset under a different name,
+    // or could not be fetched at all. Delivery now fails closed.
+    const plan = planUpdateDelivery(release([asset]), asset, null);
+    expect(plan).toMatchObject({ kind: 'releases-page', reason: 'unverifiable' });
+  });
+
+  it('no platform asset at all goes to the releases page (no-asset)', () => {
+    const plan = planUpdateDelivery(release(), null, 'a'.repeat(64));
+    expect(plan).toMatchObject({ kind: 'releases-page', reason: 'no-asset' });
+  });
+});
+
+describe('checkForUpdate checksum plumbing (browser fallback path)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const releaseWithSums = (sumsBody: string) =>
+    vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('api.github.com')) {
+        return new Response(
+          JSON.stringify([
+            {
+              tag_name: 'v1.0.7-alpha',
+              name: '1.0.7-alpha',
+              draft: false,
+              prerelease: true,
+              published_at: '2026-10-11T00:00:00Z',
+              html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.7-alpha',
+              assets: [
+                { name: 'Fress_1.0.7-alpha_x64-setup.exe', size: 1000, browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.7-alpha/Fress_1.0.7-alpha_x64-setup.exe' },
+                { name: 'SHA256SUMS.txt', size: 100, browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.7-alpha/SHA256SUMS.txt' },
+              ],
+            },
+          ]),
+          { status: 200 }
+        );
+      }
+      if (u.endsWith('SHA256SUMS.txt')) return new Response(sumsBody, { status: 200 });
+      return new Response('unexpected', { status: 404 });
+    });
+
+  it('returns expectedSha256 when SHA256SUMS.txt lists the picked asset', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' });
+    const sums = `0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  Fress_1.0.7-alpha_x64-setup.exe\nffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  other.bin\n`;
+    vi.stubGlobal('fetch', releaseWithSums(sums) as unknown as typeof fetch);
+    const res = await checkForUpdate('1.0.6-beta');
+    expect(res.kind).toBe('available');
+    if (res.kind === 'available') {
+      expect(res.expectedSha256).toBe('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+    }
+  });
+
+  it('degrades to null (unverified, and delivery then fails closed) when the entry is missing', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' });
+    vi.stubGlobal('fetch', releaseWithSums('ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  other.bin\n') as unknown as typeof fetch);
+    const res = await checkForUpdate('1.0.6-beta');
+    expect(res.kind).toBe('available');
+    if (res.kind === 'available') {
+      expect(res.expectedSha256).toBeNull();
+    }
+  });
+
+  it('degrades to null when the checksum document is unreachable', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' });
+    const failing = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('SHA256SUMS.txt')) throw new TypeError('Failed to fetch');
+      if (String(url).includes('api.github.com')) {
+        return new Response(
+          JSON.stringify([
+            {
+              tag_name: 'v1.0.7-alpha',
+              name: '1.0.7-alpha',
+              draft: false,
+              prerelease: true,
+              published_at: '2026-10-11T00:00:00Z',
+              html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.7-alpha',
+              assets: [
+                { name: 'Fress_1.0.7-alpha_x64-setup.exe', size: 1000, browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.7-alpha/Fress_1.0.7-alpha_x64-setup.exe' },
+                { name: 'SHA256SUMS.txt', size: 100, browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.7-alpha/SHA256SUMS.txt' },
+              ],
+            },
+          ]),
+          { status: 200 }
+        );
+      }
+      return new Response('unexpected', { status: 404 });
+    });
+    vi.stubGlobal('fetch', failing as unknown as typeof fetch);
+    const res = await checkForUpdate('1.0.6-beta');
+    expect(res.kind).toBe('available');
+    if (res.kind === 'available') {
+      expect(res.expectedSha256).toBeNull();
+    }
   });
 });

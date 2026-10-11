@@ -2,20 +2,25 @@
 
 ## What each release mechanism actually establishes
 
-Three independent mechanisms touch a Fress release, and they answer three
+Four independent mechanisms touch a Fress release, and they answer four
 different questions. Do not conflate them:
 
-| Mechanism | Question it answers | Establishes | Consumed by | Current status (evidence: releases v1.0.4–v1.0.6-beta) |
+| Mechanism | Question it answers | Establishes | Consumed by | Current status (evidence: release v1.0.7-beta) |
 | --- | --- | --- | --- | --- |
-| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release; verified in-app via the native `fetch_self_update_text` command |
-| Minisign `.sig` + `latest.json` + embedded public key | "Who authorized this updater artifact?" | Authenticity: a signature that only the holder of the private key (a repository secret) can produce | The Tauri updater plugin — **not wired yet**; the artifacts wait for it | Produced for the Windows installers and Linux bundles; the macOS dmgs currently ship WITHOUT updater artifacts, so `latest.json` has no darwin entries |
-| Authenticode (Windows) | "Is the publisher accountable to a certificate authority Windows trusts?" | Publisher identity for Explorer/SmartScreen; tamper evidence tied to that identity | Windows itself at install time | **Not applied today** — no signing secrets are configured, and the published installers carry no Authenticode certificate table (checked against v1.0.6-beta). This is why Windows shows "Unknown publisher" |
+| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release; verified in-app via the native `fetch_self_update_text` command, fail-closed (`planUpdateDelivery`) |
+| Minisign `.sig` + `latest.json` + embedded public key | "Who authorized this updater artifact?" | Authenticity: a signature that only the holder of the private key (a repository secret) can produce | The native `verify_self_update_signature` command (implemented and tested in-app; delivery-UI wiring pending — see below), and the Tauri updater plugin (future) | Produced for the Windows installers and Linux bundles; macOS dmgs, the MSI, portable zips and all APKs ship WITHOUT updater artifacts |
+| Authenticode (Windows) | "Is the publisher accountable to a certificate authority Windows trusts?" | Publisher identity for Explorer/SmartScreen; tamper evidence tied to that identity | Windows itself at install time | **Not applied today** — no signing secrets are configured, and the published installers carry no Authenticode certificate table. This is why Windows shows "Unknown publisher" |
+| APK signature (Android) | "Will Android accept this APK as an update of the installed app?" | OS-enforced same-signer rule: the package installer refuses an update signed with a different key | Android's package installer at install time | Applied by CI from the persistent keystore secret (see the Android section below) |
 
 A checksum proves the file matches the manifest but not who made the manifest;
 a minisign signature proves who authorized the artifact but is only visible to
-the (future) in-app updater; Authenticode proves a publisher identity to
-Windows but says nothing about update integrity by itself. The app's update
-flow leans on the first two layers and never claims the third.
+the verifier that embeds the public key; Authenticode proves a publisher
+identity to Windows but says nothing about update integrity by itself; the
+Android package signature is enforced by the OS on update-over-install and is
+unrelated to the other three. A SHA-256 match also says nothing about
+publisher identity if BOTH the file and the manifest came from the same
+compromised release account — that is exactly the gap the minisign layer
+closes for the artifacts it covers.
 
 ## Windows: signing and the "Unknown Publisher" warning
 
@@ -132,11 +137,17 @@ and check the SHA256 against `SHA256SUMS.txt` before running anything.
 
 ### Android: the persistent keystore
 
-Same rule as Windows: the keystore is stored once as repository secret
-`ANDROID_KEYSTORE_B64` (base64 of `fress.keystore`, alias `fress`, store and
-key password `fressandroid`) and reused for every release. A fresh keystore
-per release would make Android refuse update-over-install (signature
-mismatch), forcing users to uninstall first.
+Same rule as Windows: the keystore is stored ONCE as a repository secret
+(`ANDROID_KEYSTORE_B64`, base64 of `fress.keystore`, alias `fress`) and
+reused for every release, because a fresh keystore per release would make
+Android refuse update-over-install (signature mismatch), forcing users to
+uninstall first. The store/key password is a signing secret: it lives in CI
+secrets next to the keystore and is NEVER written into this repository or
+its documentation. If a password was ever committed anywhere, rotate the
+keystore and treat every past release as publisher-unverified on Android.
+(Repository hygiene note: an earlier revision of this document named the
+keystore password in plaintext; that reference has been removed, and the
+workflow step that still hardcodes it is flagged for the CI owner.)
 
 ## In-app updates: the Tauri updater key
 
@@ -146,41 +157,80 @@ downloads the matching installer and verifies its SHA256 against
 became readable through the native `fetch_self_update_text` command, that
 verification actually runs on every platform-matched update, and an update
 whose checksum cannot be established is NOT downloaded — the app opens the
-releases page instead. The second path is the Tauri updater: a signed
-`latest.json` manifest plus `.sig` signatures that a future in-app updater
-verifies with minisign before installing anything, a bad or tampered download
-is refused and the old version keeps running (rollback).
+releases page instead.
 
-The release pipeline is already wired for it: every `tauri-action` build in
-`release.yml` produces the updater artifacts (`latest.json`, `.AppImage.sig`,
-`.app.tar.gz.sig`, `*-setup.exe.sig`) when the repository has the update key
+The SECOND layer is artifact authenticity. The app now embeds the updater
+public key at compile time and ships the native
+`verify_self_update_signature` command (`src-tauri/src/lib.rs`): it streams
+a completed download through minisign verification against the embedded key,
+refusing legacy (non-prehashed) signatures, and returns ok/error without
+ever exposing file contents. The command is implemented and unit-tested
+(genuine signature verifies; one flipped bit, one extra byte, a foreign key
+and malformed documents all fail closed) — but the delivery UI does not call
+it yet, so the IN-APP flow currently verifies integrity (SHA-256), not yet
+publisher authenticity. Wiring it into the update-delivery decision touches
+`src/features/selfUpdate/**`, which is outside the updater-trust workstream's
+file ownership; until that wiring lands, neither the UI nor this document
+claims end-to-end in-app publisher authentication.
+
+The release pipeline is already wired for signatures: every `tauri-action`
+build in `release.yml` produces the updater artifacts (`latest.json`,
+`.AppImage.sig`, `*-setup.exe.sig`) when the repository has the update key
 configured. **The keypair was generated and the secrets were set on
-2026-09-22**, so from the next release on, the manifests and signatures ship
+2026-09-22**, so every recent release ships the manifests and signatures
 automatically.
 
-Current status at a glance (evidence: releases v1.0.4–v1.0.6-beta):
+Current status at a glance (evidence: release v1.0.7-beta):
 
 | Item | State |
 | --- | --- |
 | Private key | `TAURI_SIGNING_PRIVATE_KEY` secret (backup in the private `fress-state` repo, `updater-key-backup/`) |
 | Key password | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret (same backup) |
-| Public key | `fress-updater.key.pub` in this repo, also recorded below |
-| Updater signatures on releases | Windows installers (regenerated post-build) and Linux bundles; **macOS dmgs ship without updater artifacts so far** — `latest.json` therefore carries no darwin entries |
-| In-app updater plugin | not wired yet, the remaining step |
+| Public key | `fress-updater.key.pub` in this repo, embedded into every app build via `include_str!`, also recorded below |
+| Updater signatures on releases | Windows installers (regenerated post-build) and Linux bundles; **macOS dmgs, the MSI, portable zips and APKs ship without updater artifacts** — `latest.json` therefore carries no darwin entries |
+| In-app signature verification | native `verify_self_update_signature` command: implemented, unit-tested, **delivery-UI wiring pending** |
+| In-app updater plugin | not wired yet (the plugin would replace the app's own flow; see the endpoint note below) |
 
-Public key (safe to distribute; embed it in `tauri.conf.json` when the
-updater plugin gets wired):
+Public key (safe to distribute; embedded in the binary at compile time from
+`fress-updater.key.pub`):
 
 ```text
 dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MzhDNjgxMjNGQjYzM0IKUldRN1kvc2pnY1k0VnNHRXkyL2UycG5NZFhvdUFLM3I0YXNsYTN4c2sxUlc4YVUyRktUdDM4Vk4K
 ```
 
-### Generating a replacement key (rotation)
+### Release signature audit (v1.0.7-beta, verified 2026-10-12)
 
-The deployed keypair was generated 2026-09-22. Because no released app embeds
-its public key yet, it can still be rotated for free any time before the
-updater plugin ships. To rotate (also the recovery procedure if the key is
-ever exposed):
+Every updater artifact on the v1.0.7-beta release was downloaded in full and
+verified against the repository's published public key using the EXACT
+verification code the app ships (`verify_signature_over_file`):
+
+| Artifact | Updater signature | Verification against `fress-updater.key.pub` |
+| --- | --- | --- |
+| `Fress_1.0.7-beta_x64-setup.exe` | yes | **PASS** |
+| `Fress_1.0.7-beta_arm64-setup.exe` | yes | **PASS** |
+| `Fress_1.0.7-beta_amd64.AppImage` | yes | **PASS** |
+| `Fress_1.0.7-beta_amd64.deb` | yes | **PASS** |
+| `Fress-1.0.7-beta-1.x86_64.rpm` | yes | **PASS** |
+| `Fress_1.0.7-beta_x64.dmg` / `_aarch64.dmg` | no | n/a — no updater artifact produced |
+| `Fress_1.0.7-beta_x64_en-US.msi` | no | n/a |
+| `*_portable.zip` | no | n/a (and never Authenticode-signed either) |
+| `*_apk` (arm/arm64/x64/x86/universal) | no | verified by Android's package installer (same-signer rule) instead |
+
+The five signed artifacts verify byte-for-byte end to end. This proves the
+RELEASE pipeline's signatures are genuine and that the in-app verifier works
+against real artifacts; it does NOT yet prove the in-app DELIVERY flow calls
+the verifier before offering an update — that is the pending wiring above.
+Also note what a signature establishes and what it does not: the macOS dmgs
+and Android APKs are delivered through the checksum-verified path, and a
+SHA-256 match remains an integrity guarantee, not publisher proof.
+
+### Rotation caveats (updated)
+
+The deployed keypair was generated 2026-09-22. Because no RELEASED app build
+has embedded its public key yet (the verification command lands with the
+next build that includes it), rotation is still cheap today but becomes a
+one-manual-reinstall migration for every user once apps with the embedded
+key ship. To rotate (also the recovery procedure if the key is ever exposed):
 
 ```bash
 npx tauri signer generate -w fress-updater.key
@@ -224,19 +274,32 @@ one manual reinstall for everyone.
  not the `releases/latest/download/<asset>` alias, which only resolves for
  stable releases and would 404 while Fress publishes prereleases.
 
-### Remaining step: wire the in-app plugin
+### Remaining step: wire verification into the delivery decision
 
-The **config** half is done: `tauri.conf.json` carries the
-`plugins.updater` block (public key above + the releases endpoint), which
-is what the release bundler needs to produce signed updater artifacts.
-Still missing is the **runtime** half: the `tauri-plugin-updater`
-dependency in `src-tauri/Cargo.toml`, its `.plugin(...)` registration in
-`lib.rs`, and the capability permission. Until that ships, updates are
-delivered by the built-in update check (in-app download + SHA-256
-verification against `SHA256SUMS.txt`) and the manifests/signatures in
-each release simply wait for it.
+The layers now look like this:
 
-Two notes for when the runtime plugin gets wired:
+- **Release signing (done):** `updater-overrides.json` + the key secret make
+ CI produce `.sig` sidecars and `latest.json` for the Windows installers and
+ Linux bundles; the v1.0.7-beta signatures all verify against the published
+ key (see the audit above).
+- **In-app verification (done, tested):** the public key is embedded in the
+ binary at compile time and the native `verify_self_update_signature`
+ command verifies a completed download's bytes against a release's `.sig`
+ document.
+- **Delivery wiring (pending):** the update-delivery decision
+ (`planUpdateDelivery` + `src/features/selfUpdate/**`) does not call the
+ command yet, so an in-app update is currently gated on SHA-256 only. The
+ wiring change — fetch the `.sig` sidecar through the existing
+ `fetch_self_update_text` policy (its host allowlist already covers the
+ release-asset hosts), verify after the download completes, and refuse/
+ fall back to the releases page on any signature failure — touches files
+ outside the updater-trust workstream's ownership and is explicitly left
+ for a coordinated follow-up.
+
+The dormant `plugins.updater` block in `tauri.conf.json` remains future
+config for the Tauri updater PLUGIN (a different, flow-replacing mechanism);
+nothing in the release pipeline reads it — signatures are produced from the
+key secret alone. Two notes for when that plugin gets wired:
 
 - The endpoint points at GitHub's `releases/latest/download/latest.json`
  alias, which only resolves for STABLE releases. While Fress publishes

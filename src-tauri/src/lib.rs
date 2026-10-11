@@ -11,6 +11,10 @@ use serde::Serialize;
 #[cfg_attr(not(target_os = "android"), allow(unused_imports))]
 use tauri::{AppHandle, Emitter, Manager, State};
 
+// Self-update artifact authenticity: minisign verification of the release
+// `.sig` sidecars against the public key embedded in this binary.
+use minisign_verify::{PublicKey, Signature};
+
 /// Authoritative URL admission, redirect rules and client construction for
 /// every outbound request the native layer makes. The React side validates
 /// for usability; THIS module is what the native commands actually trust.
@@ -335,6 +339,134 @@ async fn fetch_self_update_text(url: String) -> Result<TextFetch, String> {
         .await
         .map_err(|e| network_policy::describe_network_error(&e))?;
     read_capped_text(resp).await
+}
+
+// ---------------------------------------------------------------------------
+// Self-update artifact authenticity (minisign verification)
+// ---------------------------------------------------------------------------
+
+/// The minisign public key every Fress updater artifact signature must
+/// verify against, embedded at COMPILE TIME from the repository-root file
+/// `fress-updater.key.pub` (the key CI signs release artifacts with, and
+/// the one published verbatim in CODE_SIGNING.md). Embedding it in the
+/// binary is the "public verification key embedded in the app" contract:
+/// a config value on disk could be edited between releases, the binary's
+/// copy cannot change without a rebuild.
+///
+/// File format (the `tauri signer` convention): the file is ONE base64
+/// line that decodes to a minisign key document ("untrusted comment:" line
+/// plus the base64 key cryptobuf). Decode-then-parse is handled by
+/// [`decode_updater_public_key`]; do NOT feed the outer base64 straight to
+/// `PublicKey::from_base64` - that expects the inner cryptobuf line only.
+const UPDATER_PUBLIC_KEY_FILE_B64: &str = include_str!("../../fress-updater.key.pub");
+
+/// Outer-layer base64 decode for Tauri-format key/signature documents.
+fn decode_document_b64(document_b64: &str) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(document_b64.trim())
+        .map_err(|e| format!("Malformed base64 document: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| format!("Key/signature document is not UTF-8: {e}"))
+}
+
+/// Parses the Tauri-format public key document (outer base64 -> minisign
+/// key document -> `PublicKey`).
+fn decode_updater_public_key(key_file_b64: &str) -> Result<PublicKey, String> {
+    let document = decode_document_b64(key_file_b64)?;
+    PublicKey::decode(&document).map_err(|e| format!("Malformed updater public key document: {e}"))
+}
+
+/// Verifies a Tauri/minisign artifact signature (the base64 signature
+/// document, i.e. the exact content of a release `.sig` sidecar) over the
+/// exact bytes in `data`, using a key in the same Tauri document format.
+/// Legacy (non-prehashed) minisign signatures are refused: Tauri's signer
+/// emits prehashed signatures, and accepting both modes would widen the
+/// verification surface for no reason.
+///
+/// In-memory shape of the streaming verifier below: the production path
+/// (`verify_self_update_signature`) always streams the artifact from disk,
+/// so this byte-slice form is exercised only by the unit tests - which is
+/// exactly where the documented accept/refuse matrix lives.
+#[cfg(test)]
+fn verify_signature_document(
+    key_file_b64: &str,
+    signature_b64: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    let pk = decode_updater_public_key(key_file_b64)?;
+    let document = decode_document_b64(signature_b64)?;
+    let sig = Signature::decode(&document)
+        .map_err(|e| format!("Malformed updater signature document: {e}"))?;
+    pk.verify(data, &sig, false)
+        .map_err(|e| format!("Updater signature verification failed: {e}"))
+}
+
+/// Streams `file_path` through the verifier in 64 KiB chunks so even the
+/// ~90 MB AppImage is verified in bounded memory - the artifact verified
+/// is byte-for-byte the artifact on disk, not a re-read or a copy.
+fn verify_signature_over_file(
+    key_file_b64: &str,
+    signature_b64: &str,
+    file_path: &str,
+) -> Result<(), String> {
+    use std::io::Read;
+    let pk = decode_updater_public_key(key_file_b64)?;
+    let document = decode_document_b64(signature_b64)?;
+    let sig = Signature::decode(&document)
+        .map_err(|e| format!("Malformed updater signature document: {e}"))?;
+    let mut file = std::fs::File::open(file_path)
+        .map_err(|e| format!("Cannot open the downloaded file: {e}"))?;
+    let mut verifier = pk
+        .verify_stream(&sig)
+        .map_err(|e| format!("Cannot start updater signature verification: {e}"))?;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Cannot read the downloaded file: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        verifier.update(&buf[..n]);
+    }
+    verifier
+        .finalize()
+        .map_err(|_| "Updater signature verification failed: the downloaded file does not match the release signature".to_string())
+}
+
+/// Verifies the minisign signature of a COMPLETED self-update download
+/// against the public key embedded in this binary.
+///
+/// Inputs:
+///   - `file_path`: the path of the downloaded artifact on disk (the path
+///     the download engine reports on completion).
+///   - `signature_base64`: the EXACT content of the matching `.sig` sidecar
+///     from the SAME release (base64 of the minisign signature document,
+///     which is also what `latest.json` carries in its signature field).
+///     "Verify the exact artifact that will be delivered, do not sign one
+///     file and verify another" is enforced here: the signature document
+///     must come from the release the artifact was selected from, and the
+///     bytes verified are the bytes on disk.
+///
+/// The command is deliberately VERIFY-ONLY: it returns ok/error and never
+/// the file contents, so it cannot be abused as a file reader. It runs on
+/// a blocking thread (multi-hundred-MB installers) and is available to the
+/// update flow; wiring it into the delivery UI is tracked in
+/// CODE_SIGNING.md ("current platform limitations").
+#[tauri::command]
+async fn verify_self_update_signature(
+    file_path: String,
+    signature_base64: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        verify_signature_over_file(
+            UPDATER_PUBLIC_KEY_FILE_B64,
+            &signature_base64,
+            file_path.trim(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Signature verification task failed: {e}"))?
 }
 
 /// Resolves the suggested stable package version from the F-Droid index.
@@ -664,6 +796,7 @@ pub fn run() {
             fetch_fdroid_package,
             fetch_text,
             fetch_self_update_text,
+            verify_self_update_signature,
             host_arch
         ])
         .run(tauri::generate_context!())
@@ -743,5 +876,143 @@ mod self_update_text_tests {
         ] {
             assert!(admit(url).is_err(), "must refuse {url}");
         }
+    }
+}
+
+#[cfg(test)]
+mod self_update_signature_tests {
+    // Tests for the artifact-authenticity contract: the embedded public key
+    // must be THE published key, a genuine minisign signature must verify
+    // over the exact artifact bytes, and any deviation (tampered artifact,
+    // foreign key, malformed document) must fail closed. The signature
+    // fixtures below were produced by `tauri signer sign` with a throwaway
+    // keypair over the exact payload constant - the same Tauri document
+    // format the release .sig sidecars use.
+
+    use super::*;
+
+    /// The fixture payload the fixture signature was generated over.
+    const FIXTURE_PAYLOAD: &[u8] = b"Fress updater signature fixture payload v1\n";
+
+    /// Throwaway keypair public key in the Tauri .pub document format
+    /// (single-line base64 of "untrusted comment" + key cryptobuf).
+    const FIXTURE_KEY_DOC_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5OTY3QkUwM0Q0Q0EwMTMKUldRVG9Fdzk0SHVXV1pQc2dONGs5TSsvMy9VZmRpVm1kdDhZUkJkMTFYWTlaRkxZai9CMVNLQ0QK";
+
+    /// `tauri signer sign` output over FIXTURE_PAYLOAD with the fixture key.
+    const FIXTURE_SIG_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRVG9Fdzk0SHVXV1phVkViOUhjM2dJTjNsR0VsTzhURTZZWlZTUGcyaXdSNGdPcVUzK0hXbk9TTWkwbGFlTk9LREUrMlRMMEdvS3VNbmhxQjF3SVVGMUFZVWpyU1VqQlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNzQ3NjUzCWZpbGU6cGF5bG9hZC5iaW4KRis3Wkp1d1kyS1U4NTF3MFlSRTBaUFp6VHU3UnJHVlExNmRsajNMNkhDRlFNWmVicEVlRWhVNFNTcFQyNXJvY2JkaTFBU1p1VXpNMUJyb0dqMEVWQnc9PQo=";
+
+    /// The key id published in CODE_SIGNING.md and on every release page.
+    const PUBLISHED_KEY_ID: &str = "5638C68123FB633B";
+
+    #[test]
+    fn the_embedded_public_key_is_the_published_fress_key() {
+        // The binary's trust anchor must be the key the docs publish - a
+        // drifted key would silently verify against nobody.
+        let document = decode_document_b64(UPDATER_PUBLIC_KEY_FILE_B64)
+            .expect("the embedded key document must decode");
+        assert!(
+            document.contains(PUBLISHED_KEY_ID),
+            "embedded key document must carry the published key id {PUBLISHED_KEY_ID}, got: {document}"
+        );
+        decode_updater_public_key(UPDATER_PUBLIC_KEY_FILE_B64)
+            .expect("the embedded key must parse as a minisign public key");
+    }
+
+    #[test]
+    fn a_genuine_signature_verifies_over_the_exact_artifact_bytes() {
+        verify_signature_document(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, FIXTURE_PAYLOAD)
+            .expect("a genuine Tauri-format signature must verify");
+    }
+
+    #[test]
+    fn a_single_flipped_bit_in_the_artifact_fails_verification() {
+        let mut tampered = FIXTURE_PAYLOAD.to_vec();
+        tampered[0] ^= 0x01;
+        let err = verify_signature_document(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, &tampered)
+            .expect_err("tampered artifact bytes must NOT verify");
+        assert!(
+            err.contains("verification failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn a_truncated_artifact_fails_verification() {
+        let truncated = &FIXTURE_PAYLOAD[..FIXTURE_PAYLOAD.len() - 1];
+        assert!(
+            verify_signature_document(FIXTURE_KEY_DOC_B64, FIXTURE_SIG_B64, truncated).is_err()
+        );
+    }
+
+    #[test]
+    fn a_signature_from_a_different_key_fails_against_the_embedded_key() {
+        // The embedded Fress key is used as the WRONG key here: it must
+        // reject the fixture signature (and the fixture key must not have
+        // drifted into the binary).
+        let err = verify_signature_document(
+            UPDATER_PUBLIC_KEY_FILE_B64,
+            FIXTURE_SIG_B64,
+            FIXTURE_PAYLOAD,
+        )
+        .expect_err("a foreign-key signature must NOT verify against the embedded key");
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn malformed_documents_are_rejected_not_panicked_on() {
+        // Garbage base64.
+        assert!(decode_document_b64("!!!not-base64!!!").is_err());
+        // Valid base64 that is not a minisign document.
+        assert!(
+            verify_signature_document("aGVsbG8gd29ybGQ=", FIXTURE_SIG_B64, FIXTURE_PAYLOAD)
+                .is_err()
+        );
+        // Valid key document, garbage signature document.
+        assert!(verify_signature_document(
+            FIXTURE_KEY_DOC_B64,
+            "aGVsbG8gd29ybGQ=",
+            FIXTURE_PAYLOAD
+        )
+        .is_err());
+        // Truncated signature document (cut mid-base64).
+        assert!(verify_signature_document(
+            FIXTURE_KEY_DOC_B64,
+            &FIXTURE_SIG_B64[..FIXTURE_SIG_B64.len() - 8],
+            FIXTURE_PAYLOAD
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn streaming_verification_accepts_the_real_file_and_refuses_a_tampered_one() {
+        // The command path verifies the file ON DISK in chunks; exercise it
+        // end to end with a temp file carrying the exact fixture bytes.
+        let mut path = std::env::temp_dir();
+        path.push(format!("fress-sig-fixture-{}.bin", std::process::id()));
+        std::fs::write(&path, FIXTURE_PAYLOAD).expect("write fixture file");
+        let ok = verify_signature_over_file(
+            FIXTURE_KEY_DOC_B64,
+            FIXTURE_SIG_B64,
+            path.to_string_lossy().as_ref(),
+        );
+        std::fs::remove_file(&path).ok();
+        ok.expect("streaming verification must accept the exact artifact bytes");
+
+        // Tampered on-disk artifact: one extra byte.
+        let mut path = std::env::temp_dir();
+        path.push(format!("fress-sig-fixture-bad-{}.bin", std::process::id()));
+        let mut bad = FIXTURE_PAYLOAD.to_vec();
+        bad.extend_from_slice(b"x");
+        std::fs::write(&path, &bad).expect("write tampered fixture file");
+        let bad_result = verify_signature_over_file(
+            FIXTURE_KEY_DOC_B64,
+            FIXTURE_SIG_B64,
+            path.to_string_lossy().as_ref(),
+        );
+        std::fs::remove_file(&path).ok();
+        assert!(
+            bad_result.is_err(),
+            "a one-byte-append artifact must NOT verify"
+        );
     }
 }

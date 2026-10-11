@@ -10,6 +10,8 @@ import {
   ghCache,
   fdCache,
   cacheSet,
+  evictFailedLookups,
+  purgePersistedFailures,
   ghCacheKey,
   loadPersisted,
   persist,
@@ -191,6 +193,37 @@ export function resolveFdroidDownload(pkgId: string): Promise<ResolvedDownload |
     cacheSet(fdCache, key, p);
   }
   return fdCache.get(key)!;
+}
+
+/**
+ * Retry entry points for the detail modal's explicit failure state.
+ *
+ * The resolvers above memoize failures (session TTL 30s, persisted TTL
+ * 5min) so a transient blip is not re-spent on every click. That caching is
+ * exactly right for background lookups and exactly wrong for a Retry
+ * button: re-invoking the plain resolver inside the failure TTL hands back
+ * the cached null with no network request at all. These wrappers evict the
+ * FAILED entries for the one app|platform the user asked about, then run
+ * the normal resolver — successes stay cached, and no unrelated lookup is
+ * re-run for a single app's retry.
+ */
+export async function retryGitHubResolve(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
+  const repo = effectiveRepo(app, platform);
+  if (repo) {
+    // Session memo keys start `repo|platform|`; the persisted store
+    // additionally suffixes the host arch, so the same prefix covers it.
+    await evictFailedLookups(ghCache, `${repo}|${platform}|`);
+    purgePersistedFailures(`${repo}|${platform}|`);
+  }
+  return resolveGitHubDownload(app, platform);
+}
+
+export async function retryFdroidResolve(pkgId: string): Promise<ResolvedDownload | null> {
+  const pkg = pkgId.trim();
+  if (pkg) {
+    await evictFailedLookups(fdCache, pkg);
+  }
+  return resolveFdroidDownload(pkgId);
 }
 
 export async function resolveDownloadFor(

@@ -14,6 +14,7 @@ import {
   loadPersisted,
   persist,
 } from './releaseFetch';
+import { evictFailedLookups, purgePersistedFailures } from './release/resolveCache';
 
 /**
  * Official download resolvers for projects whose installers do NOT live on
@@ -869,4 +870,18 @@ export function resolveOfficialDownload(app: AppItem, platform: Platform): Promi
     });
   }
   return officialCache.get(key)!;
+}
+
+/**
+ * Retry entry point for the detail modal's explicit failure state: evicts
+ * this app|platform's FAILED official lookup from the session memo and the
+ * persisted store, then re-runs the normal resolver. Successes stay cached,
+ * and no other app's lookups are touched.
+ */
+export async function retryOfficialResolve(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
+  if (!officialSupported(app, platform)) return resolveOfficialDownload(app, platform);
+  const key = `official|${app.id}|${platform}`;
+  await evictFailedLookups(officialCache, key);
+  purgePersistedFailures(`${key}|`);
+  return resolveOfficialDownload(app, platform);
 }

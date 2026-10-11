@@ -140,3 +140,61 @@ export function cacheSet(
     }
   });
 }
+
+/**
+ * Evict session-memo entries under `prefix` whose promise settles to null
+ * (a failed lookup), so an explicit user-facing Retry genuinely re-fetches
+ * instead of instantly reading the cached failure back. Pending entries are
+ * awaited and evicted when they fail; succeeded entries are never touched.
+ *
+ * Returns once every matching failed entry is removed. Safe to call when
+ * nothing matches: it is a no-op then.
+ */
+export async function evictFailedLookups(
+  cache: Map<string, Promise<ResolvedDownload | null>>,
+  prefix: string
+): Promise<void> {
+  const doomed: string[] = [];
+  for (const [key, p] of Array.from(cache.entries())) {
+    if (!key.startsWith(prefix)) continue;
+    await p.then(
+      (r) => {
+        if (r === null) doomed.push(key);
+      },
+      () => {
+        // A rejected memo entry is a failure by definition.
+        doomed.push(key);
+      }
+    );
+  }
+  for (const key of doomed) {
+    // Another caller may have replaced the entry meanwhile; only drop what
+    // is still the promise we inspected.
+    cache.delete(key);
+  }
+}
+
+/**
+ * Remove persisted FAILURE entries (url === null) under `prefix` from the
+ * localStorage store. Without this, a Retry after a failed lookup would
+ * re-read the 5-minute persisted failure and return null without any
+ * network request, making the button a lie. Successes are never purged.
+ */
+export function purgePersistedFailures(prefix: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return;
+    const store = JSON.parse(raw) as Record<string, CacheEntry>;
+    let changed = false;
+    for (const key of Object.keys(store)) {
+      if (key.startsWith(prefix) && store[key].url === null) {
+        delete store[key];
+        changed = true;
+      }
+    }
+    if (changed) localStorage.setItem(CACHE_KEY, JSON.stringify(store));
+  } catch {
+    // Blocked or full storage: the session eviction above still applies.
+  }
+}

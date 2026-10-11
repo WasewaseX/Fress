@@ -66,6 +66,8 @@ export { peekResolveError, loadPersisted, persist } from './release/resolveCache
 export {
   resolveGitHubDownload,
   resolveFdroidDownload,
+  retryGitHubResolve,
+  retryFdroidResolve,
   resolveDownloadFor,
   fdroidPageUrl,
   playStoreUrl,

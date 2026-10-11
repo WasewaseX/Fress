@@ -32,7 +32,8 @@ export const EXTRA_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'obs-studio',
@@ -59,7 +60,8 @@ export const EXTRA_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'thunderbird',
@@ -85,7 +87,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'Microsoft Outlook',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'qbittorrent',
@@ -111,7 +114,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'uTorrent',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'signal',
@@ -138,7 +142,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'WhatsApp / Telegram',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'tor-browser',
@@ -166,7 +171,8 @@ export const EXTRA_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: false,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'sumatra',
@@ -191,7 +197,8 @@ export const EXTRA_APPS: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'powertoys',
@@ -215,7 +222,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'DisplayFusion / separate paid tools',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'calibre',
@@ -240,7 +248,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'Adobe Digital Editions',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'kdenlive',
@@ -266,7 +275,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'Adobe Premiere Pro',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'balenaetcher',
@@ -291,7 +301,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'Rufus (Windows only)',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'zotero',
@@ -314,7 +325,8 @@ export const EXTRA_APPS: AppItem[] = [
     proprietaryAlternative: 'EndNote / Mendeley',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'jitsi-meet',
@@ -338,7 +350,8 @@ export const EXTRA_APPS: AppItem[] = [
     tags: ['video-calls', 'conferencing', 'no-signup', 'self-hostable'],
     proprietaryAlternative: 'Zoom',
     offlineReady: false,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'f-droid',
@@ -362,7 +375,8 @@ export const EXTRA_APPS: AppItem[] = [
     tags: ['app-store', 'android', 'apk', 'foss'],
     proprietaryAlternative: 'Google Play Store',
     offlineReady: false,
-    addedAt: '2025-09-20'
+    addedAt: '2025-09-20',
+    lastVerifiedAt: '2026-10-12',
   }
 ];
 
@@ -389,7 +403,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['photos', 'backup', 'self-hosted', 'google-photos-alternative'],
     proprietaryAlternative: 'Google Photos',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'nextcloud',
@@ -413,7 +428,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['cloud', 'file-sync', 'self-hosted', 'dropbox-alternative'],
     proprietaryAlternative: 'Dropbox / Google Drive',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'home-assistant',
@@ -439,7 +455,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['smart-home', 'iot', 'automation', 'self-hosted', 'local-first'],
     proprietaryAlternative: 'Google Home / SmartThings',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'pi-hole',
@@ -461,7 +478,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['ad-blocking', 'dns', 'tracker-blocking', 'network'],
     proprietaryAlternative: 'Paid DNS filtering services',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'searxng',
@@ -483,7 +501,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['search-engine', 'privacy', 'metasearch', 'self-hostable'],
     proprietaryAlternative: 'Google Search',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'vaultwarden',
@@ -505,7 +524,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['password-manager', 'bitwarden', 'self-hosted', 'docker'],
     proprietaryAlternative: '1Password / LastPass',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'stirling-pdf',
@@ -527,7 +547,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['pdf', 'ocr', 'self-hosted', 'document-tools'],
     proprietaryAlternative: 'Adobe Acrobat online',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'appflowy',
@@ -553,7 +574,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Notion',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'upscayl',
@@ -578,7 +600,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Topaz Gigapixel AI',
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'nocodb',
@@ -600,7 +623,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['database', 'spreadsheet', 'airtable-alternative', 'no-code'],
     proprietaryAlternative: 'Airtable',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'cal-com',
@@ -622,7 +646,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['scheduling', 'calendar', 'calendly-alternative', 'booking'],
     proprietaryAlternative: 'Calendly',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'listmonk',
@@ -644,7 +669,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['newsletter', 'email-marketing', 'mailing-list', 'self-hosted'],
     proprietaryAlternative: 'Mailchimp',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'formbricks',
@@ -666,7 +692,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     tags: ['surveys', 'forms', 'feedback', 'typeform-alternative'],
     proprietaryAlternative: 'Typeform / SurveyMonkey',
     offlineReady: false,
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'whisper-desktop',
@@ -693,7 +720,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     // the actual desktop app archive or an alphabetical tie hands the user
     // the models library instead of the program.
     assetPatterns: { windows: '^WhisperDesktop\\.zip$' },
-    addedAt: '2025-09-22'
+    addedAt: '2025-09-22',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'tuta',
@@ -725,7 +753,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     // streams. Pin the stream per platform or the picker grabs nothing
     // (desktop) or the wrong product's apk (calendar).
     tagPatterns: { windows: '^tutanota-desktop-', mac: '^tutanota-desktop-', linux: '^tutanota-desktop-', android: '^tutanota-android-' },
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'proton-mail',
@@ -752,7 +781,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Gmail / Outlook',
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'ente-photos',
@@ -791,7 +821,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     // pin below only reaches the entries still resolved on ente/ente
     // (Android). The repoOverrides above point desktop at its own repo.
     tagPatterns: { android: '^photos-' },
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'ente-auth',
@@ -820,7 +851,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     offlineReady: true,
     // Same shared repo as Ente Photos; only the auth-v* stream is this app.
     tagPatterns: { windows: '^auth-', mac: '^auth-', linux: '^auth-', android: '^auth-' },
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'aegis',
@@ -846,7 +878,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Authenticator / Microsoft Authenticator',
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'fossify-gallery',
@@ -872,7 +905,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Photos / Samsung Gallery',
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'librewolf',
@@ -899,7 +933,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: true,
     architectures: ['x86_64', 'arm64'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'mullvad-vpn',
@@ -926,7 +961,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'proton-vpn',
@@ -957,7 +993,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'element',
@@ -989,7 +1026,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'simplex',
@@ -1016,7 +1054,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'mastodon',
@@ -1043,7 +1082,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['universal'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'jellyfin',
@@ -1065,14 +1105,25 @@ export const EXTRA_APPS_2: AppItem[] = [
     isOwnerPick: false,
     isTrendingToday: false,
     tags: ['media-server', 'self-hosted', 'streaming', 'plex-alternative'],
-    wingetCommand: 'winget install Jellyfin.Server',
-    brewCommand: 'brew install --cask jellyfin',
-    flatpakCommand: 'flatpak install flathub org.jellyfin.JellyfinServer',
+    // Live audit 2026-10-12, product-selection pass: this entry IS the
+    // desktop client (its repo is jellyfin/jellyfin-desktop), but all three
+    // package commands pointed at the SERVER product - a package-manager
+    // "install" here would set up a headless media server instead of the
+    // app the resolver downloads. Canonical client ids, each verified live:
+    //   winget  manifests/j/Jellyfin/JellyfinMediaPlayer (200)
+    //   cask    Casks/j/jellyfin-media-player.rb "Jellyfin desktop client"
+    //           (the cask "jellyfin" is the SERVER, "Media system", v12.x)
+    //   flathub com.github.iwalton3.jellyfin-media-player (200; no
+    //           org.jellyfin.* client id exists on Flathub as of this date)
+    wingetCommand: 'winget install Jellyfin.JellyfinMediaPlayer',
+    brewCommand: 'brew install --cask jellyfin-media-player',
+    flatpakCommand: 'flatpak install flathub com.github.iwalton3.jellyfin-media-player',
     proprietaryAlternative: 'Plex',
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'libretranslate',
@@ -1098,7 +1149,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'cryptomator',
@@ -1125,7 +1177,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['x86_64', 'arm64'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'fossify-calendar',
@@ -1151,7 +1204,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Calendar',
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'fossify-contacts',
@@ -1177,7 +1231,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     proprietaryAlternative: 'Google Contacts',
     architectures: ['arm64', 'universal'],
     offlineReady: true,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   },
   {
     id: 'cake-wallet',
@@ -1205,7 +1260,8 @@ export const EXTRA_APPS_2: AppItem[] = [
     isPortable: false,
     architectures: ['universal'],
     offlineReady: false,
-    addedAt: '2026-09-21'
+    addedAt: '2026-09-21',
+    lastVerifiedAt: '2026-10-12',
   }
 ];
 

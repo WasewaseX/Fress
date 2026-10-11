@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import {
   X,
@@ -17,6 +17,7 @@ import {
   DownloadCloud,
   Copy,
   Check,
+  AlertTriangle,
 } from 'lucide-react';
 import { useDownloadState, useDownloadActions, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
 import { summarizeDownloadStates } from '../lib/downloadsAnnouncement';
@@ -28,34 +29,66 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
   const { cancel, retry, clearFinished, openFile, openFolder, chooseFolder } = useDownloadActions();
   const { t } = useI18n();
 
+  // Clipboard feedback for the SHA row: honest success/failure, localized,
+  // announced politely, with the flash timer cleaned up on close/unmount.
+  const [copiedHash, setCopiedHash] = useState<{ id: number; ok: boolean } | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  }, []);
+
+  const handleCopyHash = async (item: { id: number; sha256?: string }) => {
+    if (!item.sha256) return;
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(item.sha256);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    setCopiedHash({ id: item.id, ok });
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopiedHash(null);
+      copyTimerRef.current = null;
+    }, 2000);
+  };
 
   const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
+  // Escape through the shared modal stack: when another surface (palette,
+  // detail dialog) sits on top, it answers first and this panel stays.
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose });
   if (!isOpen) return null;
 
   const active = items.filter((it) => it.status === 'active');
   const finished = items.filter((it) => it.status !== 'active');
 
   return (
-    <div ref={panelRef} className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('downloads.title')}>
+    <div
+      ref={panelRef}
+      className="fixed inset-0 z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="download-manager-title"
+    >
       <div className="fr-backdrop absolute inset-0" onClick={onClose} aria-hidden="true" />
 
       {/* Screen-reader announcements for progress and failures: the visual
-          list changes silently otherwise. Polite, so it never interrupts. */}
+          list changes silently otherwise. Polite, so it never interrupts.
+          Kept restrained by summarizeDownloadStates: state-count changes
+          announce, byte-level churn does not. */}
       <div className="sr-only" role="status" aria-live="polite">
         {summarizeDownloadStates(items, (key, params) => {
           let s: string = t(key);
           if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v));
           return s;
         })}
+      </div>
+      {/* Clipboard completion feedback for the SHA row. */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {copiedHash ? (copiedHash.ok ? t('common.copied') : t('common.copyFailed')) : ''}
       </div>
 
       <aside
@@ -66,7 +99,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-900">
           <div className="flex items-center gap-2">
             <DownloadCloud className="w-4 h-4 text-sky-400" aria-hidden="true" />
-            <h2 className="text-sm font-bold text-slate-100">{t('downloads.title')}</h2>
+            <h2 id="download-manager-title" className="text-sm font-bold text-slate-100">{t('downloads.title')}</h2>
             {active.length > 0 && (
               <span className="text-[11px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded-full">
                 {active.length}
@@ -94,7 +127,15 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
           )}
 
           {items.map((item) => {
-            const pct = item.total > 0 ? Math.min(100, Math.round((item.bytes / item.total) * 100)) : item.status === 'completed' ? 100 : 0;
+            // Known total: a real percentage. Unknown total: indeterminate -
+            // the bar must never pretend 0% (or any number) it cannot know.
+            const knownTotal = item.total > 0;
+            const pct = knownTotal ? Math.min(100, Math.round((item.bytes / item.total) * 100)) : item.status === 'completed' ? 100 : 0;
+            // A progressbar role only makes sense while progress is the
+            // story: active and completed rows. Queued/error/cancelled rows
+            // carry their state in the chip and the plain track below.
+            const showProgressBar = item.status === 'active' || item.status === 'completed';
+            const indeterminate = item.status === 'active' && !knownTotal;
             return (
               <div
                 key={item.id}
@@ -109,27 +150,47 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                 </div>
 
                 {/* Progress bar */}
-                <div
-                  className="h-1.5 w-full bg-slate-950/10 dark:bg-white/[0.06] rounded-full overflow-hidden mb-2"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={item.total > 0 ? pct : undefined}
-                  aria-label={`${t('downloads.a11y.progress')}: ${item.name}`}
-                >
+                {showProgressBar ? (
                   <div
-                    className={`h-full rounded-full transition-[width] duration-200 ${
-                      item.status === 'completed'
-                        ? 'bg-emerald-500'
-                        : item.status === 'error'
-                          ? 'bg-rose-500'
-                          : item.status === 'cancelled' || item.status === 'queued'
-                            ? 'bg-slate-500'
-                            : 'bg-sky-500'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
+                    className="h-1.5 w-full bg-slate-950/10 dark:bg-white/[0.06] rounded-full overflow-hidden mb-2"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={indeterminate ? undefined : pct}
+                    aria-valuetext={
+                      indeterminate
+                        ? t('downloads.a11y.sizeUnknown')
+                        : item.status === 'completed'
+                          ? `${pct}%`
+                          : `${pct}%`
+                    }
+                    aria-label={`${t('downloads.a11y.progress')}: ${item.name}`}
+                  >
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-200 ${
+                        item.status === 'completed'
+                          ? 'bg-emerald-500'
+                          : item.status === 'error'
+                            ? 'bg-rose-500'
+                            : item.status === 'cancelled' || item.status === 'queued'
+                              ? 'bg-slate-500'
+                              : 'bg-sky-500'
+                      } ${indeterminate ? 'w-full animate-pulse opacity-60' : ''}`}
+                      style={indeterminate ? undefined : { width: `${pct}%` }}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    aria-hidden="true"
+                    className="h-1.5 w-full bg-slate-950/10 dark:bg-white/[0.06] rounded-full overflow-hidden mb-2"
+                  >
+                    <div
+                      className={`h-full rounded-full ${
+                        item.status === 'error' ? 'bg-rose-500/60 w-full' : 'bg-slate-500/50 w-0'
+                      }`}
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400 mb-2.5">
                   <span>
@@ -144,24 +205,42 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                 </div>
 
                 {item.status === 'error' && item.error && (
-                  <p className="text-[11px] text-rose-300 mb-2 leading-snug">{item.error}</p>
+                  <p className="text-[11px] text-rose-300 mb-2 leading-snug" role="alert">
+                    <AlertTriangle className="w-3 h-3 inline mr-1 -mt-0.5" aria-hidden="true" />
+                    {item.error}
+                  </p>
                 )}
 
-                {item.sha256 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(item.sha256!);
-                    }}
-                    className="w-full text-left text-[11px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
-                    title={t('common.copy')}
-                    aria-label={t('downloads.a11y.copyHash')}
-                  >
-                    <FileCheck2 className="w-3 h-3 shrink-0 text-emerald-400" />
-                    <span className="truncate">{t('downloads.hash')}: {item.sha256}</span>
-                    <Copy className="w-3 h-3 shrink-0 ml-auto" />
-                  </button>
-                )}
+                {item.sha256 && (() => {
+                  const feedback = copiedHash?.id === item.id ? copiedHash : null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyHash(item)}
+                      className="w-full text-left text-[11px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
+                      title={t('downloads.a11y.copyHash')}
+                      aria-label={`${t('downloads.a11y.copyHash')}: ${item.name}`}
+                    >
+                      <FileCheck2 className="w-3 h-3 shrink-0 text-emerald-400" aria-hidden="true" />
+                      <span className="truncate">{t('downloads.hash')}: {item.sha256}</span>
+                      {feedback ? (
+                        feedback.ok ? (
+                          <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-emerald-400 font-sans">
+                            <Check className="w-3 h-3" aria-hidden="true" />
+                            {t('common.copied')}
+                          </span>
+                        ) : (
+                          <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-rose-400 font-sans">
+                            <X className="w-3 h-3" aria-hidden="true" />
+                            {t('common.copyFailed')}
+                          </span>
+                        )
+                      ) : (
+                        <Copy className="w-3 h-3 shrink-0 ml-auto" aria-hidden="true" />
+                      )}
+                    </button>
+                  );
+                })()}
 
                 <div className="flex items-center gap-1.5">
                   {item.status === 'active' && (
@@ -239,22 +318,36 @@ function StatusChip({ status, error, verified }: { status: string; error?: strin
   if (status === 'active') {
     return <span className="shrink-0 text-[11px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1.5 py-0.5 rounded">{t('downloads.active')}</span>;
   }
-  if (status === 'browser') {
+  if (status === 'browser' || status === 'page') {
+    // Both states mean "handed to the browser, nothing transferred here":
+    // 'browser' is a download the engine declined, 'page' a recorded
+    // external-page open. Same truthful chip for both.
     return <span className="shrink-0 text-[11px] font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded">{t('downloads.openedInBrowser')}</span>;
   }
   if (status === 'queued') {
     return <span className="shrink-0 text-[11px] font-medium bg-slate-500/15 text-slate-300 border border-slate-500/30 px-1.5 py-0.5 rounded">{t('downloads.queued')}</span>;
   }
   if (status === 'completed') {
+    // Verified only ever means a trusted checksum matched. A finished file
+    // with no matching trusted hash is "done, unverified" - never "verified".
     return (
       <span className="shrink-0 text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
-        <Check className="w-2.5 h-2.5" />
-        {verified === true ? t('downloads.verified') : t('downloads.completed')}
+        {verified === true ? (
+          <>
+            <Check className="w-2.5 h-2.5" aria-hidden="true" />
+            {t('downloads.verified')}
+          </>
+        ) : (
+          <>
+            <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+            {t('downloads.completedUnverified')}
+          </>
+        )}
       </span>
     );
   }
   if (status === 'error') {
-    return <span className="shrink-0 text-[11px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><XCircle className="w-2.5 h-2.5" />{t('downloads.failed')}</span>;
+    return <span className="shrink-0 text-[11px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded flex items-center gap-1"><XCircle className="w-2.5 h-2.5" aria-hidden="true" />{t('downloads.failed')}</span>;
   }
   return <span className="shrink-0 text-[11px] font-medium bg-slate-500/15 text-slate-400 border border-slate-500/30 px-1.5 py-0.5 rounded">{t('downloads.cancelled')}</span>;
 }

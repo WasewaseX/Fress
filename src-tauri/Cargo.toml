@@ -23,6 +23,13 @@ tokio = { version = "1", features = ["macros", "sync", "time"] }
 futures-util = "0.3"
 sha2 = "0.10"
 dirs = "5"
+# Self-update artifact authenticity: zero-dependency minisign verification
+# of the release .sig sidecars against the compile-time-embedded public key
+# (the same crate family the Tauri updater plugin uses).
+minisign-verify = "0.3.0"
+# Outer-layer base64 for Tauri-format key/signature documents (both are
+# single-line base64 of a minisign document).
+base64 = "0.22"
 
 [dev-dependencies]
 # Feature declarations only: tokio is already a normal dependency, so this

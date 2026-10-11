@@ -147,7 +147,7 @@ function AppShell() {
   const comparedSet = useMemo(() => new Set(compare.comparedIds), [compare.comparedIds]);
 
   return (
-    <div id="awesome-apps-root" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-sky-600 selection:text-white">
+    <div id="awesome-apps-root" className="min-h-screen bg-fr-bg text-fr-text flex flex-col selection:bg-fr-focus selection:text-white">
       {/* Sonner Toast Notifications Container */}
       <Toaster
         theme={uiTheme}
@@ -215,7 +215,10 @@ function AppShell() {
       )}
 
       {/* Main Content Area: Grid or Table View */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24" id="main-content" tabIndex={-1}>
+      {/* fr-shell: the same content boundary as the header, hero and filter
+          bar. Wide enough for a four-column catalog on large desktops,
+          never stretched edge-to-edge on ultrawides. */}
+      <main className="flex-1 fr-shell w-full py-6 pb-24" id="main-content" tabIndex={-1}>
         {page === 'replace' ? (
           <ReplaceTab
             apps={catalog.apps}
@@ -225,7 +228,10 @@ function AppShell() {
           />
         ) : filteredApps.length > 0 ? (
           viewMode === 'grid' ? (
-            <div id="apps-catalog-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            /* Responsive ladder: 1 phone / 2 tablet / 3 desktop / 4 at 2xl
+                (1536px+ viewports), where a ~365px card stays comfortably
+                readable inside the fr-shell boundary. */
+            <div id="apps-catalog-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3.5">
               {filteredApps.map((app) => (
                 <AppCard
                   key={app.id}

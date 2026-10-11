@@ -166,6 +166,40 @@
   border-color: var(--fr-chip-active-border);
 }
 
+/* ------------------------------------------------------------------
+   SHARED CONTENT BOUNDARY
+   Header, hero, filter bar and catalog all align to this one width.
+   ~1536px (Tailwind's 2xl step) lets the catalog breathe into four
+   card columns on large desktops without stretching the UI across
+   ultrawide monitors, and keeps every band on the same edges.
+   Replaces the scattered "max-w-7xl mx-auto px-4 sm:px-6" copies.
+   ------------------------------------------------------------------ */
+.fr-shell {
+  max-width: 1536px;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+@media (min-width: 640px) {
+  .fr-shell {
+    padding-inline: 1.5rem;
+  }
+}
+
+/* ------------------------------------------------------------------
+   TOUCH TARGETS FOR ICON-ONLY CONTROLS
+   The visual footprint of a quiet icon button stays compact on desktop
+   (secondary-control density), but on coarse pointers every icon-only
+   control grows to the shared --fr-touch-target box so it is actually
+   tappable. Desktop hit areas keep their padding; only the minimum
+   box changes, so no layout rhythm shifts.
+   ------------------------------------------------------------------ */
+@media (pointer: coarse) {
+  .fr-touch-target {
+    min-width: var(--fr-touch-target);
+    min-height: var(--fr-touch-target);
+  }
+}
+
 html {
   scroll-behavior: smooth;
 }

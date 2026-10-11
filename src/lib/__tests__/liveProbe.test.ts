@@ -10,7 +10,6 @@
 // page. Run once per audit:
 //   FRESS_LIVE_PROBE=1 npx vitest run src/lib/__tests__/liveProbe.test.ts
 //
-import { readFileSync } from 'node:fs';
 import { describe, it } from 'vitest';
 import { INITIAL_APPS } from '../../data/appsData';
 import { pickAssetDetailed } from '../releaseFetch';
@@ -19,13 +18,14 @@ import { Platform } from '../../types';
 const PROBE = !!process.env.FRESS_LIVE_PROBE;
 
 function readPat(): string | null {
-  try {
-    const src = readFileSync('/home/z/my-project/scripts/verify_round6.py', 'utf8');
-    const m = src.match(/github_pat_[A-Za-z0-9_]+/);
-    return m ? m[0] : null;
-  } catch {
-    return null;
-  }
+  // The probe is opt-in and operator-driven: the PAT arrives through the
+  // environment (FRESS_GH_PAT) so the repo never carries a token and the
+  // sandbox path stays out of CI. Unauthenticated runs are capped by
+  // GitHub's 60 req/h per IP - below the 75-repo catalog, so a probe of
+  // the whole catalog effectively requires a PAT.
+  const fromEnv = process.env.FRESS_GH_PAT;
+  if (fromEnv && fromEnv.trim()) return fromEnv.trim();
+  return null;
 }
 
 const ghHeaders: Record<string, string> = { Accept: 'application/vnd.github+json' };

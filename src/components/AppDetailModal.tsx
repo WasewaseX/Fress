@@ -42,7 +42,7 @@ import {
 // what a retry does (including evicting the failed memo entry) is resolver-
 // side code behind this interface. See src/lib/resolveRetry.ts.
 import { resolverRetry } from '../lib/resolveRetry';
-import { useI18n } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
@@ -77,6 +77,62 @@ type ResolveState = 'loading' | 'ready' | 'none' | 'error';
 
 /** Why a lookup failed, when the reason changes what the UI should say. */
 type ResolveFailure = 'rate-limit' | 'network';
+
+/**
+ * Generic download-option labels from the per-app data (src/lib/appDownloads.ts)
+ * translated at RENDER time: the data file stays untouched (labels are its
+ * identifiers - the fallback-row filter compares against them), while the
+ * words the user reads follow the active language. Product-specific labels
+ * ("Thunderbird for Windows", "Signal on Google Play") go through the
+ * forPlatform/onStore templates so the product proper noun stays and only
+ * the glue word translates; anything unmatched falls through unchanged.
+ */
+const DOWNLOAD_LABEL_KEYS: Record<string, string> = {
+  'Official download page': 'detail.dl.officialPage',
+  'Official website': 'detail.dl.officialWebsite',
+  'GitLab Releases': 'detail.dl.gitlabReleases',
+  'Windows installer': 'detail.dl.windowsInstaller',
+  'macOS installer': 'detail.dl.macInstaller',
+  'Linux builds': 'detail.dl.linuxBuilds',
+  'Linux packages': 'detail.dl.linuxPackages',
+  'Windows bundle': 'detail.dl.windowsBundle',
+  'macOS bundle': 'detail.dl.macBundle',
+  'Linux bundle': 'detail.dl.linuxBundle',
+  'Install via Flatpak (official build)': 'detail.dl.flatpakOfficial',
+  'Windows .exe installer': 'detail.dl.windowsExeInstaller',
+  'Official macOS installer page': 'detail.dl.macInstallerPage',
+  'Download .exe from GitHub': 'detail.dl.exeFromGithub',
+  'Get the .apk': 'detail.dl.getApk',
+  'Download .apk': 'detail.dl.downloadApk',
+  'Download .apk (F-Droid)': 'detail.dl.downloadApkFdroid',
+  'F-Droid .apk (direct)': 'detail.dl.fdroidApkDirect',
+  'Download from GitHub': 'detail.dl.fromGithub',
+  'Download installer or portable': 'detail.dl.installerOrPortable',
+  'Installation options': 'detail.dl.installationOptions',
+  'Self-hosting guide': 'detail.dl.selfHostingGuide',
+  'Signal APK (sideload)': 'detail.dl.signalSideload',
+};
+const PRODUCT_PLACE_RE = /^(.+?) (?:for|on) (?:the )?(Windows|macOS|Linux|Android|App Store|Google Play)$/;
+
+function translateDownloadLabel(t: (key: string) => string, label: string): string {
+  const generic = DOWNLOAD_LABEL_KEYS[label];
+  if (generic) return t(generic);
+  const m = PRODUCT_PLACE_RE.exec(label);
+  if (m) {
+    const [, product, place] = m;
+    const template = place === 'App Store' || place === 'Google Play'
+      ? t('detail.dl.onStore')
+      : t('detail.dl.forPlatform');
+    return template
+      .replace('{product}', product)
+      .replace('{store}', place)
+      .replace('{platform}', place);
+  }
+  if (label.endsWith(' public instance')) {
+    return t('detail.dl.publicInstance').replace('{product}', label.replace(/ public instance$/, ''));
+  }
+  return label;
+}
 
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { startDownload, recordExternalOpen } = useDownloadActions();
@@ -209,10 +265,13 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   })();
 
   const handleOption = (option: DownloadOption) => {
+    // The translated label travels with the download/external-open record so
+    // the download list names the entry exactly as the button the user read.
+    const label = translateDownloadLabel(t, option.label);
     if (option.kind === 'direct') {
-      void startDownload(option.url, option.label);
+      void startDownload(option.url, label);
     } else {
-      recordExternalOpen(`${app.name}: ${option.label}`, option.url);
+      recordExternalOpen(`${app.name}: ${label}`, option.url);
       void openExternal(option.url);
     }
   };
@@ -282,7 +341,20 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
         <div className="text-center py-4">
           <MonitorSmartphone className="w-6 h-6 text-slate-500 mx-auto mb-2" aria-hidden="true" />
           <p className="text-xs text-slate-300 font-medium mb-0.5">{t('detail.notAvailable')}</p>
-          <p className="text-[11px] text-slate-400 leading-relaxed">{unavailable}. {app.websiteUrl ? t('detail.resolver.checkWebsite') : ''}</p>
+          {/* The note's WORDS are rendered here (translated); the lib's return
+              value is only the availability signal. Same branch structure as
+              platformUnavailableNote, pinned by test so they cannot drift. */}
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            {platform === 'ios'
+              ? t(app.platforms.includes('android') ? 'detail.unavailable.noIosHasAndroid' : 'detail.unavailable.noIos')
+              : platform === 'android'
+                ? t('detail.unavailable.noAndroid')
+                : t('detail.unavailable.noBuild')
+                    .replace('{platform}', t(`common.platform.${platform}`))
+                    .replace('{list}', app.platforms.map((p) => t(`common.platform.${p}`)).join(', '))
+            }{' '}
+            {app.websiteUrl ? t('detail.resolver.checkWebsite') : ''}
+          </p>
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -452,7 +524,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                   <span className="flex items-center gap-2 min-w-0">
                     <Download className="w-3.5 h-3.5 shrink-0 text-sky-400" aria-hidden="true" />
                     <span className="truncate">
-                      {option.label === 'GitHub Releases' ? t('detail.allReleases') : option.label}
+                      {option.label === 'GitHub Releases' ? t('detail.allReleases') : translateDownloadLabel(t, option.label)}
                       {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">{t('detail.resolver.storeBadge')}</span>}
                     </span>
                   </span>
@@ -583,8 +655,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
         <div id="app-detail-modal-header" className="p-4 sm:p-5 border-b border-slate-950/10 dark:border-white/[0.08] flex items-start justify-between gap-4 bg-slate-900">
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
+              {/* Same shared category mapping as cards, table, compare and
+                  live search - the raw id is data, never display copy. */}
               <span id="detail-category-badge" className="text-xs font-medium text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2.5 py-0.5 rounded">
-                {app.category}
+                {t(CATEGORY_I18N_KEYS[app.category])}
               </span>
               <span id="detail-license-badge" className="text-xs font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] text-slate-300 px-2 py-0.5 rounded">
                 {app.license}

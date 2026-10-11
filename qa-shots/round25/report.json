@@ -1,0 +1,186 @@
+{
+  "before": {
+    "w320": {
+      "overflow": 0,
+      "cols": 1,
+      "contentLeft": 16,
+      "gridLeft": 16,
+      "aligned": true
+    },
+    "w360": {
+      "overflow": 0,
+      "cols": 1,
+      "contentLeft": 16,
+      "gridLeft": 16,
+      "aligned": true
+    },
+    "w390": {
+      "overflow": 0,
+      "cols": 1,
+      "contentLeft": 16,
+      "gridLeft": 16,
+      "aligned": true
+    },
+    "w768": {
+      "overflow": 0,
+      "cols": 2,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1024": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1280": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1366": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1440": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1600": {
+      "overflow": 0,
+      "cols": 4,
+      "contentLeft": 56,
+      "gridLeft": 56,
+      "aligned": true
+    },
+    "w1920": {
+      "overflow": 0,
+      "cols": 4,
+      "contentLeft": 216,
+      "gridLeft": 216,
+      "aligned": true
+    },
+    "compareWellDark": {
+      "skipped": "modal not opened",
+      "clicked": true
+    },
+    "compareWellLight": {
+      "wellBg": "oklab(0 0 0 / 0.4)",
+      "panelBg": "rgb(250, 248, 242)",
+      "wellClass": false
+    },
+    "scrollBehavior": {
+      "deepY": 3000,
+      "nav": "Privacy",
+      "afterNav": {
+        "y": 0,
+        "headingTop": 83,
+        "headerBottom": 59,
+        "visible": true
+      },
+      "backY": 0
+    }
+  },
+  "after": {
+    "w320": {
+      "overflow": 0,
+      "cols": 1,
+      "contentLeft": 16,
+      "gridLeft": 16,
+      "aligned": true
+    },
+    "w360": {
+      "overflow": 0,
+      "cols": 1,
+      "contentLeft": 16,
+      "gridLeft": 16,
+      "aligned": true
+    },
+    "w390": {
+      "overflow": 0,
+      "cols": 1,
+      "contentLeft": 16,
+      "gridLeft": 16,
+      "aligned": true
+    },
+    "w768": {
+      "overflow": 0,
+      "cols": 2,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1024": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1280": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1366": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1440": {
+      "overflow": 0,
+      "cols": 3,
+      "contentLeft": 24,
+      "gridLeft": 24,
+      "aligned": true
+    },
+    "w1600": {
+      "overflow": 0,
+      "cols": 4,
+      "contentLeft": 56,
+      "gridLeft": 56,
+      "aligned": true
+    },
+    "w1920": {
+      "overflow": 0,
+      "cols": 4,
+      "contentLeft": 216,
+      "gridLeft": 216,
+      "aligned": true
+    },
+    "compareWellDark": {
+      "skipped": "modal not opened",
+      "clicked": true
+    },
+    "compareWellLight": {
+      "wellBg": "rgba(28, 24, 16, 0.07)",
+      "panelBg": "rgb(250, 248, 242)",
+      "wellClass": true
+    },
+    "scrollBehavior": {
+      "deepY": 3000,
+      "nav": "Privacy",
+      "afterNav": {
+        "y": 0,
+        "headingTop": 83,
+        "headerBottom": 59,
+        "visible": true
+      },
+      "backY": 0
+    }
+  }
+}

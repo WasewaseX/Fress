@@ -26,6 +26,64 @@
   --color-slate-800: #182132;
   --color-slate-700: #1e2736;
   --color-slate-600: #2c3648;
+
+  /* ----------------------------------------------------------------
+     SEMANTIC COLOR ALIASES
+     Components should style by MEANING (surface, danger, primary...)
+     instead of by picking whichever slate step looks right. These
+     generate real utilities: bg-fr-surface, text-fr-text-muted,
+     border-fr-border, bg-fr-primary, ring-fr-focus, ...
+     The --fr-* raw roles are defined on :root below; because both
+     scopes live on the html element, the aliases resolve to the
+     winning (dark or light) value automatically.
+     ---------------------------------------------------------------- */
+  --color-fr-bg: var(--fr-bg);
+  --color-fr-surface: var(--fr-surface);
+  --color-fr-surface-elevated: var(--fr-surface-elevated);
+  --color-fr-text: var(--fr-text);
+  --color-fr-text-muted: var(--fr-text-muted);
+  --color-fr-border: var(--fr-border);
+  --color-fr-border-strong: var(--fr-border-strong);
+  --color-fr-primary: var(--fr-primary);
+  --color-fr-primary-hover: var(--fr-primary-hover);
+  --color-fr-success: var(--fr-success);
+  --color-fr-warning: var(--fr-warning);
+  --color-fr-danger: var(--fr-danger);
+  --color-fr-focus: var(--fr-focus);
+}
+
+/* ------------------------------------------------------------------
+   SEMANTIC ROLE TOKENS (--fr-*)
+   Dark theme values (the default). Light overrides that diverge are
+   set in the :root:not(.dark) block further down; everything else
+   follows the overridden slate/sky/emerald/amber/rose steps.
+
+   Control size scale (shared dimensions, applied to header, hero and
+   empty state; adopt elsewhere gradually):
+     --fr-h-primary     main action buttons (40-44px band)
+     --fr-h-secondary   secondary controls on desktop (36-40px band)
+     --fr-h-input       text inputs
+     --fr-touch-target  mobile icon buttons, generous touch (44x44)
+   ------------------------------------------------------------------ */
+:root {
+  --fr-bg: var(--color-slate-950);
+  --fr-surface: var(--color-slate-900);
+  --fr-surface-elevated: var(--color-slate-800);
+  --fr-text: var(--color-slate-100);
+  --fr-text-muted: var(--color-slate-400);
+  --fr-border: rgba(255, 255, 255, 0.08);
+  --fr-border-strong: rgba(255, 255, 255, 0.16);
+  --fr-primary: var(--color-sky-600);
+  --fr-primary-hover: var(--color-sky-500);
+  --fr-success: var(--color-emerald-500);
+  --fr-warning: var(--color-amber-400);
+  --fr-danger: var(--color-rose-500);
+  --fr-focus: var(--color-sky-500);
+
+  --fr-h-primary: 40px;
+  --fr-h-secondary: 36px;
+  --fr-h-input: 40px;
+  --fr-touch-target: 44px;
 }
 
 /* ------------------------------------------------------------------
@@ -76,6 +134,11 @@
   --color-indigo-500: #4b50c4;
   --color-indigo-600: #4045b4;
   --color-indigo-300: #4045b4;
+
+  /* Light diverges from dark only where translucency direction flips:
+     borders are dark ink on paper instead of light haze on midnight. */
+  --fr-border: rgba(28, 24, 16, 0.14);
+  --fr-border-strong: rgba(28, 24, 16, 0.26);
 }
 
 /* ------------------------------------------------------------------
@@ -120,10 +183,16 @@ html:not(.dark) {
 
 body {
   margin: 0;
-  background-color: var(--color-slate-950);
-  color: var(--color-slate-200);
+  background-color: var(--fr-bg);
+  color: var(--fr-text);
   font-family: var(--font-sans);
   transition: background-color 160ms ease;
+}
+
+/* Anchor targets clear the fixed/sticky header when jumped to
+   (skip link, in-page hashes). */
+#main-content {
+  scroll-margin-top: calc(var(--fress-header-h, 0px) + 8px);
 }
 
 /* Respect users who ask for less motion */
@@ -154,8 +223,9 @@ body {
   color: #fff;
 }
 
+/* One obvious keyboard-focus look everywhere, in both themes. */
 :focus-visible {
-  outline: 2px solid var(--color-sky-500);
+  outline: 2px solid var(--fr-focus);
   outline-offset: 2px;
 }
 

@@ -173,7 +173,12 @@ function AppShell() {
       <div className="md:hidden" style={{ height: 'var(--fress-header-h, 0px)' }} aria-hidden="true" />
 
       {/* Spotlight Section */}
-      {page === 'catalog' && <SpotlightSection />}
+      {page === 'catalog' && (
+        <SpotlightSection
+          totalApps={catalog.apps.length}
+          androidCount={catalog.androidCount}
+        />
+      )}
 
       {/* Filter and Category Bar */}
       {page === 'catalog' && (
@@ -189,7 +194,7 @@ function AppShell() {
       )}
 
       {/* Main Content Area: Grid or Table View */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24" id="main-content">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24" id="main-content" tabIndex={-1}>
         {page === 'replace' ? (
           <ReplaceTab
             apps={catalog.apps}
@@ -234,6 +239,7 @@ function AppShell() {
           <EmptyCatalogState
             onResetFilters={resetFilters}
             onAddApp={openAddFlowSearch}
+            totalCount={catalog.apps.length}
           />
         )}
       </main>

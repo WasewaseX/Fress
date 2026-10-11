@@ -292,7 +292,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
     <div
       key={key}
       role="alert"
-      className="text-[11px] leading-snug px-3 py-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-200 dark:text-rose-300"
+      className="text-[11px] leading-snug px-3 py-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-900 dark:text-rose-300"
     >
       <p className="flex items-start gap-1.5">
         <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
@@ -455,7 +455,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                   expectedSha512: fd.expectedSha512,
                 })
               }
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 font-semibold transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Smartphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />

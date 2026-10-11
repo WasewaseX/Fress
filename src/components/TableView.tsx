@@ -8,7 +8,7 @@ import { openExternal } from '../lib/external';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
-import { useI18n } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import {
   Star,
@@ -44,7 +44,10 @@ const StarCell: React.FC<{ app: AppItem }> = ({ app }) => {
   const live = useLiveStars(app.githubUrl);
   const shown = live ?? app.stars;
   if (shown === 0) {
-    return <span className="text-slate-600">-</span>;
+    // slate-400, not slate-600: slate-600 is a decorative/border step whose
+    // light value (#d8d1c1) sits at ~1.2:1 on the paper card - as TEXT that
+    // is an invisible placeholder in light mode (and ~1.6:1 in dark).
+    return <span className="text-slate-400">-</span>;
   }
   return (
     <div className="inline-flex items-center gap-1">
@@ -188,10 +191,11 @@ export const TableView: React.FC<TableViewProps> = ({
                   <TaglineCell app={app} />
                 </td>
 
-                {/* Category */}
+                {/* Category: translated through the shared mapping - the
+                    same label the card, filters and detail modal use. */}
                 <td className="py-2.5 px-3 text-slate-300">
                   <span className="bg-slate-950/[0.04] dark:bg-white/[0.04] text-slate-300 px-2 py-0.5 rounded border border-slate-950/10 dark:border-white/[0.06] text-[11px]">
-                    {app.category}
+                    {t(CATEGORY_I18N_KEYS[app.category])}
                   </span>
                 </td>
 
@@ -249,7 +253,7 @@ export const TableView: React.FC<TableViewProps> = ({
                       )}
                     </button>
                   ) : (
-                    <span className="text-slate-600 font-mono text-[11px]">{t('table.directDl')}</span>
+                    <span className="text-slate-400 font-mono text-[11px]">{t('table.directDl')}</span>
                   )}
                 </td>
 

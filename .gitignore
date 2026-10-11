@@ -18,3 +18,7 @@ coverage/
 *.pfx
 *.pem
 *.key
+
+# Agent QA captures (screenshots + measurement reports) stay local;
+# the durable visual regression baselines live in tests/e2e/*-snapshots/.
+qa-shots/

@@ -227,7 +227,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Preview */}
         <div className="flex-1 p-5 overflow-y-auto bg-slate-950">
-          <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-black/40 border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
+          <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
             {content}
           </pre>
         </div>

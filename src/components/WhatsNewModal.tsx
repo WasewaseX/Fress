@@ -156,7 +156,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                     .filter((s) => s.items.length > 0)
                     .map((s) => (
                       <div key={s.heading}>
-                        <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center gap-1.5">
+                        <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
                           <SectionIcon heading={s.heading} className="w-3 h-3" />
                           {s.heading}
                         </h3>
@@ -202,7 +202,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                         >
                           <span className="font-mono font-semibold">
                             v{entry.version}
-                            {entry.date ? <span className="text-slate-500 font-normal"> · {entry.date}</span> : null}
+                            {entry.date ? <span className="text-slate-400 font-normal"> · {entry.date}</span> : null}
                           </span>
                           <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
                         </button>
@@ -213,7 +213,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                               .filter((s) => s.items.length > 0)
                               .map((s: ChangelogSection) => (
                                 <div key={s.heading}>
-                                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+                                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1.5">
                                     <SectionIcon heading={s.heading} className="w-2.5 h-2.5" />
                                     {s.heading}
                                   </h4>

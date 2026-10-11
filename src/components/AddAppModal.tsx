@@ -371,7 +371,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
           <div className="space-y-1">
             <label htmlFor="input-gitlab-url" className="block text-slate-300 font-medium">
-              {t('add.gitlabLabel')} <span className="text-slate-500 font-normal">{t('add.gitlabHint')}</span>
+              {t('add.gitlabLabel')} <span className="text-slate-400 font-normal">{t('add.gitlabHint')}</span>
             </label>
             <input
               id="input-gitlab-url"

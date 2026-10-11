@@ -231,7 +231,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 {app.isOwnerPick && (
                   <span
                     id={`app-owner-badge-${app.id}`}
-                    className="text-[11px] font-bold bg-amber-400 text-slate-950 border border-amber-400 px-2 py-0.5 rounded flex items-center gap-1 whitespace-nowrap shadow-xs"
+                    className="text-[11px] font-bold bg-amber-400 text-amber-950 border border-amber-400 px-2 py-0.5 rounded flex items-center gap-1 whitespace-nowrap shadow-xs"
                     title={t('card.badge.pick.tip')}
                   >
                     <Award className="w-3 h-3" aria-hidden="true" />
@@ -254,7 +254,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
               {/* Quiet category label: metadata, not a badge. */}
               <span
                 id={`app-cat-badge-${app.id}`}
-                className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 truncate mt-0.5"
+                className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 truncate mt-0.5"
               >
                 {app.category}
               </span>
@@ -444,7 +444,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           id={`download-btn-${app.id}`}
           type="button"
           onClick={handleDownload}
-          className="flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-md transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+          className="flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 text-xs font-semibold bg-fr-success-strong hover:bg-fr-success-strong-hover text-white px-3 py-2 rounded-md transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
           title={isDownloading ? t('card.download.busy') : resolving ? t('card.download.resolving') : t('card.download.tip')}
           aria-label={t('card.download.aria').replace('{name}', app.name)}
           aria-live="polite"

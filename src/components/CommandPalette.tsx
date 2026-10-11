@@ -334,7 +334,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           <span className="block text-[11px] text-slate-400">{item.subtitle}</span>
                         </span>
                       </span>
-                      <span className="text-[11px] font-mono text-slate-500 uppercase tracking-wider">
+                      <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">
                         {t('palette.actionBadge')}
                       </span>
                     </button>
@@ -443,7 +443,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↵</kbd> {t('palette.select')}</span>
             <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">ESC</kbd> {t('palette.dismiss')}</span>
           </div>
-          <span className="font-mono text-[11px] text-slate-500">{t('palette.toolsIndexed').replace('{count}', String(apps.length))}</span>
+          <span className="font-mono text-[11px] text-slate-400">{t('palette.toolsIndexed').replace('{count}', String(apps.length))}</span>
         </div>
       </div>
     </div>

@@ -40,7 +40,7 @@ export function BatchActionBar(props: {
           id="batch-download-btn"
           onClick={onDownload}
           disabled={resolving}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white px-3 py-1.5 rounded-md transition-colors shadow-xs"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold bg-fr-success-strong hover:bg-fr-success-strong-hover disabled:opacity-60 text-white px-3 py-1.5 rounded-md transition-colors shadow-xs"
           title={t('bar.downloadHint')}
         >
           <Download className={`w-3.5 h-3.5 ${resolving ? 'animate-pulse' : ''}`} />

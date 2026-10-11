@@ -131,10 +131,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs border transition-colors shrink-0${touchCls(layout)} ${FOCUS_RING} ${
               isActive
                 ? isAndroid
-                  ? 'bg-emerald-500 text-slate-950 font-bold border-emerald-400'
+                  ? 'bg-emerald-500 text-white dark:text-slate-950 font-bold border-emerald-400'
                   : 'fr-chip-active font-semibold'
                 : isAndroid
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                  ? 'bg-emerald-800/[0.07] text-emerald-900 border-emerald-800/25 hover:bg-emerald-800/[0.12] dark:bg-emerald-400/10 dark:text-emerald-300 dark:border-emerald-400/30 dark:hover:bg-emerald-400/20'
                   : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-400 border-slate-950/10 dark:border-white/[0.06] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] hover:text-slate-200'
             }`}
             aria-pressed={isActive}

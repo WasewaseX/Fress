@@ -304,7 +304,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                 <span>{t('downloads.changeFolder')}</span>
               </button>
             ) : (
-              <span className="shrink-0 text-[10px] text-slate-500">{t('settings.androidFolderNote').split('.')[0]}.</span>
+              <span className="shrink-0 text-[10px] text-slate-400">{t('settings.androidFolderNote').split('.')[0]}.</span>
             )}
           </div>
         </div>

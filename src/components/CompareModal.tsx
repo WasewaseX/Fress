@@ -100,7 +100,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
               <p className="text-slate-400 text-sm mb-4">
                 {t('cmp.empty')}
               </p>
-              <p className="text-slate-500 text-xs max-w-md mx-auto">
+              <p className="text-slate-400 text-xs max-w-md mx-auto">
                 {t('cmp.emptyHint')}
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-2xl mx-auto">
@@ -184,7 +184,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                           {app.proprietaryAlternative}
                         </span>
                       ) : (
-                        <span className="text-slate-500">{t('cmp.universal')}</span>
+                        <span className="text-slate-400">{t('cmp.universal')}</span>
                       )}
                     </div>
                   ))}
@@ -263,7 +263,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                       {app.isPortable ? (
                         <span className="text-emerald-400 font-mono text-[11px]">{t('cmp.portableYes')}</span>
                       ) : (
-                        <span className="text-slate-500 font-mono text-[11px]">{t('cmp.portableNo')}</span>
+                        <span className="text-slate-400 font-mono text-[11px]">{t('cmp.portableNo')}</span>
                       )}
                     </div>
                   ))}
@@ -294,7 +294,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   <div className="font-semibold text-slate-400">{t('cmp.rowInstall')}</div>
                   {appsToCompare.map((app) => (
                     <div key={app.id} className="px-3">
-                      <code className="text-[11px] font-mono text-sky-300 bg-black/40 px-2 py-1 rounded block truncate select-all">
+                      <code className="fr-code-well text-[11px] font-mono text-sky-300 border px-2 py-1 rounded block truncate select-all">
                         {app.wingetCommand || app.brewCommand || t('cmp.directInstaller')}
                       </code>
                     </div>

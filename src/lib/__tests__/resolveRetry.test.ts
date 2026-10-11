@@ -26,6 +26,7 @@ import {
   retryFdroidResolve,
   resolveGitHubDownload,
 } from '../release/resolve';
+import { retryOfficialResolve } from '../officialResolvers';
 import { AppItem } from '../../types';
 
 const CACHE_KEY = 'fress.resolveCache.v1';
@@ -200,5 +201,32 @@ describe('retry wrappers', () => {
     await retryGitHubResolve({ ...app, githubUrl: 'https://github.com/other/repo' } as AppItem, 'windows');
 
     expect(ghCache.get('ente-io/ente|windows|src|')).toBe(okPromise);
+  });
+
+  it('Signal Android malformed sha256sum resolves UNVERIFIED through the trusted gate (end to end)', async () => {
+    // The Signal Android resolver used to assign latest.json's sha256sum
+    // straight onto the download, bypassing attachTrustedDigests entirely -
+    // a malformed value would have entered the engine looking trusted.
+    // The retry wrapper is the clean way to drive the cached official path
+    // (it evicts the failed memo, so this really fetches). The casing/
+    // normalization half of this contract is pinned at the official()
+    // constructor in officialResolvers.test.ts - a cached SUCCESS is never
+    // evicted by a retry (by design), so a second variant needs its own
+    // cache key and belongs at the constructor level.
+    const signalApp = { id: 'signal', name: 'Signal', platforms: ['android'] } as unknown as AppItem;
+    const latestJson = JSON.stringify({
+      url: 'https://updates.signal.org/android/signal-android-8.28.0.apk',
+      versionName: '8.28.0',
+      sha256sum: 'definitely-not-a-digest',
+    });
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(latestJson, { status: 200, headers: { 'Content-Type': 'application/json' } })
+    ) as unknown as typeof fetch);
+
+    const unverified = await retryOfficialResolve(signalApp, 'android');
+    expect(unverified).not.toBeNull();
+    expect(unverified!.url).toBe('https://updates.signal.org/android/signal-android-8.28.0.apk');
+    expect(unverified!.filename).toBe('signal-android-8.28.0.apk');
+    expect(unverified!.expectedSha256).toBeUndefined(); // malformed -> unverified, never trusted
   });
 });

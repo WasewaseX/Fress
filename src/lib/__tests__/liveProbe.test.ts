@@ -94,18 +94,35 @@ describe.skipIf(!PROBE)('LIVE catalog download probe', () => {
       for (const platform of app.platforms as Platform[]) {
         if (platform === 'ios' || platform === 'web') { bump(`skip-${platform}`); continue; }
         for (const arch of ARCHES) {
-          const strictPick = pickAssetDetailed(strict.flatMap((r) => r.assets), platform, arch, app.assetPatterns);
+          // Mirror the resolver's ACTUAL decision flow (resolve.ts): the
+          // latest release is evaluated IN ISOLATION first, then the recent
+          // releases newest-first, each one release at a time. Pooling every
+          // release's assets into one picker call is NOT the production
+          // flow - a pooled call lets an older release's higher-scoring
+          // asset (or, with deterministic tie-breaks, an older VERSION of
+          // the same file) outrank the current release, which the shipped
+          // resolver can never do.
           let verdict = '';
-          if (strictPick && !strictPick.weak) { verdict = `STRICT(${strictPick.pick.name})`; bump('direct-strict'); }
-          else {
-            const relaxedPick = pickAssetDetailed(relaxed.flatMap((r) => r.assets), platform, arch, app.assetPatterns);
-            if (relaxedPick && !relaxedPick.weak) {
-              const tag = (rels || []).find((r) => r.assets?.some((a) => a.name === relaxedPick.pick.name))?.tag_name;
-              verdict = `PRERELEASE-ONLY(tag=${tag}, asset=${relaxedPick.pick.name})`;
-              bump('prerelease-flag-only');
-            } else if (strictPick) { verdict = `WEAK(${strictPick.pick.name})`; bump('weak-only'); }
-            else { verdict = 'NO-DIRECT'; bump('no-direct'); }
+          let decided = false;
+          for (const rel of strict) {
+            const p = pickAssetDetailed(rel.assets, platform, arch, app.assetPatterns);
+            if (p && !p.weak) { verdict = `STRICT(tag=${rel.tag}, ${p.pick.name})`; bump('direct-strict'); decided = true; break; }
           }
+          if (!decided) {
+            for (const rel of relaxed) {
+              const p = pickAssetDetailed(rel.assets, platform, arch, app.assetPatterns);
+              if (p && !p.weak) { verdict = `PRERELEASE-ONLY(tag=${rel.tag}, ${p.pick.name})`; bump('prerelease-flag-only'); decided = true; break; }
+            }
+          }
+          if (!decided) {
+            // Weak fallback, newest first: latest release's weak pick, else
+            // the newest release carrying one - same precedence as resolve.ts.
+            for (const rel of strict) {
+              const p = pickAssetDetailed(rel.assets, platform, arch, app.assetPatterns);
+              if (p) { verdict = `WEAK(tag=${rel.tag}, ${p.pick.name})`; bump('weak-only'); decided = true; break; }
+            }
+          }
+          if (!decided) { verdict = 'NO-DIRECT'; bump('no-direct'); }
           const shortArch = arch ?? 'unknown';
           rows.push(`${app.id} | ${platform} | ${shortArch} | ${verdict}`);
         }

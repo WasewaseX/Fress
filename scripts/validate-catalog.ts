@@ -284,6 +284,33 @@ for (const app of apps) {
     err(label, `lastVerifiedAt must be YYYY-MM-DD, got: ${app.lastVerifiedAt}`);
   }
 
+  // TIMEZONE POLICY for lastVerifiedAt (and addedAt): the stamp is the
+  // Asia/Tehran (project) local calendar date on which the live
+  // verification actually ran. The audit scripts log the UTC instant
+  // alongside, so an audit at 2026-10-11T19:15Z is stamped 2026-10-12 -
+  // that is the same event, not a future date. To keep the policy
+  // enforceable everywhere (CI included) this validator computes "today"
+  // in that exact zone and rejects any stamp that would be in the future
+  // there. A stamp must NEVER be moved forward just to satisfy a test:
+  // it may only change when a live verification actually re-runs.
+  const tehranToday = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tehran',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  for (const [field, value] of [
+    ['lastVerifiedAt', app.lastVerifiedAt],
+    ['addedAt', app.addedAt],
+  ] as const) {
+    if (value !== undefined && ISO_DATE_RE.test(value) && value > tehranToday) {
+      err(
+        label,
+        `${field} ${value} is in the future (today in Asia/Tehran, the catalog's verification timezone: ${tehranToday}) - stamps must reflect real verification dates`
+      );
+    }
+  }
+
   // Per-platform release repos: must be an "owner/repo" GitHub path and
   // only for platforms the app supports, exactly like the pattern checks.
   if (app.repoOverrides) {

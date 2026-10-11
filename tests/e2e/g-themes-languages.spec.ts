@@ -70,7 +70,7 @@ test.describe('Workflow G: themes and languages', () => {
 
       // 2. Command palette.
       await openPalette(page);
-      await expect(page.getByRole('textbox', { name: d['palette.inputAria'] })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: d['palette.inputAria'] })).toBeVisible();
       await expectNoHorizontalOverflow(page);
       await page.keyboard.press('Escape');
 

@@ -33,7 +33,8 @@ test.describe('Workflow B: command palette', () => {
     await page.locator(sel.searchInput).focus();
 
     await openPalette(page);
-    const input = page.getByRole('textbox', { name: DICTS.en['palette.inputAria'] });
+    // The palette input exposes role="combobox" (a11y listbox pattern).
+    const input = page.getByRole('combobox', { name: DICTS.en['palette.inputAria'] });
     await expect(input).toBeFocused();
 
     // English action term -> the export action, localized title from DICTS.
@@ -66,7 +67,7 @@ test.describe('Workflow B: command palette', () => {
   test('app search result opens the detail dialog via keyboard', async ({ gotoApp, page }) => {
     await gotoApp();
     await openPalette(page);
-    const input = page.getByRole('textbox', { name: DICTS.en['palette.inputAria'] });
+    const input = page.getByRole('combobox', { name: DICTS.en['palette.inputAria'] });
 
     await input.fill('LocalSend');
     const firstResult = page.locator(sel.paletteModal).getByText('LocalSend', { exact: true }).first();
@@ -85,7 +86,7 @@ test.describe('Workflow B: command palette', () => {
 
     await page.locator(sel.searchInput).focus();
     await openPalette(page);
-    const input = page.getByRole('textbox', { name: d['palette.inputAria'] });
+    const input = page.getByRole('combobox', { name: d['palette.inputAria'] });
 
     // A Persian action word: no English keyword matches, no catalog data
     // matches - the palette must answer with the localized no-match message.

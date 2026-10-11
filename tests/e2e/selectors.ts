@@ -70,7 +70,8 @@ export const sel = {
   // Privacy Pack (ReplaceTab) -------------------------------------------
   ppPicker: (catId: string) => `#pp-picker-${catId}`,
   ppDropdown: (catId: string) => `#pp-dropdown-${catId}`,
-  ppOption: (catId: string, altId: string) => `#pp-alt-${catId}-${altId}`,
+  // PpDropdown renders options as `${listboxId}-opt-${optId}`.
+  ppOption: (catId: string, altId: string) => `#pp-dropdown-${catId}-opt-${altId}`,
   ppCounter: (catId: string) => `#pp-counter-${catId}`,
   ppPicked: (catId: string, altId: string) => `#pp-picked-${catId}-${altId}`,
   ppGet: (catId: string, altId: string) => `#pp-get-${catId}-${altId}`,

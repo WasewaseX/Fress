@@ -116,7 +116,7 @@ test.describe('visual: command palette', () => {
   test('palette with a highlighted result', async ({ gotoApp, page }) => {
     await gotoApp();
     await openPalette(page);
-    const input = page.getByRole('textbox', { name: dict()['palette.inputAria'] });
+    const input = page.getByRole('combobox', { name: dict()['palette.inputAria'] });
     await input.fill('local');
     await expect(page.locator(sel.paletteModal).getByText('LocalSend', { exact: true }).first()).toBeVisible();
     // The first row is highlighted by default (selectedIndex 0).

@@ -563,6 +563,18 @@ const en: Dict = {
   'rating.beginner': 'Super Beginner Friendly',
   'rating.quick': 'Quick Learning Curve',
   'rating.advanced': 'Advanced / Power User',
+
+  // Round 25: self-update delivery (orchestrator, wiring PR #22's toasts)
+  'update.channelSet': 'Update channel: {channel}',
+  'update.channelSetHint': 'Re-check for updates to apply the new channel.',
+  'update.availableToast': 'Fress v{version} is available.',
+  'update.availableToastHint': 'Use the Update button in the header. Your apps and data are kept.',
+  'update.latestToast': 'You are on the latest version (v{version}).',
+  'update.downloading': 'Update downloading…',
+  'update.downloadingHint': 'When it finishes, open the file to update Fress. Your apps and data stay.',
+  'update.releasesPage': 'Opening the releases page instead',
+  'update.unverifiableHint': 'This update could not be verified against the published SHA256SUMS.txt, so it will not be downloaded automatically. Verify manually, then install.',
+  'update.noAssetHint': 'No file for this platform could be picked automatically. Download it from the releases page.',
 };
 
 const fa: Dict = {
@@ -1109,6 +1121,18 @@ const fa: Dict = {
   'rating.beginner': 'برای تازه‌کارها بسیار مناسب',
   'rating.quick': 'یادگیری سریع',
   'rating.advanced': 'پیشرفته / کاربر حرفه‌ای',
+
+  // Round 25: self-update delivery (orchestrator, wiring PR #22's toasts)
+  'update.channelSet': 'کانال به‌روزرسانی: {channel}',
+  'update.channelSetHint': 'برای اعمال کانال جدید، دوباره به‌روزرسانی را بررسی کنید.',
+  'update.availableToast': 'فریس v{version} موجود است.',
+  'update.availableToastHint': 'از دکمه به‌روزرسانی در هدر استفاده کنید. برنامه‌ها و داده‌های شما حفظ می‌شوند.',
+  'update.latestToast': 'شما روی آخرین نسخه هستید (v{version}).',
+  'update.downloading': 'در حال دریافت به‌روزرسانی…',
+  'update.downloadingHint': 'پس از پایان، فایل را باز کنید تا فریس به‌روز شود. برنامه‌ها و داده‌های شما باقی می‌مانند.',
+  'update.releasesPage': 'به‌جای آن صفحه Releases باز می‌شود',
+  'update.unverifiableHint': 'این به‌روزرسانی با SHA256SUMS.txt منتشرشده تأیید نشد، بنابراین به‌طور خودکار دریافت نمی‌شود. دستی بررسی و سپس نصب کنید.',
+  'update.noAssetHint': 'فایلی برای این سکو به‌طور خودکار پیدا نشد. آن را از صفحه Releases دریافت کنید.',
 };
 
 const es: Dict = {
@@ -1655,6 +1679,18 @@ const es: Dict = {
   'rating.beginner': 'Ideal para principiantes',
   'rating.quick': 'Se aprende rápido',
   'rating.advanced': 'Avanzado / Usuario experto',
+
+  // Round 25: self-update delivery (orchestrator, wiring PR #22's toasts)
+  'update.channelSet': 'Canal de actualización: {channel}',
+  'update.channelSetHint': 'Vuelve a buscar actualizaciones para aplicar el nuevo canal.',
+  'update.availableToast': 'Fress v{version} está disponible.',
+  'update.availableToastHint': 'Usa el botón Actualizar del encabezado. Tus apps y datos se conservan.',
+  'update.latestToast': 'Estás en la última versión (v{version}).',
+  'update.downloading': 'Descargando actualización…',
+  'update.downloadingHint': 'Cuando termine, abre el archivo para actualizar Fress. Tus apps y datos se mantienen.',
+  'update.releasesPage': 'Abriendo la página de releases',
+  'update.unverifiableHint': 'Esta actualización no pudo verificarse con el SHA256SUMS.txt publicado, así que no se descargará automáticamente. Verifícala manualmente y luego instala.',
+  'update.noAssetHint': 'No se pudo elegir automáticamente un archivo para esta plataforma. Descárgalo desde la página de releases.',
 };
 
 const fr: Dict = {
@@ -2201,6 +2237,18 @@ const fr: Dict = {
   'rating.beginner': 'Très adapté aux débutants',
   'rating.quick': 'Prise en main rapide',
   'rating.advanced': 'Avancé / Utilisateur expert',
+
+  // Round 25: self-update delivery (orchestrator, wiring PR #22's toasts)
+  'update.channelSet': 'Canal de mise à jour : {channel}',
+  'update.channelSetHint': 'Revérifiez les mises à jour pour appliquer le nouveau canal.',
+  'update.availableToast': 'Fress v{version} est disponible.',
+  'update.availableToastHint': 'Utilisez le bouton Mettre à jour de l’en-tête. Vos applications et données sont conservées.',
+  'update.latestToast': 'Vous êtes sur la dernière version (v{version}).',
+  'update.downloading': 'Téléchargement de la mise à jour…',
+  'update.downloadingHint': 'Une fois terminé, ouvrez le fichier pour mettre à jour Fress. Vos applications et données restent en place.',
+  'update.releasesPage': 'Ouverture de la page des releases',
+  'update.unverifiableHint': 'Cette mise à jour n’a pas pu être vérifiée avec le SHA256SUMS.txt publié ; elle ne sera donc pas téléchargée automatiquement. Vérifiez manuellement, puis installez.',
+  'update.noAssetHint': 'Aucun fichier n’a pu être choisi automatiquement pour cette plateforme. Téléchargez-le depuis la page des releases.',
 };
 
 const de: Dict = {
@@ -2747,6 +2795,18 @@ const de: Dict = {
   'rating.beginner': 'Super einsteigerfreundlich',
   'rating.quick': 'Schnelle Einarbeitung',
   'rating.advanced': 'Fortgeschritten / Power-User',
+
+  // Round 25: self-update delivery (orchestrator, wiring PR #22's toasts)
+  'update.channelSet': 'Update-Kanal: {channel}',
+  'update.channelSetHint': 'Prüfen Sie erneut auf Updates, um den neuen Kanal anzuwenden.',
+  'update.availableToast': 'Fress v{version} ist verfügbar.',
+  'update.availableToastHint': 'Verwenden Sie die Aktualisieren-Schaltfläche in der Kopfzeile. Ihre Apps und Daten bleiben erhalten.',
+  'update.latestToast': 'Sie sind auf der neuesten Version (v{version}).',
+  'update.downloading': 'Update wird geladen…',
+  'update.downloadingHint': 'Öffnen Sie nach Abschluss die Datei, um Fress zu aktualisieren. Ihre Apps und Daten bleiben.',
+  'update.releasesPage': 'Stattdessen öffnet sich die Releases-Seite',
+  'update.unverifiableHint': 'Dieses Update konnte nicht gegen die veröffentlichte SHA256SUMS.txt verifiziert werden und wird daher nicht automatisch geladen. Bitte manuell prüfen und dann installieren.',
+  'update.noAssetHint': 'Für diese Plattform konnte keine Datei automatisch gewählt werden. Laden Sie sie von der Releases-Seite herunter.',
 };
 
 export const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

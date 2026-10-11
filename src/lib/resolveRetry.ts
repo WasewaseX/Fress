@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: MIT
 //
 import { AppItem, Platform } from '../types';
+import { ResolvedDownload } from './releaseFetch';
 import {
-  resolveGitHubDownload,
-  resolveFdroidDownload,
-  ResolvedDownload,
-} from './releaseFetch';
-import { resolveOfficialDownload } from './officialResolvers';
+  retryGitHubResolve,
+  retryFdroidResolve,
+} from './release/resolve';
+import { retryOfficialResolve } from './officialResolvers';
 
 /**
  * THE AGREED RETRY INTERFACE between the dialog UI and the resolver
@@ -44,14 +44,13 @@ import { resolveOfficialDownload } from './officialResolvers';
  *      unrelated apps' entries stay untouched.
  *   3. Never leave the caller waiting forever: every path settles.
  *
- * Today this module delegates to the plain resolvers (the only exports
- * available here). While the failure memo is in effect an immediate retry
- * may answer from that memo; the dialog keeps reporting the truth either
- * way, because it re-derives its state from the actual answer plus the
- * resolver's peekResolveError bookkeeping. When the resolver-side retry
- * implementations (evict-then-re-resolve) land in their owning files, the
- * three delegates below switch to them without ANY change in the dialog:
- * the component imports this module, not the resolver internals.
+ * The three delegates route to the resolver-side evict-then-re-resolve
+ * implementations (release/resolve.ts for GitHub and F-Droid,
+ * officialResolvers.ts for the vendor manifests): each evicts exactly the
+ * failed memo entry (and persisted failure) for the one app|platform asked
+ * about, then re-runs the plain resolver - so a Retry always performs a
+ * FRESH lookup instead of replaying the memoized failure. The dialog never
+ * changes: it imports this module, not the resolver internals.
  */
 
 export interface ResolverRetryApi {
@@ -64,7 +63,11 @@ export interface ResolverRetryApi {
 }
 
 export const resolverRetry: ResolverRetryApi = {
-  retryGitHubResolve: (app: AppItem, platform: Platform) => resolveGitHubDownload(app, platform),
-  retryFdroidResolve: (pkgId: string) => resolveFdroidDownload(pkgId),
-  retryOfficialResolve: (app: AppItem, platform: Platform) => resolveOfficialDownload(app, platform),
+  // Direct passthroughs to the resolver owners' retry wrappers: same
+  // signatures, same settle-never-reject contract, one evicted failure
+  // each. Kept as thin arrows so a future signature change on either side
+  // surfaces here first, never inside the dialog.
+  retryGitHubResolve: (app: AppItem, platform: Platform) => retryGitHubResolve(app, platform),
+  retryFdroidResolve: (pkgId: string) => retryFdroidResolve(pkgId),
+  retryOfficialResolve: (app: AppItem, platform: Platform) => retryOfficialResolve(app, platform),
 };

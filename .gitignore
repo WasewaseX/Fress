@@ -18,3 +18,11 @@ coverage/
 *.pfx
 *.pem
 *.key
+
+# Playwright run artifacts (reports, traces, results) are workflow outputs,
+# not sources. The visual BASELINES in tests/e2e/z-visual.spec.ts-snapshots/
+# ARE sources and stay versioned - they are the visual contract.
+test-results/
+playwright-report/
+playwright-live-report/
+scripts/perf/results/

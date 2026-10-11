@@ -4,8 +4,16 @@ name: CI
 # Packaging stays exclusive to tag pushes (release.yml): PRs get typecheck,
 # unit tests, the catalog validator, a production frontend build, Rust
 # formatting/linting, and the Rust test suite on every desktop platform
-# Fress ships for — everything needed to know a change is sound without
+# Fress ships for - everything needed to know a change is sound without
 # paying for six platform bundles.
+#
+# Integration gates (quality/integration-gates):
+#   - e2e: the full Playwright suite (workflows A-H + visual regression)
+#     against the production build on Linux, with deterministic fixture
+#     network only - never live GitHub/F-Droid/vendor calls.
+#   - perf: the integrated catalog benchmark; deterministic count-based
+#     invariants (render isolation, persistence coalescing) are BLOCKING,
+#     wall-clock numbers are recorded as informational artifacts.
 #
 # Hardening notes:
 #   - Least privilege: the workflow only ever reads repository contents.
@@ -13,6 +21,9 @@ name: CI
 #     compromised tag upstream cannot move what runs here.
 #   - persist-credentials: false keeps the checkout token out of .git/config,
 #     so untrusted PR code (npm scripts run below) cannot reach it.
+#   - The E2E/perf suites run against untrusted PR code too: they hold no
+#     secrets and their network layer is fixture-backed and deny-all by
+#     default (tests/e2e/netpolicy.ts aborts every non-loopback request).
 
 on:
   push:
@@ -149,3 +160,82 @@ jobs:
           npm run build
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  e2e:
+    # Integration gate: the complete browser suite (workflows A-H plus the
+    # visual regression set) runs against the PRODUCTION build served by
+    # vite preview. Deterministic fixtures only - the network layer answers
+    # every resolver/vendor endpoint from fixtures and aborts all other
+    # external requests, so shared GitHub quota can never flake a PR.
+    # Visual baselines were generated on Linux (Chromium headless); macOS and
+    # Windows rasterize text differently and are NOT part of this gate (see
+    # docs/quality-gates.md, "What still requires manual device testing").
+    name: E2E + visual (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies from the lockfile
+        run: npm ci
+      - name: Production build (the suite runs against the shipped artifact)
+        run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run the E2E + visual suite
+        run: npm run test:e2e
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  perf:
+    # Performance gate: the integrated catalog benchmark runs the real
+    # production build in headless Chromium with a 500-entry fixture and a
+    # scripted download stream. The DETERMINISTIC invariants fail the job:
+    #   - zero unrelated card mutations during a 1000-event progress burst
+    #     (the React render-isolation contract),
+    #   - persistence writes stay inside the coalescing bound.
+    # Wall-clock numbers (usable-catalog time, search latency, view-switch
+    # time) are machine-sensitive: they are recorded to the job summary and
+    # compared against scripts/perf/baselines/catalog.json INFORMATIONALLY -
+    # a 10% machine delta must never fail a PR, a rendering-contract
+    # regression must always.
+    name: Perf invariants (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies from the lockfile
+        run: npm ci
+      - name: Production build (the benchmark runs against the shipped artifact)
+        run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run the integrated catalog benchmark
+        run: npm run test:perf
+      - name: Attach the measurement record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-results
+          path: scripts/perf/results/
+          retention-days: 30
+          if-no-files-found: ignore

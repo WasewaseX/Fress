@@ -62,6 +62,9 @@ const en: Dict = {
   'card.install': 'Install',
   'card.copied': 'Copied',
   'card.download': 'Download',
+  'card.details': 'Details',
+  'card.deleteConfirm': 'Remove {name} from your library? This cannot be undone.',
+  'card.deleteConfirmAction': 'Remove',
   'card.badge.pick': 'Our pick',
   'card.badge.trending': 'Popular',
   'card.badge.custom': 'Custom',
@@ -332,6 +335,7 @@ const en: Dict = {
   'hero.countAndroid': 'with Android builds',
   'empty.catalogTitle': 'Your catalog is empty',
   'empty.catalogDesc': 'Nothing has been added yet. Search official sources or enter an app by hand to start your catalog.',
+  'a11y.skipToContent': 'Skip to main content',
 };
 
 const fa: Dict = {
@@ -378,6 +382,9 @@ const fa: Dict = {
   'card.install': 'نصب',
   'card.copied': 'کپی شد',
   'card.download': 'دانلود',
+  'card.details': 'جزئیات',
+  'card.deleteConfirm': '«{name}» از فهرست شما حذف شود؟ این کار قابل بازگشت نیست.',
+  'card.deleteConfirmAction': 'حذف',
   'card.badge.pick': 'انتخاب ما',
   'card.badge.trending': 'پرطرفدار',
   'card.badge.custom': 'سفارشی',
@@ -648,6 +655,7 @@ const fa: Dict = {
   'hero.countAndroid': 'آماده برای اندروید',
   'empty.catalogTitle': 'فهرست شما خالی است',
   'empty.catalogDesc': 'هنوز چیزی افزوده نشده است. برای شروع، از منابع رسمی جست‌وجو کنید یا برنامه را دستی وارد کنید.',
+  'a11y.skipToContent': 'پرش به محتوای اصلی',
 };
 
 const es: Dict = {
@@ -694,6 +702,9 @@ const es: Dict = {
   'card.install': 'Instalar',
   'card.copied': 'Copiado',
   'card.download': 'Descargar',
+  'card.details': 'Detalles',
+  'card.deleteConfirm': '¿Quitar {name} de tu biblioteca? Esta acción no se puede deshacer.',
+  'card.deleteConfirmAction': 'Quitar',
   'card.badge.pick': 'La elección',
   'card.badge.trending': 'Tendencia',
   'card.badge.custom': 'Personalizado',
@@ -964,6 +975,7 @@ const es: Dict = {
   'hero.countAndroid': 'listas para Android',
   'empty.catalogTitle': 'Tu catálogo está vacío',
   'empty.catalogDesc': 'Aún no se ha añadido nada. Busca en fuentes oficiales o introduce una app a mano para empezar.',
+  'a11y.skipToContent': 'Saltar al contenido principal',
 };
 
 const fr: Dict = {
@@ -1010,6 +1022,9 @@ const fr: Dict = {
   'card.install': 'Installer',
   'card.copied': 'Copié',
   'card.download': 'Télécharger',
+  'card.details': 'Détails',
+  'card.deleteConfirm': 'Retirer {name} de votre bibliothèque ? Cette action est irréversible.',
+  'card.deleteConfirmAction': 'Retirer',
   'card.badge.pick': 'Le choix',
   'card.badge.trending': 'Tendance',
   'card.badge.custom': 'Personnalisé',
@@ -1280,6 +1295,7 @@ const fr: Dict = {
   'hero.countAndroid': 'prêtes pour Android',
   'empty.catalogTitle': 'Votre catalogue est vide',
   'empty.catalogDesc': 'Rien n’a encore été ajouté. Cherchez parmi les sources officielles ou saisissez une app à la main pour commencer.',
+  'a11y.skipToContent': 'Aller au contenu principal',
 };
 
 const de: Dict = {
@@ -1326,6 +1342,9 @@ const de: Dict = {
   'card.install': 'Installieren',
   'card.copied': 'Kopiert',
   'card.download': 'Herunterladen',
+  'card.details': 'Details',
+  'card.deleteConfirm': '{name} aus Ihrer Bibliothek entfernen? Dies lässt sich nicht rückgängig machen.',
+  'card.deleteConfirmAction': 'Entfernen',
   'card.badge.pick': 'Der Tipp',
   'card.badge.trending': 'Im Trend',
   'card.badge.custom': 'Benutzerdefiniert',
@@ -1596,6 +1615,7 @@ const de: Dict = {
   'hero.countAndroid': 'für Android bereit',
   'empty.catalogTitle': 'Ihr Katalog ist leer',
   'empty.catalogDesc': 'Noch nichts vorhanden. Suchen Sie in offiziellen Quellen oder tragen Sie eine App von Hand ein.',
+  'a11y.skipToContent': 'Zum Hauptinhalt springen',
 };
 
 export const DICTS: Record<Language, Dict> = { en, fa, es, fr, de };

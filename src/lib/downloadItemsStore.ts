@@ -24,10 +24,13 @@
 import { DownloadItem } from './downloads';
 
 const ITEMS_KEY = 'fress.downloadItems.v1';
-const MAX_PERSISTED = 60;
+export const MAX_PERSISTED = 60;
 
-/** The slice of a download item worth keeping across restarts. */
-export function serializeItems(items: DownloadItem[]): string {
+/** The slice of a download item worth keeping across restarts. `limit`
+ * shrinks the retained set for the quota-error retry, which trades the
+ * oldest history for fitting into whatever storage is still willing to
+ * hold. */
+export function serializeItems(items: DownloadItem[], limit: number = MAX_PERSISTED): string {
   const keep = items
     .filter(
       (it) =>
@@ -36,7 +39,7 @@ export function serializeItems(items: DownloadItem[]): string {
         it.status === 'cancelled' ||
         it.status === 'page'
     )
-    .slice(0, MAX_PERSISTED)
+    .slice(0, Math.max(0, limit))
     .map((it) => ({
       url: it.url,
       name: it.name,

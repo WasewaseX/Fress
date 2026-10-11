@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { AppItem } from '../../types';
 import { LegalTab } from '../../components/LegalModals';
@@ -86,6 +86,12 @@ export function useAppDialogs(): AppDialogs {
     tab: 'privacy'
   });
 
+  // Mirrored into a ref so closeDetailIfApp can keep a stable identity:
+  // it is a dependency of AppShell's handleDeleteApp, which is a prop of
+  // every memoized card. A per-render new function would defeat memo.
+  const selectedAppRef = useRef<AppItem | null>(null);
+  selectedAppRef.current = selectedApp;
+
   const closeAllDialogs = () => {
     setSelectedApp(null);
     setEditingApp(null);
@@ -101,11 +107,11 @@ export function useAppDialogs(): AppDialogs {
     setLegalModal((prev) => ({ ...prev, isOpen: false }));
   };
 
-  const closeDetailIfApp = (appId: string) => {
-    if (selectedApp?.id === appId) {
+  const closeDetailIfApp = useCallback((appId: string) => {
+    if (selectedAppRef.current?.id === appId) {
       setSelectedApp(null);
     }
-  };
+  }, []);
 
   return {
     selectedApp,

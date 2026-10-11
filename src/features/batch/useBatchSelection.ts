@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AppItem } from '../../types';
@@ -45,32 +45,34 @@ export function useBatchSelection(apps: AppItem[], openDownloads: () => void): B
     return apps.filter((a) => selectedBatchAppIds.includes(a.id));
   }, [apps, selectedBatchAppIds]);
 
-  // Selection helper shared by the Privacy Pack tab and the batch checkboxes.
-  const addIds = (ids: string[]) => {
+  // Selection helpers. All card-facing (grid checkboxes, Privacy Pack) -
+  // useCallback with empty deps keeps their identity stable for memoized
+  // cards; they only touch the state setter.
+  const addIds = useCallback((ids: string[]) => {
     setSelectedBatchAppIds((prev) => Array.from(new Set([...prev, ...ids])));
-  };
+  }, []);
 
   // Privacy tab picks stay in sync with the batch selection both ways:
   // picking a replacement adds it, unpicking (or clearing a category) removes it.
-  const removeIds = (ids: string[]) => {
+  const removeIds = useCallback((ids: string[]) => {
     setSelectedBatchAppIds((prev) => prev.filter((id) => !ids.includes(id)));
-  };
+  }, []);
 
   // Batch toggle
-  const toggleSelect = (appId: string) => {
+  const toggleSelect = useCallback((appId: string) => {
     setSelectedBatchAppIds((prev) =>
       prev.includes(appId) ? prev.filter((id) => id !== appId) : [...prev, appId]
     );
-  };
+  }, []);
 
-  const selectAll = () => {
+  const selectAll = useCallback(() => {
     setSelectedBatchAppIds(apps.map((a) => a.id));
     toast.success(`Selected all ${apps.length} applications for batch operations.`);
-  };
+  }, [apps]);
 
-  const clear = () => {
+  const clear = useCallback(() => {
     setSelectedBatchAppIds([]);
-  };
+  }, []);
 
   // Real downloads for the whole batch selection: resolve the latest stable
   // file for this device for every selected app and hand each one to the

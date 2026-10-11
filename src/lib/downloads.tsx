@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { dirname } from '@tauri-apps/api/path';
@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { formatBytes, formatSpeed, formatEta } from './format';
 import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
 import { serializeItems, deserializeItems, DOWNLOAD_ITEMS_KEY } from './downloadItemsStore';
+import { createDownloadPersistence } from './downloadPersistence';
 
 export { formatBytes, formatSpeed, formatEta };
 
@@ -45,6 +46,14 @@ export interface DownloadItem {
 
 const DIR_KEY = 'fress.downloadDir';
 
+/** Storage ceiling for the quota-retry: keep the newest 20 durable entries
+ * instead of the usual 60 when the first write is refused. */
+const TRIMMED_PERSIST_LIMIT = 20;
+
+/** Statuses that survive a restart, i.e. the ones whose appearance, change
+ * or removal MUST reach storage promptly. Mirrors serializeItems' filter. */
+const DURABLE_STATUSES = new Set<DownloadStatus>(['completed', 'error', 'cancelled', 'page']);
+
 /** Local-only panel entries (browser fallback, "opened official page") have
  * no Rust download id. Negative counting ids can never collide with the
  * Rust side's positive ids - or with each other, which Date.now() could:
@@ -63,19 +72,10 @@ export function isAndroidWebview(): boolean {
   return typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 }
 
-/** Read side of the download engine: values that change as downloads
- * progress. Split from the actions so progress-heavy consumers (manager,
- * header badge) can subscribe alone - and so action-only consumers stop
- * re-rendering on every progress tick. */
-export interface DownloadsStateValue {
-  items: DownloadItem[];
-  activeCount: number;
-  downloadDir: string | null;
-}
-
-/** Write side of the download engine. Every member is a useCallback with
- * stable deps, so identities only change when the functions themselves do. */
-export interface DownloadsActionsValue {
+/** Commands only. Every function here is referentially stable across the
+ * provider's lifetime, so consumers that only need actions (detail modal,
+ * footer, batch selection) NEVER rerender because download state moved. */
+interface DownloadActionsValue {
   startDownload: (
     url: string,
     nameHint?: string,
@@ -91,15 +91,99 @@ export interface DownloadsActionsValue {
   resetFolder: () => Promise<void>;
 }
 
-const DownloadsStateContext = createContext<DownloadsStateValue | null>(null);
-const DownloadsActionsContext = createContext<DownloadsActionsValue | null>(null);
+/** Lightweight facts: the active-transfer count and the target folder.
+ * Byte-count/ETA updates change neither, so header badges and other
+ * summary consumers stay quiet while transfers stream. */
+interface DownloadSummaryValue {
+  activeCount: number;
+  downloadDir: string | null;
+}
+
+/** The live item list. Only the download manager should subscribe - it is
+ * the one surface that must repaint on every progress event. */
+interface DownloadItemsValue {
+  items: DownloadItem[];
+}
+
+/** Identity of the currently active transfers: name and source URL only.
+ * Updates when the active SET changes (start/finish/fail/cancel) - never
+ * when an existing transfer's byte count, speed or ETA moves. */
+export interface ActiveDownloadInfo {
+  id: number;
+  name: string;
+  url: string;
+}
+
+const EMPTY_ACTIVE: ActiveDownloadInfo[] = [];
+
+/**
+ * Selector store for per-app download status.
+ *
+ * Context alone cannot skip rerenders: a context value change rerenders
+ * EVERY consumer, memoized or not. Cards therefore subscribe through
+ * useSyncExternalStore instead: the snapshot is the per-app boolean
+ * itself, so a store notification whose snapshot did not flip (a
+ * byte-count update, a start that matches some OTHER app) makes React
+ * bail out without rendering the card at all. This is the
+ * "selector-based subscription" option - strictly stronger than a
+ * context that only updates on active-set changes.
+ */
+export class ActiveDownloadsStore {
+  private snapshot: ActiveDownloadInfo[] = EMPTY_ACTIVE;
+  private listeners = new Set<() => void>();
+
+  /** The live active-download identity list. */
+  getSnapshot = (): ActiveDownloadInfo[] => this.snapshot;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /** Publish a new active list. Byte-count/ETA-driven recomputes produce
+   * an equal list and are swallowed here - no notification, no rerender. */
+  setActive(next: ActiveDownloadInfo[]): void {
+    const prev = this.snapshot;
+    if (
+      prev.length === next.length &&
+      prev.every((p, i) => {
+        const n = next[i];
+        return p.id === n.id && p.name === n.name && p.url === n.url;
+      })
+    ) {
+      return;
+    }
+    this.snapshot = next;
+    this.listeners.forEach((listener) => listener());
+  }
+}
+
+const DownloadActionsContext = createContext<DownloadActionsValue | null>(null);
+const DownloadSummaryContext = createContext<DownloadSummaryValue | null>(null);
+const DownloadItemsContext = createContext<DownloadItemsValue | null>(null);
+const DownloadActiveStoreContext = createContext<ActiveDownloadsStore | null>(null);
+
+/** Pre-split aggregate kept for existing callers during the migration to
+ * the focused hooks above. */
+interface DownloadsContextValue extends DownloadActionsValue, DownloadSummaryValue {
+  items: DownloadItem[];
+}
+
+/** Read side named the way the PR-12-era consumers expect: items, active
+ * count and directory in one object. Implemented over the FOCUSED
+ * subscriptions, so it adds no new coupling - but new code should prefer
+ * useDownloadItems()/useDownloadSummary() to keep subscriptions narrow. */
+export interface DownloadsStateValue extends DownloadSummaryValue {
+  items: DownloadItem[];
+}
 
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   // The panel survives restarts: completed/failed entries come back (the
-  // .part files and finished files are on disk), and a download that was
-  // mid-flight when the app closed is restored as resumable, because that
-  // is exactly what it is. Ids are re-assigned to fresh negatives so they
-  // can never collide with the Rust side's ids, which restart at 0.
+  // .part files and finished files are on disk). Ids are re-assigned to
+  // fresh negatives so they can never collide with the Rust side's ids,
+  // which restart at 0.
   const [items, setItems] = useState<DownloadItem[]>(() => {
     try {
       return deserializeItems(localStorage.getItem(DOWNLOAD_ITEMS_KEY)).map((it) => ({
@@ -111,14 +195,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   });
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
-  useEffect(() => {
-    try {
-      localStorage.setItem(DOWNLOAD_ITEMS_KEY, serializeItems(items));
-    } catch {
-      // Storage full/blocked: the panel simply forgets on close.
-    }
-  }, [items]);
-  const itemsRef = useRef<DownloadItem[]>([]);
+  const itemsRef = useRef<DownloadItem[]>(items);
   itemsRef.current = items;
   /** Downloads waiting for a free slot (max MAX_CONCURRENT_DOWNLOADS run at
    * once). FIFO; entries carry everything startDownload received so a
@@ -137,6 +214,76 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
    * (the file can finish before start_download's invoke resolves). Keyed
    * by id, drained by startDownload right after the item is inserted. */
   const pendingEventsRef = useRef<Map<number, Array<(it: DownloadItem) => DownloadItem>>>(new Map());
+
+  /** Persistence scheduler (see downloadPersistence.ts): terminal states
+   * flush promptly, progress snapshots coalesce, identical payloads are
+   * deduped, quota failures degrade without touching the download. */
+  const [persistence] = useState(() => {
+    let initial: string | undefined;
+    try {
+      initial = localStorage.getItem(DOWNLOAD_ITEMS_KEY) ?? undefined;
+    } catch {
+      initial = undefined;
+    }
+    return createDownloadPersistence({
+      initial,
+      read: () => serializeItems(itemsRef.current),
+      readTrimmed: () => serializeItems(itemsRef.current, TRIMMED_PERSIST_LIMIT),
+      write: (payload) => {
+        localStorage.setItem(DOWNLOAD_ITEMS_KEY, payload);
+      },
+    });
+  });
+
+  /** Status of every item as of the last commit, for the durable-change
+   * diff below. Cheap field comparison - no serialization on the hot path. */
+  const persistedStatusRef = useRef<Map<number, DownloadStatus> | null>(null);
+
+  useEffect(() => {
+    const prev = persistedStatusRef.current;
+    const next = new Map<number, DownloadStatus>();
+    let durable = false;
+    for (const it of items) {
+      next.set(it.id, it.status);
+      const before = prev?.get(it.id);
+      if (before === undefined) {
+        // A brand-new entry only matters to storage if it is (or can
+        // become) a persisted one; active/queued/browser insertions do
+        // not change the serialized payload.
+        if (DURABLE_STATUSES.has(it.status)) durable = true;
+      } else if (before !== it.status) {
+        // A transition (active -> completed/error/cancelled, etc.) always
+        // changes what the panel would restore after a restart.
+        durable = true;
+      }
+    }
+    if (prev) {
+      for (const id of prev.keys()) {
+        if (!next.has(id)) {
+          // Removals (retry, clearFinished, queued-cancel) can drop
+          // persisted entries. Erring toward flushing is free: the dedupe
+          // below still skips writes whose payload did not change.
+          durable = true;
+          break;
+        }
+      }
+    }
+    persistedStatusRef.current = next;
+    persistence.recordChange({ durable });
+  }, [items, persistence]);
+
+  // Unmount/pagehide safety: the debounced timer is cancelled, and the
+  // most recent valid state is flushed once so quitting right after a
+  // terminal event cannot lose it. The flush never sets state, so this is
+  // safe even in StrictMode's dev double-mount.
+  useEffect(() => {
+    const flush = () => persistence.flushNow();
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      persistence.dispose();
+    };
+  }, [persistence]);
 
   /** How many Rust downloads are transferring right now. */
   const activeTauriCount = (): number => activeSlotsRef.current;
@@ -513,9 +660,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // openFolder reads the folder through a ref so its identity - and with
+  // it the whole actions context value - stays stable while the user
+  // changes the download directory.
+  const downloadDirRef = useRef<string | null>(null);
+  downloadDirRef.current = downloadDir;
+
   const openFolder = useCallback((path?: string) => {
     if (!isTauri()) return;
-    const target = path || downloadDir;
+    const target = path || downloadDirRef.current;
     if (!target) return;
     if (path) {
       // Reveal the file inside its folder. When the reveal fails (Windows
@@ -533,7 +686,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     } else {
       openPath(target).catch(() => toast.error('Could not open the folder'));
     }
-  }, [downloadDir]);
+  }, []);
 
   const chooseFolder = useCallback(async () => {
     if (!isTauri()) {
@@ -567,42 +720,130 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const activeCount = items.filter((it) => it.status === 'active').length;
+  /** Selector store for card-level download status. Stable for the
+   * provider's lifetime; see the class comment for why cards subscribe
+   * through it instead of through a context value. */
+  const [activeStore] = useState(() => new ActiveDownloadsStore());
 
-  // Memoized context values: the callbacks are already useCallback, the
-  // memo keeps the value OBJECTS stable so consumers only re-render when
-  // the values they read actually change, not on every provider render.
-  const stateValue = useMemo<DownloadsStateValue>(
-    () => ({ items, activeCount, downloadDir }),
-    [items, activeCount, downloadDir]
+  // Keep the selector store in sync with the committed item list. Progress
+  // events land here too, but setActive's equality check turns them into
+  // no-ops: only genuine active-SET changes notify subscribers.
+  useEffect(() => {
+    activeStore.setActive(
+      items
+        .filter((it) => it.status === 'active')
+        .map((it) => ({ id: it.id, name: it.name, url: it.url }))
+    );
+  }, [items, activeStore]);
+
+  // ---- Derived subscription slices ------------------------------------
+  // Each value changes identity ONLY when the data its consumers care
+  // about changed. A byte-count/ETA event updates `items` but leaves
+  // activeCount, downloadDir, the actions and the active-download
+  // identities untouched - so their subscribers skip the render entirely.
+
+  const activeCount = useMemo(
+    () => items.reduce((n, it) => (it.status === 'active' ? n + 1 : n), 0),
+    [items]
   );
-  const actionsValue = useMemo<DownloadsActionsValue>(
+
+  const summaryValue = useMemo(
+    () => ({ activeCount, downloadDir }),
+    [activeCount, downloadDir]
+  );
+
+  const itemsValue = useMemo(() => ({ items }), [items]);
+
+  const actionsValue = useMemo(
     () => ({ startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder, resetFolder }),
     [startDownload, recordExternalOpen, cancel, retry, clearFinished, openFile, openFolder, chooseFolder, resetFolder]
   );
 
-  // State on the OUTSIDE, actions INSIDE: the actions value is stable
-  // across item updates, so action-only consumers nested under it never
-  // re-render from progress ticks, while state consumers above still see
-  // every update.
   return (
-    <DownloadsStateContext.Provider value={stateValue}>
-      <DownloadsActionsContext.Provider value={actionsValue}>
-        {children}
-      </DownloadsActionsContext.Provider>
-    </DownloadsStateContext.Provider>
+    <DownloadActionsContext.Provider value={actionsValue}>
+      <DownloadSummaryContext.Provider value={summaryValue}>
+        <DownloadItemsContext.Provider value={itemsValue}>
+          <DownloadActiveStoreContext.Provider value={activeStore}>
+            {children}
+          </DownloadActiveStoreContext.Provider>
+        </DownloadItemsContext.Provider>
+      </DownloadSummaryContext.Provider>
+    </DownloadActionsContext.Provider>
   );
 }
 
-export function useDownloadState(): DownloadsStateValue {
-  const ctx = useContext(DownloadsStateContext);
-  if (!ctx) throw new Error('useDownloadState must be used inside DownloadsProvider');
-  return ctx;
-}
-
-export function useDownloadActions(): DownloadsActionsValue {
-  const ctx = useContext(DownloadsActionsContext);
+/** Stable commands: start, cancel, retry, open, folder management. */
+export function useDownloadActions(): DownloadActionsValue {
+  const ctx = useContext(DownloadActionsContext);
   if (!ctx) throw new Error('useDownloadActions must be used inside DownloadsProvider');
   return ctx;
 }
 
+/** Active-transfer count and the download directory. */
+export function useDownloadSummary(): DownloadSummaryValue {
+  const ctx = useContext(DownloadSummaryContext);
+  if (!ctx) throw new Error('useDownloadSummary must be used inside DownloadsProvider');
+  return ctx;
+}
+
+/** The live item list. For the download manager (and compat callers). */
+export function useDownloadItems(): DownloadItemsValue {
+  const ctx = useContext(DownloadItemsContext);
+  if (!ctx) throw new Error('useDownloadItems must be used inside DownloadsProvider');
+  return ctx;
+}
+
+/** Identity of the active transfers; changes only when the set changes. */
+export function useActiveDownloads(): ActiveDownloadInfo[] {
+  const store = useContext(DownloadActiveStoreContext);
+  if (!store) throw new Error('useActiveDownloads must be used inside DownloadsProvider');
+  return useSyncExternalStore(store.subscribe, store.getSnapshot);
+}
+
+/**
+ * Does THIS app have a transfer in flight? Subscribes only to the active
+ * download identity set: a byte-count or ETA update cannot flip it, so a
+ * streaming download never rerenders cards that do not belong to it.
+ * The panel names entries by the real file name ("VLC-3.0.2-win64.exe",
+ * "Cake_Wallet_v5.9.0_Windows.exe"), which often does NOT start with the
+ * app's display name ("VLC media player", "Cake Wallet"), so the stable app
+ * id is matched inside the name or the source URL as well.
+ */
+export function useAppDownloadStatus(appId: string, appName: string): boolean {
+  const store = useContext(DownloadActiveStoreContext);
+  if (!store) throw new Error('useAppDownloadStatus must be used inside DownloadsProvider');
+  // The snapshot IS the per-app boolean: React compares consecutive
+  // snapshots with Object.is and skips the render entirely while this
+  // app's status did not flip. A byte-count update on any transfer leaves
+  // every boolean untouched - zero card renders.
+  return useSyncExternalStore(store.subscribe, () => {
+    const appIdLc = appId.toLowerCase();
+    const active = store.getSnapshot();
+    return active.some(
+      (d) =>
+        d.name.startsWith(appName) ||
+        d.name.toLowerCase().includes(appIdLc) ||
+        d.url.toLowerCase().includes(appIdLc)
+    );
+  });
+}
+
+/** Aggregate read side (items + activeCount + downloadDir). Compat shim
+ * for consumers migrated to the PR-12 API; kept deliberately cheap. */
+export function useDownloadState(): DownloadsStateValue {
+  const { items } = useDownloadItems();
+  const summary = useDownloadSummary();
+  return useMemo(() => ({ items, ...summary }), [items, summary]);
+}
+
+/** Legacy aggregate. Unchanged contract; new code should prefer the three
+ * focused hooks above so subscriptions stay as narrow as the data used. */
+export function useDownloads(): DownloadsContextValue {
+  const actions = useDownloadActions();
+  const summary = useDownloadSummary();
+  const { items } = useDownloadItems();
+  return useMemo(
+    () => ({ items, ...summary, ...actions }),
+    [items, summary, actions]
+  );
+}

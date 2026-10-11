@@ -76,6 +76,7 @@ src/
 | `fress.lang` | `lib/i18n` |
 | `fress.resolveCache.v1` | `lib/release/resolveCache` |
 | `fress.last_update_check`, `fress.seen_version` | `features/selfUpdate`, `features/whatsNew` |
+| `fress.downloadItems.v1`, `fress.downloadDir` | `lib/downloads` (writes scheduled by `lib/downloadPersistence`) |
 
 ## The resolver's confidence order (unchanged behavior)
 
@@ -111,10 +112,26 @@ per-keystroke pipeline. Numbers from the reference run:
 | Per-card membership lookup (favorites/selection) | ~0.00005 ms |
 
 Everything is at least an order of magnitude below the 16 ms frame budget,
-including 13x/67x stress sizes, so **no memoization, virtualization, or
-state library was added** - the pre-existing `useMemo` around the filter
-pipeline was kept, and nothing else showed a measurable problem. The one
-structural caveat recorded honestly: `favorites.includes` / id-list
-lookups are linear per card; at 5000 apps x 5000 selections this would
-start to matter, and the fix then is a `Set` in `useBatchSelection`, not a
-rendering rewrite. Re-run the script after any catalog-scale change.
+including 13x/67x stress sizes, so no memoization was added to the filter
+pipeline itself. What DID gain memoization (measured, not assumed) is the
+download-under-load path: React 19's Profiler does not observe
+context-propagated rerenders, so the before/after was measured with a
+card-body render counter over a 500-card fixture with one live transfer
+(downloadsRenderIsolation.test.tsx records the after-side as assertions):
+
+| Scenario (500 cards, 1 download) | Before | After |
+|---|---|---|
+| Card renders while a download starts | 1500 | 0 (no matching card) |
+| Card renders across 10 progress events | 5000 | 0 |
+| localStorage writes across 10 progress events | 11 | 0 |
+
+The mechanism: `useDownloads` is split into `useDownloadActions` (stable),
+`useDownloadSummary` (count + dir), `useDownloadItems` (the manager only)
+and a per-app status selector (`useAppDownloadStatus`, a
+`useSyncExternalStore` subscription whose snapshot is the per-app boolean,
+so React bails out for every card whose status did not flip). Cards are
+wrapped in `React.memo` and the grid feeds them memoized id-`Set`
+lookups and stable callbacks. Download-panel persistence is coalesced by
+`lib/downloadPersistence.ts`: terminal transitions flush immediately,
+progress snapshots coalesce (750 ms) and dedupe, quota errors retry once
+with a trimmed payload.

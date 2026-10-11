@@ -2500,6 +2500,22 @@ mod tests {
         /// Used to prove a cancel signalled while the tail is provably
         /// still in flight wins over the completion decision.
         resume_body_after_hold: bool,
+        /// Validator-aware replies: when set, the request's `If-Range`
+        /// header is compared against the validator the origin currently
+        /// serves and the matching or mismatching scripted reply is sent.
+        /// This is how a conforming origin behaves: an unchanged resource
+        /// answers a range request with 206, a REPLACED one falls back to
+        /// a full 200 so the client never glues an old prefix onto a new
+        /// suffix.
+        if_range: Option<Box<IfRangeSwitch>>,
+    }
+
+    struct IfRangeSwitch {
+        /// The validator (ETag / Last-Modified, quoted as on the wire) the
+        /// origin currently serves.
+        current: String,
+        on_match: Box<MockReply>,
+        on_mismatch: Box<MockReply>,
     }
 
     impl MockReply {
@@ -2515,6 +2531,21 @@ mod tests {
                 send_body_bytes: None,
                 hold_ms: 0,
                 resume_body_after_hold: false,
+                if_range: None,
+            }
+        }
+
+        /// Serve `on_match` when the request's If-Range equals `current`,
+        /// `on_mismatch` otherwise (a changed resource must answer with a
+        /// fresh full body, never a 206 tail of the old one).
+        fn switch_on_if_range(current: &str, on_match: MockReply, on_mismatch: MockReply) -> Self {
+            MockReply {
+                if_range: Some(Box::new(IfRangeSwitch {
+                    current: current.to_string(),
+                    on_match: Box::new(on_match),
+                    on_mismatch: Box::new(on_mismatch),
+                })),
+                ..MockReply::raw("HTTP/1.1 302 Found", Vec::new(), Vec::new())
             }
         }
 
@@ -2604,26 +2635,48 @@ mod tests {
             .unwrap()
             .push(String::from_utf8_lossy(&buf).to_string());
 
+        // If-Range-aware serving: pick the reply this request earned
+        // before any header/body bytes go out. Nested switches are not
+        // evaluated (the sub-replies are plain scripted replies).
+        let request_head_lower = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+        let effective: &MockReply = match &reply.if_range {
+            Some(sw) => {
+                let sent = request_head_lower
+                    .split("if-range:")
+                    .nth(1)
+                    .and_then(|rest| rest.lines().next())
+                    .map(str::trim)
+                    .unwrap_or("");
+                let current = sw.current.to_ascii_lowercase();
+                if sent.eq_ignore_ascii_case(&current) {
+                    &sw.on_match
+                } else {
+                    &sw.on_mismatch
+                }
+            }
+            None => reply,
+        };
+
         let mut head = String::new();
-        head.push_str(reply.status_line);
+        head.push_str(effective.status_line);
         head.push_str("\r\n");
-        for (k, v) in &reply.headers {
+        for (k, v) in &effective.headers {
             head.push_str(&format!("{}: {}\r\n", k, v));
         }
         head.push_str("Connection: close\r\n\r\n");
         let _ = stream.write_all(head.as_bytes());
-        let limit = reply
+        let limit = effective
             .send_body_bytes
-            .unwrap_or(reply.body.len())
-            .min(reply.body.len());
-        let _ = stream.write_all(&reply.body[..limit]);
+            .unwrap_or(effective.body.len())
+            .min(effective.body.len());
+        let _ = stream.write_all(&effective.body[..limit]);
         let _ = stream.flush();
-        if reply.hold_ms > 0 {
-            std::thread::sleep(Duration::from_millis(reply.hold_ms));
+        if effective.hold_ms > 0 {
+            std::thread::sleep(Duration::from_millis(effective.hold_ms));
         }
-        if reply.resume_body_after_hold && limit < reply.body.len() {
+        if effective.resume_body_after_hold && limit < effective.body.len() {
             // Release the held tail onto the same connection, then close.
-            let _ = stream.write_all(&reply.body[limit..]);
+            let _ = stream.write_all(&effective.body[limit..]);
             let _ = stream.flush();
         }
         drop(stream);
@@ -4028,5 +4081,719 @@ mod tests {
             "A's staging file must hold exactly A's staged bytes"
         );
         assert!(!tmp.path().join("clash.bin").exists());
+    }
+
+    // -----------------------------------------------------------------------
+    // Final hardening round: disk failures at every write boundary, the
+    // remaining lifecycle edges, validator-tied resume, filename limits
+    // -----------------------------------------------------------------------
+
+    /// Test-only staging sink whose WRITES always succeed but whose
+    /// `sync_all` fails like a full disk once `budget` bytes have been
+    /// written. ENOSPC famously surfaces at fsync time (the dirty pages
+    /// cannot be written back), and the engine routes that error through
+    /// the same final, non-retryable disk-write classification as a
+    /// mid-write failure.
+    struct SyncFailsAfter {
+        budget: u64,
+    }
+
+    struct SyncFlakyWriter {
+        inner: tokio::fs::File,
+        written: u64,
+        budget: u64,
+    }
+
+    impl PartWriter for SyncFlakyWriter {
+        async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+            tokio::io::AsyncWriteExt::write_all(&mut self.inner, bytes).await?;
+            self.written += bytes.len() as u64;
+            Ok(())
+        }
+        async fn flush(&mut self) -> io::Result<()> {
+            tokio::io::AsyncWriteExt::flush(&mut self.inner).await
+        }
+        async fn sync_all(&mut self) -> io::Result<()> {
+            if self.written >= self.budget {
+                return Err(io::Error::from(io::ErrorKind::StorageFull));
+            }
+            tokio::fs::File::sync_all(&self.inner).await
+        }
+    }
+
+    impl StagingSink for SyncFailsAfter {
+        type Writer = SyncFlakyWriter;
+        async fn open(&self, part: &Path, mode: StagingOpenMode) -> io::Result<Self::Writer> {
+            let inner = DiskStaging.open(part, mode).await?;
+            Ok(SyncFlakyWriter {
+                inner,
+                written: 0,
+                budget: self.budget,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_disk_full_failure_during_a_resume_tail_is_final_and_keeps_the_prefix_resumable() {
+        // First attempt staged 400 bytes, then the disk filled (see the
+        // fresh-download variant below). After freeing space the user
+        // resumes and the 206 TAIL write hits the still-full disk after
+        // 300 tail bytes. The failure must stay final and non-retryable,
+        // keep prefix + partial tail under the staging name only, and the
+        // recovered download must resume from exactly those 700 bytes.
+        let tmp = TempDir::new("e2e-diskfull-resume");
+        let full = pattern(1_000);
+        let tail = MockReply::partial_206(
+            &format!("bytes 400-{}/{}", full.len() - 1, full.len()),
+            &full[400..],
+        );
+        let server = spawn_mock(vec![tail]);
+        let part = tmp.path().join("full.bin.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &full[..400]).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("full.bin"));
+        plan.resume = true;
+        plan.staging = Some(part.clone());
+        plan.expected_sha256 = Some(sha256_hex(&full));
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        // The 600-byte tail gets 300 bytes of disk room: the writer fails
+        // with a typed full-disk error on the second half of the tail.
+        let sink = DiskFullAfter { budget: 300 };
+
+        let (message, kind) =
+            execute_with_retries_on(&log, &session, 1, plan, cancel_rx, test_backoff(), &sink)
+                .await
+                .expect_err("a full disk during the tail write must fail the download");
+        assert!(
+            message.starts_with("Disk write failed"),
+            "the failure must be categorized as a local disk-write failure, got: {message}"
+        );
+        assert_eq!(
+            kind, None,
+            "a local disk failure is final - never the retryable network kind"
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(
+            log.retries.lock().unwrap().is_empty(),
+            "a disk-full failure must never consume the automatic retry budget"
+        );
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            1,
+            "no second attempt may be started against the server"
+        );
+        // Finalization cannot occur while the transfer is incomplete: no
+        // destination file, and the staged bytes are exactly prefix plus
+        // the tail bytes that made it to disk - nothing more, nothing
+        // truncated-looking at the final name.
+        assert!(!tmp.path().join("full.bin").exists());
+        assert_eq!(
+            tokio::fs::metadata(&part).await.unwrap().len(),
+            700,
+            "the prefix and exactly the budgeted tail bytes must survive"
+        );
+        assert_eq!(
+            tokio::fs::read(&part).await.unwrap(),
+            [&full[..400], &full[400..700]].concat()
+        );
+        assert!(
+            read_part_meta(&part).await.is_some(),
+            "the validator sidecar must survive for the resume"
+        );
+
+        // Recovery: with the disk condition corrected, the retained 700
+        // bytes are the resume base - the request asks for exactly their
+        // offset and the download completes with the trusted digest.
+        let recovery = MockReply::partial_206(
+            &format!("bytes 700-{}/{}", full.len() - 1, full.len()),
+            &full[700..],
+        );
+        let server2 = spawn_mock(vec![recovery]);
+        let mut plan2 = plan_for(&server2.url, tmp.path(), Some("full.bin"));
+        plan2.resume = true;
+        plan2.staging = Some(part.clone());
+        plan2.expected_sha256 = Some(sha256_hex(&full));
+        let (session2, cancel_rx2) = test_session().await;
+        let payload = execute_with_retries(&log, &session2, 1, plan2, cancel_rx2, test_backoff())
+            .await
+            .expect("recovery after freeing space must complete the download");
+        assert_eq!(payload.bytes, 1_000);
+        assert_eq!(payload.verified, Some(true));
+        assert!(request_head(&server2, 0).contains("range: bytes=700-"));
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("full.bin")).await.unwrap(),
+            full
+        );
+        assert!(!part.exists());
+    }
+
+    #[tokio::test]
+    async fn a_disk_failure_at_the_sync_boundary_is_final_and_never_finalizes() {
+        // ENOSPC regularly surfaces at fsync rather than at write time.
+        // Every write succeeds, then the sync fails: the same final
+        // disk-write classification must apply, nothing may be finalized,
+        // and the staged bytes stay exactly what was written - never a
+        // hybrid. Recovery goes through the documented policy chain: the
+        // complete-looking .part is not blindly committed, the resume
+        // learns from the 416 that nothing is missing and discards the
+        // staging bytes, and a fresh attempt finishes the job.
+        let tmp = TempDir::new("e2e-diskfull-sync");
+        let body = pattern(1_000);
+        let server = spawn_mock(vec![
+            MockReply::full_200(&body),
+            MockReply::range_not_satisfiable(),
+            MockReply::full_200(&body),
+        ]);
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let mut plan = plan_for(&server.url, tmp.path(), Some("sync.bin"));
+        plan.expected_sha256 = Some(sha256_hex(&body));
+        let sink = SyncFailsAfter { budget: 700 };
+
+        let (message, kind) =
+            execute_with_retries_on(&log, &session, 1, plan, cancel_rx, test_backoff(), &sink)
+                .await
+                .expect_err("a failed fsync must fail the download");
+        assert!(message.starts_with("Disk write failed"), "got: {message}");
+        assert_eq!(kind, None, "a disk failure is final, never retryable");
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(log.retries.lock().unwrap().is_empty());
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+        assert!(!tmp.path().join("sync.bin").exists());
+        let part = tmp.path().join("sync.bin.part");
+        assert_eq!(
+            tokio::fs::metadata(&part).await.unwrap().len(),
+            1_000,
+            "every written byte is retained under the staging name"
+        );
+        assert!(read_part_meta(&part).await.is_some());
+
+        // Resuming a complete-length .part is refused by the origin (the
+        // range is unsatisfiable) and the staging bytes are discarded by
+        // policy - the engine never commits from an unverifiable state.
+        let mut plan2 = plan_for(&server.url, tmp.path(), Some("sync.bin"));
+        plan2.resume = true;
+        plan2.staging = Some(part.clone());
+        let (session2, cancel_rx2) = test_session().await;
+        let (message2, kind2) =
+            execute_with_retries(&log, &session2, 1, plan2, cancel_rx2, test_backoff())
+                .await
+                .expect_err("the unsatisfiable range must discard the staging bytes");
+        assert_eq!(kind2.as_deref(), Some("resume-invalid"), "{message2}");
+        assert!(
+            !part.exists(),
+            "the discard policy must have removed the .part"
+        );
+        assert!(!tmp.path().join("sync.bin").exists());
+
+        // A fresh attempt with the disk corrected completes verified.
+        let mut plan3 = plan_for(&server.url, tmp.path(), Some("sync.bin"));
+        plan3.expected_sha256 = Some(sha256_hex(&body));
+        let (session3, cancel_rx3) = test_session().await;
+        let payload = execute_with_retries(&log, &session3, 1, plan3, cancel_rx3, test_backoff())
+            .await
+            .expect("the fresh attempt must complete");
+        assert_eq!(payload.verified, Some(true));
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("sync.bin")).await.unwrap(),
+            body
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failure_after_the_part_is_created_but_before_any_byte_streams_is_survivable() {
+        // The server promises 1000 bytes and closes before delivering a
+        // single one. The .part already exists (it is created between the
+        // response gate and the stream loop): the attempt must fail as a
+        // RETRYABLE network error, spend the automatic retry budget
+        // against the dead server, and never leave anything at the final
+        // name. A later resume from the empty staging file is a plain
+        // fresh download that completes byte-exactly.
+        let tmp = TempDir::new("e2e-zero-body");
+        let full = pattern(1_000);
+        let mut dead = MockReply::full_200(&full);
+        dead.send_body_bytes = Some(0);
+        let server = spawn_mock(vec![dead]);
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("zero.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a zero-byte body against a promised length must fail");
+        assert_eq!(
+            kind.as_deref(),
+            Some("network"),
+            "a short transfer is retryable, got: {message}"
+        );
+        assert_eq!(
+            log.retries.lock().unwrap().len(),
+            2,
+            "the retry budget (2) must be spent on the dead transfer"
+        );
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            1,
+            "only the scripted attempt is served; the retries hit the exhausted mock"
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        // The staging file was created before the failure and is kept;
+        // neither the requested name nor any candidate name exists.
+        let part = tmp.path().join("zero.bin.part");
+        assert!(part.exists());
+        assert_eq!(tokio::fs::metadata(&part).await.unwrap().len(), 0);
+        assert!(!tmp.path().join("zero.bin").exists());
+        assert!(!tmp.path().join("zero (1).bin").exists());
+
+        // Recovery: resuming the empty staging file reuses the same .part
+        // (truncate + rewrite) and completes exactly.
+        let server2 = spawn_mock(vec![MockReply::full_200(&full)]);
+        let mut plan2 = plan_for(&server2.url, tmp.path(), Some("zero.bin"));
+        plan2.resume = true;
+        plan2.staging = Some(part.clone());
+        let (session2, cancel_rx2) = test_session().await;
+        let payload = execute_with_retries(&log, &session2, 1, plan2, cancel_rx2, test_backoff())
+            .await
+            .expect("recovery from a zero-byte staging file must complete");
+        assert_eq!(payload.bytes, 1_000);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("zero.bin")).await.unwrap(),
+            full
+        );
+        assert!(!part.exists());
+    }
+
+    /// Test-only sink whose staging file disappears between the last
+    /// written byte and the final commit (a vanished mount, an external
+    /// cleaner). Drives the REAL finalize boundary into its failure arm.
+    struct VanishOnSync;
+
+    struct VanishingWriter {
+        inner: tokio::fs::File,
+        part: PathBuf,
+    }
+
+    impl PartWriter for VanishingWriter {
+        async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+            tokio::io::AsyncWriteExt::write_all(&mut self.inner, bytes).await
+        }
+        async fn flush(&mut self) -> io::Result<()> {
+            tokio::io::AsyncWriteExt::flush(&mut self.inner).await
+        }
+        async fn sync_all(&mut self) -> io::Result<()> {
+            let _ = tokio::fs::remove_file(&self.part).await;
+            tokio::fs::File::sync_all(&self.inner).await
+        }
+    }
+
+    impl StagingSink for VanishOnSync {
+        type Writer = VanishingWriter;
+        async fn open(&self, part: &Path, mode: StagingOpenMode) -> io::Result<Self::Writer> {
+            let inner = DiskStaging.open(part, mode).await?;
+            Ok(VanishingWriter {
+                inner,
+                part: part.to_path_buf(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failure_at_the_finalization_boundary_never_leaves_a_file_behind() {
+        // Every byte was delivered and hashed, but the staging file is
+        // gone when the commit runs. The finalize boundary must fail the
+        // download as a FINAL error, leave nothing at the destination
+        // (including no half-made reservation from the create_new
+        // fallback), and never report success.
+        let tmp = TempDir::new("e2e-finalize-fail");
+        let body = pattern(600);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("gone.bin"));
+
+        let (message, kind) = execute_with_retries_on(
+            &log,
+            &session,
+            1,
+            plan,
+            cancel_rx,
+            test_backoff(),
+            &VanishOnSync,
+        )
+        .await
+        .expect_err("a vanished staging file must fail the commit");
+        assert!(
+            message.starts_with("Cannot finalize the download"),
+            "got: {message}"
+        );
+        assert_eq!(kind, None, "a finalize failure is final, never retryable");
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(log.retries.lock().unwrap().is_empty());
+        assert!(
+            !tmp.path().join("gone.bin").exists(),
+            "the destination name must never appear for a failed commit"
+        );
+        assert!(!tmp.path().join("gone.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_panicking_engine_task_releases_the_registry_and_reports_failure() {
+        // Mirrors the bridge contract implemented in lib.rs
+        // (catch_unwind_result + session.release()): an unexpected panic
+        // inside the engine must NOT be swallowed into a success or an
+        // ordinary error result. The wrapper observes the panic, reports
+        // the failure, and releases the registry entry so no
+        // forever-active download is left behind.
+        let tmp = TempDir::new("e2e-panic");
+        let server = spawn_mock(vec![MockReply::full_200(&pattern(100_000))]);
+
+        struct PanickingSink;
+        impl ProgressSink for PanickingSink {
+            fn progress(&self, _payload: ProgressPayload) {
+                panic!("unexpected engine fault");
+            }
+            fn retrying(&self, _payload: RetryPayload) {}
+        }
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let plan = plan_for(&server.url, tmp.path(), Some("panic.bin"));
+
+        use futures_util::FutureExt;
+        let outcome = FutureExt::catch_unwind(std::panic::AssertUnwindSafe(execute_with_retries(
+            &PanickingSink,
+            &session,
+            id,
+            plan,
+            cancel_rx,
+            test_backoff(),
+        )))
+        .await;
+        assert!(
+            outcome.is_err(),
+            "the panic must propagate out of the engine, got {:?}",
+            outcome.map(|r| r.map(|p| p.bytes))
+        );
+        // What the bridge does next: release the entry. The registry must
+        // be empty afterwards - no active download, no stale state.
+        session.release().await;
+        assert_eq!(session.snapshot().await, None);
+        assert!(
+            !tmp.path().join("panic.bin").exists(),
+            "a panicking task must never claim the final name"
+        );
+        // A panic leaves the transfer exactly like a crash: the staging
+        // file survives untouched (still resumable by a later attempt),
+        // nothing completed-looking is left behind.
+        assert!(tmp.path().join("panic.bin.part").exists());
+    }
+
+    /// Asserts that `session` sits in a terminal state with no legal
+    /// successor - the runtime half of `terminal_states_have_no_exits`.
+    async fn assert_terminal_has_no_exits(label: &str, session: &DownloadSession) {
+        use DownloadState::*;
+        for to in [
+            Queued,
+            Downloading,
+            Retrying,
+            Verifying,
+            Completed,
+            Failed,
+            Cancelled,
+        ] {
+            assert!(
+                session.advance(to).await.is_err(),
+                "{label}: no edge may leave the terminal state via {to:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn session_walks_every_documented_edge_and_rejects_the_rest() {
+        // Runtime walk of the full transition table through the real
+        // session layer: every documented edge succeeds somewhere, and
+        // once a terminal state is reached NO edge leaves it.
+        use DownloadState::*;
+
+        // Queued -> Downloading -> Verifying -> Completed.
+        let (s, _) = test_session().await;
+        assert!(s.advance(Downloading).await.is_ok());
+        assert!(s.advance(Verifying).await.is_ok());
+        assert!(s.advance(Completed).await.is_ok());
+        assert_terminal_has_no_exits("Completed", &s).await;
+
+        // The Verifying -> Failed edge (e.g. checksum mismatch).
+        let (s, _) = test_session().await;
+        s.advance(Downloading).await.unwrap();
+        s.advance(Verifying).await.unwrap();
+        s.advance(Failed).await.unwrap();
+        assert_terminal_has_no_exits("Failed", &s).await;
+
+        // The full automatic-retry cycle.
+        let (s, _) = test_session().await;
+        s.advance(Downloading).await.unwrap();
+        s.advance(Retrying).await.unwrap();
+        s.advance(Downloading).await.unwrap();
+        s.advance(Retrying).await.unwrap();
+        s.advance(Downloading).await.unwrap();
+        s.advance(Verifying).await.unwrap();
+        s.advance(Completed).await.unwrap();
+
+        // Cancellation is reachable from Queued (no step), Downloading and
+        // Retrying (each path starts at Queued).
+        for walk in [
+            Vec::new() as Vec<DownloadState>,
+            vec![Downloading],
+            vec![Downloading, Retrying],
+        ] {
+            let (s, _) = test_session().await;
+            for step in walk {
+                s.advance(step).await.unwrap();
+            }
+            s.advance(Cancelled).await.unwrap();
+            assert_terminal_has_no_exits("Cancelled", &s).await;
+        }
+
+        // Failure is reachable from Downloading and Retrying.
+        for walk in [vec![Downloading], vec![Downloading, Retrying]] {
+            let (s, _) = test_session().await;
+            for step in walk {
+                s.advance(step).await.unwrap();
+            }
+            s.advance(Failed).await.unwrap();
+            assert_terminal_has_no_exits("Failed(walk)", &s).await;
+        }
+
+        // The rejected shapes the table forbids: skipping states and
+        // entering non-terminals from terminals are already covered by
+        // the 7x7 matrix; here the two most dangerous skips are pinned at
+        // the session layer.
+        let (s, _) = test_session().await;
+        assert!(
+            s.advance(Completed).await.is_err(),
+            "Queued -> Completed must not happen"
+        );
+        assert!(
+            s.advance(Verifying).await.is_err(),
+            "Queued -> Verifying must not happen"
+        );
+        assert_eq!(
+            s.snapshot().await,
+            Some(Queued),
+            "rejections leave the state alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_changed_remote_resource_is_never_glued_onto_the_staged_prefix() {
+        // The staging file holds a prefix of the OLD resource (validator
+        // "v1"); the origin now serves "v2". A conforming server refuses
+        // the If-Range and answers with a full 200 of the NEW body. The
+        // engine must replace the staging content - never append - and
+        // the final file must be byte-exactly the new resource.
+        let tmp = TempDir::new("e2e-ifrange-changed");
+        let old = pattern(1_000);
+        let new: Vec<u8> = (0..900u32).map(|i| ((i + 13) % 251) as u8).collect();
+        let server = spawn_mock(vec![MockReply::switch_on_if_range(
+            "\"v2\"",
+            // Served only if the stale validator were (wrongly) accepted.
+            MockReply::partial_206("bytes 400-999/1000", &old[400..]),
+            MockReply::full_200(&new),
+        )]);
+        let part = tmp.path().join("res.bin.part");
+        seed_staging(&part, &server.url, Some("\"v1\""), &old[..400]).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("res.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a replaced resource must be re-fetched in full");
+        let head = request_head(&server, 0);
+        assert!(
+            head.contains("range: bytes=400-"),
+            "the resume request must ask for the tail"
+        );
+        assert!(
+            head.contains("if-range: \"v1\""),
+            "the stale validator must travel as If-Range"
+        );
+        assert_eq!(payload.bytes, 900, "the new body alone, never prefix+tail");
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("res.bin")).await.unwrap(),
+            new,
+            "the final file must be exactly the new resource"
+        );
+        assert_eq!(payload.sha256, sha256_hex(&new));
+        assert_eq!(session.snapshot().await, Some(DownloadState::Completed));
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_resource_resumes_its_tail_when_the_validator_still_matches() {
+        // The positive half of the If-Range contract: same validator, so
+        // the origin serves the 206 tail and the staged prefix + tail are
+        // one byte-exact file.
+        let tmp = TempDir::new("e2e-ifrange-match");
+        let full = pattern(1_000);
+        let server = spawn_mock(vec![MockReply::switch_on_if_range(
+            "\"v2\"",
+            MockReply::partial_206("bytes 400-999/1000", &full[400..]),
+            // Served only if the valid resume were (wrongly) refused.
+            MockReply::full_200(&full),
+        )]);
+        let part = tmp.path().join("res.bin.part");
+        seed_staging(&part, &server.url, Some("\"v2\""), &full[..400]).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("res.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("an unchanged resource must resume its tail");
+        let head = request_head(&server, 0);
+        assert!(head.contains("range: bytes=400-"));
+        assert!(head.contains("if-range: \"v2\""));
+        assert_eq!(payload.bytes, 1_000);
+        assert_eq!(payload.sha256, sha256_hex(&full));
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("res.bin")).await.unwrap(),
+            full
+        );
+    }
+
+    #[tokio::test]
+    async fn a_last_modified_only_sidecar_still_ties_the_resume_to_the_resource() {
+        // Some vendors never send ETags; Last-Modified is then the only
+        // validator. It must be carried as If-Range exactly like an ETag:
+        // a matching value resumes the tail, a changed one would force
+        // the 200 replacement path.
+        let tmp = TempDir::new("e2e-ifrange-lm");
+        let full = pattern(800);
+        let server = spawn_mock(vec![MockReply::switch_on_if_range(
+            "Tue, 06 Oct 2026 09:00:00 GMT",
+            MockReply::partial_206("bytes 300-799/800", &full[300..]),
+            MockReply::full_200(&pattern(999)),
+        )]);
+        let part = tmp.path().join("lm.bin.part");
+        write_file(&part, &full[..300]).await;
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "last-modified",
+            "Tue, 06 Oct 2026 09:00:00 GMT"
+                .parse()
+                .expect("header value"),
+        );
+        write_part_meta(&part, &server.url, &headers).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("lm.bin"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a Last-Modified validator must drive the resume");
+        let head = request_head(&server, 0);
+        assert!(head.contains("range: bytes=300-"));
+        assert!(
+            head.contains("if-range: tue, 06 oct 2026 09:00:00 gmt"),
+            "the Last-Modified validator must travel as If-Range, got: {head}"
+        );
+        assert_eq!(payload.bytes, 800);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("lm.bin")).await.unwrap(),
+            full
+        );
+    }
+
+    #[tokio::test]
+    async fn an_over_long_filename_fails_cleanly_without_artifacts() {
+        // A 300+ character name exceeds the 255-byte per-name limit of
+        // mainstream filesystems (or the classic Windows MAX_PATH budget,
+        // which the .part suffix and directory prefix also eat into). The
+        // engine must refuse with a FINAL error and leave the directory
+        // untouched - never panic, never truncate, never rename silently.
+        // Self-calibrating: if this filesystem does accept such a name
+        // (long paths enabled), the portable claim is "no panic, no
+        // corruption" instead.
+        let tmp = TempDir::new("e2e-long-name");
+        let body = pattern(64);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let long = format!("{}.bin", "x".repeat(300));
+
+        let probe = tmp.path().join(&long);
+        match std::fs::write(&probe, b"x") {
+            Err(_) => {
+                let _ = std::fs::remove_file(&probe);
+                let (session, cancel_rx) = test_session().await;
+                let log = EventLog::default();
+                let plan = plan_for(&server.url, tmp.path(), Some(&long));
+                let (message, kind) =
+                    execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                        .await
+                        .expect_err("an unrepresentable name must fail the download");
+                assert_eq!(
+                    kind, None,
+                    "a local filesystem limit is final, got: {message}"
+                );
+                assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+                assert!(
+                    log.retries.lock().unwrap().is_empty(),
+                    "a filesystem limit must not consume the retry budget"
+                );
+                assert!(!tmp.path().join(&long).exists());
+                assert!(!tmp.path().join(format!("{long}.part")).exists());
+                assert_eq!(
+                    std::fs::read_dir(tmp.path()).unwrap().count(),
+                    0,
+                    "no artifact of any kind may remain"
+                );
+            }
+            Ok(()) => {
+                let _ = std::fs::remove_file(&probe);
+                let (session, cancel_rx) = test_session().await;
+                let log = EventLog::default();
+                let plan = plan_for(&server.url, tmp.path(), Some(&long));
+                let payload =
+                    execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                        .await
+                        .expect("a filesystem that accepts the name must download fine");
+                assert_eq!(payload.bytes, 64);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_long_but_representable_filename_downloads_end_to_end() {
+        // 176 characters plus extension: inside every mainstream per-name
+        // limit and the classic Windows MAX_PATH budget together with the
+        // temp prefix. Guards against overzealous refusal of legitimate
+        // long names anywhere in sanitize/stage/commit.
+        let tmp = TempDir::new("e2e-long-ok");
+        let body = pattern(300);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let name = format!("{}.bin", "a".repeat(172));
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some(&name));
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("a representable long name must download end to end");
+        assert_eq!(
+            payload.path,
+            tmp.path().join(&name).to_string_lossy().to_string()
+        );
+        assert_eq!(tokio::fs::read(tmp.path().join(&name)).await.unwrap(), body);
+        assert!(!tmp.path().join(format!("{name}.part")).exists());
     }
 }

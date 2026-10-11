@@ -4,6 +4,7 @@
 //
 import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
+import { useI18n } from '../lib/i18n';
 import { X } from 'lucide-react';
 
 export type LegalTab = 'privacy' | 'terms';
@@ -19,6 +20,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
   initialTab = 'privacy',
   onClose
 }) => {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<LegalTab>(initialTab);
 
   // Re-sync the requested tab each time the modal opens (state persists between opens)
@@ -29,7 +31,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
   }, [isOpen, initialTab]);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose });
   if (!isOpen) return null;
 
   const tabClass = (id: LegalTab) => `py-2.5 px-3 font-medium whitespace-nowrap border-b-2 transition-colors ${
@@ -53,25 +55,37 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between bg-slate-900">
           <h2 id="legal-modal-heading" className="text-sm sm:text-base font-bold text-slate-100 tracking-tight">
-            Privacy &amp; terms
+            {t('legal.title')}
           </h2>
           <button
             type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors"
-            aria-label="Close legal documents dialog"
+            aria-label={t('legal.closeAria')}
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
-        {/* Tab Navigation */}
+        {/* Tab Navigation: plain buttons (no tab roles) so keyboard users get
+            real buttons in the tab order; the selection state is exposed via
+            aria-pressed on each. */}
         <div className="flex border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950 px-4 text-xs overflow-x-auto">
-          <button type="button" onClick={() => setActiveTab('privacy')} className={tabClass('privacy')}>
-            Privacy
+          <button
+            type="button"
+            onClick={() => setActiveTab('privacy')}
+            aria-pressed={activeTab === 'privacy'}
+            className={tabClass('privacy')}
+          >
+            {t('legal.tabPrivacy')}
           </button>
-          <button type="button" onClick={() => setActiveTab('terms')} className={tabClass('terms')}>
-            Terms
+          <button
+            type="button"
+            onClick={() => setActiveTab('terms')}
+            aria-pressed={activeTab === 'terms'}
+            className={tabClass('terms')}
+          >
+            {t('legal.tabTerms')}
           </button>
         </div>
 
@@ -79,25 +93,17 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto text-xs text-slate-300 leading-relaxed">
           {activeTab === 'privacy' && (
             <div className="space-y-3">
-              <h3 className="text-sm font-bold text-slate-100">What Fress collects</h3>
-              <p>
-                Short answer: nothing. Fress has no accounts, no servers and no analytics. Your bookmarks, the apps you add, and your settings live in this device's local storage and never leave it.
-              </p>
-              <p>
-                When you click a link to a project's GitHub page or website, your browser talks to that site directly. Fress adds nothing to those requests and sees none of them.
-              </p>
+              <h3 className="text-sm font-bold text-slate-100">{t('legal.privacyHeading')}</h3>
+              <p>{t('legal.privacyBody1')}</p>
+              <p>{t('legal.privacyBody2')}</p>
             </div>
           )}
 
           {activeTab === 'terms' && (
             <div className="space-y-3">
-              <h3 className="text-sm font-bold text-slate-100">Terms</h3>
-              <p>
-                Fress is a directory. It lists other people's software and links to their official downloads; it does not host or modify anything. Every app keeps its own license (MIT, GPL, Apache, and so on). Read and respect the license of whatever you install.
-              </p>
-              <p>
-                The catalog is provided as-is. We check links and facts when we list an app, but projects change and we are not liable for what happens after you leave the app. If you add custom entries yourself, they are yours, not ours.
-              </p>
+              <h3 className="text-sm font-bold text-slate-100">{t('legal.tabTerms')}</h3>
+              <p>{t('legal.termsBody1')}</p>
+              <p>{t('legal.termsBody2')}</p>
             </div>
           )}
         </div>
@@ -109,7 +115,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
             onClick={onClose}
             className="text-xs bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 px-4 py-2 rounded-lg border border-slate-950/10 dark:border-white/[0.1] transition-colors"
           >
-            Close
+            {t('common.close')}
           </button>
         </div>
       </div>

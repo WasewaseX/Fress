@@ -4,6 +4,7 @@
 //
 import React, { useEffect, useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
+import { useI18n } from '../lib/i18n';
 import { X, Check, Sparkles, ExternalLink, Wrench, RefreshCw, Minus, ChevronDown } from 'lucide-react';
 import { BrandMark } from './Header';
 import { notesForVersion } from '../lib/releaseNotes';
@@ -39,19 +40,17 @@ function SectionIcon({ heading, className }: { heading: string; className: strin
  * the popup was dismissed.
  */
 export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose }) => {
+  const { t } = useI18n();
   const [showDetails, setShowDetails] = useState(false);
   const [showEarlier, setShowEarlier] = useState(false);
   const [openEarlierVersion, setOpenEarlierVersion] = useState<string | null>(null);
 
-  // Escape closes, like every other modal in the app.
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  // Escape goes through the shared modal stack: while another surface (the
+  // command palette, a dialog opened on top) is above this one, that surface
+  // answers first and this window-level listener used to close BOTH layers
+  // with one press.
+  const panelRef = useRef<HTMLDivElement>(null);
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose });
 
   // Reset the expanded views each time the popup opens.
   useEffect(() => {
@@ -62,8 +61,6 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
     }
   }, [isOpen]);
 
-  const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
   if (!isOpen) return null;
 
   const note = notesForVersion(pkg.version);
@@ -93,7 +90,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
             <div className="min-w-0">
               <h2 id="whats-new-title" className="text-base font-bold text-slate-100 tracking-tight flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-sky-400" aria-hidden="true" />
-                <span>What's new in Fress</span>
+                <span>{t('wn.title')}</span>
               </h2>
               <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
                 v{note ? note.version : pkg.version}
@@ -106,7 +103,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
             type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] transition-colors shrink-0"
-            aria-label="Close what's new"
+            aria-label={t('wn.closeAria')}
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -132,7 +129,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
             </>
           ) : (
             <p className="text-[13px] text-slate-300 leading-relaxed">
-              Fress was updated to v{pkg.version}. This build brings small fixes and polish.
+              {t('wn.fallbackBody').replace('{v}', pkg.version)}
             </p>
           )}
 
@@ -146,7 +143,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                 aria-expanded={showDetails}
                 className="w-full flex items-center justify-between gap-2 text-xs font-semibold text-sky-400 hover:text-sky-300 transition-colors py-1.5"
               >
-                <span>All details for this release</span>
+                <span>{t('wn.allDetails')}</span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showDetails ? 'rotate-180' : ''}`} aria-hidden="true" />
               </button>
 
@@ -187,7 +184,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                 aria-expanded={showEarlier}
                 className="w-full flex items-center justify-between gap-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors py-1.5"
               >
-                <span>Earlier releases ({earlier.length})</span>
+                <span>{t('wn.earlier').replace('{n}', String(earlier.length))}</span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showEarlier ? 'rotate-180' : ''}`} aria-hidden="true" />
               </button>
 
@@ -248,7 +245,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
             onClick={() => void openExternal(CHANGELOG_URL)}
             className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
           >
-            <span>Full changelog on GitHub</span>
+            <span>{t('wn.fullChangelog')}</span>
             <ExternalLink className="w-3 h-3" aria-hidden="true" />
           </button>
           <button
@@ -257,7 +254,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
             onClick={onClose}
             className="text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white px-4 py-1.5 rounded-lg border border-sky-500 transition-colors"
           >
-            Got it
+            {t('wn.gotIt')}
           </button>
         </div>
       </div>

@@ -209,10 +209,16 @@ test.describe('Workflow J: incompatible-asset release', () => {
     // The fail-closed contract: no platform-matched asset -> the releases
     // page opens (with the "no asset" hint), the download registry stays
     // EMPTY, and the "downloading" toast never appears.
+    //
+    // openExternal records through an async dynamic import, so the bridge
+    // read must POLL for the recorded URL instead of racing it (CI runners
+    // lost this race once; the toast assertion below auto-waits already).
     await page.locator('#header-update-pill').click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
     const b = (await bridge(page))!;
     expect(Object.keys(b.downloads)).toHaveLength(0);
-    expect(b.openedUrls).toEqual([VALID_RELEASE_URL]);
 
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
@@ -233,10 +239,14 @@ test.describe('Workflow J: unverifiable asset (checksum fail-closed)', () => {
     await expect(page.locator('#header-update-pill')).toBeVisible();
     await drainToasts(page);
 
+    // Same poll discipline as the ARM-only sibling above: the opener
+    // records through an async import, never race the bridge read.
     await page.locator('#header-update-pill').click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
     const b = (await bridge(page))!;
     expect(Object.keys(b.downloads)).toHaveLength(0);
-    expect(b.openedUrls).toEqual([VALID_RELEASE_URL]);
 
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();

@@ -42,6 +42,8 @@ import {
   OWN_RELEASE_NO_SUMS,
   OWN_SUMS_WRONG_HASH,
   OWN_SUMS_PARTIAL,
+  OWN_SIG_TXT,
+  GOOD_SHA256,
 } from './fixtures/data';
 
 const d = DICTS.en;
@@ -114,6 +116,87 @@ test.describe('Workflow I: valid release fixture', () => {
     // The transfer is a real download-manager row (same pipeline as any app).
     await openDownloads(page);
     await expect(page.locator(sel.downloadsPanel)).toContainText('Fress_1.0.9_amd64.AppImage');
+  });
+
+  /** Workflow I, second half: the post-download signature gate. The native
+   * engine confirms the checksum (verified: true), and BEFORE the app can
+   * call the update "verified", `verify_self_update_signature` must run
+   * against the ENGINE-reported completion path with the release's sidecar
+   * document. Only then may the verified state appear. */
+  test('completed download is signature-verified before the app claims verified', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await checkForUpdates(page);
+    await drainToasts(page);
+
+    await page.locator('#header-update-pill').click();
+    const b = (await bridge(page))!;
+    const id = Number(Object.keys(b.downloads)[0]);
+    const finalPath = '/home/test/Downloads/Fress_1.0.9_amd64.AppImage';
+
+    // The engine finishes and CONFIRMS the published digest. (The bridge's
+    // emit methods only exist inside the page - functions do not survive
+    // page.evaluate's structured clone - so they are called in-page, and
+    // every value travels through the argument object.)
+    await page.evaluate(
+      ({ id, path, sha }) => window.__fressTest!.emitComplete(id, path, 22_000_000, sha, true),
+      { id, path: finalPath, sha: GOOD_SHA256 }
+    );
+
+    // The native verifier ran against the exact completed bytes with the
+    // release sidecar document - the machine-truth binding contract.
+    await expect
+      .poll(async () => (await bridge(page))!.calls.filter((c) => c.cmd === 'verify_self_update_signature').length, { timeout: 10_000 })
+      .toBe(1);
+    const b2 = (await bridge(page))!;
+    const verify = b2.calls.find((c) => c.cmd === 'verify_self_update_signature');
+    expect(verify?.args.filePath).toBe(finalPath);
+    expect(verify?.args.signatureBase64).toBe(OWN_SIG_TXT);
+
+    // Only now does the app render the verified outcome: the success toast
+    // names the verified state, and the pill flips to its ready label.
+    const verifiedToast = page.locator('[data-sonner-toast]', { hasText: d['update.verifiedReady'] });
+    await expect(verifiedToast.first()).toBeVisible();
+    await expect(page.locator('#header-update-pill')).toContainText(
+      d['header.updatePillReady'].replace('{v}', '1.0.9-beta')
+    );
+    // No fallback and no auto-launch anywhere in the happy path.
+    expect(b2.openedUrls).toEqual([]);
+  });
+
+  /** The mirror contract: a failed signature verification (foreign key,
+   * tampered bytes - the Rust suite covers the crypto, this covers the
+   * FLOW) must surface as an explained failure with the releases-page
+   * fallback, never as a verified update. */
+  test('a rejected signature is an explained failure with the releases-page fallback', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await checkForUpdates(page);
+    await drainToasts(page);
+
+    const b0 = (await bridge(page))!;
+    await page.evaluate(() =>
+      window.__fressTest!.setFailVerify('Updater signature verification failed')
+    );
+
+    await page.locator('#header-update-pill').click();
+    // The download registry only exists AFTER the click started the
+    // delivery - the earlier snapshot was taken before it, so re-read it.
+    const b1 = (await bridge(page))!;
+    const id = Number(Object.keys(b1.downloads)[0]);
+    await page.evaluate(
+      ({ id, path, sha }) => window.__fressTest!.emitComplete(id, path, 22_000_000, sha, true),
+      { id, path: '/home/test/Downloads/Fress_1.0.9_amd64.AppImage', sha: GOOD_SHA256 }
+    );
+
+    const failedToast = page.locator('[data-sonner-toast]', { hasText: d['update.signatureFailed'] });
+    await expect(failedToast.first()).toBeVisible({ timeout: 10_000 });
+    // The pill tells the truth about what is deliverable, and the official
+    // releases page opened as the fallback.
+    await expect(page.locator('#header-update-pill')).toContainText(
+      d['header.updatePillSeeReleases']
+    );
+    await expect
+      .poll(async () => (await bridge(page))!.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual(['https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta']);
   });
 });
 

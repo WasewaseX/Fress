@@ -18,6 +18,8 @@
 //    of a hardcoded label.
 
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -299,5 +301,72 @@ describe('floating docks and bars expose localized accessible names', () => {
     expect(screen.getByLabelText('داک مقایسه')).toBeTruthy();
     expect(screen.getByText('2 در مقایسه')).toBeTruthy();
     expect(screen.getByText('نمایش ماتریس')).toBeTruthy();
+  });
+});
+
+describe('privacy page label-in-name and heading contract', () => {
+  it('the "you use now" trigger is named by the CURRENT app, not the category', () => {
+    // The trigger's visible text is the app name (Gmail); a name that omits
+    // it fails WCAG 2.5.3 Label in Name (axe: label-content-name-mismatch).
+    setLang('en');
+    render(
+      <I18nProvider>
+        <ReplaceTab apps={[]} onOpenDetail={() => {}} onAddToBatch={() => {}} onRemoveFromBatch={() => {}} />
+      </I18nProvider>
+    );
+    const mailCat = PRIVACY_PACK.find((c) => c.id === 'mail') ?? PRIVACY_PACK[0];
+    const current = mailCat.mainstream[0].name;
+    const trigger = document.getElementById(`pp-main-${mailCat.id}`) as HTMLButtonElement;
+    expect(trigger).toBeTruthy();
+    expect(trigger.textContent).toContain(current);
+    expect(trigger.getAttribute('aria-label')).toBe(`You use now: ${current}`);
+  });
+
+  it('the replacement picker name contains its visible placeholder and counter', () => {
+    setLang('en');
+    render(
+      <I18nProvider>
+        <ReplaceTab apps={[]} onOpenDetail={() => {}} onAddToBatch={() => {}} onRemoveFromBatch={() => {}} />
+      </I18nProvider>
+    );
+    const placeholder = DICTS.en['pp.pick'];
+    const trigger = document.getElementById('pp-picker-mail') as HTMLButtonElement;
+    expect(trigger).toBeTruthy();
+    // Visible text: placeholder + n/max counter.
+    expect(trigger.textContent).toContain(placeholder);
+    expect(trigger.textContent).toContain('0/3');
+    // The accessible name embeds the SAME strings, so it always contains the
+    // visible text in every trigger state.
+    const label = trigger.getAttribute('aria-label') ?? '';
+    expect(label.startsWith('Replace with: ')).toBe(true);
+    expect(label).toContain(placeholder);
+    expect(label).toContain('0/3');
+    // The label is built from the same source string as the content.
+    expect(label).toBe(`Replace with: ${placeholder} 0/3`);
+  });
+
+  it('the privacy page carries exactly one level-one heading', () => {
+    // When this page replaces the catalog its h1 goes with it; the page
+    // must own its own (axe: page-has-heading-one).
+    setLang('en');
+    render(
+      <I18nProvider>
+        <ReplaceTab apps={[]} onOpenDetail={() => {}} onAddToBatch={() => {}} onRemoveFromBatch={() => {}} />
+      </I18nProvider>
+    );
+    const h1s = screen.getAllByRole('heading', { level: 1 });
+    expect(h1s.length).toBe(1);
+    expect(h1s[0].textContent).toBe(DICTS.en['pp.title']);
+    // Card headings sit one level below the page heading - no skips.
+    const h2s = screen.getAllByRole('heading', { level: 2 });
+    expect(h2s.length).toBeGreaterThanOrEqual(PRIVACY_PACK.length);
+  });
+
+  it('no emerald-500 text ink remains in ReplaceTab (light-theme AA)', () => {
+    // Light remaps emerald-500 to #257c4b, which fails 4.5:1 on the tinted
+    // chips. Text uses emerald-800 in light (emerald-400 in dark): emerald-700 still sat at about 4.3:1 on the tinted chip.
+    const source = readFileSync(resolve(process.cwd(), 'src/components/ReplaceTab.tsx'), 'utf8');
+    expect(source.includes('text-emerald-500')).toBe(false);
+    expect(source.includes('text-emerald-800 dark:text-emerald-400')).toBe(true);
   });
 });

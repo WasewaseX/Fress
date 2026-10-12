@@ -721,7 +721,18 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={onUpdateClick}
                 className="order-4 md:order-2 max-md:basis-full max-md:justify-center inline-flex items-center gap-1 self-center text-[11px] font-bold text-amber-950 bg-amber-400 hover:brightness-105 border border-amber-400 dark:text-amber-900 dark:bg-amber-300 dark:hover:bg-amber-200 px-2 py-1 rounded-lg transition-colors"
-                title={t('header.updatePillTitle').replace('{v}', updateVersion)}
+                title={
+                  /* The tooltip must tell the same truth as the visible
+                   * label: while a delivery state override is active
+                   * (busy / verified / retry / see-releases after a
+                   * plan-level refusal), the override label IS the
+                   * honest description of what the pill does - the static
+                   * "tap to download" hint would contradict the
+                   * see-releases label on a refused update. */
+                  updatePillStatus
+                    ? updatePillStatus.label
+                    : t('header.updatePillTitle').replace('{v}', updateVersion)
+                }
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
                 <span>

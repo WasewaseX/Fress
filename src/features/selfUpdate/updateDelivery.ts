@@ -188,7 +188,19 @@ export function syncDeliveryItems(items: DeliveryItemFacts[]): void {
   if (item.status === 'completed' && item.path) {
     // The item's OWN checksum verdict is passed through - never assumed.
     handleCompleteForPlan({ path: item.path, verified: item.verified === true });
+  } else if (item.status === 'cancelled') {
+    // The user stopped the transfer while the delivery's own listeners were
+    // still registering (or the event was lost to the race window entirely).
+    // The manager's item list is authoritative: a cancelled update is a
+    // QUIET return to idle - never a failure, never a fallback - exactly
+    // like the download-error path treats an explicit Cancelled message.
+    handleErrorForPlan({ message: 'Cancelled' });
   } else if (item.status === 'error') {
+    // Reconciled errors carry the manager's row but not the engine's error
+    // KIND, so this reports the generic retryable transfer failure - the
+    // event path stays authoritative for the precise kind (checksum vs
+    // network) whenever its event did land. Never a false verified, never
+    // a fallback: the row keeps its fresh Retry.
     handleErrorForPlan({ message: 'download failed', kind: 'network' });
   }
 }

@@ -58,8 +58,13 @@ export interface SelfUpdateUi {
 
 /** Maps the delivery state onto the pill's label override. Kept beside the
  * hook (not inside the delivery module) so every label comes from i18n and
- * carries the release version the pill already names. */
-function pillStatusFor(
+ * carries the release version the pill already names.
+ *
+ * Exported for the updater UI-state tests: this mapping IS the pill's
+ * truthfulness contract, so every phase (including every plan-level
+ * refusal reason) is pinned in isolation, not only through the rendered
+ * header. */
+export function pillStatusFor(
   delivery: UpdateDeliveryState,
   version: string,
   t: (key: string) => string
@@ -79,6 +84,17 @@ function pillStatusFor(
       return delivery.fallback
         ? { label: t('header.updatePillSeeReleases'), busy: false }
         : { label: t('header.updatePillRetry'), busy: false };
+    case 'fallback':
+      // A PLAN-LEVEL refusal ('no-asset' | 'unverifiable' | 'unsigned'):
+      // the planner just proved this update cannot be delivered in-app,
+      // so the pill must say where to get it instead of reverting to the
+      // plain available label - that label implies in-app delivery is
+      // still on the table. The WHY travels through the refusal toast
+      // (noAssetHint / unverifiableHint / unsignedHint) raised with the
+      // fallback; the pill stays non-busy and clicking it re-runs the
+      // planner (which re-opens the official Releases page, or delivers
+      // for real if the release gained the missing gate in the meantime).
+      return { label: t('header.updatePillSeeReleases'), busy: false };
     default:
       return null;
   }

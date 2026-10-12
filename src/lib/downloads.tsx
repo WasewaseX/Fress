@@ -14,6 +14,14 @@ import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downl
 import { serializeItems, deserializeItems, DOWNLOAD_ITEMS_KEY } from './downloadItemsStore';
 import { createDownloadPersistence } from './downloadPersistence';
 import { useI18n } from './i18n';
+import {
+  openCompletedArtifact,
+  revealCompletedArtifact,
+  parseOpenError,
+  type CompletedArtifactRef,
+  type OpenFailureKind,
+  type OpenOutcome,
+} from './artifactOpen';
 
 export { formatBytes, formatSpeed, formatEta };
 
@@ -86,10 +94,36 @@ interface DownloadActionsValue {
   cancel: (id: number) => void;
   retry: (id: number, resume?: boolean) => void;
   clearFinished: () => void;
-  openFile: (path: string) => void;
-  openFolder: (path?: string) => void;
+  /** Hands the completed artifact to the OS: the opener plugin's
+   * OS-default-handler open with the EXACT completed path, and - only on
+   * rejection, only for a .AppImage on desktop Linux - the registry-
+   * validated launch command. Bound to the download id; resolves an
+   * outcome instead of throwing so the row can leave the busy state and
+   * offer a retry. Repeat activations while one launch is pending are
+   * IGNORED (no toast, no second native call). */
+  openFile: (artifact: CompletedArtifactRef) => Promise<OpenOutcome>;
+  /** Reveals the completed file in its folder (containing-folder fallback,
+   * then an honest error). Same id binding, busy and outcome contract. */
+  openFolder: (artifact: CompletedArtifactRef) => Promise<OpenOutcome>;
   chooseFolder: () => Promise<void>;
   resetFolder: () => Promise<void>;
+}
+
+/** Localized message per typed open failure. The toast TITLE stays the
+ * long-standing generic key (the E2E contract asserts that text); the
+ * classified reason becomes the description and explains what the user
+ * can do next. Keys live in i18n.tsx (Agent 2 owns wording). */
+function openFailureDescription(kind: OpenFailureKind, t: (key: string) => string): string | undefined {
+  switch (kind) {
+    case 'missing': return t('downloads.toast.openMissing');
+    case 'not-a-file': return t('downloads.toast.openNotFile');
+    case 'unregistered': return t('downloads.toast.openUnregistered');
+    case 'cross-wired': return t('downloads.toast.openCrossWired');
+    case 'replaced': return t('downloads.toast.openReplaced');
+    case 'no-handler': return t('downloads.toast.openNoHandler');
+    case 'permission': return t('downloads.toast.openPermission');
+    default: return undefined;
+  }
 }
 
 /** Lightweight facts: the active-transfer count and the target folder.
@@ -165,6 +199,73 @@ const DownloadActionsContext = createContext<DownloadActionsValue | null>(null);
 const DownloadSummaryContext = createContext<DownloadSummaryValue | null>(null);
 const DownloadItemsContext = createContext<DownloadItemsValue | null>(null);
 const DownloadActiveStoreContext = createContext<ActiveDownloadsStore | null>(null);
+const DownloadBusyStoreContext = createContext<ArtifactActionBusyStore | null>(null);
+
+const EMPTY_ID_SET: ReadonlySet<number> = new Set();
+
+/**
+ * Selector store for the per-row artifact actions' busy state.
+ *
+ * Same pattern as ActiveDownloadsStore: context alone would rerender every
+ * consumer on each transition, so the panel subscribes through
+ * useSyncExternalStore and the snapshot is the busy-id set itself. The
+ * snapshot identity only changes when a row actually enters or leaves the
+ * busy state, so open/reveal activity on OTHER rows repaints nothing.
+ *
+ * Why a store and not disabled attributes: the E2E-pinned contract (K-G1)
+ * is that repeated activation while one native launch is pending produces
+ * exactly ONE invoke. The authoritative guard is therefore in the action
+ * itself (synchronous check-then-set before any await); the store lets the
+ * row RENDER the busy state (dimmed + aria-busy) while the control STAYS
+ * interactive - a second activation lands and is swallowed by the guard
+ * instead of hanging on a non-interactive control.
+ */
+export class ArtifactActionBusyStore {
+  private openBusy = new Set<number>();
+  private revealBusy = new Set<number>();
+  private openSnapshot: ReadonlySet<number> = EMPTY_ID_SET;
+  private revealSnapshot: ReadonlySet<number> = EMPTY_ID_SET;
+  private listeners = new Set<() => void>();
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /** The set of download ids whose Open action is pending. */
+  getOpenSnapshot = (): ReadonlySet<number> => this.openSnapshot;
+
+  /** The set of download ids whose Show-in-folder action is pending. */
+  getRevealSnapshot = (): ReadonlySet<number> => this.revealSnapshot;
+
+  /** Marks `id` busy for `action`. Returns false when it was ALREADY busy -
+   * the caller treats that as "activation ignored". Synchronous by design:
+   * two rapid clicks cannot interleave between the check and the set. */
+  begin(id: number, action: 'open' | 'reveal'): boolean {
+    const set = action === 'open' ? this.openBusy : this.revealBusy;
+    if (set.has(id)) return false;
+    set.add(id);
+    this.publish();
+    return true;
+  }
+
+  end(id: number, action: 'open' | 'reveal'): void {
+    const set = action === 'open' ? this.openBusy : this.revealBusy;
+    if (!set.delete(id)) return;
+    this.publish();
+  }
+
+  private publish(): void {
+    const nextOpen = this.openBusy.size > 0 ? new Set(this.openBusy) : EMPTY_ID_SET;
+    const nextReveal = this.revealBusy.size > 0 ? new Set(this.revealBusy) : EMPTY_ID_SET;
+    if (nextOpen === this.openSnapshot && nextReveal === this.revealSnapshot) return;
+    this.openSnapshot = nextOpen;
+    this.revealSnapshot = nextReveal;
+    this.listeners.forEach((listener) => listener());
+  }
+}
 
 /** Pre-split aggregate kept for existing callers during the migration to
  * the focused hooks above. */
@@ -665,11 +766,55 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     setItems((prev) => prev.filter((it) => it.status === 'active' || it.status === 'queued'));
   }, []);
 
-  const openFile = useCallback((path: string) => {
-    if (isTauri()) {
-      openPath(path).catch(() => toast.error(tRef.current('downloads.toast.openFileFailed')));
-    }
-  }, []);
+  // ---- The download-to-open boundary ------------------------------------
+  // One busy store for both artifact actions; the actions below are its
+  // only writers, the panel subscribes through useArtifactActionBusy().
+  // Created lazily once so the actions' identities stay stable (the
+  // documented contract of this context).
+  const busyStoreRef = useRef<ArtifactActionBusyStore | null>(null);
+  if (!busyStoreRef.current) busyStoreRef.current = new ArtifactActionBusyStore();
+  const busyStore = busyStoreRef.current;
+
+  /** Where the registry-validated AppImage launch command exists: a
+   * desktop Linux build. Android never launches AppImages (its adapter
+   * owns the APK handoff below the SAME open_path boundary); Windows and
+   * macOS have their OS associations. */
+  const appImageLaunchSupported =
+    isTauri() && !isAndroidWebview() && /linux/i.test(navigator.userAgent);
+
+  const openFile = useCallback(
+    async (artifact: CompletedArtifactRef): Promise<OpenOutcome> => {
+      if (!isTauri()) return { ok: false, kind: 'unknown' };
+      if (!artifact.path) return { ok: false, kind: 'missing' };
+      // Airtight repeat-activation guard: check-then-set SYNCHRONOUSLY,
+      // before any await, so two rapid clicks cannot interleave. A second
+      // activation while one launch is pending is IGNORED - no toast, no
+      // second native call (the E2E-pinned single-launch contract).
+      if (!busyStore.begin(artifact.id, 'open')) return { ok: false, kind: 'busy' };
+      try {
+        const outcome = await openCompletedArtifact(artifact, {
+          openPath,
+          launchAppImage: ({ id, path }) => invoke('launch_app_image_artifact', { id, path }),
+          appImageLaunchSupported,
+          warn: (message, detail) => console.warn(`[download-open] ${message}`, detail),
+        });
+        if (!outcome.ok) {
+          // The TITLE is the long-standing generic message (the contract
+          // the tests and other surfaces rely on); the classified reason
+          // explains what to do next; the raw native detail went to the
+          // console inside the operation. The row stays completed and the
+          // action stays retryable - only the open attempt failed.
+          toast.error(tRef.current('downloads.toast.openFileFailed'), {
+            description: openFailureDescription(outcome.kind, tRef.current),
+          });
+        }
+        return outcome;
+      } finally {
+        busyStore.end(artifact.id, 'open');
+      }
+    },
+    [busyStore, appImageLaunchSupported]
+  );
 
   // openFolder reads the folder through a ref so its identity - and with
   // it the whole actions context value - stays stable while the user
@@ -677,27 +822,48 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const downloadDirRef = useRef<string | null>(null);
   downloadDirRef.current = downloadDir;
 
-  const openFolder = useCallback((path?: string) => {
-    if (!isTauri()) return;
-    const target = path || downloadDirRef.current;
-    if (!target) return;
-    if (path) {
-      // Reveal the file inside its folder. When the reveal fails (Windows
-      // builds without the explorer integration), fall back to opening the
-      // file's CONTAINING folder - the old fallback opened `path` itself,
-      // which just launched the downloaded file instead of showing where
-      // it lives.
-      revealItemInDir(path).catch(async () => {
-        try {
-          await openPath(await dirname(path));
-        } catch {
-          toast.error(tRef.current('downloads.toast.openFolderFailed'));
+  const openFolder = useCallback(
+    async (artifact: CompletedArtifactRef): Promise<OpenOutcome> => {
+      if (!isTauri()) return { ok: false, kind: 'unknown' };
+      const path = artifact.path || downloadDirRef.current;
+      if (!path) return { ok: false, kind: 'missing' };
+      if (!busyStore.begin(artifact.id, 'reveal')) return { ok: false, kind: 'busy' };
+      try {
+        if (artifact.path) {
+          // Reveal the file inside its folder; on refusal fall back to the
+          // file's CONTAINING folder - never the file itself; on total
+          // refusal an honest error. The artifact stays completed.
+          const outcome = await revealCompletedArtifact(artifact, {
+            revealItemInDir,
+            openPath,
+            dirname,
+            warn: (message, detail) => console.warn(`[download-reveal] ${message}`, detail),
+          });
+          if (!outcome.ok) {
+            toast.error(tRef.current('downloads.toast.openFolderFailed'), {
+              description: openFailureDescription(outcome.kind, tRef.current),
+            });
+          }
+          return outcome;
         }
-      });
-    } else {
-      openPath(target).catch(() => toast.error(tRef.current('downloads.toast.openFolderFailed')));
-    }
-  }, []);
+        // No exact file known (defensive): open the configured directory.
+        try {
+          await openPath(path);
+          return { ok: true, kind: 'unknown' };
+        } catch (e) {
+          const parsed = parseOpenError(e);
+          console.warn('[download-reveal] directory open failed', e);
+          toast.error(tRef.current('downloads.toast.openFolderFailed'), {
+            description: openFailureDescription(parsed.kind, tRef.current),
+          });
+          return { ok: false, kind: parsed.kind, detail: parsed.detail };
+        }
+      } finally {
+        busyStore.end(artifact.id, 'reveal');
+      }
+    },
+    [busyStore]
+  );
 
   const chooseFolder = useCallback(async () => {
     if (!isTauri()) {
@@ -775,7 +941,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       <DownloadSummaryContext.Provider value={summaryValue}>
         <DownloadItemsContext.Provider value={itemsValue}>
           <DownloadActiveStoreContext.Provider value={activeStore}>
-            {children}
+            <DownloadBusyStoreContext.Provider value={busyStore}>
+              {children}
+            </DownloadBusyStoreContext.Provider>
           </DownloadActiveStoreContext.Provider>
         </DownloadItemsContext.Provider>
       </DownloadSummaryContext.Provider>
@@ -809,6 +977,19 @@ export function useActiveDownloads(): ActiveDownloadInfo[] {
   const store = useContext(DownloadActiveStoreContext);
   if (!store) throw new Error('useActiveDownloads must be used inside DownloadsProvider');
   return useSyncExternalStore(store.subscribe, store.getSnapshot);
+}
+
+/** The artifact actions' busy state, as two id sets (Open and Show in
+ * folder). The snapshot identity changes only when a row enters or leaves
+ * the busy state, so a pending launch rerenders exactly the rows it
+ * belongs to. The row renders the dimmed/aria-busy presentation from this;
+ * the action itself still owns the authoritative single-launch guard. */
+export function useArtifactActionBusy(): { openBusy: ReadonlySet<number>; revealBusy: ReadonlySet<number> } {
+  const store = useContext(DownloadBusyStoreContext);
+  if (!store) throw new Error('useArtifactActionBusy must be used inside DownloadsProvider');
+  const openBusy = useSyncExternalStore(store.subscribe, store.getOpenSnapshot);
+  const revealBusy = useSyncExternalStore(store.subscribe, store.getRevealSnapshot);
+  return { openBusy, revealBusy };
 }
 
 /**

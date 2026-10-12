@@ -19,7 +19,7 @@ import {
   Check,
   AlertTriangle,
 } from 'lucide-react';
-import { useDownloadState, useDownloadActions, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
+import { useDownloadState, useDownloadActions, useArtifactActionBusy, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
 import { summarizeDownloadStates } from '../lib/downloadsAnnouncement';
 import { useI18n } from '../lib/i18n';
 
@@ -27,6 +27,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
   // Split context: state re-renders on every progress tick, actions never do.
   const { items, downloadDir } = useDownloadState();
   const { cancel, retry, clearFinished, openFile, openFolder, chooseFolder } = useDownloadActions();
+  const { openBusy, revealBusy } = useArtifactActionBusy();
   const { t } = useI18n();
 
   // Clipboard feedback for the SHA row: honest success/failure, localized,
@@ -280,11 +281,36 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                   )}
                   {item.status === 'completed' && item.path && (
                     <>
-                      <PanelButton onClick={() => openFile(item.path!)} icon={<CheckCircle2 className="w-3 h-3" />} label={t('downloads.openFile')} primary />
+                      {/* The row's OWN id and completion path travel with
+                          every activation: two downloads with identical
+                          display names can never cross-wire their files.
+                          While one launch is pending the button dims
+                          (aria-busy) but stays interactive - repeat
+                          activations LAND and are swallowed by the action's
+                          authoritative guard (check-then-set before any
+                          await), so exactly one native launch is in flight. */}
+                      <PanelButton
+                        onClick={() => {
+                          if (openBusy.has(item.id)) return;
+                          void openFile({ id: item.id, path: item.path!, name: item.name, url: item.url });
+                        }}
+                        icon={<CheckCircle2 className="w-3 h-3" />}
+                        label={t('downloads.openFile')}
+                        primary
+                        busy={openBusy.has(item.id)}
+                      />
                       {/* Android saves into app-private storage that no file
                           manager can browse, so only Open is offered there. */}
                       {!isAndroidWebview() && (
-                        <PanelButton onClick={() => openFolder(item.path)} icon={<FolderOpen className="w-3 h-3" />} label={t('downloads.showFolder')} />
+                        <PanelButton
+                          onClick={() => {
+                            if (revealBusy.has(item.id)) return;
+                            void openFolder({ id: item.id, path: item.path, name: item.name, url: item.url });
+                          }}
+                          icon={<FolderOpen className="w-3 h-3" />}
+                          label={t('downloads.showFolder')}
+                          busy={revealBusy.has(item.id)}
+                        />
                       )}
                     </>
                   )}
@@ -376,17 +402,31 @@ function PanelButton({
   icon,
   label,
   primary,
+  busy,
 }: {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   primary?: boolean;
+  /** A native call for this action is in flight. Deliberately NOT rendered
+   * as disabled/aria-disabled: the control must stay interactive so a
+   * second activation LANDS and is swallowed by the action's own
+   * single-launch guard (before any await) - a non-interactive control
+   * would instead hang a second click on actionability waiting. The busy
+   * state is communicated visually (dimmed) and via aria-busy, which
+   * blocks neither clicking nor keyboard activation. */
+  busy?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-busy={busy || undefined}
       className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-md border transition-colors ${
+        busy
+          ? 'opacity-50 cursor-default '
+          : ''
+      }${
         primary
           ? 'bg-sky-600 hover:bg-sky-500 text-white border-sky-500'
           : 'text-slate-300 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border-slate-950/10 dark:border-white/[0.08]'

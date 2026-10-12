@@ -44,13 +44,19 @@ Notes on custom commands: Tauri capability permissions gate **plugin and core
 commands only**. The app's own Rust IPC commands (`start_download`,
 `cancel_download`, `default_download_dir`, `fetch_latest_release`,
 `fetch_recent_releases`, `fetch_fdroid_package`, `fetch_text`,
-`fetch_self_update_text`, `host_arch`) are not authorization-gated by
-capabilities; they must enforce their own input validation in Rust (see the
-URL allowlist inside `fetch_text`, the repo-pinned admission inside
-`fetch_self_update_text`, and the native network policy in
-`src-tauri/src/`). `app_version` was removed in the October 2026 audit: no
-frontend call site ever existed (the UI reads its version from
-`package.json`), and an uncallable command is surface without a purpose.
+`fetch_self_update_text`, `host_arch`, `launch_app_image_artifact`) are not
+authorization-gated by capabilities; they must enforce their own input
+validation in Rust (see the URL allowlist inside `fetch_text`, the
+repo-pinned admission inside `fetch_self_update_text`, the native network
+policy in `src-tauri/src/`, and the registry-bound gates inside
+`artifact_open.rs` — staging names, traversal, symlinks, non-regular files
+and paths without an engine completion record are all refused before the
+one privileged operation it performs: chmod +x on THAT validated AppImage
+followed by a direct argv exec, no shell; see
+`docs/download-open-contract.md`). `app_version` was removed in the
+October 2026 audit: no frontend call site ever existed (the UI reads its
+version from `package.json`), and an uncallable command is surface without
+a purpose.
 
 ## Content Security Policy
 

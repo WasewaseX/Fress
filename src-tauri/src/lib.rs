@@ -401,21 +401,40 @@ fn verify_signature_document(
         .map_err(|e| format!("Updater signature verification failed: {e}"))
 }
 
-/// Streams `file_path` through the verifier in 64 KiB chunks so even the
-/// ~90 MB AppImage is verified in bounded memory - the artifact verified
-/// is byte-for-byte the artifact on disk, not a re-read or a copy.
+/// Streams the artifact at `file_path` through the verifier in 64 KiB
+/// chunks so even the ~90 MB AppImage is verified in bounded memory - the
+/// artifact verified is byte-for-byte the artifact on disk, not a re-read
+/// or a copy.
+///
+/// Test-only convenience: production reaches the byte verdict through
+/// [`verify_completed_self_update_signature_with_key`], which opens the
+/// file itself and feeds [`verify_signature_over_open_file`] so its
+/// metadata checks and its byte stream share one handle.
+#[cfg(test)]
 fn verify_signature_over_file(
     key_file_b64: &str,
     signature_b64: &str,
     file_path: &str,
+) -> Result<(), String> {
+    let mut file = std::fs::File::open(file_path)
+        .map_err(|e| format!("Cannot open the downloaded file: {e}"))?;
+    verify_signature_over_open_file(key_file_b64, signature_b64, &mut file)
+}
+
+/// [`verify_signature_over_file`] over an ALREADY-OPENED handle. The
+/// verification boundary uses this form so the metadata checks (regular
+/// file, committed size) and the byte stream come from the SAME open -
+/// no second path lookup between "checked" and "verified".
+fn verify_signature_over_open_file(
+    key_file_b64: &str,
+    signature_b64: &str,
+    file: &mut std::fs::File,
 ) -> Result<(), String> {
     use std::io::Read;
     let pk = decode_updater_public_key(key_file_b64)?;
     let document = decode_document_b64(signature_b64)?;
     let sig = Signature::decode(&document)
         .map_err(|e| format!("Malformed updater signature document: {e}"))?;
-    let mut file = std::fs::File::open(file_path)
-        .map_err(|e| format!("Cannot open the downloaded file: {e}"))?;
     let mut verifier = pk
         .verify_stream(&sig)
         .map_err(|e| format!("Cannot start updater signature verification: {e}"))?;
@@ -434,19 +453,145 @@ fn verify_signature_over_file(
         .map_err(|_| "Updater signature verification failed: the downloaded file does not match the release signature".to_string())
 }
 
+/// One uniform refusal for every path that is not a completed download
+/// artifact of this session. The sameness IS the security property: no
+/// error-shape differences that could turn the boundary into a filesystem
+/// probe for the webview (a path's existence, readability or type is never
+/// distinguishable through this command).
+const VERIFICATION_SCOPE_REFUSAL: &str =
+    "Signature verification refused: this path is not a completed Fress download artifact";
+
+/// THE updater signature-verification boundary.
+///
+/// Accepts ONLY a completed, registered update artifact: `file_path` must
+/// resolve to a record in the download registry's completed-artifact queue
+/// (see `download_finalize.rs`, "Completed-artifact registry"), which the
+/// engine populates exclusively on a successful, full, hash-checked
+/// no-clobber commit. A frontend-provided arbitrary filesystem path can
+/// therefore never become a general-purpose native file-verification API:
+/// an unregistered path is refused before a single byte of it is read,
+/// with the same generic refusal regardless of what exists on disk.
+///
+/// The checks, in order:
+///   1. Registry scope - exact reported-path match first (the frontend
+///      echoes the completion event's `path` verbatim), then a
+///      canonicalized fallback for a normalized variant of the same
+///      location. Miss => the uniform refusal, nothing else observable.
+///   2. Staging shapes - a `.part` / `.part.meta` name is refused by
+///      construction (defense in depth; the engine never records one).
+///   3. Canonical stability - the recorded path is re-canonicalized NOW
+///      and must equal the canonical path recorded at completion. A file
+///      swapped for a symlink, moved, or re-homed after completion is
+///      refused even when its bytes would verify.
+///   4. Regular file + committed size - the OPEN HANDLE's metadata must
+///      be a regular file of the recorded size. A deleted, replaced or
+///      truncated artifact is refused here instead of verified.
+///   5. Byte verdict - the signature is streamed over the bytes of that
+///      same open handle. Whatever is on disk at verification time is
+///      exactly what is judged: a same-size in-place edit is invisible to
+///      metadata but always fails the signature, so any post-completion
+///      modification can only produce a refusal, never a false "verified".
+///
+/// TOCTOU note: between the metadata checks and the streaming read the
+/// bytes could still be exchanged by something with local disk access.
+/// The design keeps that window harmless by construction - the verdict is
+/// computed over whatever the handle actually yields, so an exchange can
+/// only change WHICH failure is reported, never turn a failure into a
+/// success (the exchanged bytes must also carry the embedded key's
+/// signature to verify, in which case they are a genuine artifact).
+///
+/// Deliberately NOT promised here: binding the signature DOCUMENT to a
+/// release version or asset filename. Minisign trusted comments are not
+/// verifiable through the `minisign-verify` API, so "this .sig is the one
+/// published for release vX's <name>" is enforced by the frontend
+/// delivery plan, which matches the sidecar against the pinned release
+/// feed before ever calling. A wrong-version document cannot forge an
+/// outcome: it verifies only over bytes that genuinely carry the embedded
+/// key's signature.
+///
+/// VERIFY-ONLY: the command returns ok/error, never file contents, and
+/// never modifies, executes or exposes the artifact. `key_file_b64` is a
+/// parameter only so the tests can drive the full boundary with the
+/// fixture key; production passes the compile-time-embedded public key.
+fn verify_completed_self_update_signature_with_key(
+    registry: &DownloadRegistry,
+    key_file_b64: &str,
+    file_path: &str,
+    signature_base64: &str,
+) -> Result<(), String> {
+    let requested = std::path::PathBuf::from(file_path.trim());
+    if requested.as_os_str().is_empty() {
+        return Err(VERIFICATION_SCOPE_REFUSAL.to_string());
+    }
+    // Staging files are never verification candidates. The registry cannot
+    // contain one (only commits are recorded), so this is pure defense in
+    // depth - and it documents the intent for a future caller.
+    let name = requested
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if name.ends_with(".part") || name.ends_with(".part.meta") {
+        return Err(VERIFICATION_SCOPE_REFUSAL.to_string());
+    }
+    // 1. Registry scope. Before this line passes, the command has touched
+    //    nothing on disk under the caller's path.
+    let Some(record) = registry.completed_artifact_for_path(&requested) else {
+        return Err(VERIFICATION_SCOPE_REFUSAL.to_string());
+    };
+    // 3. Canonical stability: the artifact must still sit where the engine
+    //    committed it, not behind a symlink, bind mount or rename. The
+    //    download id and source URL travel with the refusal: they are the
+    //    caller's own download (the frontend correlates id -> url before
+    //    it calls), so they aid diagnosis without leaking anything.
+    let current = std::fs::canonicalize(&record.path).map_err(|_| {
+        format!(
+            "Signature verification refused: the completed download artifact is no longer on disk (download #{}, originally from {})",
+            record.id, record.url
+        )
+    })?;
+    if current != record.canonical {
+        return Err(
+            "Signature verification refused: the completed download artifact was moved or replaced on disk"
+                .to_string(),
+        );
+    }
+    // 4. Regular file of the committed size, judged through the SAME
+    //    handle the bytes are then read from.
+    let mut file = std::fs::File::open(&current)
+        .map_err(|e| format!("Cannot open the downloaded file: {e}"))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("Cannot inspect the downloaded file: {e}"))?;
+    if !meta.is_file() {
+        return Err(
+            "Signature verification refused: the completed download artifact is not a regular file"
+                .to_string(),
+        );
+    }
+    if meta.len() != record.size {
+        return Err(
+            "Signature verification refused: the file at the completed download's path has changed since completion"
+                .to_string(),
+        );
+    }
+    // 5. The actual bytes.
+    verify_signature_over_open_file(key_file_b64, signature_base64, &mut file)
+}
+
 /// Verifies the minisign signature of a COMPLETED self-update download
 /// against the public key embedded in this binary.
 ///
 /// Inputs:
-///   - `file_path`: the path of the downloaded artifact on disk (the path
-///     the download engine reports on completion).
-///   - `signature_base64`: the EXACT content of the matching `.sig` sidecar
-///     from the SAME release (base64 of the minisign signature document,
-///     which is also what `latest.json` carries in its signature field).
-///     "Verify the exact artifact that will be delivered, do not sign one
-///     file and verify another" is enforced here: the signature document
-///     must come from the release the artifact was selected from, and the
-///     bytes verified are the bytes on disk.
+///   - `file_path`: the path of the downloaded artifact on disk - the
+///     exact `path` the download engine reported on the download-complete
+///     event. It is validated against the native download registry's
+///     completed-artifact records (see
+///     [`verify_completed_self_update_signature_with_key`]); it is NOT an
+///     arbitrary filesystem API.
+///   - `signature_base64`: the EXACT content of the matching `.sig`
+///     sidecar from the SAME release (base64 of the minisign signature
+///     document, which is also what `latest.json` carries in its
+///     signature field).
 ///
 /// The command is deliberately VERIFY-ONLY: it returns ok/error and never
 /// the file contents, so it cannot be abused as a file reader. It runs on
@@ -457,12 +602,15 @@ fn verify_signature_over_file(
 async fn verify_self_update_signature(
     file_path: String,
     signature_base64: String,
+    registry: State<'_, Arc<DownloadRegistry>>,
 ) -> Result<(), String> {
+    let registry = Arc::clone(registry.inner());
     tokio::task::spawn_blocking(move || {
-        verify_signature_over_file(
+        verify_completed_self_update_signature_with_key(
+            &registry,
             UPDATER_PUBLIC_KEY_FILE_B64,
+            &file_path,
             &signature_base64,
-            file_path.trim(),
         )
     })
     .await
@@ -892,14 +1040,14 @@ mod self_update_signature_tests {
     use super::*;
 
     /// The fixture payload the fixture signature was generated over.
-    const FIXTURE_PAYLOAD: &[u8] = b"Fress updater signature fixture payload v1\n";
+    pub(crate) const FIXTURE_PAYLOAD: &[u8] = b"Fress updater signature fixture payload v1\n";
 
     /// Throwaway keypair public key in the Tauri .pub document format
     /// (single-line base64 of "untrusted comment" + key cryptobuf).
-    const FIXTURE_KEY_DOC_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5OTY3QkUwM0Q0Q0EwMTMKUldRVG9Fdzk0SHVXV1pQc2dONGs5TSsvMy9VZmRpVm1kdDhZUkJkMTFYWTlaRkxZai9CMVNLQ0QK";
+    pub(crate) const FIXTURE_KEY_DOC_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5OTY3QkUwM0Q0Q0EwMTMKUldRVG9Fdzk0SHVXV1pQc2dONGs5TSsvMy9VZmRpVm1kdDhZUkJkMTFYWTlaRkxZai9CMVNLQ0QK";
 
     /// `tauri signer sign` output over FIXTURE_PAYLOAD with the fixture key.
-    const FIXTURE_SIG_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRVG9Fdzk0SHVXV1phVkViOUhjM2dJTjNsR0VsTzhURTZZWlZTUGcyaXdSNGdPcVUzK0hXbk9TTWkwbGFlTk9LREUrMlRMMEdvS3VNbmhxQjF3SVVGMUFZVWpyU1VqQlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNzQ3NjUzCWZpbGU6cGF5bG9hZC5iaW4KRis3Wkp1d1kyS1U4NTF3MFlSRTBaUFp6VHU3UnJHVlExNmRsajNMNkhDRlFNWmVicEVlRWhVNFNTcFQyNXJvY2JkaTFBU1p1VXpNMUJyb0dqMEVWQnc9PQo=";
+    pub(crate) const FIXTURE_SIG_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRVG9Fdzk0SHVXV1phVkViOUhjM2dJTjNsR0VsTzhURTZZWlZTUGcyaXdSNGdPcVUzK0hXbk9TTWkwbGFlTk9LREUrMlRMMEdvS3VNbmhxQjF3SVVGMUFZVWpyU1VqQlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNzQ3NjUzCWZpbGU6cGF5bG9hZC5iaW4KRis3Wkp1d1kyS1U4NTF3MFlSRTBaUFp6VHU3UnJHVlExNmRsajNMNkhDRlFNWmVicEVlRWhVNFNTcFQyNXJvY2JkaTFBU1p1VXpNMUJyb0dqMEVWQnc9PQo=";
 
     /// The key id published in CODE_SIGNING.md and on every release page.
     const PUBLISHED_KEY_ID: &str = "5638C68123FB633B";
@@ -1014,5 +1162,276 @@ mod self_update_signature_tests {
             bad_result.is_err(),
             "a one-byte-append artifact must NOT verify"
         );
+    }
+}
+
+#[cfg(test)]
+mod verification_boundary_tests {
+    // THE security regression matrix for the updater signature boundary
+    // (`verify_self_update_signature`). The command is scoped to completed,
+    // registered download artifacts; every test here drives the full
+    // boundary function - registry lookup, canonical-stability check,
+    // regular-file/size gate and the byte verdict - exactly as production
+    // runs it (only the public key is the test fixture, since the real
+    // private key never leaves CI).
+    //
+    // The hostile scenarios map 1:1 to the acceptance checklist:
+    //   - arbitrary frontend path          -> refused (NOT a file-verification API)
+    //   - staging .part / .part.meta       -> refused
+    //   - tampered bytes after completion  -> signature fails, file untouched
+    //   - replaced / truncated after completion -> size gate refuses
+    //   - symlink swap after completion    -> canonical gate refuses
+    //   - deleted after completion         -> canonical gate refuses
+    //   - foreign key / malformed / truncated .sig -> verification fails
+    //   - same-size in-place edit          -> signature fails (metadata-blind,
+    //                                         signature-caught)
+
+    use super::self_update_signature_tests::{
+        FIXTURE_KEY_DOC_B64, FIXTURE_PAYLOAD, FIXTURE_SIG_B64,
+    };
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            static COUNTER: AtomicU32 = AtomicU32::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "fress-verify-boundary-{}-{}-{}",
+                tag,
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::SeqCst)
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("create temp dir");
+            TempDir(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The fixture signature module lives one scope up.
+    fn boundary_verify(
+        registry: &DownloadRegistry,
+        file_path: &str,
+        signature_base64: &str,
+    ) -> Result<(), String> {
+        verify_completed_self_update_signature_with_key(
+            registry,
+            FIXTURE_KEY_DOC_B64,
+            file_path,
+            signature_base64,
+        )
+    }
+
+    /// A registry holding one completed artifact at `<dir>/<name>` whose
+    /// bytes are the fixture payload - the shape the engine produces on a
+    /// successful commit.
+    fn registered_artifact(dir: &TempDir, name: &str) -> (DownloadRegistry, PathBuf) {
+        let path = dir.0.join(name);
+        std::fs::write(&path, FIXTURE_PAYLOAD).expect("write artifact bytes");
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(
+            42,
+            &path,
+            "https://github.com/WasewaseX/Fress/releases/download/v1.0.8-beta/app.exe",
+        );
+        (registry, path)
+    }
+
+    #[test]
+    fn a_genuine_signature_verifies_on_the_registered_completed_artifact() {
+        let dir = TempDir::new("ok");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect("the completed, registered artifact must verify");
+    }
+
+    #[test]
+    fn an_arbitrary_filesystem_path_is_refused_even_when_its_bytes_would_verify() {
+        // THE anti-generalization test: the SAME genuine bytes, the SAME
+        // genuine signature - but the file was not completed by the
+        // download engine, so the boundary refuses without reading it.
+        // This is what keeps a compromised webview from using the command
+        // as a native "verify any file" oracle.
+        let dir = TempDir::new("unregistered");
+        let path = dir.0.join("dropped-by-browser.exe");
+        std::fs::write(&path, FIXTURE_PAYLOAD).expect("write unregistered file");
+        let registry = DownloadRegistry::default();
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("an unregistered path must be refused");
+        assert!(
+            err.contains(super::VERIFICATION_SCOPE_REFUSAL),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn staging_part_files_are_never_verification_candidates() {
+        let dir = TempDir::new("staging");
+        let (registry, _) = registered_artifact(&dir, "Fress-setup.exe");
+        let part = dir.0.join("Fress-setup.exe.part");
+        std::fs::write(&part, FIXTURE_PAYLOAD).expect("write part bytes");
+        let err = boundary_verify(&registry, part.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a .part file must be refused");
+        assert!(err.contains(super::VERIFICATION_SCOPE_REFUSAL), "{err}");
+
+        let meta = dir.0.join("Fress-setup.exe.part.meta");
+        std::fs::write(&meta, b"url").unwrap();
+        let err = boundary_verify(&registry, meta.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a .part.meta file must be refused");
+        assert!(err.contains(super::VERIFICATION_SCOPE_REFUSAL), "{err}");
+    }
+
+    #[test]
+    fn empty_and_whitespace_paths_are_refused() {
+        let registry = DownloadRegistry::default();
+        for p in ["", "   "] {
+            let err = boundary_verify(&registry, p, FIXTURE_SIG_B64)
+                .expect_err("an empty path must be refused");
+            assert!(err.contains(super::VERIFICATION_SCOPE_REFUSAL), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_same_size_tamper_after_completion_fails_closed_and_leaves_the_file_untouched() {
+        let dir = TempDir::new("tampered");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        // Flip one byte IN PLACE - the size gate cannot see this; the
+        // signature verdict must.
+        let mut bytes = FIXTURE_PAYLOAD.to_vec();
+        bytes[3] ^= 0x80;
+        std::fs::write(&path, &bytes).expect("tamper in place");
+
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("tampered completed bytes must NOT verify");
+        assert!(err.contains("verification failed"), "unexpected: {err}");
+
+        // The verifier is verify-only: the artifact is exactly as the
+        // tamper left it - not deleted, not rewritten, not executed.
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn a_file_replaced_after_completion_is_refused_at_the_boundary() {
+        let dir = TempDir::new("replaced");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        // The classic "replaced between completion and verification":
+        // delete, then write an attacker file under the same name.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, b"attacker payload, different length").unwrap();
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a replaced artifact must be refused");
+        assert!(
+            err.contains("changed since completion"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn a_deleted_artifact_is_refused_not_treated_as_unverifiable_success() {
+        let dir = TempDir::new("deleted");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        std::fs::remove_file(&path).unwrap();
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a deleted artifact must be refused");
+        assert!(err.contains("no longer on disk"), "unexpected: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_swap_is_refused_even_when_the_target_holds_verifiable_bytes() {
+        // The strongest swap: the artifact path now points at a DIFFERENT
+        // file whose bytes are byte-for-byte the genuine fixture payload.
+        // The canonical-stability gate refuses it anyway - the boundary
+        // verifies THE artifact the engine committed, at the location it
+        // was committed to, never "whatever this path currently yields".
+        let dir = TempDir::new("symlinked");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        let decoy = dir.0.join("decoy.bin");
+        std::fs::write(&decoy, FIXTURE_PAYLOAD).expect("write decoy bytes");
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&decoy, &path).expect("create symlink swap");
+
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a symlink-swapped artifact must be refused");
+        assert!(err.contains("moved or replaced"), "unexpected: {err}");
+        // The decoy was never touched either.
+        assert_eq!(std::fs::read(&decoy).unwrap(), FIXTURE_PAYLOAD);
+    }
+
+    #[test]
+    fn foreign_key_and_broken_signature_documents_fail_on_a_registered_artifact() {
+        let dir = TempDir::new("docs");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        let artifact = path.to_string_lossy().to_string();
+
+        // A signature from a DIFFERENT key (the embedded production key
+        // against the fixture signature): the streaming verifier refuses
+        // at startup - a verification failure, not a panic and not a scope
+        // refusal (the path IS registered).
+        let err = verify_completed_self_update_signature_with_key(
+            &registry,
+            UPDATER_PUBLIC_KEY_FILE_B64,
+            &artifact,
+            FIXTURE_SIG_B64,
+        )
+        .expect_err("a foreign-key signature must NOT verify");
+        assert!(
+            err.contains("different key") || err.contains("verification failed"),
+            "unexpected: {err}"
+        );
+
+        // Malformed base64 document.
+        let err = boundary_verify(&registry, &artifact, "!!!not-base64!!!")
+            .expect_err("malformed base64 must fail");
+        assert!(err.contains("Malformed base64"), "unexpected: {err}");
+
+        // Valid base64 that is not a minisign document.
+        let err = boundary_verify(&registry, &artifact, "aGVsbG8gd29ybGQ=")
+            .expect_err("a non-minisign document must fail");
+        assert!(
+            err.contains("Malformed updater signature document"),
+            "unexpected: {err}"
+        );
+
+        // Truncated signature document (cut mid-base64).
+        let truncated = &FIXTURE_SIG_B64[..FIXTURE_SIG_B64.len() - 8];
+        let err = boundary_verify(&registry, &artifact, truncated)
+            .expect_err("a truncated sidecar must fail");
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn the_boundary_refusal_is_identical_for_every_unregistered_path() {
+        // The uniform-refusal contract: existence, readability and type of
+        // an arbitrary path must NOT be distinguishable through the
+        // boundary. One registry, three wildly different paths, one exact
+        // same error.
+        let dir = TempDir::new("uniform");
+        let registry = DownloadRegistry::default();
+        // (a) a path that does not exist
+        let a = dir.0.join("does-not-exist.bin");
+        // (b) a path that exists and is readable
+        let b = dir.0.join("readable.txt");
+        std::fs::write(&b, b"secret? no - just a file").unwrap();
+        // (c) a directory
+        let c = dir.0.join("a-directory");
+        std::fs::create_dir_all(&c).unwrap();
+
+        let err_a =
+            boundary_verify(&registry, a.to_string_lossy().as_ref(), FIXTURE_SIG_B64).unwrap_err();
+        let err_b =
+            boundary_verify(&registry, b.to_string_lossy().as_ref(), FIXTURE_SIG_B64).unwrap_err();
+        let err_c =
+            boundary_verify(&registry, c.to_string_lossy().as_ref(), FIXTURE_SIG_B64).unwrap_err();
+        assert_eq!(err_a, err_b);
+        assert_eq!(err_b, err_c);
+        assert!(err_a.contains(super::VERIFICATION_SCOPE_REFUSAL));
     }
 }

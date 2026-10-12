@@ -249,9 +249,10 @@ source; the release audit covered the released bytes.
 
 | Run | Commit | Result |
 | --- | --- | --- |
-| [Author guard 38292161792](https://github.com/WasewaseX/Fress/actions/runs/38292161792) | `fb08a91` stack | success |
+| [CI (PR) 38292601594](https://github.com/WasewaseX/Fress/actions/runs/38292601594) | `267b54b` (this branch's head) | **7/7 success** — incl. the extended version-guard (Cargo.lock) |
+| [Author guard (PR) 38292601754](https://github.com/WasewaseX/Fress/actions/runs/38292601754) | `267b54b` | success |
+| [Author guard (push) 38292494047](https://github.com/WasewaseX/Fress/actions/runs/38292494047) | `267b54b` | success |
 | [Live network smoke (dispatch) 38292160847](https://github.com/WasewaseX/Fress/actions/runs/38292160847) | `e96c24c` | **success — all 4 live probes ran and passed** (the fix proven end-to-end) |
-| CI on the PR | this PR's head | required checks run on the exact branch head; live status in the PR checks tab |
 
 ### 6.4 Suppression audit (re-verified this round)
 

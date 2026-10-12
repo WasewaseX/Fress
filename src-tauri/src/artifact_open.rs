@@ -323,11 +323,13 @@ pub(crate) async fn launch_app_image_artifact(
 
     match planned {
         #[cfg(target_os = "linux")]
-        OpenRoute::LaunchAppImage { path } => tokio::task::spawn_blocking(move || launch_app_image(&path))
-            .await
-            .map_err(|e| OpenRejection::Internal(format!("open task failed: {e}")))
-            .and_then(|inner| inner)
-            .map_err(|rej| rej.render()),
+        OpenRoute::LaunchAppImage { path } => {
+            tokio::task::spawn_blocking(move || launch_app_image(&path))
+                .await
+                .map_err(|e| OpenRejection::Internal(format!("open task failed: {e}")))
+                .and_then(|inner| inner)
+                .map_err(|rej| rej.render())
+        }
         #[cfg(not(target_os = "linux"))]
         OpenRoute::LaunchAppImage { .. } => Err(OpenRejection::UnsupportedPlatform.render()),
     }

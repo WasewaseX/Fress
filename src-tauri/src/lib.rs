@@ -962,7 +962,7 @@ pub fn run() {
             fetch_self_update_text,
             verify_self_update_signature,
             host_arch,
-            artifact_open::launch_app_image_artifact
+            artifact_open::launch_app_image_artifact,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

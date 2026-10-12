@@ -198,4 +198,24 @@ describe('keepFocusInside', () => {
     rerender(<Harness open={false} />);
     expect(document.activeElement).not.toBe(opener);
   });
+
+  it('survives a full unmount while async work is in flight (no close transition)', () => {
+    // The real case: a dialog whose submit promise is still running when its
+    // parent unmounts the whole tree (navigation, a list refresh). The
+    // cleanup must release the scroll lock and empty the panel stack even
+    // though `open` never flipped to false.
+    const { getByTestId, unmount } = render(<Probe open />);
+    getByTestId('panel-first').focus();
+    expect(document.body.style.overflow).toBe('hidden');
+
+    expect(() => unmount()).not.toThrow();
+    expect(document.body.style.overflow).not.toBe('hidden');
+
+    // The stack must be empty again: a fresh dialog behaves as the topmost
+    // (and only) panel - its scroll lock applies and its Escape answers.
+    const Second: React.FC = () => <Probe open testId="second" opts={{ onEscape: () => {} }} />;
+    const second = render(<Second />);
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.activeElement).toBe(second.getByTestId('second-first'));
+  });
 });

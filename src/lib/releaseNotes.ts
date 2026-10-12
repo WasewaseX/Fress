@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.9-beta',
+    date: '2026-10-12',
+    title: 'The verified-delivery release',
+    items: [
+      'An in-app update is now called "verified" only after every check has passed on the file that is actually being delivered: the release offers a file your machine can run with a published checksum and a signature for that exact filename, the download is checksum-checked by the engine, and the completed file\'s bytes are verified with the release signature before anything says "verified and ready" — nothing is ever launched automatically. A corrupted transfer stays in the download manager with a working Retry, unsigned platforms (macOS, Android) get the Releases page with the reason spelled out, and the signature verifier itself now only accepts files the app actually finished downloading — never an arbitrary path on disk.',
+      'The release pipeline audits its own bytes before publishing: checksums both ways, the update manifest cross-checked against the real assets, and every signature sidecar cryptographically verified. The manifest\'s timestamp is derived from the release now, so re-running the pipeline can no longer invalidate the published checksums.',
+      'The interface passed its final acceptance round: the header works at 200% browser zoom, amber warning text (the weak-pick hint, copy-failed feedback, the update pill in light mode) now holds WCAG AA contrast by measurement with new automated gates, the command palette\'s copy control and empty state are honest ARIA, the footer speaks five languages, and the Android device behavior is pinned by tests.',
+    ],
+  },
+  {
     version: '1.0.8-beta',
     date: '2026-10-12',
     title: 'The integration release',

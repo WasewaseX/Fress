@@ -80,7 +80,7 @@ Two platform notes, so nothing surprises you: on **macOS**, the dmgs are unsigne
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header, right next to the name — a released build of `v1.0.9-beta` shows `v1.0.9-beta`. The version badge at the top of this page tracks the newest **published** release; the development sources on `main` build the next version (currently `1.0.10-beta`), so a newer version number in the repository does not mean a release has been published yet. If your installed app does not show the version you expect, install the newest installer from the [Releases page](https://github.com/WasewaseX/Fress/releases). Old installers keep working and can silently sit on your machine next to the new one.
+Each Fress app shows its exact version in the header, right next to the name — a released build of `v1.0.9-beta` shows `v1.0.9-beta`. The version badge at the top of this page tracks the newest **published** release; the development sources on `main` carry the version that will ship next (`package.json` is the source of truth — it moves ahead of the badge as soon as a release is published), so a newer version number in the repository does not always mean that version has been published yet. If your installed app does not show the version you expect, install the newest installer from the [Releases page](https://github.com/WasewaseX/Fress/releases). Old installers keep working and can silently sit on your machine next to the new one.
 
 ### Where downloads are saved (per operating system)
 

@@ -44,7 +44,9 @@ jobs:
     # at PR time, instead of at release time. The lockfiles are checked
     # too: package-lock.json records the package version twice (root and
     # ""), and a release cut from a drifted lockfile ships a mismatched
-    # npm view.
+    # npm view. Cargo.lock records the crate version where the crate is
+    # named ("fress") - a release built from a stale lockfile would embed
+    # the old version in the binary metadata.
     name: Version consistency
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -60,12 +62,15 @@ jobs:
           TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           LOCK_ROOT=$(node -p "require('./package-lock.json').version")
           LOCK_PKG=$(node -p "require('./package-lock.json').packages[''].version")
+          CARGO_LOCK_VERSION=$(awk -F'"' '/^name = "fress"$/{getline; sub(/^version = "/,""); sub(/"$/,""); print; exit}' src-tauri/Cargo.lock)
           fail() { echo "::error::$1"; exit 1; }
+          [ -n "$CARGO_LOCK_VERSION" ] || fail "could not read the 'fress' crate version from src-tauri/Cargo.lock"
           [ "$CARGO_VERSION" = "$VERSION" ] || fail "Cargo.toml version ($CARGO_VERSION) != package.json version ($VERSION)"
           [ "$TAURI_VERSION" = "$VERSION" ] || fail "tauri.conf.json version ($TAURI_VERSION) != package.json version ($VERSION)"
           [ "$LOCK_ROOT" = "$VERSION" ] || fail "package-lock.json .version ($LOCK_ROOT) != package.json version ($VERSION)"
           [ "$LOCK_PKG" = "$VERSION" ] || fail "package-lock.json packages[''].version ($LOCK_PKG) != package.json version ($VERSION)"
-          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION package-lock.json=$LOCK_ROOT"
+          [ "$CARGO_LOCK_VERSION" = "$VERSION" ] || fail "src-tauri/Cargo.lock fress version ($CARGO_LOCK_VERSION) != package.json version ($VERSION)"
+          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION package-lock.json=$LOCK_ROOT Cargo.lock(fress)=$CARGO_LOCK_VERSION"
 
   frontend:
     name: Typecheck, tests, catalog, security, build

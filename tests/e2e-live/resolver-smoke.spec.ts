@@ -18,7 +18,12 @@ import { readFileSync } from 'node:fs';
 import { storageSeeds } from '../e2e/netpolicy';
 
 const APP_VERSION: string = (
-  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+  // This spec lives at tests/e2e-live/ - the root package.json is TWO levels
+  // up. ('../package.json' resolved to tests/package.json, which does not
+  // exist, so the scheduled live-smoke workflow failed collection with
+  // ENOENT before a single probe ran - caught by its first scheduled run,
+  // 2026-10-12, run 38271362011.)
+  JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
 ).version;
 
 test.beforeEach(async ({ context }) => {

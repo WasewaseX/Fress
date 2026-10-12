@@ -40,6 +40,7 @@ import {
   OWN_RELEASE_ARM_ONLY,
   OWN_SUMS_ARM_ONLY,
   OWN_RELEASE_NO_SUMS,
+  OWN_RELEASES_NO_SIG,
   OWN_SUMS_WRONG_HASH,
   OWN_SUMS_PARTIAL,
   OWN_SIG_TXT,
@@ -429,6 +430,49 @@ test.describe('Workflow J: published digest is wrong (corrupted release)', () =>
       })
       .toBe(true);
   });
+  /** The user stops the transfer on purpose. Cancellation is NOT a
+   * failure: the delivery layer goes back to idle with no failure
+   * theatre - no error toast, no releases-page fallback, no verified
+   * claim - and the pill returns to its plain "update available" label
+   * because the update itself is still detected and still available. */
+  test('cancelling the update transfer is quiet: back to available, no fallback, no verified claim', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await checkForUpdates(page);
+    await expect(page.locator('#header-update-pill')).toBeVisible();
+    await drainToasts(page);
+
+    await page.locator('#header-update-pill').click();
+    await expect
+      .poll(async () => Object.keys((await bridge(page))!.downloads).length, { timeout: 10_000 })
+      .toBe(1);
+
+    // The user cancels from the download manager - the same surface as
+    // any other download. The bridge emits the terminal 'Cancelled'
+    // error on cancel_download, so the real event path is exercised.
+    await openDownloads(page);
+    await page.locator(sel.downloadRow('active')).first().getByRole('button', { name: d['downloads.cancel'] }).click();
+
+    // The engine received the cancel for this transfer...
+    await expect
+      .poll(async () => (await bridge(page))!.calls.filter((c) => c.cmd === 'cancel_download').length, { timeout: 10_000 })
+      .toBeGreaterThanOrEqual(1);
+    // ...and the delivery layer reacts to 'Cancelled' exactly as
+    // designed: idle phase, plain pill, zero fallbacks, zero failure
+    // toasts, zero verified rows.
+    await expect(page.locator('#header-update-pill')).toContainText(
+      d['header.updatePill'].replace('{v}', '1.0.9-beta'), { timeout: 10_000 }
+    );
+    const cur = (await bridge(page))!;
+    expect(cur.openedUrls).toEqual([]);
+    for (const key of [d['update.signatureFailed'], d['update.checksumFailed'], d['update.releasesPage']]) {
+      await expect(page.locator('[data-sonner-toast]', { hasText: key })).toHaveCount(0);
+    }
+    // The registry tells the truth: a cancelled row, never a completed or
+    // verified one.
+    await expect(page.locator(sel.downloadRow('cancelled'))).toHaveCount(1);
+    expect(await page.locator(sel.downloadRows).allTextContents())
+      .not.toContain(d['downloads.verified']);
+  });
 });
 
 test.describe('Workflow J: SHA256SUMS.txt omits the chosen asset (partial manifest)', () => {
@@ -458,5 +502,48 @@ test.describe('Workflow J: SHA256SUMS.txt omits the chosen asset (partial manife
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unverifiableHint']);
+  });
+});
+
+test.describe('Workflow J: unsigned platform artifact (no signature sidecar)', () => {
+  // The macOS/Android matrix row as a release: the platform-matched asset
+  // and its published checksum line EXIST, but the release ships no
+  // <asset>.sig sidecar. The third delivery gate fails closed - no
+  // in-app download of a file that cannot be publisher-verified; the
+  // official releases page opens with the exact 'unsigned' reason.
+  test.use({ ownReleases: { list: OWN_RELEASES_NO_SIG } });
+
+  test('release without a sidecar: releases page with the unsigned reason, no download', async ({ gotoApp, page }) => {
+    await gotoApp();
+
+    await checkForUpdates(page);
+    await expect(page.locator('#header-update-pill')).toBeVisible();
+    await drainToasts(page);
+
+    await page.locator('#header-update-pill').click();
+    // The official releases page opens as the fallback...
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
+    // ...and NO in-app delivery may start: the download registry stays
+    // empty, so nothing can ever be presented as a verified update.
+    const b = (await bridge(page))!;
+    expect(Object.keys(b.downloads)).toHaveLength(0);
+    // The honest reason, explained in the UI, localized like every other
+    // updater string.
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(d['update.releasesPage']);
+    await expect(toast).toContainText(d['update.unsignedHint']);
+    // The pill must never claim an outcome the delivery cannot deliver:
+    // no "verified · ready", no fake progress - the plain available label
+    // is the current contract. (Truthfulness improvement routed to the
+    // self-update owner: after a plan-level refusal the pill could carry
+    // the see-releases label like a post-download failure does; tracked
+    // in docs/quality-gates.md, owner: self-update.)
+    await expect(page.locator('#header-update-pill')).not.toContainText(
+      d['header.updatePillReady'].replace('{v}', '1.0.9-beta')
+    );
+    await expect(page.locator('#header-update-pill')).not.toContainText(d['header.updatePillDownloading']);
   });
 });

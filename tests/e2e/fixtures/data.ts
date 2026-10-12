@@ -173,6 +173,29 @@ export const OWN_RELEASES_VALID: GhReleaseFixture[] = [
   },
 ];
 
+/** The honest macOS/Android matrix row as an E2E fixture: the release
+ * ships the platform-matched AppImage and its published checksum, but NO
+ * `<asset>.sig` sidecar - exactly the shape of every asset class the
+ * release pipeline does not sign (dmg/msi/apk/portable). The delivery
+ * planner's third gate (a well-formed sidecar for the exact filename)
+ * must fail closed: releases page with the 'unsigned' reason, never an
+ * in-app download of a file that cannot be publisher-verified. */
+export const OWN_RELEASES_NO_SIG: GhReleaseFixture[] = [
+  {
+    tag: 'v1.0.9-beta',
+    name: 'Fress 1.0.9-beta',
+    published_at: '2026-10-12T00:00:00Z',
+    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta',
+    prerelease: true,
+    assets: [
+      { name: 'Fress_1.0.9_amd64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_amd64.AppImage` },
+      { name: 'Fress_1.0.9_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_x64-setup.exe` },
+      { name: 'Fress_1.0.9_aarch64.AppImage', size: 20_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_aarch64.AppImage` },
+      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.9-beta/SHA256SUMS.txt` },
+    ],
+  },
+];
+
 /** A release whose tag parseVersion() cannot read. The updater drops
  * unparsable tags from the candidate list before sorting; a feed of only
  * malformed tags fails closed into the "No published releases" contract

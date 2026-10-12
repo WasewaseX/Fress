@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.10-beta (2026-10-12): the contrast-acceptance release
+
+Four quality threads (native engine tests, updater delivery truth, audit honesty, i18n/a11y acceptance) merged and were then re-verified as one integrated candidate by a fresh visual acceptance round — 46 harness tests and 67 screenshots across both themes at every supported width. Every fix below was reproduced on the rendered app before it was coded, and every re-capture is kept as evidence.
+
+### Interface: every state is readable
+- **The command palette's selected row reads in light mode.** The selection highlight paints a solid cocoa band, and the row's paper-calibrated inks sat on it at 1.06:1 (description), 1.12:1 (the "vs proprietary" chip) and 2.53:1 (the name). The selection surface now carries its own measured ink family — primary text, soft secondary text and an amber accent for the chip — held at AA in both themes and pinned by automated contrast assertions.
+- **App names never disappear from the palette.** On narrow windows the "vs proprietary" chip could push the app name to zero width on every row and clipped mid-word at the dialog edge. The name keeps its space first; the chip truncates with an ellipsis.
+- **Dark-theme primary buttons hold WCAG AA.** White labels on the Add-App button, the dialogs' primary actions, their hover states and the downloads count badge measured 4.02:1 and 2.71:1 on the default oklch sky steps; the dark theme now pins steps that hold 5.93:1 and 4.92:1, with the light theme's verified steps unchanged.
+- **The update pill's tooltip tells the same truth as its label.** After the planner refuses an in-app delivery the pill says "see the releases page" — the static "tap to download" tooltip would have contradicted it. A cancelled update transfer also reconciles quietly now instead of hanging the pill, and the tooltip follows the live state in every phase.
+- **The export preview is keyboard-scrollable.** The generated script/export region was focusable to the mouse only (a serious axe finding); it is now a labeled, tabbable region.
+- **Privacy Pack labels match their content.** The "You use now" triggers and replacement pickers are named from the exact string they render (plus the counter), so speech-input "click Gmail" matches; the download panel's SHA copy control includes the visible hash in its accessible name; the Privacy page owns a real h1 heading.
+
+### Engine and updater: the record contract, completed
+- **The download registry records what the engine proved about its bytes.** Every completed artifact now carries the engine's own checksum verdict (`verified` only when a publisher-supplied digest matched, honestly `unverified` otherwise; a mismatch can never leave a record), and the signature verifier's diagnostics quote that provenance — for the caller's own download only. New end-to-end tests pin that two concurrent downloads can never read each other's records and that a failed verification mutates nothing in the registry.
+- **The CI version guard also pins `Cargo.lock`**, so a stale lockfile can no longer ship an old crate version inside the binaries, and the scheduled live-network smoke test actually runs now (its first scheduled execution failed collection on a wrong path; the manual dispatch passed all four probes).
+
+### Honesty of the audits
+- A quota-exhausted GitHub answer is its own "inconclusive — re-run later" class in the catalog audit, separate from "missing" or "dead"; the tool tolerates non-JSON bodies and keeps real status codes.
+
 ## 1.0.9-beta (2026-10-12): the verified-delivery release
 
 The updater's three trust layers (strict version parsing, the native minisign verifier, the checksum-checked download engine) existed side by side, but the real delivery flow never called the verifier. Now it does: an in-app update is called "verified" only after every gate has passed against the artifact that is actually being delivered, and the release pipeline audits its own published bytes before publishing them.

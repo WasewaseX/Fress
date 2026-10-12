@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.10-beta',
+    date: '2026-10-12',
+    title: 'The contrast-acceptance release',
+    items: [
+      'Every interface state is readable now, verified by a fresh acceptance round that rendered the real app in both themes at every supported width. The command palette\'s highlighted row is legible in light mode (the selection band used to swallow its own text at 1.06:1), app names can no longer be pushed out of a palette row by a long "vs proprietary" chip on narrow windows, dark-theme primary buttons and their hover states hold WCAG AA by measurement, and the export preview is keyboard-scrollable.',
+      'The update pill is truthful in every state: a refused in-app delivery says "see the releases page" in both the label and the tooltip, and a cancelled update transfer returns quietly to the available state instead of hanging. The download registry records what the engine proved about each file\'s checksum, so the signature verifier\'s diagnostics can tell you whether your download completed verified or merely completed — and new tests pin that concurrent downloads can never read each other\'s records.',
+      'Privacy Pack controls are named by what they actually show (speech-input "click Gmail" works now), the catalog audit reports a rate-limited answer as "inconclusive" instead of confusing it with a dead package, and CI now guards the Rust lockfile version so a stale build can never ship.',
+    ],
+  },
+  {
     version: '1.0.9-beta',
     date: '2026-10-12',
     title: 'The verified-delivery release',

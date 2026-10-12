@@ -27,7 +27,11 @@ export const SpotlightSection: React.FC<SpotlightSectionProps> = ({ totalApps, a
       id="spotlight-section"
       /* Phones: the platform chip bar is fixed directly under the header and
          overlays the top of this section, so the hero clears it with its own
-         top padding. Desktop has no fixed bar and keeps the compact rhythm. */
+         top padding. Desktop has no fixed bar and keeps the compact rhythm.
+         Named region: the section sits outside <main> (full-bleed background
+         cannot move into the shell), so it names itself as a landmark for
+         screen-reader navigation (axe: region). */
+      aria-labelledby="spotlight-main-heading"
       className="bg-fr-bg border-b border-fr-border py-5 max-md:pt-12"
     >
       <div className="fr-shell">

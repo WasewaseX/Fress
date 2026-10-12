@@ -8,7 +8,7 @@ import { openExternal } from '../lib/external';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
-import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import {
   Star,
@@ -227,7 +227,7 @@ export const TableView: React.FC<TableViewProps> = ({
 
                 {/* License */}
                 <td className="py-2.5 px-3 text-slate-400 font-mono text-[11px]">
-                  {app.license}
+                  {translateLicenseDisplay(t, app.license)}
                 </td>
 
                 {/* Quick Install Command */}

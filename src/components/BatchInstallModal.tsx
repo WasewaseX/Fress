@@ -328,7 +328,8 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                   type="button"
                   onClick={() => onToggleAppSelection(app.id)}
                   className="text-slate-400 hover:text-rose-400 ml-0.5"
-                  title="Remove from batch"
+                  title={`${t('bs.removeApp')}: ${app.name}`}
+                  aria-label={`${t('bs.removeApp')}: ${app.name}`}
                 >
                   <X className="w-3 h-3" />
                 </button>

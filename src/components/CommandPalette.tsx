@@ -105,6 +105,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       // to run first and poison that capture: the palette remembered itself
       // as the opener, so closing restored focus to a node that was about
       // to be removed - keyboard users landed on <body>.
+    } else {
+      // Dismissal kills the pending "Copied"/"Copy failed" flash: reopening
+      // inside the 2s timer window must not resurrect feedback from the
+      // previous palette session (stale success is as false as stale failure).
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+      setCopyState(null);
     }
   }, [isOpen]);
 
@@ -229,8 +238,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     // text caret inside the query, they do not jump across result rows.
   };
 
-  const handleCopyCommand = async (e: React.MouseEvent, cmd: string, id: string) => {
-    e.stopPropagation();
+  const handleCopyCommand = async (cmd: string, id: string) => {
     if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     try {
       await navigator.clipboard.writeText(cmd);
@@ -296,18 +304,73 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           </kbd>
         </div>
 
+        {/* Contextual install-command copy for the HIGHLIGHTED app row.
+            It lives OUTSIDE the listbox on purpose: a listbox may own only
+            option/group elements, and a focusable control among the rows
+            (its li is role=presentation, and focusable descendants do NOT
+            inherit that role) surfaces in the accessibility tree as a
+            `button` child of the listbox - axe: aria-required-children.
+            Applying it to the arrow-key selection also matches what the
+            screen reader is already announcing, instead of forcing N extra
+            Tab stops between the rows. */}
+        {(() => {
+          const activeApp = activeItem?.type === 'app' ? activeItem.app : null;
+          const installCmd = activeApp ? activeApp.wingetCommand || activeApp.brewCommand || activeApp.flatpakCommand : undefined;
+          if (!activeApp || !installCmd) return null;
+          const feedback = copyState?.id === activeApp.id ? copyState : null;
+          return (
+            <div className="px-4 py-2 border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950/60">
+              <button
+                type="button"
+                onClick={() => void handleCopyCommand(installCmd, activeApp.id)}
+                className={`inline-flex items-center gap-1.5 text-[11px] font-mono border rounded px-2 py-1 transition-colors ${
+                  feedback
+                    ? feedback.ok
+                      ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+                      : 'text-rose-400 border-rose-500/40 bg-rose-500/10'
+                    : 'text-slate-200 bg-slate-950/[0.05] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border-slate-950/10 dark:border-white/[0.1]'
+                }`}
+                title={installCmd}
+              >
+                {feedback ? (
+                  feedback.ok ? (
+                    <>
+                      <Check className="w-3 h-3" aria-hidden="true" />
+                      <span>{t('common.copied')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="w-3 h-3" aria-hidden="true" />
+                      <span>{t('common.copyFailed')}</span>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" aria-hidden="true" />
+                    <span>{t('palette.copyCommandFor').replace('{name}', activeApp.name)}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Results List. The listbox/option pair (with aria-selected and the
             input's aria-activedescendant) is what makes the rows keyboard
             and screen-reader operable; the old click-only divs were silent
-            to assistive tech. */}
-        <ul
-          id="command-palette-list"
-          role="listbox"
-          aria-label={t('palette.resultsAria')}
-          className="max-h-96 overflow-y-auto p-2 divide-y divide-slate-950/10 dark:divide-white/[0.03] list-none m-0"
-        >
-          {filteredItems.length > 0 ? (
-            filteredItems.map((item, idx) => {
+            to assistive tech. When NOTHING matches, the id moves to a
+            role=status sibling instead: a listbox may only own option/group
+            children, so the empty state must never live inside it (axe:
+            aria-required-children). aria-controls keeps pointing at
+            #command-palette-list either way. */}
+        {filteredItems.length > 0 ? (
+          <ul
+            id="command-palette-list"
+            role="listbox"
+            aria-label={t('palette.resultsAria')}
+            className="max-h-96 overflow-y-auto p-2 divide-y divide-slate-950/10 dark:divide-white/[0.03] list-none m-0"
+          >
+            {filteredItems.map((item, idx) => {
               const isSelected = idx === activeIndex;
               const rowCls = `w-full flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors text-left ${
                 isSelected ? 'fr-chip-active border' : 'text-slate-300 hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04]'
@@ -344,8 +407,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
               const app = item.app!;
               const isFav = favorites.includes(app.id);
-              const installCmd = app.wingetCommand || app.brewCommand || app.flatpakCommand;
-              const copyFeedback = copyState?.id === app.id ? copyState : null;
 
               return (
                 <li key={app.id} role="presentation" className="relative list-none">
@@ -382,48 +443,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       </span>
                     </span>
                   </button>
-
-                  {/* Sibling of the row button, never nested inside it: an
-                      interactive control inside another button is invalid
-                      HTML and breaks both activations. */}
-                  {installCmd && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleCopyCommand(e, installCmd, app.id)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 text-[11px] font-mono bg-slate-950/[0.05] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.1] text-slate-200 px-2 py-1 rounded transition-colors"
-                      title={installCmd}
-                    >
-                      {copyFeedback ? (
-                        copyFeedback.ok ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                            <span className="text-emerald-400">{t('common.copied')}</span>
-                          </>
-                        ) : (
-                          <>
-                            <X className="w-3 h-3 text-rose-400" aria-hidden="true" />
-                            <span className="text-rose-400">{t('common.copyFailed')}</span>
-                          </>
-                        )
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-slate-400" aria-hidden="true" />
-                          <span>{t('common.copy')}</span>
-                        </>
-                      )}
-                    </button>
-                  )}
                 </li>
               );
-            })
-          ) : (
-            <li role="presentation" className="list-none">
-              <div role="status" className="p-8 text-center text-xs text-slate-400">
-                {t('palette.noMatch').replace('{query}', query)}
-              </div>
-            </li>
-          )}
-        </ul>
+            })}
+          </ul>
+        ) : (
+          <div
+            id="command-palette-list"
+            role="status"
+            className="p-8 text-center text-xs text-slate-400"
+          >
+            {t('palette.noMatch').replace('{query}', query)}
+          </div>
+        )}
 
         {/* Localized completion feedback for the clipboard operation: the
             visual swap on the button is not announced by screen readers on

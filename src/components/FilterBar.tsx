@@ -250,6 +250,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   return (
     <div
       id="filter-bar-container"
+      /* The bar sits outside <main> (sticky full-bleed band), so it must be
+         its own landmark to not float outside the page outline for screen
+         readers (axe: region). A named region needs the explicit role on a
+         generic div; the label names the whole control cluster. */
+      role="region"
+      aria-label={t('filter.region')}
       className="md:sticky md:z-20 bg-fr-bg border-b border-fr-border py-2.5"
       style={{ top: 'var(--fress-header-h, 0px)' }}
     >

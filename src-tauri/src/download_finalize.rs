@@ -131,8 +131,45 @@
 //! reserving the destination name with `create_new` (also atomic) and
 //! copying the bytes. A filename collision picks the next candidate name
 //! ("name (1).ext", ...); a genuine filesystem error is reported as such.
+//!
+//! # Completed-artifact registry and the signature-verification boundary
+//!
+//! A successful commit leaves one bounded record in
+//! [`DownloadRegistry`]'s completed-artifact queue: the exact reported
+//! path, its canonical path resolved AT COMPLETION TIME, the committed
+//! byte size and the source URL. The queue exists for exactly one
+//! consumer - the updater's signature-verification command in `lib.rs` -
+//! and is the reason that command cannot be turned into a general-purpose
+//! "verify any file on disk" API:
+//!
+//! - A record is created ONLY by a successful, full, hash-checked commit.
+//!   Cancelled, failed, checksum-mismatched and resume-invalid downloads
+//!   never leave one, so a staging `.part` (or any other file the frontend
+//!   picks a path for) can never present itself for verification.
+//! - The queue is capped ([`COMPLETED_RECORD_CAP`], FIFO) and a newer
+//!   completion of the same canonical path replaces the stale record, so a
+//!   verification always judges the artifact the engine MOST RECENTLY
+//!   finalized there.
+//! - The verification command re-resolves the record's path and refuses
+//!   when the on-disk canonical path no longer matches the recorded one
+//!   (a symlink swap or rename between completion and verification), when
+//!   the open file is not a regular file, or when its size no longer
+//!   matches the committed size. A same-size in-place edit cannot be seen
+//!   by metadata - the signature verdict itself is the rail there: the
+//!   command verifies the bytes it actually reads from the opened handle,
+//!   so ANY modification after completion can only produce a failed
+//!   verification, never a false one.
+//!
+//! What the boundary deliberately does NOT promise: the release-version /
+//! filename binding of the signature DOCUMENT. A minisign trusted comment
+//! is not verifiable with the `minisign-verify` API, so "this .sig belongs
+//! to release vX's asset" is the frontend delivery plan's gate (it matches
+//! the sidecar to the asset on the pinned release feed). Natively, a
+//! wrong-version signature document can never yield a false "verified":
+//! it only verifies over artifact bytes that genuinely carry the embedded
+//! key's signature.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -273,13 +310,49 @@ struct ActiveDownload {
     state: DownloadState,
 }
 
+/// How many completed artifacts the registry remembers for the
+/// signature-verification boundary. A self-update flow realistically has
+/// one; the cap only bounds memory if a user downloads many files and then
+/// verifies them one after another. FIFO: the oldest record is evicted.
+pub(crate) const COMPLETED_RECORD_CAP: usize = 32;
+
+/// The record one successfully completed download leaves behind for the
+/// updater's signature-verification boundary (see the module docs). Created
+/// exclusively by the commit path; never by cancelled, failed or
+/// checksum-mismatched downloads.
+#[derive(Clone, Debug)]
+pub(crate) struct CompletedArtifact {
+    pub(crate) id: u32,
+    /// The exact final path the engine reported in its completion event
+    /// (`CompletePayload.path`) - the string the frontend echoes back.
+    pub(crate) path: PathBuf,
+    /// The path canonicalized at completion time (symlinks resolved). The
+    /// verifier compares this against a FRESH canonicalization to detect a
+    /// symlink swap or rename between completion and verification.
+    pub(crate) canonical: PathBuf,
+    /// Committed byte size. A cheap post-completion replacement detector;
+    /// the signature verdict covers what metadata cannot.
+    pub(crate) size: u64,
+    /// Source URL the bytes were downloaded from (the plan URL the
+    /// network policy admitted). Auditability only today: the verifier is
+    /// invoked with a path, and the frontend correlates id -> url before
+    /// it calls. The binding is kept so a future caller can demand it.
+    pub(crate) url: String,
+}
+
 /// Registry of live downloads, keyed by download id. The state machine and
 /// the cancel channel live behind one mutex, so a state read and the cancel
 /// signal are always consistent with each other.
+///
+/// The completed-artifact queue uses a plain [`std::sync::Mutex`] on
+/// purpose: its two callers are the engine's commit path (no await while
+/// held) and the verifier's blocking thread, which cannot lock an async
+/// mutex. No guard is ever held across an await point.
 #[derive(Default)]
 pub(crate) struct DownloadRegistry {
     next_id: AtomicU32,
     active: Mutex<HashMap<u32, ActiveDownload>>,
+    completed: std::sync::Mutex<VecDeque<CompletedArtifact>>,
 }
 
 impl DownloadRegistry {
@@ -305,6 +378,68 @@ impl DownloadRegistry {
         if let Some(entry) = self.active.lock().await.get(&id) {
             let _ = entry.cancel.try_send(());
         }
+    }
+
+    /// Engine-only: records a successfully committed artifact for the
+    /// signature-verification boundary. Called once per successful commit,
+    /// right after [`commit_no_clobber`] returned the final path.
+    ///
+    /// A newer completion of the same canonical path replaces the earlier
+    /// record (the old file it described was either consumed or is no
+    /// longer reachable under that path - the newest commit is the
+    /// truthful one). The queue is FIFO-capped so a long session cannot
+    /// grow it without bound.
+    pub(crate) fn record_completed_artifact(&self, id: u32, path: &Path, url: &str) {
+        // Best effort: the file was just committed and still exists, but a
+        // canonicalization hiccup must never fail a finished download. The
+        // fallback keeps the raw path, and the verifier's fresh
+        // canonicalization comparison stays sound (fail closed) for it.
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let mut completed = self
+            .completed
+            .lock()
+            .expect("completed-artifact registry poisoned");
+        completed.retain(|a| a.canonical != canonical);
+        while completed.len() >= COMPLETED_RECORD_CAP {
+            completed.pop_front();
+        }
+        completed.push_back(CompletedArtifact {
+            id,
+            path: path.to_path_buf(),
+            canonical,
+            size,
+            url: url.to_string(),
+        });
+    }
+
+    /// Boundary lookup for the signature verifier: the completed-artifact
+    /// record for `path`, if any. The primary match is the exact reported
+    /// path (the frontend echoes the completion event's path verbatim);
+    /// the fallback matches by freshly canonicalized path so a caller
+    /// carrying a normalized/`..`-folded variant of the same location is
+    /// still recognized. Both outcomes return the record; every rejection
+    /// upstream renders the SAME generic refusal, so this lookup leaks no
+    /// filesystem information about unregistered paths.
+    pub(crate) fn completed_artifact_for_path(&self, path: &Path) -> Option<CompletedArtifact> {
+        let completed = self
+            .completed
+            .lock()
+            .expect("completed-artifact registry poisoned");
+        if let Some(record) = completed.iter().find(|a| a.path == path) {
+            return Some(record.clone());
+        }
+        let canonical = std::fs::canonicalize(path).ok()?;
+        completed.iter().find(|a| a.canonical == canonical).cloned()
+    }
+
+    /// Test-only view of the completed queue length (cap regression tests).
+    #[cfg(test)]
+    fn completed_len(&self) -> usize {
+        self.completed
+            .lock()
+            .expect("completed-artifact registry poisoned")
+            .len()
     }
 }
 
@@ -1644,6 +1779,15 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
             ));
         }
     };
+
+    // The commit is real: hand the verification boundary the record it
+    // will scope the updater's signature check against (see the module
+    // docs, "Completed-artifact registry"). Nothing after this point can
+    // un-report the completion - the file is committed under its final
+    // name and every exit from here returns Ok.
+    session
+        .registry
+        .record_completed_artifact(id, &committed, url.as_str());
 
     if session.advance(DownloadState::Completed).await.is_err() {
         // The file IS committed; report the truth even if the state book-
@@ -4805,5 +4949,172 @@ mod tests {
         );
         assert_eq!(tokio::fs::read(tmp.path().join(&name)).await.unwrap(), body);
         assert!(!tmp.path().join(format!("{name}.part")).exists());
+    }
+
+    // -----------------------------------------------------------------------
+    // Completed-artifact registry (the signature-verification boundary)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_completed_download_is_recorded_for_the_signature_boundary() {
+        let tmp = TempDir::new("e2e-completed-record");
+        let body = pattern(9_000);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        std::fs::create_dir_all(tmp.path().join("sub")).expect("sub dir for the path variant");
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+
+        let payload = execute_with_retries(&log, &session, 7, plan, cancel_rx, test_backoff())
+            .await
+            .expect("download must complete");
+
+        // The exact path the completion event carried is the lookup key.
+        let record = session
+            .registry
+            .completed_artifact_for_path(Path::new(&payload.path))
+            .expect("the committed artifact must be registered");
+        assert_eq!(record.id, 7);
+        assert_eq!(record.url, server.url);
+        assert_eq!(record.size, body.len() as u64);
+        assert_eq!(
+            record.canonical,
+            std::fs::canonicalize(&payload.path).expect("artifact canonicalizable")
+        );
+
+        // A path variant of the same location that textual path equality
+        // does NOT collapse ("sub/.." stays in the components) must still
+        // be recognized through the canonical fallback.
+        let folded = tmp.path().join("sub").join("..").join("setup.exe");
+        assert_ne!(
+            folded.components().count(),
+            Path::new(&payload.path).components().count(),
+            "the variant must differ textually to reach the fallback"
+        );
+        assert!(session
+            .registry
+            .completed_artifact_for_path(&folded)
+            .is_some());
+
+        // An unrelated path in the same directory has no record.
+        assert!(session
+            .registry
+            .completed_artifact_for_path(&tmp.path().join("other.exe"))
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_download_never_leaves_a_completed_record() {
+        // A cancelled transfer keeps its staging file for the Resume
+        // button - and must keep it UNVERIFIABLE: no completion record may
+        // exist for the .part or for the destination name it would have
+        // taken.
+        let tmp = TempDir::new("e2e-cancel-record");
+        let body = pattern(70_000);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+
+        // Cancel the session's REAL registry id (test_session hands out
+        // ids from a fresh registry; the engine's id parameter is only a
+        // label for events, exactly like the bridge passes its own).
+        session.registry.request_cancel(session.id).await;
+        let err = execute_with_retries(&log, &session, 7, plan, cancel_rx, test_backoff())
+            .await
+            .expect_err("a pre-signalled cancel must fail the download");
+        assert_eq!(err.0, CANCEL_SENTINEL);
+
+        let dest = tmp.path().join("setup.exe");
+        let part = part_path_for(&dest);
+        assert!(session
+            .registry
+            .completed_artifact_for_path(&dest)
+            .is_none());
+        assert!(session
+            .registry
+            .completed_artifact_for_path(&part)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_checksum_failure_leaves_no_completed_record() {
+        let tmp = TempDir::new("e2e-checksum-record");
+        let body = pattern(1_000);
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.expected_sha256 = Some(sha256_hex(b"not the downloaded bytes"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 3, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a checksum mismatch must fail the download");
+        assert_eq!(kind.as_deref(), Some("checksum"), "{message}");
+
+        // The artifact was deleted AND never registered: the stale
+        // record scenario the verification boundary must refuse.
+        assert!(!tmp.path().join("setup.exe").exists());
+        assert!(session
+            .registry
+            .completed_artifact_for_path(&tmp.path().join("setup.exe"))
+            .is_none());
+    }
+
+    #[test]
+    fn the_completed_record_queue_is_fifo_capped() {
+        let registry = DownloadRegistry::default();
+        for i in 0..(COMPLETED_RECORD_CAP + 8) {
+            // Paths that do not exist: canonicalization falls back to the
+            // raw path, which is exactly what makes this test portable
+            // (no filesystem needed for queue mechanics).
+            registry.record_completed_artifact(
+                i as u32,
+                &PathBuf::from(format!("/nonexistent/artifact-{i}.bin")),
+                "https://example.com/a.bin",
+            );
+        }
+        assert_eq!(
+            registry.completed_len(),
+            COMPLETED_RECORD_CAP,
+            "the queue must never grow past the cap"
+        );
+        // Oldest evicted, newest retained.
+        assert!(registry
+            .completed_artifact_for_path(Path::new("/nonexistent/artifact-0.bin"))
+            .is_none());
+        let last = COMPLETED_RECORD_CAP + 7;
+        let newest = registry
+            .completed_artifact_for_path(Path::new(&format!("/nonexistent/artifact-{last}.bin")))
+            .expect("the newest record must survive");
+        assert_eq!(newest.id as usize, last);
+    }
+
+    #[test]
+    fn a_recommit_of_the_same_path_replaces_the_stale_record() {
+        // If a path completes twice (the user deleted the first artifact
+        // and re-downloaded; no-clobber still holds per-download), the
+        // verification boundary must judge the MOST RECENT commit, never
+        // the stale record with its old size.
+        let tmp = TempDir::new("e2e-recommit-record");
+        let path = tmp.path().join("setup.exe");
+        std::fs::write(&path, vec![0u8; 10]).unwrap();
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(1, &path, "https://example.com/a.bin");
+
+        std::fs::write(&path, vec![1u8; 20]).unwrap();
+        registry.record_completed_artifact(2, &path, "https://example.com/a.bin");
+
+        assert_eq!(
+            registry.completed_len(),
+            1,
+            "one canonical path, one record"
+        );
+        let record = registry
+            .completed_artifact_for_path(&path)
+            .expect("record present");
+        assert_eq!(record.id, 2);
+        assert_eq!(record.size, 20, "the stale size must not survive");
     }
 }

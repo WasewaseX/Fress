@@ -27,6 +27,17 @@
   --color-slate-700: #1e2736;
   --color-slate-600: #2c3648;
 
+  /* Dark sky steps carry WHITE text on every primary control
+     (bg-sky-600 / bg-fr-primary + text-white, hover:bg-sky-500, the
+     downloads count badge bg-fr-primary-hover): the Tailwind v4 oklch
+     defaults measure white 4.02:1 on sky-600 and 2.71:1 on sky-500 -
+     below AA for the text-xs font-semibold labels those buttons carry
+     (round-27 a11y scan finding, evidence a6-dark-header-primary.png).
+     #0369a1 holds white at 5.93:1, #0276b6 at 4.92:1; both stay above
+     the 3:1 non-text floor as focus ring / checkbox accents. */
+  --color-sky-600: #0369a1;
+  --color-sky-500: #0276b6;
+
   /* ----------------------------------------------------------------
      SEMANTIC COLOR ALIASES
      Components should style by MEANING (surface, danger, primary...)

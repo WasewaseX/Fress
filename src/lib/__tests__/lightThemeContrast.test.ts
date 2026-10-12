@@ -282,4 +282,21 @@ describe('light theme token contrast (WCAG AA)', () => {
       expect(b).toMatch(/--fr-chip-active-accent:\s*#fde68a/);
     }
   });
+
+  it('dark primary controls hold AA with white text in BOTH roles (round 27)', () => {
+    // Agent 2's round-27 a11y scan measured white 4.02:1 on the Tailwind v4
+    // oklch sky-600 (bg-sky-600 / bg-fr-primary primary buttons) and 2.71:1
+    // on sky-500 (the hover state AND the downloads count badge
+    // bg-fr-primary-hover). The dark block now pins both steps to values
+    // that hold AA for the text-xs font-semibold labels they carry; the
+    // light block's deepened steps were already AA and stay pinned.
+    const darkRoot = CSS.slice(CSS.indexOf('/* Dark theme base'), CSS.indexOf('SEMANTIC COLOR ALIASES'));
+    expect(darkRoot).toMatch(/--color-sky-600:\s*#0369a1/);
+    expect(darkRoot).toMatch(/--color-sky-500:\s*#0276b6/);
+    expect(contrastRatio('#ffffff', '#0369a1')).toBeGreaterThanOrEqual(4.5); // base bg
+    expect(contrastRatio('#ffffff', '#0276b6')).toBeGreaterThanOrEqual(4.5); // hover bg + badge
+    // The light steps keep their measured AA (never "re-darken" light to match).
+    expect(contrastRatio('#ffffff', '#0a6a99')).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio('#ffffff', '#0c73a6')).toBeGreaterThanOrEqual(4.5);
+  });
 });

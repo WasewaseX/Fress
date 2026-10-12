@@ -245,8 +245,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </button>
         </div>
 
-        {/* Preview */}
-        <div className="flex-1 p-5 overflow-y-auto bg-slate-950">
+        {/* Preview. Keyboard-scrollable (axe scrollable-region-focusable):
+            a keyboard user must be able to scroll the generated export
+            without a mouse wheel. Labelled by the modal's own title - no
+            new dictionary key needed. (Finding and fix shape routed from
+            Agent 2's round-27 scan; file owned by Agent 4, applied by the
+            orchestrator with attribution.) */}
+        <div
+          className="flex-1 p-5 overflow-y-auto bg-slate-950"
+          tabIndex={0}
+          role="region"
+          aria-label={t('export.title')}
+        >
           <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
             {content}
           </pre>

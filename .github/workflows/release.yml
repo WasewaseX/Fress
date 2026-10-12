@@ -24,25 +24,33 @@ jobs:
           # Nothing in this workflow pushes to git; the release uploads
           # authenticate via GH_TOKEN env vars instead.
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Install dependencies from the lockfile
+        # tsx (the validator's TypeScript loader) comes from devDependencies.
+        run: npm ci
       - id: v
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
 
-          # One version everywhere. A tag that disagrees with package.json,
-          # Cargo.toml or tauri.conf.json would produce a release whose
-          # installer reports a different version than its tag says, so the
-          # whole run stops here instead of shipping a confusing release.
-          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          fail() { echo "::error::$1"; exit 1; }
-          [ "$CARGO_VERSION" = "$VERSION" ] || fail "Cargo.toml version ($CARGO_VERSION) != package.json version ($VERSION)"
-          [ "$TAURI_VERSION" = "$VERSION" ] || fail "tauri.conf.json version ($TAURI_VERSION) != package.json version ($VERSION)"
+          # One version everywhere, validated by ONE authoritative
+          # implementation: scripts/ci/validate-versions.ts (Agent 2's
+          # validator, the same command CI runs as `npm run
+          # validate:versions`). This step does not re-implement the rules
+          # in shell; it only derives the job outputs the later build jobs
+          # consume. On a tag push the validator additionally proves the
+          # tag equals v<version>, so a release whose installer would
+          # report a different version than its tag stops here. On
+          # workflow_dispatch (no tag) the same coherence rules run without
+          # tag binding.
           if [ "${GITHUB_REF_TYPE:-branch}" = "tag" ]; then
-            [ "${GITHUB_REF_NAME}" = "v$VERSION" ] || fail "pushed tag (${GITHUB_REF_NAME}) != package.json version (v$VERSION)"
+            npm run validate:versions -- --release-tag "${GITHUB_REF_NAME}"
+          else
+            npm run validate:versions
           fi
-          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION tag=${GITHUB_REF_NAME:-n/a}"
 
+          VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
@@ -1280,12 +1288,21 @@ jobs:
     # links to the release page, so users can see multi-engine results before
     # they trust a download. Uses the public VT API directly (4 uploads/min
     # is enough for one release); runs when a VIRUSTOTAL_API_KEY secret is
-    # set (free account at virustotal.com), skipped silently otherwise.
+    # set (free account at virustotal.com).
+    #
+    # INFORMATIONAL by design: this is a convenience overlay on the release
+    # page, never a publication gate - the artifact audit is the gate. The
+    # skip is labeled, not silent: without the key the job prints why and
+    # exits green, so a green run can never be mistaken for "scanned and
+    # clean".
     needs: [version, checksums]
     runs-on: ubuntu-latest
     env:
       FRESS_VT_CONFIGURED: ${{ secrets.VIRUSTOTAL_API_KEY != '' }}
     steps:
+      - name: Say so when the scan is skipped (informational, not a pass)
+        if: env.FRESS_VT_CONFIGURED != 'true'
+        run: echo "::notice::VirusTotal scan skipped - VIRUSTOTAL_API_KEY is not configured. Informational only; the SHA256SUMS.txt + signature audit remains the integrity gate."
       - name: Scan assets and attach analysis links
         if: env.FRESS_VT_CONFIGURED == 'true'
         env:
@@ -1340,7 +1357,15 @@ jobs:
     # truncated upload, a stale latest.json or an invalid sidecar now
     # leaves the release as a private draft: re-run the failed jobs, the
     # draft fills back up.
-    needs: [version, checksums, virustotal]
+    #
+    # needs: [version, checksums] -- virustotal deliberately NOT in needs:
+    # it is documented as an informational overlay on the release page and
+    # must never be able to block publication. With it in needs, one
+    # transient VT API error would leave a fully verified release stuck as
+    # a draft forever - a convenience feature holding the gate hostage. It
+    # runs in parallel off the same checksums result instead; the integrity
+    # boundary is version -> checksums -> verify-release -> draft=false.
+    needs: [version, checksums]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

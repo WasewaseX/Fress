@@ -39,14 +39,15 @@ concurrency:
 
 jobs:
   version-guard:
-    # The release workflow refuses a tag whose version disagrees with
-    # package.json, Cargo.toml or tauri.conf.json. Catch the drift here,
-    # at PR time, instead of at release time. The lockfiles are checked
-    # too: package-lock.json records the package version twice (root and
-    # ""), and a release cut from a drifted lockfile ships a mismatched
-    # npm view. Cargo.lock records the crate version where the crate is
-    # named ("fress") - a release built from a stale lockfile would embed
-    # the old version in the binary metadata.
+    # Version coherence is validated by ONE authoritative implementation:
+    # scripts/ci/validate-versions.ts, run as `npm run validate:versions`
+    # (Agent 2's implementation, wired here by the CI owner). The rules do
+    # not live in this workflow - the steps below are only the invocation.
+    # It catches drift between package.json, Cargo.toml, tauri.conf.json and
+    # both lockfiles at PR time, instead of at release time. Tag binding is
+    # enforced by the same command in release.yml (--release-tag); a normal
+    # development build deliberately does NOT have to match the currently
+    # published release version.
     name: Version consistency
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -54,23 +55,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: package.json, Cargo.toml, tauri.conf.json and lockfiles must agree
-        run: |
-          set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
-          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          LOCK_ROOT=$(node -p "require('./package-lock.json').version")
-          LOCK_PKG=$(node -p "require('./package-lock.json').packages[''].version")
-          CARGO_LOCK_VERSION=$(awk -F'"' '/^name = "fress"$/{getline; sub(/^version = "/,""); sub(/"$/,""); print; exit}' src-tauri/Cargo.lock)
-          fail() { echo "::error::$1"; exit 1; }
-          [ -n "$CARGO_LOCK_VERSION" ] || fail "could not read the 'fress' crate version from src-tauri/Cargo.lock"
-          [ "$CARGO_VERSION" = "$VERSION" ] || fail "Cargo.toml version ($CARGO_VERSION) != package.json version ($VERSION)"
-          [ "$TAURI_VERSION" = "$VERSION" ] || fail "tauri.conf.json version ($TAURI_VERSION) != package.json version ($VERSION)"
-          [ "$LOCK_ROOT" = "$VERSION" ] || fail "package-lock.json .version ($LOCK_ROOT) != package.json version ($VERSION)"
-          [ "$LOCK_PKG" = "$VERSION" ] || fail "package-lock.json packages[''].version ($LOCK_PKG) != package.json version ($VERSION)"
-          [ "$CARGO_LOCK_VERSION" = "$VERSION" ] || fail "src-tauri/Cargo.lock fress version ($CARGO_LOCK_VERSION) != package.json version ($VERSION)"
-          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION package-lock.json=$LOCK_ROOT Cargo.lock(fress)=$CARGO_LOCK_VERSION"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Install dependencies from the lockfile
+        # tsx (the validator's TypeScript loader) comes from devDependencies;
+        # the validator itself only touches node:fs/node:path/node:url.
+        run: npm ci
+      - name: All manifests and lockfiles must agree (scripts/ci/validate-versions.ts)
+        run: npm run validate:versions
 
   frontend:
     name: Typecheck, tests, catalog, security, build
@@ -90,6 +83,11 @@ jobs:
         run: npm ci
       - name: TypeScript
         run: npm run typecheck
+      - name: Version coherence (validate:versions)
+        # Same authoritative command as the version-guard job; running it
+        # inside the build job too costs one second and keeps the build
+        # path honest even if the standalone job is ever restructured.
+        run: npm run validate:versions
       - name: Unit tests
         run: npm test
       - name: Catalog validator
@@ -178,6 +176,24 @@ jobs:
           npm run build
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  artifact-audit-tests:
+    # The release-artifact verifier (scripts/ci/verify-release-artifacts.py)
+    # is the gate that keeps a corrupted or mis-manifested release private.
+    # Its rejection behavior is executable: this job proves the verifier
+    # actually REJECTS tampered checksums, bad signatures, wrong-version
+    # manifests, stray sidecars and malformed manifests - using synthetic
+    # temp-dir fixtures, never a real release. A verifier that cannot prove
+    # its own rejection paths is not a gate, it is a hope.
+    name: Release-artifact verifier tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Run the verifier test suite (stdlib unittest)
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
 
   e2e:
     # Integration gate: the complete browser suite (workflows A-J plus the

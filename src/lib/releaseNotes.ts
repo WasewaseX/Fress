@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.11-beta',
+    date: '2026-10-13',
+    title: 'The open-contract release',
+    items: [
+      'Downloaded apps open now. Every completed download hands its exact file to your operating system, and when the OS refuses you get a real reason (the file moved, no app handles it, the system said no) with the action left retryable — no more re-downloading to try again. Linux AppImages launch for real: a validated launcher re-proves the file against the download engine\'s own completion record before marking it executable and starting it, so a launch can never be faked or double-fired.',
+      'The whole download-to-open journey is now pinned by 22 new browser tests — exact per-row paths, keyboard-only activation, filenames with spaces and Unicode and shell characters, and the AppImage fallback included. The release pipeline validates its versions through one executable command across all six authoritative surfaces and audits its own published artifacts with loud, named refusals (duplicate manifest keys and platform mismatches are hard errors now).',
+      'The README and the signing guide were rewritten against the actual published release bytes: which artifacts carry an updater signature, which platforms get verified in-app updates, what macOS Gatekeeper and Android expect on first launch, and why Windows shows "Unknown publisher" today.',
+    ],
+  },
+  {
     version: '1.0.10-beta',
     date: '2026-10-12',
     title: 'The contrast-acceptance release',

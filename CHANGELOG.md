@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.11-beta (2026-10-13): the open-contract release
+
+The download → open journey became real, then was proven as one integrated candidate: five parallel rounds (the desktop open contract, the end-to-end journey suite, executable version coherence, release-verifier hardening, user-facing docs truth) merged and re-verified together — full E2E suite 92/92, unit suite 605 passed, typecheck and build clean, and the new version validator green on the release candidate itself.
+
+### Downloaded apps actually open (desktop)
+- **One uniform native boundary.** Every completed artifact is handed to the OS opener with the exact completed path and the default handler — the OS association stays the authority, so Gatekeeper/UAC/package-manager checks stay in force. Open failures are typed and classified now (file gone, no handler, OS refused, unsupported) instead of one generic message; the row stays completed, the reason is explained in plain language, and the action stays retryable without re-downloading.
+- **Linux AppImages launch for real.** Stock desktops ship no AppImage MIME handler and a freshly downloaded AppImage has no execute bit, so the generic open always refused. The frontend's one fallback retries below the same boundary with a registry-validated launcher: the command re-proves the artifact against the engine's own completion record (the claimed download id, the exact committed path, canonical location and size — staging shapes, traversal targets and symlinks are refused by construction), sets the execute bit on that validated file only, and spawns it directly (argv, no shell, reaped in the background so Fress can exit without killing it).
+- **A launch in flight cannot be stacked.** The open action announces its busy state (aria-busy) while staying interactive, and a synchronous check-then-set guard makes a repeat activation a silent no-op: one click, one native launch, no double-fire, full recovery the moment the handoff returns.
+- Android's APK installer handoff (FileProvider content URIs to the system package installer) is scoped to the Android adapter's own round, below the same boundary; until it lands, the frontend keeps the uniform pass-through and honest classified failures.
+
+### The journey is pinned end to end
+- **Workflow K (22 browser tests)** proves the complete download-to-open journey: the completed row hands the exact path per row (two concurrent downloads completing in reverse order can never cross-wire), keyboard-only activation lands exactly one launch per keypress with visible focus, spaces/Unicode/shell-metacharacter filenames pass through as single values, Show in folder reveals the file and degrades honestly to the containing folder when the explorer integration is missing, every refusal surfaces a typed error with the action left retryable, and the AppImage fallback receives the same id and path the opener refused with — once, with no retry loops.
+- The E2E bridge records every `(boundary, id, path, with)` tuple that reaches the native layer, so a future regression in the opener wiring can no longer hide behind green state tests.
+
+### Release integrity became executable
+- **One version-coherence command** (`npm run validate:versions`) now guards all six authoritative version surfaces — package.json, both package-lock positions, Cargo.toml, the `fress` entry in Cargo.lock, tauri.conf.json — against one anchored grammar that mirrors the updater's own parser. Both workflows invoke it instead of re-implementing the rules in shell; the release pipeline additionally binds the pushed tag to the build version, and a development build is explicitly allowed to run ahead of the published release.
+- **The release artifact audit refuses bad input loudly**: duplicate JSON keys in latest.json are a hard error instead of silent last-wins, every advertised platform must match its asset's OS shape, and a malformed manifest fails with a named reason instead of a Python traceback. Twenty new verifier tests pin the refusals.
+- The VirusTotal job's skip is labeled as informational on the release page, never mistaken for a clean scan; the quality-gates runbook was rewritten to describe exactly what the workflows actually run.
+
+### Docs tell the truth
+- README and CODE_SIGNING were rewritten against the actual published release bytes: the per-artifact signing matrix (what carries a minisign signature, what does not, and what that means for in-app updates), macOS Gatekeeper first-launch behavior, Android's same-key upgrade rule, and the honest explanation of Windows' "Unknown publisher" warning.
+
 ## 1.0.10-beta (2026-10-12): the contrast-acceptance release
 
 Four quality threads (native engine tests, updater delivery truth, audit honesty, i18n/a11y acceptance) merged and were then re-verified as one integrated candidate by a fresh visual acceptance round — 46 harness tests and 67 screenshots across both themes at every supported width. Every fix below was reproduced on the rendered app before it was coded, and every re-capture is kept as evidence.

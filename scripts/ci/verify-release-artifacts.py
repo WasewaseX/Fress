@@ -236,15 +236,62 @@ def verifier_selftest() -> None:
 # =========================================================================
 UNSIGNED_MARKERS = (".dmg", ".msi", ".apk", "-portable.zip")
 
+# Platform-key -> asset-shape contract, mirroring the updater-manifest
+# job's plans in release.yml. A platform key advertises WHERE an update
+# runs; pointing it at a file built for another OS would hand a macOS
+# bundle to a Windows updater (or similar). The audit refuses any
+# advertised platform whose asset does not match its key's OS class.
+PLATFORM_ASSET_SHAPE = {
+    "windows": (".exe",),  # nsis installers are the only signed Windows class
+    "linux": (".AppImage", ".deb", ".rpm"),
+    "darwin": (".app.tar.gz",),
+}
 
-def main() -> int:
-    assets_dir, tag, version, repo = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    verifier_selftest()
 
-    conf_path = os.path.join(os.path.dirname(__file__), "..", "..", "src-tauri", "tauri.conf.json")
-    tauri_conf = json.load(open(conf_path))
-    pubkey_doc = base64.b64decode(tauri_conf["plugins"]["updater"]["pubkey"]).decode()
+def _no_duplicate_keys(pairs):
+    """object_pairs_hook that makes duplicate JSON keys a hard error: a
+    hand-edited latest.json with the same platform key twice currently
+    parses to "last one wins" - exactly the kind of silent coercion the
+    audit exists to refuse."""
+    seen: dict = {}
+    for k, v in pairs:
+        if k in seen:
+            raise ValueError(f"duplicate JSON key {k!r}")
+        seen[k] = v
+    return seen
 
+
+def _load_latest_json(path: str):
+    """Parse latest.json into (manifest, None) or (None, actionable-error).
+    A malformed manifest must fail the release with a named reason, not a
+    Python traceback that buries the cause."""
+    try:
+        raw = open(path, encoding="utf-8").read()
+    except OSError as exc:
+        return None, f"latest.json cannot be read: {exc}"
+    try:
+        lj = json.loads(raw, object_pairs_hook=_no_duplicate_keys)
+    except ValueError as exc:
+        return None, f"latest.json is not valid, unambiguous JSON: {exc}"
+    if not isinstance(lj, dict):
+        return None, f"latest.json must be a JSON object, got {type(lj).__name__}"
+    if not isinstance(lj.get("version"), str):
+        return None, f"latest.json 'version' must be a string, got {lj.get('version')!r}"
+    plats = lj.get("platforms")
+    if not isinstance(plats, dict):
+        return None, f"latest.json 'platforms' must be an object, got {type(plats).__name__}"
+    for key, ent in plats.items():
+        if not isinstance(ent, dict) or not isinstance(ent.get("url"), str) or not isinstance(ent.get("signature"), str):
+            return None, f"latest.json platform {key!r} must be an object with string 'url' and 'signature'"
+    return lj, None
+
+
+def run_audit(assets_dir, tag, version, repo, pubkey_doc: str):
+    """The audit core: verify the EXACT bytes in assets_dir and return
+    (failures, findings). Separated from main() so the rejection behavior
+    is itself testable (scripts/ci/test_verify_release_artifacts.py drives
+    it against synthetic temp-dir fixtures with a dedicated test key;
+    production always enters through main(), which loads the real key)."""
     names = sorted(n for n in os.listdir(assets_dir) if os.path.isfile(os.path.join(assets_dir, n)))
     print(f"auditing {len(names)} release files of {tag} (version {version})")
 
@@ -264,10 +311,19 @@ def main() -> int:
         failures.append("SHA256SUMS.txt is missing - no one could verify any download")
     else:
         entries: dict[str, str] = {}
+        duplicated: list[str] = []
         for line in open(os.path.join(assets_dir, "SHA256SUMS.txt")).read().splitlines():
             if line.strip():
                 h, _, n = line.partition(" ")
-                entries[n.strip().lstrip("*")] = h.strip()
+                name = n.strip().lstrip("*")
+                if name in entries:
+                    # The same file listed twice makes the manifest's
+                    # meaning depend on which line a verifier happens to
+                    # read - refuse instead of letting order decide.
+                    duplicated.append(name)
+                entries[name] = h.strip()
+        for name in sorted(set(duplicated)):
+            failures.append(f"SHA256SUMS.txt lists {name} more than once (duplicated mapping)")
         for n, expected in entries.items():
             if n == "SHA256SUMS.txt":
                 failures.append("SHA256SUMS.txt lists itself")
@@ -284,13 +340,18 @@ def main() -> int:
     if "latest.json" not in names:
         failures.append("latest.json is missing - no in-app verified updates are possible")
     else:
-        lj = json.load(open(os.path.join(assets_dir, "latest.json")))
+        lj, manifest_error = _load_latest_json(os.path.join(assets_dir, "latest.json"))
+        if manifest_error is not None:
+            failures.append(manifest_error)
+        lj_version = lj.get("version") if lj else None
+        lj_plats = lj.get("platforms") if isinstance(lj, dict) else {}
+        lj_plats = lj_plats if isinstance(lj_plats, dict) else {}
         base = f"https://github.com/{repo}/releases/download/{tag}"
-        if lj.get("version") != version:
-            failures.append(f"latest.json version field {lj.get('version')!r} != release version {version!r}")
-        if not str(lj.get("pub_date", "")).endswith("Z"):
+        if lj and lj_version != version:
+            failures.append(f"latest.json version field {lj_version!r} != release version {version!r}")
+        if lj and not str(lj.get("pub_date", "")).endswith("Z"):
             findings.append("latest.json pub_date is not a UTC ISO instant")
-        plats = lj.get("platforms", {})
+        plats = lj_plats
         for key, ent in plats.items():
             url = ent.get("url", "")
             asset = url.rsplit("/", 1)[-1]
@@ -299,6 +360,16 @@ def main() -> int:
             if asset not in hashes:
                 failures.append(f"latest.json[{key}]: references nonexistent asset {asset}")
                 continue
+            # The platform key is a promise about WHERE the asset runs. A
+            # windows-x86_64 entry that resolves to a .dmg (or any other
+            # cross-OS misclassification) would hand the wrong binary to
+            # the updater; names and classifications must agree.
+            os_class = key.split("-")[0]
+            shapes = PLATFORM_ASSET_SHAPE.get(os_class)
+            if shapes and not asset.endswith(shapes):
+                failures.append(
+                    f"latest.json[{key}]: asset {asset} does not match the {os_class} updater classes {shapes} - platform classification disagrees with the artifact"
+                )
             sig_asset = asset + ".sig"
             if sig_asset not in hashes:
                 failures.append(f"latest.json[{key}]: references {sig_asset} but that sidecar is not on the release")
@@ -306,7 +377,9 @@ def main() -> int:
                 sidecar = open(os.path.join(assets_dir, sig_asset)).read().strip()
                 if sidecar != ent.get("signature", "").strip():
                     failures.append(f"latest.json[{key}]: embedded signature differs from {sig_asset} sidecar bytes")
-        print(f"latest.json: version={lj.get('version')!r}, {len(plats)} platform entries cross-checked against assets and sidecars")
+        print(
+            f"latest.json: version={lj_version!r}, {len(plats)} platform entries cross-checked against assets and sidecars"
+        )
 
         # ---- 4. platform matrix -----------------------------------------
         for required in ("windows-x86_64", "windows-aarch64", "linux-x86_64"):
@@ -353,6 +426,24 @@ def main() -> int:
             "assets without sidecars (in-app delivery NOT offered, official-page fallback only): "
             + ", ".join(sorted(unsigned))
         )
+
+    return failures, findings
+
+
+def main() -> int:
+    """CLI entry point (release.yml verify-release job): self-test the
+    verifier, load the PRODUCTION minisign key from tauri.conf.json, run
+    the audit over the directory the job just downloaded from the release,
+    and turn hard failures into a non-zero exit with an actionable
+    annotation. Expected-absence findings are reported, never failed."""
+    assets_dir, tag, version, repo = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    verifier_selftest()
+
+    conf_path = os.path.join(os.path.dirname(__file__), "..", "..", "src-tauri", "tauri.conf.json")
+    tauri_conf = json.load(open(conf_path))
+    pubkey_doc = base64.b64decode(tauri_conf["plugins"]["updater"]["pubkey"]).decode()
+
+    failures, findings = run_audit(assets_dir, tag, version, repo, pubkey_doc)
 
     print(f"\nfindings (informational): {len(findings)}")
     for f_ in findings:

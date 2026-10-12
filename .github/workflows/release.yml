@@ -27,22 +27,23 @@ jobs:
       - id: v
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
 
-          # One version everywhere. A tag that disagrees with package.json,
-          # Cargo.toml or tauri.conf.json would produce a release whose
-          # installer reports a different version than its tag says, so the
-          # whole run stops here instead of shipping a confusing release.
-          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          fail() { echo "::error::$1"; exit 1; }
-          [ "$CARGO_VERSION" = "$VERSION" ] || fail "Cargo.toml version ($CARGO_VERSION) != package.json version ($VERSION)"
-          [ "$TAURI_VERSION" = "$VERSION" ] || fail "tauri.conf.json version ($TAURI_VERSION) != package.json version ($VERSION)"
+          # One version everywhere, validated by ONE authoritative
+          # implementation: scripts/validate-versions.mjs (the same command
+          # CI runs as `npm run validate:versions`). This step does not
+          # re-implement the rules in shell; it only derives the job
+          # outputs the later build jobs consume. On a tag push the
+          # validator additionally proves the tag equals v<version>, so a
+          # release whose installer would report a different version than
+          # its tag stops here. On workflow_dispatch (no tag) the same
+          # coherence rules run without tag binding.
           if [ "${GITHUB_REF_TYPE:-branch}" = "tag" ]; then
-            [ "${GITHUB_REF_NAME}" = "v$VERSION" ] || fail "pushed tag (${GITHUB_REF_NAME}) != package.json version (v$VERSION)"
+            node scripts/validate-versions.mjs --expect-tag "${GITHUB_REF_NAME}"
+          else
+            node scripts/validate-versions.mjs
           fi
-          echo "version consistency: package.json=$VERSION Cargo.toml=$CARGO_VERSION tauri.conf.json=$TAURI_VERSION tag=${GITHUB_REF_NAME:-n/a}"
 
+          VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
@@ -1280,12 +1281,21 @@ jobs:
     # links to the release page, so users can see multi-engine results before
     # they trust a download. Uses the public VT API directly (4 uploads/min
     # is enough for one release); runs when a VIRUSTOTAL_API_KEY secret is
-    # set (free account at virustotal.com), skipped silently otherwise.
+    # set (free account at virustotal.com).
+    #
+    # INFORMATIONAL by design: this is a convenience overlay on the release
+    # page, never a publication gate - the artifact audit is the gate. The
+    # skip is labeled, not silent: without the key the job prints why and
+    # exits green, so a green run can never be mistaken for "scanned and
+    # clean".
     needs: [version, checksums]
     runs-on: ubuntu-latest
     env:
       FRESS_VT_CONFIGURED: ${{ secrets.VIRUSTOTAL_API_KEY != '' }}
     steps:
+      - name: Say so when the scan is skipped (informational, not a pass)
+        if: env.FRESS_VT_CONFIGURED != 'true'
+        run: echo "::notice::VirusTotal scan skipped - VIRUSTOTAL_API_KEY is not configured. Informational only; the SHA256SUMS.txt + signature audit remains the integrity gate."
       - name: Scan assets and attach analysis links
         if: env.FRESS_VT_CONFIGURED == 'true'
         env:

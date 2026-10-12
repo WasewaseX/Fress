@@ -3,7 +3,9 @@
 Scope: the LAST mile of the Fress user journey — a completed download is
 handed to the operating system and either opens, or fails with an honest,
 understandable result. This document is the **manual, executable** platform
-checklist that complements `tests/e2e/download-open.spec.ts` (Workflow K).
+checklist that complements the two automated open-journey suites:
+`tests/e2e/download-open.spec.ts` (Workflow K) and `tests/e2e/d-download-open.spec.ts`
+(Workflow D2, the state-gating/listener-hygiene round).
 
 ## Read this first: what a green mock does and does not prove
 
@@ -74,7 +76,9 @@ evidence yet.
 
 Executed 2026-10-13, Chromium (Linux CI container), production build via
 `vite preview`, native boundary mocked by `tests/e2e/tauri-bridge.ts`;
-`npx playwright test tests/e2e/download-open.spec.ts` → 21 passed, exit 0.
+`npx playwright test tests/e2e/download-open.spec.ts tests/e2e/d-download-open.spec.ts`
+→ all green, exit 0 (Workflow K: 22 tests; Workflow D2: the state-gating
+round — see its own mapping table at the end of this section).
 
 | Workflow K test | Journey contract proven (UI level) |
 |---|---|
@@ -86,10 +90,11 @@ Executed 2026-10-13, Chromium (Linux CI container), production build via
 | K-E1 | Out-of-order concurrent completions stay wired per row (no last-event/selection keying) |
 | K-E2 | Duplicate filenames with collision-safe `(1)` destinations stay wired per row; duplicate completion events create no duplicate UI state |
 | K-F | Open rejection is surfaced, the action is not stuck busy, retry works, no unhandled promise rejection |
-| K-G1 (pinned `test.fail`) | Repeated activation while one open is pending must not stack native launches — **currently fails: one invoke per click** (defect routed to the production owner) |
+| K-G1 | Repeated activation while one open is pending does not stack native launches: the synchronous busy guard makes a repeat activation a silent no-op; the row announces aria-busy while staying interactive and recovers for a real retry (the round-5 pinned defect shipped fixed — the test is positive now) |
 | K-G2 | Keyboard reachability (Tab), visible focus indicator, Enter/Space activation, truthful accessible names, correct enabled state |
 | K-H | Spaces/Unicode/parentheses/shell-like filenames pass through as ONE exact value, never split or interpolated |
 | K-I ×9 | exe/msi/zip, dmg/pkg, deb/rpm/AppImage, apk: each class hands the completed path to the opener with the intended operation (desktop classes also verify Show in folder) |
+| K-I2 | AppImage fallback end to end: after open_path refuses, the validated launcher receives THIS download's id and THIS exact path, once — a rescued open reports no failure toast, a refused launcher reports an honest one, no retry loops |
 | K-Android | Android UA: Open remains, Show in folder is absent, app-private path passes through, footer adapts honestly |
 
 ---
@@ -184,3 +189,15 @@ fill it from the mock suite.
   means at the boundary; if the UI contract changes deliberately, update
   Workflow K AND the corresponding rows together in the same change.
 
+### Workflow D2 mapping (`tests/e2e/d-download-open.spec.ts` — state gating, listener hygiene, adapter boundary)
+
+| Automated proof (mocked native boundary) | Manual row(s) it supports |
+| --- | --- |
+| D2 › A (exact path + pending silence) | W1, M1, L1, A1 |
+| D2 › B (concurrent, out-of-order, duplicate names) | any row after two downloads |
+| D2 › C (no Open outside completion; keyboard never reaches the opener) | A6, and every row's precondition |
+| D2 › D (opener rejection, retry, no unhandled rejection) | W6, M6, L4 |
+| D2 › E (Show in folder, parent fallback, both failing) | W4, M4, L5 |
+| D2 › F (checksum-mismatched artifact never openable; no-path rows) | row preconditions (Verified/Done only after real completion) |
+| D2 › G (byte-exact odd paths; one completion listener, stale events cannot cross-wire) | W5 |
+| D2 › H (artifact-class pass-through; Android UA drops Show in folder) | W2/W3/L1–L3, M1–M3, A1–A5 |

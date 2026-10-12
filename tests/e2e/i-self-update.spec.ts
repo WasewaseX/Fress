@@ -403,15 +403,12 @@ test.describe('Workflow J: published digest is wrong (corrupted release)', () =>
     expect(persisted).not.toContain('"status":"completed"');
     expect(persisted).not.toContain('"verified":true');
 
-    // The engine deleted the corrupt bytes, so an in-place Retry would
-    // replay the identical doomed transfer. The delivery layer's terminal
-    // checksum handling therefore routes the user to the official Releases
-    // page with the explained reason (updateDelivery.failDelivery ->
-    // fallback). The escape hatch is the release PAGE only - the artifact
-    // itself is never launched, and the failed row stays in the manager.
-    await expect
-      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
-      .toEqual([VALID_RELEASE_URL]);
+    // No external escape hatch fired: the failure stays in the manager.
+    // A corrupted TRANSFER is retryable (a fresh request re-downloads and
+    // re-checks), so the row's Retry is the recovery path - the delivery
+    // layer reports a non-fallback checksum failure and opens nothing.
+    // The artifact itself is never launched, and no verified claim exists.
+    expect(cur.openedUrls).toEqual([]);
     const checksumToast = page.locator('[data-sonner-toast]').first();
     await expect(checksumToast).toContainText(d['update.checksumFailed']);
     await expect(checksumToast).toContainText(d['update.checksumFailedHint']);

@@ -21,8 +21,8 @@ Candidate commit stack (bottom to top):
 | Commit | Content |
 | --- | --- |
 | `0cb678b27` | `main` tip: v1.0.8 integration + PR #36 (i18n/focus) + PR #37 (resolver determinism) merged |
-| `a374907` | PR #38 content — signature verification wired into the real delivery flow (`updateDelivery.ts`), cherry-picked from `da7b26bff` with the author rewritten to `WasewaseX <WasewaseX@users.noreply.github.com>` per the author-guard (PR #38's original commit is authored as `Z User <z@container>`, which fails the guard; the owner must rewrite it before #38 itself can merge) |
-| `1e6e3d2` | E2E checksum-failure contract aligned with PR #38's releases-page fallback (the one semantic integration conflict the suite caught) |
+| #38 (merged) | PR #38 content — signature verification wired into the real delivery flow (`updateDelivery.ts`), merged from its own rewritten branch (the original commit is authored as `Z User <z@container>`, which fails the author-guard; the owner rewrote it to `WasewaseX <WasewaseX@users.noreply.github.com>` before merging). This branch carries #38's content via the cherry-pick and rebases onto the merge |
+| (rebase fix) | E2E checksum-failure contract realigned with #38's FINAL semantic (`1fda705`): a terminal checksum failure stays a retryable download-manager failure — no releases-page redirect. The interim cherry-pick predated that fix (`da7b26bff` redirected); the rebase keeps the code and unit tests at the final semantic and restores the E2E assertion the merged PR #35 contract already pinned |
 | `12b97e6` | release.yml: final published-artifact audit before publish + deterministic `latest.json` (see §3) |
 | `cb94ac2` | E2E: unsigned-release and cancellation trust-boundary scenarios |
 | (this commit) | this report + integration table + quality-gates update |
@@ -54,15 +54,19 @@ Notes on the integration:
   present and used. Its `src/lib/i18n.tsx` additions (19 updater strings ×
   5 languages) merged cleanly against PR #36's changes and the translation
   parity gate passes on the candidate.
-- One real integration defect surfaced and was fixed at the test-contract
-  level (`1e6e3d2`): the pre-#38 test asserted that a checksum failure
-  stays inside the download manager, but the new delivery flow correctly
-  routes terminal checksum failures to the releases page with an explained
-  toast (the engine deleted the corrupt bytes; an in-place retry would
-  replay the identical doomed transfer). The artifact itself is never
-  launched, no verified state is ever rendered, and the manager row with
-  a fresh-request Retry remains. This is the official-page fallback the
-  mission prescribes, not a masking of failure.
+- One real integration conflict surfaced during the interim cherry-pick
+  (`1e6e3d2`): the pre-#38 test asserted that a checksum failure stays
+  inside the download manager, while the cherry-picked delivery flow still
+  had the older releases-page redirect. Resolved at root cause in favor of
+  PR #38's FINAL commit (`1fda705`, "checksum failures stay retryable in
+  the manager"), which is also the contract PR #35's merged E2E pins
+  (`openedUrls` stays empty): a corrupted TRANSFER is retryable — a fresh
+  request re-downloads and re-checks — so the manager row with the
+  fresh-request Retry is the recovery path and nothing is opened
+  automatically. The artifact itself is never launched, no verified state
+  is ever rendered, and the explained checksum toast still fires. The
+  official Releases page remains the manual escape hatch named by the
+  failure hint, not an automatic redirect.
 
 ## 2. Local gate results on the integrated commits
 
@@ -257,8 +261,8 @@ Browser-level, `i-self-update.spec.ts`, deterministic loopback fixtures:
    documents refuse at the Rust verifier (accept/refuse matrix). ✅
 5. Incorrect digest, plan time (`SHA256SUMS` line hash is wrong) → ✅
    (wrong-hash fixture); transfer time (published digest vs actual bytes)
-   → kind=checksum failure, releases-page fallback with explained toast,
-   fresh Retry to the same asset. ✅
+   → kind=checksum failure that stays retryable in the download manager
+   (no redirect), explained toast, fresh Retry to the same asset. ✅
 6. Unsigned platform artifact → same gate as 3 (dmg/apk-shaped release). ✅
 7. Incompatible-only architecture release → update detected, releases page,
    no download (two-phase picker; the published digest for the incompatible

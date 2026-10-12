@@ -387,7 +387,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             </button>
           )}
           {wantGh && ghState === 'ready' && gh?.weak && (
-            <p className="text-[11px] text-amber-500 dark:text-amber-400 leading-snug flex items-start gap-1.5">
+            <p className="text-[11px] text-amber-300 dark:text-amber-400 leading-snug flex items-start gap-1.5">
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
               <span>{t('detail.weakPick')}</span>
             </p>

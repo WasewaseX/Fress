@@ -254,7 +254,13 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label={`${t('header.downloads')}${downloadBadge > 0 ? ` (${downloadBadge})` : ''}`}
               >
                 <DownloadCloud className="w-4 h-4" aria-hidden="true" />
-                <span className="hidden sm:inline">{t('header.downloads')}</span>
+                {/* Label from md up only: at sm-md widths (e.g. 1366px at
+                    200% browser zoom = 683 CSS px) the brand, search, Add
+                    app, Downloads and More cannot share one row - the label
+                    clipped mid-word against the More button. The icon-only
+                    button (title + aria-label carry the name) matches the
+                    phone treatment. */}
+                <span className="hidden md:inline">{t('header.downloads')}</span>
                 {downloadBadge > 0 && (
                   <span
                     id="downloads-active-badge"
@@ -714,7 +720,7 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-update-pill"
                 type="button"
                 onClick={onUpdateClick}
-                className="order-4 md:order-2 max-md:basis-full max-md:justify-center inline-flex items-center gap-1 self-center text-[11px] font-bold text-amber-900 bg-amber-300 hover:bg-amber-200 border border-amber-400 px-2 py-1 rounded-lg transition-colors"
+                className="order-4 md:order-2 max-md:basis-full max-md:justify-center inline-flex items-center gap-1 self-center text-[11px] font-bold text-amber-950 bg-amber-400 hover:brightness-105 border border-amber-400 dark:text-amber-900 dark:bg-amber-300 dark:hover:bg-amber-200 px-2 py-1 rounded-lg transition-colors"
                 title={t('header.updatePillTitle').replace('{v}', updateVersion)}
               >
                 <Download className="w-3 h-3" aria-hidden="true" />

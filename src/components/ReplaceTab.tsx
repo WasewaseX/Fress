@@ -453,7 +453,11 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-base font-bold text-slate-100 tracking-tight">{t('pp.title')}</h2>
+            {/* Page heading: the page's ONE top-level heading. It must be an
+              h1: when this page replaces the catalog, the catalog's h1 goes
+              with it, and a page without any level-one heading breaks
+              screen-reader heading navigation (axe: page-has-heading-one). */}
+          <h1 className="text-base font-bold text-slate-100 tracking-tight">{t('pp.title')}</h1>
             <button
               type="button"
               id="pp-about-toggle"
@@ -554,8 +558,8 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-100 tracking-tight">{t('pp.combo.maxPrivacy.name')}</h3>
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2 py-0.5">
+                <h2 className="text-sm font-bold text-slate-100 tracking-tight">{t('pp.combo.maxPrivacy.name')}</h2>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2 py-0.5">
                   {t('pp.maxBadge')}
                 </span>
               </div>
@@ -612,12 +616,12 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               aria-label={ppCategoryName(cat.name)}
             >
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-100 tracking-tight mr-auto">{ppCategoryName(cat.name)}</h3>
+                <h2 className="text-sm font-bold text-slate-100 tracking-tight mr-auto">{ppCategoryName(cat.name)}</h2>
                 <span
                   id={`pp-counter-${cat.id}`}
                   className={`text-[10px] font-bold rounded-full px-2 py-0.5 border ${
                     picked.length > 0
-                      ? 'text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25'
+                      ? 'text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25'
                       : 'text-slate-400 bg-slate-950/[0.04] dark:bg-white/[0.05] border-slate-950/10 dark:border-white/[0.08]'
                   }`}
                 >
@@ -646,11 +650,16 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{t('pp.youUseNow')}</p>
                 <div className="relative flex items-center gap-2">
                   <PPLogo id={mainstream.id} name={mainstream.name} size={22} />
+                  {/* Name carries the CURRENT app, not the category: the
+                      trigger's visible text IS the app name (Gmail), and a
+                      name that omits it fails WCAG 2.5.3 Label in Name -
+                      speech-input "click Gmail" would not match. It also
+                      reads better on a screen reader. */}
                   <PpDropdown
                     open={mainOpen}
                     onOpenChange={(o) => setOpenPicker(o ? `main:${cat.id}` : null)}
                     triggerId={`pp-main-${cat.id}`}
-                    triggerAriaLabel={`${t('pp.youUseNow')}: ${ppCategoryName(cat.name)}`}
+                    triggerAriaLabel={`${t('pp.youUseNow')}: ${mainstream.name}`}
                     triggerContent={mainstream.name}
                     triggerSuffix={
                       <ChevronDown
@@ -686,11 +695,24 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               {/* Private side */}
               <div className="relative">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{t('pp.replaceWith')}</p>
+                {/* The picker trigger's visible text is the placeholder or the
+                    picked names PLUS the n/max counter. The accessible name is
+                    built from the SAME strings, so it always contains the
+                    visible text (WCAG 2.5.3 Label in Name) no matter which
+                    state the trigger renders - and the count stays in the name
+                    after the sr-only sentence loses its announcing job to the
+                    explicit aria-label. */}
                 <PpDropdown
                   open={altOpen}
                   onOpenChange={(o) => setOpenPicker(o ? `alt:${cat.id}` : null)}
                   triggerId={`pp-picker-${cat.id}`}
-                  triggerAriaLabel={`${t('pp.replaceWith')}: ${ppCategoryName(cat.name)}`}
+                  triggerAriaLabel={`${t('pp.replaceWith')}: ${
+                    picked.length === 0
+                      ? t('pp.pick')
+                      : picked.length === 1
+                        ? picked[0].name
+                        : `${picked[0].name} +${picked.length - 1}`
+                  } ${picked.length}/${MAX_PICKS_PER_CATEGORY}`}
                   triggerContent={
                     picked.length === 0
                       ? t('pp.pick')
@@ -699,11 +721,8 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                         : `${picked[0].name} +${picked.length - 1}`
                   }
                   triggerSuffix={
-                    <span className="text-slate-400 text-[10px] shrink-0">
-                      <span aria-hidden="true">{picked.length}/{MAX_PICKS_PER_CATEGORY}</span>
-                      <span className="sr-only">
-                        {t('pp.counterAria').replace('{n}', String(picked.length)).replace('{max}', String(MAX_PICKS_PER_CATEGORY))}
-                      </span>
+                    <span className="text-slate-400 text-[10px] shrink-0" aria-hidden="true">
+                      {picked.length}/{MAX_PICKS_PER_CATEGORY}
                     </span>
                   }
                   triggerClassName="w-full inline-flex items-center justify-between gap-2 text-xs font-medium text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] border border-slate-950/10 dark:border-white/[0.08] rounded-md px-2.5 py-1.5 transition-colors"
@@ -717,7 +736,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                         <AltLogo alt={alt} name={alt.name} size={18} />
                         <span className="truncate flex-1">{alt.name}</span>
                         {cat.pick === alt.id && (
-                          <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 dark:text-emerald-400 shrink-0">
+                          <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-400 shrink-0">
                             {t('pp.startHere')}
                           </span>
                         )}

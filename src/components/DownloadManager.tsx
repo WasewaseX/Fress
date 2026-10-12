@@ -225,15 +225,22 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
 
                 {item.sha256 && (() => {
                   const feedback = copiedHash?.id === item.id ? copiedHash : null;
+                  // Name from CONTENT, not aria-label: the visible text is
+                  // the hash itself, so a label like "Copy hash: {name}"
+                  // would omit the very text the user sees - WCAG 2.5.3
+                  // Label in Name (axe: label-content-name-mismatch).
+                  // The sr-only prefix puts the intent and the file name
+                  // at the FRONT of the name, and the visible hash rides
+                  // along as part of it.
                   return (
                     <button
                       type="button"
                       onClick={() => void handleCopyHash(item)}
                       className="w-full text-left text-[11px] font-mono text-slate-400 hover:text-slate-200 bg-slate-950/[0.04] dark:bg-white/[0.03] border border-slate-950/10 dark:border-white/[0.06] rounded px-2 py-1 mb-2.5 break-all flex items-center gap-1.5"
                       title={t('downloads.a11y.copyHash')}
-                      aria-label={`${t('downloads.a11y.copyHash')}: ${item.name}`}
                     >
                       <FileCheck2 className="w-3 h-3 shrink-0 text-emerald-400" aria-hidden="true" />
+                      <span className="sr-only">{t('downloads.a11y.copyHash')}: {item.name}. </span>
                       <span className="truncate">{t('downloads.hash')}: {item.sha256}</span>
                       {feedback ? (
                         feedback.ok ? (

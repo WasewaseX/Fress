@@ -22,8 +22,9 @@ import { I18nProvider } from '../../lib/i18n';
 import { CommandPalette } from '../../components/CommandPalette';
 import { AppItem } from '../../types';
 
-function app(id: string, name: string, cmd: string): AppItem {
+function app(id: string, name: string, cmd: string, proprietaryAlternative?: string): AppItem {
   return {
+    proprietaryAlternative,
     id,
     name,
     tagline: `${name} tagline`,
@@ -42,7 +43,10 @@ function app(id: string, name: string, cmd: string): AppItem {
   } as unknown as AppItem;
 }
 
-const APPS = [app('alpha', 'Alpha Tool', 'winget install alpha'), app('beta', 'Beta Tool', 'brew install beta')];
+const APPS = [
+  app('alpha', 'Alpha Tool', 'winget install alpha', 'Alpha Proprietary Suite'),
+  app('beta', 'Beta Tool', 'brew install beta'),
+];
 
 function renderPalette(isOpen: boolean, onClose = vi.fn()) {
   return render(
@@ -220,5 +224,61 @@ describe('active option follows the keyboard selection', () => {
     // aria-controls still resolves to a live element.
     const input = screen.getByRole('combobox');
     expect(document.getElementById(input.getAttribute('aria-controls')!)).toBe(status);
+  });
+});
+
+describe('selected row follows the chip text contract', () => {
+  it('the highlighted row paints its text with the selection-surface ink family (light-theme AA)', () => {
+    // The active chip background is a SOLID cocoa in light theme; the row's
+    // paper-calibrated slate inks would sit dark-on-brown far below AA
+    // (subtitle measured 1.06:1, the "vs" chip 1.12:1, the name 2.53:1 in
+    // the round-27 captures). The selected row must switch to the
+    // selection-surface ink family: primary text, soft secondary text and
+    // the amber accent for the proprietary chip - all via the semantic
+    // tokens, in BOTH themes.
+    renderPalette(true);
+    const selected = document.getElementById('palette-item-alpha')!;
+    expect(selected.getAttribute('aria-selected')).toBe('true');
+
+    // Primary ink: the app name.
+    const title = selected.querySelector('span[class*="fr-chip-active-text"]') as HTMLElement;
+    expect(title, 'the selected name must carry the chip-active text token').toBeTruthy();
+    expect(title.className).toContain('text-[color:var(--fr-chip-active-text)]');
+    expect(title.className).not.toContain('-soft');
+
+    // Secondary inks: subtitle and stars carry the soft token.
+    const soft = selected.querySelectorAll('span[class*="fr-chip-active-text-soft"]');
+    expect(soft.length, 'subtitle + stars must use the soft ink').toBeGreaterThanOrEqual(2);
+
+    // Accent ink: the "vs proprietary" badge.
+    const badge = selected.querySelector('span[class*="fr-chip-active-accent"]') as HTMLElement;
+    expect(badge, 'the vs badge must carry the accent token').toBeTruthy();
+    expect(badge.textContent).toContain('vs');
+
+    // No paper-calibrated slate text ink survives on the selected row.
+    expect(selected.querySelectorAll('.text-slate-100, .text-slate-400').length).toBe(0);
+  });
+
+  it('unselected rows keep their slate inks (no needless override)', () => {
+    renderPalette(true);
+    const unselected = document.getElementById('palette-item-beta')!;
+    expect(unselected.getAttribute('aria-selected')).toBe('false');
+    expect(unselected.querySelector('.text-slate-100')).toBeTruthy();
+    expect(unselected.querySelectorAll('span[class*="fr-chip-active"]').length).toBe(0);
+  });
+
+  it('the ink family follows the keyboard selection as it moves', () => {
+    renderPalette(true);
+    const input = screen.getByRole('combobox');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const nowSelected = document.getElementById('palette-item-beta')!;
+    expect(nowSelected.getAttribute('aria-selected')).toBe('true');
+    expect(
+      nowSelected.querySelector('span[class*="fr-chip-active-text"]'),
+      'the newly selected row must carry the ink family'
+    ).toBeTruthy();
+    const before = document.getElementById('palette-item-alpha')!;
+    expect(before.querySelectorAll('span[class*="fr-chip-active"]').length).toBe(0);
+    expect(before.querySelector('.text-slate-100')).toBeTruthy();
   });
 });

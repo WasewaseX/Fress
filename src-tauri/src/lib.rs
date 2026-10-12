@@ -29,6 +29,7 @@ pub mod network_policy;
 // registration here is the coordination point between the download-engine
 // work and the URL/HTTP-client work (Agent 1's sections below are untouched).
 mod download_finalize;
+mod artifact_open;
 use download_finalize::{
     execute_with_retries, sanitize_filename, DownloadPlan, DownloadRegistry, DownloadSession,
     ErrorPayload, ProgressSink, CANCEL_SENTINEL,
@@ -960,7 +961,8 @@ pub fn run() {
             fetch_text,
             fetch_self_update_text,
             verify_self_update_signature,
-            host_arch
+            host_arch,
+            artifact_open::launch_app_image_artifact
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

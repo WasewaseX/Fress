@@ -28,8 +28,8 @@ pub mod network_policy;
 // only the Tauri command surface and the event mapping. The module
 // registration here is the coordination point between the download-engine
 // work and the URL/HTTP-client work (Agent 1's sections below are untouched).
-mod download_finalize;
 mod artifact_open;
+mod download_finalize;
 use download_finalize::{
     execute_with_retries, sanitize_filename, DownloadPlan, DownloadRegistry, DownloadSession,
     ErrorPayload, ProgressSink, CANCEL_SENTINEL,

@@ -174,10 +174,9 @@ fn reject_unopenable_name(path: &Path) -> Result<String, OpenRejection> {
 /// Shape gate at action time: the artifact must CURRENTLY be a regular file
 /// (`symlink_metadata` - a symlink is refused, not followed).
 fn require_regular_file(path: &Path) -> Result<std::fs::Metadata, OpenRejection> {
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|_| OpenRejection::NotFound {
-            detail: "the downloaded file is no longer on disk".to_string(),
-        })?;
+    let meta = std::fs::symlink_metadata(path).map_err(|_| OpenRejection::NotFound {
+        detail: "the downloaded file is no longer on disk".to_string(),
+    })?;
     if meta.file_type().is_symlink() {
         return Err(OpenRejection::Symlink);
     }
@@ -404,7 +403,11 @@ mod tests {
             "/tmp/a/..",
         ] {
             let route = plan_open(&registry, 1, candidate);
-            assert_eq!(route.unwrap_err(), OpenRejection::NotArtifact, "{candidate}");
+            assert_eq!(
+                route.unwrap_err(),
+                OpenRejection::NotArtifact,
+                "{candidate}"
+            );
         }
     }
 
@@ -489,10 +492,7 @@ mod tests {
         register(&registry, 42, &app);
 
         let route = plan_open(&registry, 42, app.to_str().unwrap()).unwrap();
-        assert_eq!(
-            route,
-            OpenRoute::LaunchAppImage { path: app.clone() }
-        );
+        assert_eq!(route, OpenRoute::LaunchAppImage { path: app.clone() });
     }
 
     #[test]
@@ -595,7 +595,12 @@ mod tests {
 
         // The route carries the EXACT path the completion event reported.
         let route = plan_open(&registry, 77, weird.to_str().unwrap()).unwrap();
-        assert_eq!(route, OpenRoute::LaunchAppImage { path: weird.clone() });
+        assert_eq!(
+            route,
+            OpenRoute::LaunchAppImage {
+                path: weird.clone()
+            }
+        );
     }
 
     #[test]
@@ -622,12 +627,21 @@ mod tests {
 
     #[test]
     fn rejections_render_as_typed_open_artifact_codes() {
-        assert_eq!(OpenRejection::NotArtifact.render(), "open-artifact/not-artifact");
         assert_eq!(
-            OpenRejection::NotFound { detail: "the downloaded file is no longer on disk".into() }.render(),
+            OpenRejection::NotArtifact.render(),
+            "open-artifact/not-artifact"
+        );
+        assert_eq!(
+            OpenRejection::NotFound {
+                detail: "the downloaded file is no longer on disk".into()
+            }
+            .render(),
             "open-artifact/not-found: the downloaded file is no longer on disk"
         );
-        assert_eq!(OpenRejection::IdMismatch.render(), "open-artifact/id-mismatch");
+        assert_eq!(
+            OpenRejection::IdMismatch.render(),
+            "open-artifact/id-mismatch"
+        );
         assert_eq!(OpenRejection::Symlink.render(), "open-artifact/symlink");
         assert_eq!(
             OpenRejection::Internal("spawn failed: boom".into()).render(),

@@ -1,0 +1,193 @@
+name: Integration snapshot
+
+# Public, always-current evidence of the repository's integration state.
+# Unlike a static Markdown file (which silently goes stale as main
+# advances and releases ship), this workflow re-observes the facts on
+# every default-branch push, weekly, and on demand, and publishes the
+# result where it cannot be edited out of date: the Actions run summary.
+#
+# What it reports (docs/quality-gates.md, "Public integration snapshot"):
+#   - the exact tested ref + full SHA and the default-branch head (and
+#     whether they are the same commit),
+#   - the source version from package.json (the authoritative manifest),
+#   - the newest published release, its tag commit SHA, and whether that
+#     commit is an ancestor of the tested SHA (release provenance),
+#   - the observed open-PR inventory with links (never an empty list when
+#     the API call failed - the run goes red instead),
+#   - every workflow's latest result on the tested SHA with run URLs,
+#   - the artifact-integrity audit verdict for the newest release (job 1
+#     below downloads the real bytes and runs the real verifier),
+#   - the version-coherence verdict (the one authoritative validator),
+#   - the known unavailable observations: branch-protection enforcement is
+#     a maintainer Settings fact a read token cannot observe, and no CI
+#     run here is a device or GUI test.
+#
+# Read-only: the workflow token holds contents: read, pull-requests: read
+# and actions: read; nothing is committed, pushed or released. Output
+# lives in the step summary and run artifacts only.
+#
+# Job split: artifact-audit (downloads ~350 MB of release bytes and runs
+# the verifier) is separated from snapshot (API + git facts) so a red run
+# names its cause: an integrity failure fails the audit job, an API
+# failure fails the snapshot job, and the snapshot still publishes what it
+# could observe (needs: artifact-audit + if: always()).
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 06:40 UTC - offset from network-smoke's 06:20 so the
+    # two network-touching evidence runs never contend.
+    - cron: '40 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: integration-snapshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  artifact-audit:
+    # Re-audit the NEWEST published release's exact bytes with the
+    # verifier at the tested SHA. This is the same gate release.yml runs
+    # before flipping a draft public, executed against what actually
+    # shipped. Verdict travels to the snapshot job via job output; the
+    # raw log travels as an artifact.
+    name: Artifact-integrity audit (newest release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      result_json: ${{ steps.verdict.outputs.result_json }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The verifier + production pubkey come from the tested commit,
+          # so the tooling version is itself part of the evidence.
+          persist-credentials: false
+      - name: Find the newest published release
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # /releases/latest excludes prereleases (every Fress release is
+          # one), so use the same inventory order the releases page shows.
+          TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name')
+          VERSION=${TAG#v}
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "auditing newest published release: $TAG"
+      - name: Download every uploaded asset (transient-failure retry, integrity checks stay honest)
+        id: audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          set -uo pipefail
+          mkdir -p assets
+          dl_ok=0
+          for attempt in 1 2; do
+            # gh release download fetches exactly the UPLOADED assets -
+            # the GitHub-generated source archives are not release assets
+            # and are correctly outside the checksum contract.
+            if gh release download "$TAG" --dir assets --clobber --repo "${{ github.repository }}"; then dl_ok=1; break; fi
+            echo "::warning::asset download attempt $attempt failed (transient) - retrying after backoff"
+            sleep 20
+          done
+          if [ "$dl_ok" != 1 ]; then
+            # No bytes, no judgment: report unavailable, fail the job.
+            printf '{"verdict":"unavailable","reason":"release asset download failed after retry","release_tag":"%s"}\n' "$TAG" > audit-result.json
+            exit 3
+          fi
+          echo "downloaded $(ls assets | wc -l) uploaded assets of $TAG"
+          rc=0
+          python3 scripts/ci/verify-release-artifacts.py assets "$TAG" "$VERSION" "${{ github.repository }}" > audit.log 2>&1 || rc=$?
+          tail -n 30 audit.log
+          python3 - "$rc" "$TAG" <<'PY' > audit-result.json
+          import json, re, sys
+          rc, tag = int(sys.argv[1]), sys.argv[2]
+          log = open("audit.log").read()
+          m = re.search(r"HARD FAILURES: (\d+)", log)
+          if rc == 0:
+              verdict, failures = "pass", 0
+          elif m:
+              verdict, failures = "fail", int(m.group(1))
+          else:
+              verdict, failures = "fail", None
+          print(json.dumps({"verdict": verdict, "verifier_exit_code": rc, "hard_failures": failures, "release_tag": tag}))
+          PY
+          exit "$rc"
+      - name: Export the audit verdict for the snapshot job
+        # if: always() - a failed audit must still HAND ITS VERDICT to the
+        # snapshot so the public summary can show FAIL. This is verdict
+        # reporting, not failure swallowing: the job itself still exits
+        # non-zero above.
+        if: always()
+        id: verdict
+        run: |
+          set -euo pipefail
+          python3 -c "import json;print('result_json='+json.dumps(json.load(open('audit-result.json')),separators=(',',':')))" >> "$GITHUB_OUTPUT"
+      - name: Keep the raw audit log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: artifact-audit-log
+          path: |
+            audit.log
+            audit-result.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  snapshot:
+    # Observes the API + git facts, receives the audit verdict, writes the
+    # step summary and the machine-readable artifact, and exits non-zero
+    # when a required observation was unavailable or a gate failed - a red
+    # snapshot run IS the honest integration state.
+    name: Integration snapshot (public evidence)
+    needs: artifact-audit
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full history: the snapshot proves release provenance locally
+          # (merge-base ancestry), which a shallow clone cannot.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies from the lockfile
+        run: npm ci
+      - name: Version coherence (the one authoritative validator; the verdict is REPORTED, not swallowed)
+        id: coherence
+        run: |
+          set -uo pipefail
+          rc=0
+          npm run validate:versions || rc=$?
+          if [ "$rc" = 0 ]; then echo "coherence=pass" >> "$GITHUB_OUTPUT"; else echo "coherence=fail" >> "$GITHUB_OUTPUT"; fi
+          echo "coherence_rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "validate:versions exit code: $rc (recorded as the snapshot's coherence verdict)"
+      - name: Build and publish the integration snapshot
+        id: snap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # read-only: contents + pull-requests + actions
+          VERSION_COHERENCE: ${{ steps.coherence.outputs.coherence }}
+          VERSION_COHERENCE_RC: ${{ steps.coherence.outputs.coherence_rc }}
+          ARTIFACT_AUDIT_JSON: ${{ needs.artifact-audit.outputs.result_json }}
+        run: node scripts/ci/integration-snapshot.mjs --out integration-snapshot.json --version-coherence "${VERSION_COHERENCE}" --version-coherence-rc "${VERSION_COHERENCE_RC}" --artifact-audit "${ARTIFACT_AUDIT_JSON}"
+      - name: Attach the machine-readable snapshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: integration-snapshot
+          path: integration-snapshot.json
+          retention-days: 90
+          if-no-files-found: ignore

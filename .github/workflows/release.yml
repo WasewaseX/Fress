@@ -1357,7 +1357,15 @@ jobs:
     # truncated upload, a stale latest.json or an invalid sidecar now
     # leaves the release as a private draft: re-run the failed jobs, the
     # draft fills back up.
-    needs: [version, checksums, virustotal]
+    #
+    # needs: [version, checksums] -- virustotal deliberately NOT in needs:
+    # it is documented as an informational overlay on the release page and
+    # must never be able to block publication. With it in needs, one
+    # transient VT API error would leave a fully verified release stuck as
+    # a draft forever - a convenience feature holding the gate hostage. It
+    # runs in parallel off the same checksums result instead; the integrity
+    # boundary is version -> checksums -> verify-release -> draft=false.
+    needs: [version, checksums]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

@@ -21,6 +21,8 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -276,6 +278,88 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         open(path, "w").write(body + entry + "\n")
         failures = self._failures()
         self.assertTrue(any("unsigned asset classes carry sidecars" in f for f in failures), failures)
+
+    def test_checksum_value_edited_fails(self):
+        # Brief case 4 ("incorrect entry"): the asset is intact, but one
+        # SHA256SUMS.txt value was edited (stale manifest from before an
+        # upload-replace). Both directions must catch it: the listed hash
+        # no longer matches the only bytes on the release.
+        path = os.path.join(self.dir, "SHA256SUMS.txt")
+        body = open(path).read()
+        target = f"Fress_{VERSION}_x64_en-US.msi"
+        lines = body.splitlines()
+        for i, line in enumerate(lines):
+            if line.endswith("  " + target):
+                digest = line.split(" ", 1)[0]
+                lines[i] = line.replace(digest, "0" * 64, 1)
+                break
+        open(path, "w").write("\n".join(lines) + "\n")
+        failures = self._failures()
+        self.assertTrue(any(target in f and "SHA256SUMS.txt says" in f for f in failures), failures)
+
+    def test_attacker_cannot_launder_tampered_sidecar_via_manifest(self):
+        # Brief case 7 (full form): the attacker replaces an artifact with
+        # malware, also rewrites the sidecar signature bytes AND updates
+        # latest.json's embedded signature to match the new sidecar, and
+        # fixes SHA256SUMS.txt for all three files. Every manifest is
+        # self-consistent now - the ONLY thing standing is the
+        # cryptographic check, because the attacker cannot sign with the
+        # production key. The audit must still fail on the signature.
+        exe = f"Fress_{VERSION}_x64-setup.exe"
+        sig_name = exe + ".sig"
+        # 1. malware instead of the installer
+        malware = b"MZ evila " + b"X" * 256
+        open(os.path.join(self.dir, exe), "wb").write(malware)
+        # 2. re-sign with an ATTACKER key (not the test/production key)
+        attacker_scalar = _scalar(b"the attacker's own key")
+        forged_sig = _sign(malware, scalar=attacker_scalar)
+        open(os.path.join(self.dir, sig_name), "w").write(forged_sig)
+        # 3. manifest embedded signature = the new sidecar bytes
+        lj = json.load(open(os.path.join(self.dir, "latest.json")))
+        lj["platforms"]["windows-x86_64"]["signature"] = forged_sig
+        json.dump(lj, open(os.path.join(self.dir, "latest.json"), "w"))
+        # 4. checksums refreshed over the tampered set (both files changed)
+        sums = os.path.join(self.dir, "SHA256SUMS.txt")
+        lines = open(sums).read().splitlines()
+        fixed = []
+        for line in lines:
+            name = line.split("  ", 1)[-1]
+            if name in (exe, sig_name):
+                line = _sha256(open(os.path.join(self.dir, name), "rb").read()) + "  " + name
+            fixed.append(line)
+        open(sums, "w").write("\n".join(fixed) + "\n")
+
+        failures = self._failures()
+        self.assertTrue(
+            any(sig_name in f and "does NOT verify" in f and "production key" in f for f in failures),
+            failures,
+        )
+
+    def test_cli_exit_status_nonzero_on_corruption(self):
+        # Brief: "Test failure exit status, not merely an error log." Drives
+        # the REAL CLI entry point (main(): selftest + production key load
+        # + audit) against a corrupted fixture dir and proves the process
+        # exits non-zero with the actionable annotation - the exact signal
+        # release.yml's step failure (and therefore the blocked publish)
+        # is built on.
+        target = f"Fress_{VERSION}_amd64.deb"
+        path = os.path.join(self.dir, target)
+        blob = bytearray(open(path, "rb").read())
+        blob[3] ^= 0xFF
+        open(path, "wb").write(bytes(blob))
+        script = os.path.join(_HERE, "verify-release-artifacts.py")
+        proc = subprocess.run(
+            [sys.executable, script, self.dir, TAG, VERSION, REPO],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertNotEqual(proc.returncode, 0, "corrupted set must exit non-zero")
+        combined = proc.stdout + proc.stderr
+        self.assertIn("::error::final artifact audit FAILED", combined)
+        self.assertIn(target, combined, "the failing asset must be named")
+        # And the success-adjacent marker must be absent.
+        self.assertNotIn("FINAL ARTIFACT AUDIT PASSED", combined)
 
     def test_orphan_sidecar_fails(self):
         with open(os.path.join(self.dir, "Ghost_1.0.0.AppImage.sig"), "w") as f:

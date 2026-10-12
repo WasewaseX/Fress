@@ -18,6 +18,30 @@
  *   src-tauri/Cargo.lock         [[package]] name="fress" -> version (binary metadata)
  *   src-tauri/tauri.conf.json    .version                (Tauri/bundle metadata)
  *
+ * ANDROID METADATA (conditional-authoritative). The Android version that
+ * ships is normally DERIVED from tauri.conf.json:version by the Tauri CLI
+ * at `tauri android build` time, so a plain checkout has no Android version
+ * field to check. Two places carry an explicit Android version anyway, and
+ * when they exist they are authoritative build inputs:
+ *
+ *   src-tauri/tauri.conf.json    .bundle.android.versionName  (optional CLI
+ *                                override: if set, Android bundles ship THIS
+ *                                version — it must agree with the canonical
+ *                                one or desktop and Android drift apart)
+ *   src-tauri/gen/android/app/build.gradle.kts  versionName    (the generated
+ *                                Gradle project's app version; present only
+ *                                after `tauri android init`, never gitignored,
+ *                                so it can be checked in or sit in a working
+ *                                tree — if the file EXISTS, its versionName
+ *                                must agree and must be parseable)
+ *
+ * These are OPTIONAL files/fields: absent means "nothing to check" (not a
+ * failure — they are generated, not hand-maintained), but PRESENT means
+ * authoritative: a stale, ambiguous or unparsable Android version fails
+ * closed exactly like a required field. A file that exists but cannot be
+ * read also fails — an unreadable manifest must never silently disable its
+ * check.
+ *
  * Why lockfiles are checked, not just manifests: a release cut from a stale
  * lockfile ships an old `npm view` version and embeds the old crate version
  * in the binary metadata even though every manifest was bumped.
@@ -63,7 +87,11 @@
  * Usage:
  *   npm run validate:versions
  *   npm run validate:versions -- --release-tag v1.0.10-beta
+ *   npm run validate:versions -- --expect-tag v1.0.10-beta
  *   npm run validate:versions -- --root /path/to/checkout
+ *
+ *   --expect-tag is accepted as an exact alias of --release-tag so release
+ *   wiring can use either spelling; prefer --release-tag.
  */
 
 import { readFileSync } from 'node:fs';
@@ -163,6 +191,80 @@ export function parseTauriConfVersion(text: string): ParseResult {
     return { kind: 'err', error: `src-tauri/tauri.conf.json is not valid JSON (${e instanceof Error ? e.message : String(e)})` };
   }
   return jsonField(data, 'src-tauri/tauri.conf.json', '.version', ['version']);
+}
+
+/** Outcome of reading an OPTIONAL field: 'absent' is legitimate (the field
+ * is simply not set — never a failure), 'err' means present-but-malformed,
+ * which fails closed like any authoritative field. String discriminant:
+ * this repo's tsconfig does not narrow boolean-literal unions. */
+export type OptionalParseResult =
+  | { kind: 'ok'; value: string }
+  | { kind: 'absent' }
+  | { kind: 'err'; error: string };
+
+/** src-tauri/tauri.conf.json — the optional .bundle.android.versionName
+ * override. Absent key (or absent bundle.android object) => 'absent'; a
+ * present-but-non-string / empty value => 'err'. */
+export function parseTauriAndroidVersionName(text: string): OptionalParseResult {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return { kind: 'err', error: `src-tauri/tauri.conf.json is not valid JSON (${e instanceof Error ? e.message : String(e)})` };
+  }
+  if (data === null || typeof data !== 'object') {
+    return { kind: 'absent' };
+  }
+  const bundle = (data as Record<string, unknown>)['bundle'];
+  if (bundle === undefined || bundle === null || typeof bundle !== 'object') {
+    return { kind: 'absent' };
+  }
+  const android = (bundle as Record<string, unknown>)['android'];
+  if (android === undefined || android === null || typeof android !== 'object') {
+    return { kind: 'absent' };
+  }
+  const versionName = (android as Record<string, unknown>)['versionName'];
+  if (versionName === undefined) return { kind: 'absent' };
+  if (typeof versionName !== 'string' || versionName.trim() === '') {
+    return { kind: 'err', error: 'src-tauri/tauri.conf.json .bundle.android.versionName is set but is not a non-empty string' };
+  }
+  return { kind: 'ok', value: versionName };
+}
+
+/** src-tauri/gen/android/app/build.gradle.kts — the generated Android
+ * project's versionName. Kotlin DSL assignments come in two shapes Tauri
+ * emits/accepts: `versionName = "1.0.0"` and Groovy-style
+ * `versionName "1.0.0"`. Comments are ignored; exactly ONE uncommented
+ * assignment must exist — zero means the authoritative field is missing,
+ * several means it is ambiguous, and both fail closed. */
+export function parseGradleKtsVersionName(text: string): ParseResult {
+  const FILE = 'src-tauri/gen/android/app/build.gradle.kts';
+  const found: string[] = [];
+
+  for (const rawLine of text.split('\n')) {
+    let line = rawLine.trim();
+    if (line === '') continue;
+    // Strip full-line and trailing // comments (no string-aware lexing is
+    // needed: a URL inside a versionName cannot contain '//'-started text
+    // before the quoted value this parser reads, and a comment can only be
+    // *stripped*, never mistaken for an assignment).
+    const commentIdx = line.indexOf('//');
+    if (commentIdx === 0) continue;
+    if (commentIdx > 0) line = line.slice(0, commentIdx).trim();
+
+    const assign = /^(?:[a-zA-Z_][\w.]*\.)?versionName\s*(?:=\s*)?"((?:[^"\\]|\\.)*)"\s*$/.exec(line);
+    if (assign) {
+      found.push(assign[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+    }
+  }
+
+  if (found.length === 0) {
+    return { kind: 'err', error: `${FILE} exists but has no parseable versionName assignment (the authoritative Android version field is missing or mangled)` };
+  }
+  if (found.length > 1) {
+    return { kind: 'err', error: `${FILE} has ${found.length} versionName assignments (${found.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+  }
+  return { kind: 'ok', value: found[0] };
 }
 
 // --- Cargo (TOML) -----------------------------------------------------------
@@ -316,6 +418,15 @@ export const REQUIRED_FILES = [
 
 export type RequiredFile = (typeof REQUIRED_FILES)[number];
 
+/** Optional-authoritative files: checked ONLY when present on disk. Absent
+ * means the build input does not exist in this checkout (the Android Gradle
+ * project is generated by `tauri android init`), which is legitimate — not
+ * a skip of a required check. Present means authoritative: it must parse
+ * and must agree with the canonical version. */
+export const OPTIONAL_FILES = ['src-tauri/gen/android/app/build.gradle.kts'] as const;
+
+export type OptionalFile = (typeof OPTIONAL_FILES)[number];
+
 export interface VersionCheck {
   file: string;
   field: string;
@@ -342,6 +453,12 @@ export interface ValidateInput {
   missing?: string[];
   /** Required paths that exist but could not be read, with the reason. */
   readErrors?: Record<string, string>;
+  /** Content of optional-authoritative files by path. A path absent from
+   * this map means the file does not exist (nothing to check); a path
+   * PRESENT here is validated like a required field. */
+  optionalFiles?: Partial<Record<OptionalFile, string>>;
+  /** Optional paths that exist but could not be read — fails closed. */
+  optionalReadErrors?: Record<string, string>;
   /** Release-context tag (e.g. "v1.0.10-beta" from GITHUB_REF_NAME). */
   releaseTag?: string;
 }
@@ -551,6 +668,76 @@ export function validateVersions(input: ValidateInput): ValidationReport {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // ANDROID metadata (conditional-authoritative).
+  //
+  // 1) .bundle.android.versionName in tauri.conf.json — an explicit CLI
+  //    override. If the key is set, Android bundles ship THAT version, so
+  //    it must agree with the canonical one. Absent = the top-level version
+  //    applies (legitimate, no row).
+  // 2) versionName in the generated Gradle project — checked only when the
+  //    file exists (after `tauri android init`). Present-but-unparsable,
+  //    ambiguous, or unreadable fails closed; stale fails as drift.
+  // A failure in a required file means its content is untrustworthy; the
+  // Android override shares that file, so the file-level failure already
+  // covers it (no double reporting).
+  const tauriConfText = files['src-tauri/tauri.conf.json'];
+  const tauriConfTrusted = typeof tauriConfText === 'string';
+
+  if (tauriConfTrusted) {
+    const override = parseTauriAndroidVersionName(tauriConfText!);
+    if (override.kind === 'err') {
+      checks.push({ file: 'src-tauri/tauri.conf.json', field: '.bundle.android.versionName', value: '(malformed)', status: 'fail', detail: override.error });
+      failures.push(override.error);
+    } else if (override.kind === 'ok') {
+      if (canonical === null) {
+        const msg = `src-tauri/tauri.conf.json .bundle.android.versionName is "${override.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
+        checks.push({ file: 'src-tauri/tauri.conf.json', field: '.bundle.android.versionName', value: override.value, status: 'fail', detail: msg });
+        failures.push(msg);
+      } else if (stripVPrefix(override.value) !== canonical) {
+        const msg = expectedLine('src-tauri/tauri.conf.json', '.bundle.android.versionName', `"${override.value}"`, `"${canonical}"`, 'remove the Android override or set it to the canonical version (Android bundles would otherwise ship a different version than desktop)');
+        checks.push({ file: 'src-tauri/tauri.conf.json', field: '.bundle.android.versionName', value: override.value, status: 'fail', detail: msg, hint: 'remove the Android override or set it to the canonical version' });
+        failures.push(msg);
+      } else {
+        checks.push({ file: 'src-tauri/tauri.conf.json', field: '.bundle.android.versionName', value: override.value, status: 'ok' });
+      }
+    }
+  }
+
+  for (const optPath of OPTIONAL_FILES) {
+    if (optPath in (input.optionalReadErrors ?? {})) {
+      const reason = input.optionalReadErrors![optPath];
+      const msg = `${optPath} exists but could not be read (${reason}) — an unreadable build input must not silently disable its check.`;
+      checks.push({ file: optPath, field: '(file)', value: '(unreadable)', status: 'fail', detail: msg });
+      failures.push(msg);
+      continue;
+    }
+    const text = input.optionalFiles?.[optPath];
+    if (typeof text !== 'string') continue; // absent = generated, nothing to check
+
+    if (optPath === 'src-tauri/gen/android/app/build.gradle.kts') {
+      const parsed = parseGradleKtsVersionName(text);
+      if (parsed.kind === 'err') {
+        checks.push({ file: optPath, field: 'versionName', value: '(unparsable)', status: 'fail', detail: parsed.error });
+        failures.push(parsed.error);
+        continue;
+      }
+      if (canonical === null) {
+        const msg = `${optPath} versionName is "${parsed.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
+        checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'fail', detail: msg });
+        failures.push(msg);
+        continue;
+      }
+      if (stripVPrefix(parsed.value) !== canonical) {
+        const msg = expectedLine(optPath, 'versionName', `"${parsed.value}"`, `"${canonical}"`, 're-run "tauri android build" so the generated project records the current version');
+        checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'fail', detail: msg, hint: 're-run "tauri android build" so the generated project records the current version' });
+        failures.push(msg);
+        continue;
+      }
+      checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'ok' });
+    }
+  }
+
   return { ok: failures.length === 0, canonical, checks, failures, releaseTag: releaseTagReport };
 }
 
@@ -561,12 +748,18 @@ export interface LoadedFiles {
   files: Partial<Record<RequiredFile, string>>;
   missing: string[];
   readErrors: Record<string, string>;
+  /** Optional-authoritative files that exist on disk, by path. */
+  optionalFiles: Partial<Record<OptionalFile, string>>;
+  /** Optional paths that exist but could not be read (fail closed). */
+  optionalReadErrors: Record<string, string>;
 }
 
 /** Read the required files from a checkout. Missing files are reported (and
- * fail closed in validateVersions) rather than skipped. */
+ * fail closed in validateVersions) rather than skipped. Optional files
+ * (the generated Android project) are read only when present; a read error
+ * on an EXISTING optional file is recorded and fails closed. */
 export function loadVersionFiles(root: string): LoadedFiles {
-  const out: LoadedFiles = { files: {}, missing: [], readErrors: {} };
+  const out: LoadedFiles = { files: {}, missing: [], readErrors: {}, optionalFiles: {}, optionalReadErrors: {} };
   for (const rel of REQUIRED_FILES) {
     try {
       out.files[rel] = readFileSync(join(root, rel), 'utf8');
@@ -574,6 +767,18 @@ export function loadVersionFiles(root: string): LoadedFiles {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') out.missing.push(rel);
       else out.readErrors[rel] = e instanceof Error ? e.message : String(e);
+    }
+  }
+  for (const rel of OPTIONAL_FILES) {
+    try {
+      out.optionalFiles[rel] = readFileSync(join(root, rel), 'utf8');
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        // Exists but unreadable: authoritative metadata must not silently
+        // disable its own check.
+        out.optionalReadErrors[rel] = e instanceof Error ? e.message : String(e);
+      }
     }
   }
   return out;
@@ -630,8 +835,13 @@ Usage:
 Options:
   --release-tag <tag>   Release context: the tag (e.g. v1.0.10-beta) must equal
                         the build version in every authoritative field.
+  --expect-tag <tag>    Exact alias of --release-tag (wiring compatibility).
   --root <dir>          Checkout root (default: the repo root this file lives in).
   -h, --help            Show this help.
+
+Android metadata (src-tauri/gen/android/app/build.gradle.kts versionName and
+the tauri.conf.json .bundle.android.versionName override) is checked whenever
+it exists; its absence is legitimate because it is generated at build time.
 
 Exit codes: 0 pass, 1 validation failure, 2 usage error.`;
 
@@ -659,7 +869,7 @@ export function runCli(argv: string[]): number {
       console.log(USAGE);
       return 0;
     }
-    const tag = inline('--release-tag');
+    const tag = inline('--release-tag') ?? inline('--expect-tag');
     if (tag !== null) {
       releaseTag = tag;
       continue;
@@ -675,7 +885,14 @@ export function runCli(argv: string[]): number {
 
   const checkoutRoot = root ?? resolve(join(dirnameFileUrl(), '..', '..'));
   const loaded = loadVersionFiles(checkoutRoot);
-  const report = validateVersions({ ...loaded, releaseTag });
+  const report = validateVersions({
+    files: loaded.files,
+    missing: loaded.missing,
+    readErrors: loaded.readErrors,
+    optionalFiles: loaded.optionalFiles,
+    optionalReadErrors: loaded.optionalReadErrors,
+    releaseTag,
+  });
   console.log(renderReport(report));
   return report.ok ? 0 : 1;
 }

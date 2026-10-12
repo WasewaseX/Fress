@@ -39,6 +39,21 @@
  *   setResolver('ok' | 'rate-limit' | 'empty'); setRelease(repo, releases)
  *   setDialogDir(dir) / setFailDialog(msg)      plugin:dialog|open
  *   setFailStart(msg) / setFailCancel(msg)      engine fault injection
+ *   setFailOpenArtifact(msg) / setHoldOpen(b) / releaseOpen()
+ *                                               open_downloaded_artifact
+ *   setFailOpenPath(msg) / setFailReveal(msg)   opener fault injection
+ *   setHoldOpenPath(true) / releaseOpenPath()   hold open_path invocations
+ *                                      in-flight until the test releases them
+ *                                      (prove the UI does not report failure
+ *                                      or duplicate-launch while pending)
+ *   openedPaths / revealedPaths        recorded opener-adapter traffic
+ *
+ * Every artifact-open attempt (open_downloaded_artifact AND the opener
+ * plugin's open_path) is recorded in `openedPaths` so tests can assert the
+ * exact (command, id, path, with) record that reached the native boundary -
+ * the value the frontend handed over, never a reconstruction. `with` is
+ * normalized to null when the frontend requested the OS default handler,
+ * so assertions survive structured-clone round-trips.
  */
 
 export interface BridgeDownloadRequest {
@@ -69,6 +84,24 @@ export interface FressTestBridge {
   /** URLs handed to the opener plugin (Workflow J: the releases page must
    * open instead of a direct download when no usable asset exists). */
   openedUrls: string[];
+  /** Paths handed to plugin:opener|reveal_item_in_dir (Show in folder). */
+  revealedPaths: Array<{ paths: string[] }>;
+  /** When set, plugin:opener|open_path rejects with this error (the OS
+   * cannot open the file: permission denied, missing handler, the file is
+   * gone). The call is still RECORDED first - the contract is about what
+   * the frontend asked for, not whether the OS granted it. */
+  failOpenPath: string | null;
+  setFailOpenPath(msg: string | null): void;
+  /** When set, plugin:opener|reveal_item_in_dir rejects (reveal refused). */
+  failReveal: string | null;
+  setFailReveal(msg: string | null): void;
+  /** When true, open_path invocations are recorded but HELD in-flight until
+   * releaseOpenPath() resolves them - the mock equivalent of a slow native
+   * launch. Proves the UI neither reports failure early nor lets repeated
+   * activation stack duplicate native launches while one is pending. */
+  holdOpenPath: boolean;
+  setHoldOpenPath(hold: boolean): void;
+  releaseOpenPath(): void;
   nextId: number;
   hostArch: string;
   defaultDir: string;
@@ -84,6 +117,27 @@ export interface FressTestBridge {
    * (Workflow I: a tampered/foreign-key artifact must never verify). */
   failVerify: string | null;
   setFailVerify(msg: string | null): void;
+  /** When set, `launch_app_image_artifact` rejects with this error (the
+   * AppImage fallback's own typed refusal surfaces honestly). */
+  failLaunchAppImage: string | null;
+  setFailLaunchAppImage(msg: string | null): void;
+  /** When set, `open_downloaded_artifact` rejects with this error (Workflow
+   * D: a failed OS handoff must surface a typed, honest failure). */
+  failOpenArtifact: string | null;
+  setFailOpenArtifact(msg: string | null): void;
+  /** When true, open_downloaded_artifact stays pending until releaseOpen()
+   * is called - the busy-state (double-click guard) contract. */
+  holdOpen: boolean;
+  setHoldOpen(value: boolean): void;
+  releaseOpen(): void;
+  /** Every artifact-open attempt: { cmd, id, path, with }. Covers BOTH the
+   * open_downloaded_artifact command AND the opener plugin's open_path
+   * (which records id 0 - its API has no download id). `with` is normalized
+   * to null when the frontend requested the OS default handler, so
+   * assertions survive structured-clone round-trips. Each record is the
+   * EXACT value the frontend handed to the native boundary, never a
+   * reconstruction. */
+  openedPaths: Array<{ cmd: string; id: number; path: string; with: string | null }>;
   resolverMode: 'ok' | 'rate-limit' | 'empty';
   setResolver(mode: 'ok' | 'rate-limit' | 'empty'): void;
   releases: Record<string, unknown[]>;
@@ -126,6 +180,8 @@ const BRIDGE_BODY = String.raw`
     downloads: {},
     emits: [],
     openedUrls: [],
+    openedPaths: [],
+    revealedPaths: [],
     nextId: 1001,
     hostArch: HOST_ARCH,
     defaultDir: DEFAULT_DIR,
@@ -139,6 +195,37 @@ const BRIDGE_BODY = String.raw`
     setFailCancel: function (msg) { this.failCancel = msg; },
     failVerify: null,
     setFailVerify: function (msg) { this.failVerify = msg; },
+    failLaunchAppImage: null,
+    setFailLaunchAppImage: function (msg) { this.failLaunchAppImage = msg; },
+    failOpenArtifact: null,
+    setFailOpenArtifact: function (msg) { this.failOpenArtifact = msg; },
+    holdOpen: false,
+    setHoldOpen: function (value) { this.holdOpen = value; },
+    openResolvers: [],
+    releaseOpen: function () {
+      var resolvers = this.openResolvers;
+      this.openResolvers = [];
+      for (var i = 0; i < resolvers.length; i++) resolvers[i]();
+    },
+    openedPaths: [],
+    recordOpen: function (cmd, id, path, withVal) {
+      this.openedPaths.push({ cmd: cmd, id: id, path: path, with: withVal === undefined ? null : withVal });
+    },
+    failOpenPath: null,
+    setFailOpenPath: function (msg) { this.failOpenPath = msg; },
+    failReveal: null,
+    setFailReveal: function (msg) { this.failReveal = msg; },
+    openWaiters: [],
+    holdOpenPath: false,
+    setHoldOpenPath: function (hold) {
+      this.holdOpenPath = hold;
+      if (!hold) this.releaseOpenPath();
+    },
+    releaseOpenPath: function () {
+      var waiters = this.openWaiters;
+      this.openWaiters = [];
+      for (var w = 0; w < waiters.length; w++) waiters[w](null);
+    },
     resolverMode: 'ok',
     setResolver: function (mode) { this.resolverMode = mode; },
     releases: INITIAL_RELEASES,
@@ -321,16 +408,66 @@ const BRIDGE_BODY = String.raw`
         if (bridge.failVerify) throw bridge.failVerify;
         return null;
       }
+      case 'open_downloaded_artifact': {
+        var oa = args || {};
+        bridge.recordOpen('open_downloaded_artifact', Number(oa.id) || 0, String(oa.path || ''));
+        if (bridge.failOpenArtifact) throw bridge.failOpenArtifact;
+        if (bridge.holdOpen) {
+          return new Promise(function (resolve) {
+            bridge.openResolvers.push(resolve);
+          });
+        }
+        return null;
+      }
+      case 'launch_app_image_artifact': {
+        // The validated AppImage launcher (the open_path refusal's
+        // fallback): recorded with the download id the frontend claims,
+        // so the (boundary, id, path) triple is assertable end to end.
+        var la = args || {};
+        bridge.recordOpen('launch_app_image_artifact', Number(la.id) || 0, String(la.path || ''), null);
+        if (bridge.failLaunchAppImage) throw bridge.failLaunchAppImage;
+        return null;
+      }
       case 'plugin:dialog|open': {
         if (bridge.failDialog) throw bridge.failDialog;
         return bridge.dialogDir;
       }
+      case 'plugin:path|dirname': {
+        // The real path utilities are Rust commands (plugin:path), not pure
+        // JS - openFolder's reveal-fallback calls dirname() before opening
+        // the containing folder. Mock POSIX parent semantics: '/a/b/c' ->
+        // '/a/b', '/c' -> '/', no separator -> null (std::path::parent).
+        var pd = String((args && args.path) || '');
+        var cut = pd.lastIndexOf('/');
+        if (cut === -1) return null;
+        if (cut === 0) return '/';
+        return pd.slice(0, cut);
+      }
       case 'plugin:opener|open_url':
         if (args && typeof args.url === 'string') bridge.openedUrls.push(args.url);
         return null;
-      case 'plugin:opener|open_path':
-      case 'plugin:opener|reveal_item_in_dir':
+      case 'plugin:opener|open_path': {
+        // Record FIRST (the frontend's request is the contract), then honor
+        // the fault/hold gates the test set. The record carries the opener
+        // identity (cmd, id 0 - the opener API has no download id) so
+        // command-level and opener-level assertions read one array.
+        bridge.recordOpen(
+          'plugin:opener|open_path',
+          0,
+          args && typeof args.path === 'string' ? args.path : '',
+          args && args.with !== undefined && args.with !== null ? String(args.with) : null
+        );
+        if (bridge.failOpenPath) throw bridge.failOpenPath;
+        if (bridge.holdOpenPath) {
+          return new Promise(function (resolve) { bridge.openWaiters.push(resolve); });
+        }
         return null;
+      }
+      case 'plugin:opener|reveal_item_in_dir': {
+        bridge.revealedPaths.push({ paths: (args && args.paths) || [] });
+        if (bridge.failReveal) throw bridge.failReveal;
+        return null;
+      }
       default:
         // Unknown command: resolve null (plugins in this app tolerate it).
         return null;

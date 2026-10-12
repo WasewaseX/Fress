@@ -12,6 +12,7 @@
     "test": "vitest run",
     "validate:catalog": "tsx scripts/validate-catalog.ts",
     "validate:security": "node scripts/validate-security-config.mjs",
+    "validate:versions": "tsx scripts/ci/validate-versions.ts",
     "perf:catalog": "tsx scripts/perf-catalog.ts",
     "test:e2e": "playwright test",
     "test:e2e:build": "npm run build && playwright test",

@@ -470,6 +470,27 @@ describe('correlation and consistency (Task 6: pill/registry stay consistent)', 
     expect(getDeliveryState()).toMatchObject({ phase: 'verified', path: '/downloads/raced.exe' });
   });
 
+  it('a cancellation that raced ahead of the listeners reconciles to a quiet idle (no false failure)', async () => {
+    const h = makeHarness();
+    await h.start();
+    // The manager's item list already shows the transfer as cancelled: the
+    // user stopped it before the delivery's listeners were registered, so
+    // the 'Cancelled' error event can never arrive. The item list is the
+    // authoritative record, and a cancelled update is a QUIET return to
+    // idle - never a failure state, never a fallback redirect.
+    h.registerItem(7, ASSET_URL, 'cancelled');
+    await flush();
+    expect(getDeliveryState()).toMatchObject({ phase: 'idle' });
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+    // The plan is gone: a late completion for the cancelled transfer can
+    // never reach the verifier or resurrect the delivery.
+    emit('download-complete', { id: 7, path: '/downloads/late.exe', bytes: 21_000_000, sha256: GOOD_SHA, verified: true });
+    await flush();
+    expect(getDeliveryState().phase).toBe('idle');
+    expect(h.verifyCalls()).toHaveLength(0);
+  });
+
   it('state transitions are observable by subscribers (the pill) in order', async () => {
     const h = makeHarness();
     const phases: string[] = [];

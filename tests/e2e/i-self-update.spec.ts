@@ -319,6 +319,13 @@ test.describe('Workflow J: incompatible-asset release', () => {
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.noAssetHint']);
+
+    // The refusal is a plan-level fact, so the pill must say where the
+    // update lives now - it may not revert to the plain available label
+    // ("Update v..."), which implies in-app delivery is still on the table.
+    await expect(page.locator('#header-update-pill')).toContainText(
+      d['header.updatePillSeeReleases']
+    );
   });
 });
 
@@ -347,6 +354,12 @@ test.describe('Workflow J: unverifiable asset (checksum fail-closed)', () => {
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unverifiableHint']);
+
+    // Same refusal truth as the ARM-only sibling: the pill names the
+    // releases page, not a deliverable-looking available label.
+    await expect(page.locator('#header-update-pill')).toContainText(
+      d['header.updatePillSeeReleases']
+    );
   });
 });
 
@@ -535,15 +548,20 @@ test.describe('Workflow J: unsigned platform artifact (no signature sidecar)', (
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unsignedHint']);
-    // The pill must never claim an outcome the delivery cannot deliver:
-    // no "verified · ready", no fake progress - the plain available label
-    // is the current contract. (Truthfulness improvement routed to the
-    // self-update owner: after a plan-level refusal the pill could carry
-    // the see-releases label like a post-download failure does; tracked
-    // in docs/quality-gates.md, owner: self-update.)
+    // The pill carries the see-releases label after the refusal - the
+    // routed truthfulness fix (quality-gates finding 1): a plan-level
+    // refusal may not revert the pill to the plain available label ("Update
+    // v..."), which implies in-app delivery is still on the table. No
+    // "verified · ready", no fake progress, no deliverable-looking label.
+    await expect(page.locator('#header-update-pill')).toContainText(
+      d['header.updatePillSeeReleases']
+    );
     await expect(page.locator('#header-update-pill')).not.toContainText(
       d['header.updatePillReady'].replace('{v}', NEXT_VERSION)
     );
     await expect(page.locator('#header-update-pill')).not.toContainText(d['header.updatePillDownloading']);
+    await expect(page.locator('#header-update-pill')).not.toContainText(
+      d['header.updatePill'].replace('{v}', NEXT_VERSION)
+    );
   });
 });

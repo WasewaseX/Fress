@@ -199,6 +199,18 @@ application flow, with frontend integration tests (`selfUpdateDelivery.test.ts`)
 and E2E Workflow I contracts covering the verified path, the rejected-signature
 fallback, cancellation, download failure and signature-fetch retry.
 
+The header pill tells the same truth as the delivery state: busy phases
+name the live step (downloading / checking checksum / verifying
+signature), only the all-gates-passed state says "ready", a retryable
+failure offers the retry, and a plan-level refusal ('no-asset' |
+'unverifiable' | 'unsigned') flips the pill to the see-releases label —
+it never reverts to the plain "Update v…" available label, which would
+imply in-app delivery is still on the table after the planner proved it
+is not. The reason itself is explained by the localized refusal toast
+that accompanies the fallback, and a cancelled transfer returns the pill
+to its quiet available state (a cancellation is a user decision, not a
+failure).
+
 What verification does NOT do: a passing signature establishes trust in the
 bytes. The app never auto-launches the installer — the verified state offers
 "reveal the file", and the user decides when (and whether) to run it.

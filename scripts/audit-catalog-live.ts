@@ -225,6 +225,23 @@ async function auditScoop(appId: string, cmd: string) {
 async function auditFdroid(appId: string, pkgId: string) {
   bump('fdroid-checked');
   const r = await jget(`https://f-droid.org/api/v1/packages/${pkgId}`, { 'User-Agent': BROWSER_UA }, (s) => s >= 500);
+  if (r.status === 0) {
+    // Connection-level failure (timeout/blocked). The sandbox cannot reach
+    // f-droid.org on some runs; that says NOTHING about whether the ID
+    // exists - a timeout is never proof a vendor/package is dead. Same
+    // honesty rule as the curated-page audit below: report the real
+    // network class, do NOT raise a catalog error.
+    findings.push({ app: appId, field: 'fdroid', severity: 'WARN', detail: `F-Droid API unreachable from sandbox (informational, real status: connection failure) for ${pkgId}` });
+    bump('fdroid-unreachable');
+    return;
+  }
+  if (r.status >= 500) {
+    // A real server response, but inconclusive for the catalog claim (the
+    // ID may be perfectly fine - the registry had a bad moment).
+    findings.push({ app: appId, field: 'fdroid', severity: 'WARN', detail: `F-Droid API HTTP ${r.status} (server error at audit time, inconclusive) for ${pkgId}` });
+    bump('fdroid-server-error');
+    return;
+  }
   if (r.status !== 200 || !r.json) {
     findings.push({ app: appId, field: 'fdroid', severity: 'ERROR', detail: `F-Droid API HTTP ${r.status} for ${pkgId}` });
     bump('fdroid-missing');

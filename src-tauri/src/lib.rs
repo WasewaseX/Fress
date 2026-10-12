@@ -461,6 +461,18 @@ fn verify_signature_over_open_file(
 const VERIFICATION_SCOPE_REFUSAL: &str =
     "Signature verification refused: this path is not a completed Fress download artifact";
 
+/// One-line provenance suffix for the boundary's diagnostics about a
+/// REGISTERED artifact: what the engine itself proved about the bytes when
+/// it committed them (the record's checksum status). Only ever attached to
+/// the caller's own download record - it says nothing about any other
+/// filesystem path, so the uniform-refusal property is untouched.
+fn checksum_provenance(checksum_verified: Option<bool>) -> &'static str {
+    match checksum_verified {
+        Some(true) => "the download had completed checksum-verified",
+        _ => "the download had completed without a verified checksum",
+    }
+}
+
 /// THE updater signature-verification boundary.
 ///
 /// Accepts ONLY a completed, registered update artifact: `file_path` must
@@ -540,20 +552,23 @@ fn verify_completed_self_update_signature_with_key(
     };
     // 3. Canonical stability: the artifact must still sit where the engine
     //    committed it, not behind a symlink, bind mount or rename. The
-    //    download id and source URL travel with the refusal: they are the
-    //    caller's own download (the frontend correlates id -> url before
-    //    it calls), so they aid diagnosis without leaking anything.
+    //    download id, source URL and the engine's own checksum verdict
+    //    travel with the refusal: they describe the caller's own download
+    //    (the frontend correlates id -> url before it calls), so they aid
+    //    diagnosis without leaking anything.
     let current = std::fs::canonicalize(&record.path).map_err(|_| {
         format!(
-            "Signature verification refused: the completed download artifact is no longer on disk (download #{}, originally from {})",
-            record.id, record.url
+            "Signature verification refused: the completed download artifact is no longer on disk (download #{}, originally from {}; {})",
+            record.id,
+            record.url,
+            checksum_provenance(record.checksum_verified)
         )
     })?;
     if current != record.canonical {
-        return Err(
-            "Signature verification refused: the completed download artifact was moved or replaced on disk"
-                .to_string(),
-        );
+        return Err(format!(
+            "Signature verification refused: the completed download artifact was moved or replaced on disk ({})",
+            checksum_provenance(record.checksum_verified)
+        ));
     }
     // 4. Regular file of the committed size, judged through the SAME
     //    handle the bytes are then read from.
@@ -569,10 +584,10 @@ fn verify_completed_self_update_signature_with_key(
         );
     }
     if meta.len() != record.size {
-        return Err(
-            "Signature verification refused: the file at the completed download's path has changed since completion"
-                .to_string(),
-        );
+        return Err(format!(
+            "Signature verification refused: the file at the completed download's path has changed since completion ({})",
+            checksum_provenance(record.checksum_verified)
+        ));
     }
     // 5. The actual bytes.
     verify_signature_over_open_file(key_file_b64, signature_base64, &mut file)
@@ -1240,6 +1255,10 @@ mod verification_boundary_tests {
             42,
             &path,
             "https://github.com/WasewaseX/Fress/releases/download/v1.0.8-beta/app.exe",
+            // The updater artifact is downloaded through the delivery plan
+            // with the published SHA-256, so a real record would carry the
+            // engine's checksum verdict; the fixture pins the same shape.
+            Some(true),
         );
         (registry, path)
     }
@@ -1318,6 +1337,47 @@ mod verification_boundary_tests {
     }
 
     #[test]
+    fn a_failed_verification_never_mutates_the_registry_record() {
+        // "Must not leave it registered as successfully verified": the
+        // registry has no verified flag to flip - the only honest shape -
+        // and a failed verdict must not add, remove, or alter any record.
+        // The record the engine wrote at commit time is exactly what a
+        // later verification attempt still sees.
+        let dir = TempDir::new("record-immutable");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        let before = registry
+            .completed_artifact_for_path(&path)
+            .expect("record present before the failed verification");
+
+        // The same-size tamper: verification fails at the byte verdict.
+        let mut bytes = FIXTURE_PAYLOAD.to_vec();
+        bytes[2] ^= 0x01;
+        std::fs::write(&path, &bytes).expect("tamper in place");
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("tampered bytes must NOT verify");
+        assert!(err.contains("verification failed"), "unexpected: {err}");
+
+        let after = registry
+            .completed_artifact_for_path(&path)
+            .expect("record must survive a failed verification");
+        assert_eq!(before.id, after.id);
+        assert_eq!(before.url, after.url);
+        assert_eq!(before.size, after.size);
+        assert_eq!(before.canonical, after.canonical);
+        assert_eq!(before.path, after.path);
+        assert_eq!(
+            before.checksum_verified, after.checksum_verified,
+            "the engine's checksum verdict must not be rewritten by the verifier"
+        );
+        // And nothing else appeared in the queue either.
+        assert_eq!(
+            registry.completed_len(),
+            1,
+            "a failed verification must not create records"
+        );
+    }
+
+    #[test]
     fn a_file_replaced_after_completion_is_refused_at_the_boundary() {
         let dir = TempDir::new("replaced");
         let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
@@ -1341,6 +1401,46 @@ mod verification_boundary_tests {
         let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
             .expect_err("a deleted artifact must be refused");
         assert!(err.contains("no longer on disk"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn the_boundary_diagnostics_carry_the_engines_checksum_verdict() {
+        // The record's checksum status is the "expected checksum status"
+        // leg of the contract, surfaced in the diagnostics for the
+        // caller's OWN download - and only there.
+        let dir = TempDir::new("provenance");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        std::fs::remove_file(&path).unwrap();
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a deleted artifact must be refused");
+        assert!(
+            err.contains("checksum-verified"),
+            "a checksummed record must say so: {err}"
+        );
+
+        // A record the engine completed WITHOUT a trusted checksum must
+        // never be described as checksum-verified.
+        let dir = TempDir::new("provenance-none");
+        let path = dir.0.join("Fress-setup.exe");
+        std::fs::write(&path, FIXTURE_PAYLOAD).expect("write artifact bytes");
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(
+            43,
+            &path,
+            "https://github.com/WasewaseX/Fress/releases/download/v1.0.8-beta/app.exe",
+            None,
+        );
+        std::fs::remove_file(&path).unwrap();
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a deleted artifact must be refused");
+        assert!(
+            err.contains("without a verified checksum"),
+            "an unchecksummed record must say so: {err}"
+        );
+        assert!(
+            !err.contains("checksum-verified"),
+            "the unchecksummed record must NOT claim a verdict: {err}"
+        );
     }
 
     #[cfg(unix)]

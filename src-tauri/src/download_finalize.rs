@@ -137,10 +137,13 @@
 //! A successful commit leaves one bounded record in
 //! [`DownloadRegistry`]'s completed-artifact queue: the exact reported
 //! path, its canonical path resolved AT COMPLETION TIME, the committed
-//! byte size and the source URL. The queue exists for exactly one
-//! consumer - the updater's signature-verification command in `lib.rs` -
-//! and is the reason that command cannot be turned into a general-purpose
-//! "verify any file on disk" API:
+//! byte size, the source URL and the engine's own checksum verdict
+//! (`checksum_verified`: `Some(true)` only when a publisher-supplied
+//! trusted digest matched, `None` when the artifact completed without
+//! one; a mismatch can never leave a record at all). The queue exists for
+//! exactly one consumer - the updater's signature-verification command in
+//! `lib.rs` - and is the reason that command cannot be turned into a
+//! general-purpose "verify any file on disk" API:
 //!
 //! - A record is created ONLY by a successful, full, hash-checked commit.
 //!   Cancelled, failed, checksum-mismatched and resume-invalid downloads
@@ -338,6 +341,27 @@ pub(crate) struct CompletedArtifact {
     /// invoked with a path, and the frontend correlates id -> url before
     /// it calls. The binding is kept so a future caller can demand it.
     pub(crate) url: String,
+    /// The integrity verdict the engine itself produced at completion,
+    /// copied verbatim from the commit path's digest comparison:
+    ///   - `Some(true)`  - the bytes matched a PUBLISHER-supplied trusted
+    ///     digest (expected_sha256 / expected_sha512, compared at the
+    ///     Verifying phase);
+    ///   - `None` - no trusted reference digest existed, so the digest was
+    ///     computed but the artifact completed UNVERIFIED.
+    ///
+    /// `Some(false)` is unreachable by construction: a mismatching download
+    /// is deleted and fails with kind `checksum` BEFORE any commit, so it
+    /// can never leave a record here (pinned by
+    /// `a_checksum_failure_leaves_no_completed_record`).
+    ///
+    /// This is the "expected checksum status" leg of the verifier's record
+    /// contract (id, url, canonical path, size, completed state, checksum
+    /// status). The signature verdict stays a separate, stronger check -
+    /// this field exists so the boundary's caller (and any future caller)
+    /// can see exactly what the engine itself proved about these bytes,
+    /// and so a diagnostic can distinguish "checksummed" from "merely
+    /// completed". It NEVER upgrades the signature result.
+    pub(crate) checksum_verified: Option<bool>,
 }
 
 /// Registry of live downloads, keyed by download id. The state machine and
@@ -389,7 +413,13 @@ impl DownloadRegistry {
     /// longer reachable under that path - the newest commit is the
     /// truthful one). The queue is FIFO-capped so a long session cannot
     /// grow it without bound.
-    pub(crate) fn record_completed_artifact(&self, id: u32, path: &Path, url: &str) {
+    pub(crate) fn record_completed_artifact(
+        &self,
+        id: u32,
+        path: &Path,
+        url: &str,
+        checksum_verified: Option<bool>,
+    ) {
         // Best effort: the file was just committed and still exists, but a
         // canonicalization hiccup must never fail a finished download. The
         // fallback keeps the raw path, and the verifier's fresh
@@ -410,6 +440,7 @@ impl DownloadRegistry {
             canonical,
             size,
             url: url.to_string(),
+            checksum_verified,
         });
     }
 
@@ -433,9 +464,10 @@ impl DownloadRegistry {
         completed.iter().find(|a| a.canonical == canonical).cloned()
     }
 
-    /// Test-only view of the completed queue length (cap regression tests).
+    /// Test-only view of the completed queue length (cap regression tests,
+    /// and the registry-immutability assertion in lib.rs's boundary tests).
     #[cfg(test)]
-    fn completed_len(&self) -> usize {
+    pub(crate) fn completed_len(&self) -> usize {
         self.completed
             .lock()
             .expect("completed-artifact registry poisoned")
@@ -1787,7 +1819,7 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
     // name and every exit from here returns Ok.
     session
         .registry
-        .record_completed_artifact(id, &committed, url.as_str());
+        .record_completed_artifact(id, &committed, url.as_str(), verified);
 
     if session.advance(DownloadState::Completed).await.is_err() {
         // The file IS committed; report the truth even if the state book-
@@ -5073,6 +5105,7 @@ mod tests {
                 i as u32,
                 &PathBuf::from(format!("/nonexistent/artifact-{i}.bin")),
                 "https://example.com/a.bin",
+                None,
             );
         }
         assert_eq!(
@@ -5101,10 +5134,10 @@ mod tests {
         let path = tmp.path().join("setup.exe");
         std::fs::write(&path, vec![0u8; 10]).unwrap();
         let registry = DownloadRegistry::default();
-        registry.record_completed_artifact(1, &path, "https://example.com/a.bin");
+        registry.record_completed_artifact(1, &path, "https://example.com/a.bin", Some(true));
 
         std::fs::write(&path, vec![1u8; 20]).unwrap();
-        registry.record_completed_artifact(2, &path, "https://example.com/a.bin");
+        registry.record_completed_artifact(2, &path, "https://example.com/a.bin", None);
 
         assert_eq!(
             registry.completed_len(),
@@ -5116,5 +5149,178 @@ mod tests {
             .expect("record present");
         assert_eq!(record.id, 2);
         assert_eq!(record.size, 20, "the stale size must not survive");
+    }
+
+    #[tokio::test]
+    async fn the_completed_record_carries_the_engines_checksum_verdict() {
+        // "Expected checksum status" leg of the record contract: the record
+        // must say what the ENGINE proved about the bytes at completion -
+        // Some(true) only when a publisher-supplied trusted digest matched,
+        // None when no trusted digest existed. A download without a trusted
+        // reference must never look checksummed, and a checksummed one must
+        // never look unverified.
+        let tmp = TempDir::new("e2e-record-verdict");
+        let body = pattern(2_500);
+
+        // (a) Trusted digest supplied and matching -> Some(true).
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let (session, cancel_rx) = test_session().await;
+        let mut plan = plan_for(&server.url, tmp.path(), Some("verified-setup.exe"));
+        plan.expected_sha256 = Some(sha256_hex(&body));
+        let payload = execute_with_retries(
+            &EventLog::default(),
+            &session,
+            1,
+            plan,
+            cancel_rx,
+            test_backoff(),
+        )
+        .await
+        .expect("matching trusted digest must complete");
+        assert_eq!(payload.verified, Some(true), "the event must say verified");
+        // Filesystem state: the committed artifact exists at the reported
+        // path with the exact bytes, and no staging file survived.
+        let final_a = tmp.path().join("verified-setup.exe");
+        assert_eq!(std::fs::read(&final_a).unwrap(), body);
+        assert!(!tmp.path().join("verified-setup.exe.part").exists());
+        assert_eq!(payload.path, final_a.to_string_lossy().to_string());
+        let record = session
+            .registry
+            .completed_artifact_for_path(final_a.as_path())
+            .expect("verified completion must be registered");
+        assert_eq!(
+            record.checksum_verified,
+            Some(true),
+            "the record must carry the engine's checksum verdict"
+        );
+
+        // (b) No trusted digest supplied -> None. The artifact completed
+        // (it is a legitimate record), but nothing about its bytes was
+        // PROVEN - the record must say exactly that.
+        let server = spawn_mock(vec![MockReply::full_200(&body)]);
+        let (session, cancel_rx) = test_session().await;
+        let plan = plan_for(&server.url, tmp.path(), Some("plain-setup.exe"));
+        let payload = execute_with_retries(
+            &EventLog::default(),
+            &session,
+            2,
+            plan,
+            cancel_rx,
+            test_backoff(),
+        )
+        .await
+        .expect("an unchecksummed download must still complete");
+        assert_eq!(
+            payload.verified, None,
+            "no trusted reference means no verdict"
+        );
+        // Filesystem state: same guarantee, no staging file survived.
+        let final_b = tmp.path().join("plain-setup.exe");
+        assert_eq!(std::fs::read(&final_b).unwrap(), body);
+        assert!(!tmp.path().join("plain-setup.exe.part").exists());
+        let record = session
+            .registry
+            .completed_artifact_for_path(final_b.as_path())
+            .expect("unverified completion must still be registered");
+        assert_eq!(
+            record.checksum_verified, None,
+            "the record must NOT claim a checksum the engine never made"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_completed_downloads_never_cross_their_boundary_records() {
+        // Cross-download ID confusion: with two completed artifacts in the
+        // registry, the verifier's lookup is keyed by the file's path and
+        // must hand back the id/url/checksum verdict of EXACTLY the
+        // download that committed that file - never a sibling's. The
+        // refusal diagnostics (which quote the record's id and url) would
+        // otherwise misattribute a failure to the wrong download.
+        let tmp = TempDir::new("e2e-cross-record");
+        let body_a = pattern(1_200);
+        let body_b = pattern(3_400);
+
+        // Two sessions over ONE registry - exactly the shape the Tauri
+        // bridge produces for two concurrent downloads.
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id_a, cancel_rx_a) = registry.register().await;
+        let session_a = DownloadSession::new(Arc::clone(&registry), id_a);
+        let (id_b, cancel_rx_b) = registry.register().await;
+        let session_b = DownloadSession::new(Arc::clone(&registry), id_b);
+
+        let server_a = spawn_mock(vec![MockReply::full_200(&body_a)]);
+        let mut plan_a = plan_for(&server_a.url, tmp.path(), Some("alpha.exe"));
+        plan_a.expected_sha256 = Some(sha256_hex(&body_a));
+        let payload_a = execute_with_retries(
+            &EventLog::default(),
+            &session_a,
+            11,
+            plan_a,
+            cancel_rx_a,
+            test_backoff(),
+        )
+        .await
+        .expect("download A must complete");
+
+        let server_b = spawn_mock(vec![MockReply::full_200(&body_b)]);
+        let mut plan_b = plan_for(&server_b.url, tmp.path(), Some("beta.exe"));
+        plan_b.expected_sha512 = Some(sha512_hex(&body_b));
+        let payload_b = execute_with_retries(
+            &EventLog::default(),
+            &session_b,
+            12,
+            plan_b,
+            cancel_rx_b,
+            test_backoff(),
+        )
+        .await
+        .expect("download B must complete");
+
+        let path_a = PathBuf::from(&payload_a.path);
+        let path_b = PathBuf::from(&payload_b.path);
+        assert_ne!(
+            path_a, path_b,
+            "the two downloads must sit at distinct paths"
+        );
+
+        // Filesystem state: both artifacts exist with THEIR OWN bytes (not
+        // a sibling's), and no staging files survived either commit.
+        assert_eq!(std::fs::read(&path_a).unwrap(), body_a);
+        assert_eq!(std::fs::read(&path_b).unwrap(), body_b);
+        assert!(!path_a.with_extension("exe.part").exists());
+        assert!(!path_b.with_extension("exe.part").exists());
+
+        let record_a = registry
+            .completed_artifact_for_path(&path_a)
+            .expect("A's record present");
+        let record_b = registry
+            .completed_artifact_for_path(&path_b)
+            .expect("B's record present");
+
+        // Every correlation leg points at its own download, both ways.
+        assert_eq!(record_a.id, 11, "A's path must resolve to A's id");
+        assert_eq!(
+            record_a.url, server_a.url,
+            "A's path must resolve to A's url"
+        );
+        assert_eq!(record_a.size, body_a.len() as u64);
+        assert_eq!(record_a.checksum_verified, Some(true));
+        assert_eq!(record_b.id, 12, "B's path must resolve to B's id");
+        assert_eq!(
+            record_b.url, server_b.url,
+            "B's path must resolve to B's url"
+        );
+        assert_eq!(record_b.size, body_b.len() as u64);
+        assert_eq!(record_b.checksum_verified, Some(true));
+
+        // The association is exclusive in the other direction too: the two
+        // canonical paths are distinct, and two completions leave exactly
+        // two records - no third, no merge.
+        assert_ne!(record_a.canonical, record_b.canonical);
+        assert_eq!(
+            registry.completed_len(),
+            2,
+            "two distinct completions, two records"
+        );
     }
 }

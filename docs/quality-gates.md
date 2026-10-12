@@ -15,7 +15,7 @@ Run from the repository root after `npm ci`:
 | Command | Where | What it proves |
 |---|---|---|
 | `npm run typecheck` | local + CI (`ci.yml` → `frontend`) | TypeScript compiles clean across `src/`, `tests/e2e/`, `scripts/perf/`, both Playwright configs. |
-| `npm run validate:versions` | local + CI (`ci.yml` → `version-guard` AND `frontend`; `release.yml` → `version` with `--expect-tag`) | THE single authoritative version-coherence command (`scripts/validate-versions.mjs`): package.json, Cargo.toml, tauri.conf.json, package-lock.json (both positions) and the `fress` crate in Cargo.lock all agree. With `--expect-tag vX` it additionally proves a release tag binds to the build metadata. A development build deliberately does NOT have to match the currently published release. |
+| `npm run validate:versions` | local + CI (`ci.yml` → `version-guard` AND `frontend`; `release.yml` → `version` with `--release-tag`) | THE single authoritative version-coherence command (`scripts/ci/validate-versions.ts`): package.json, Cargo.toml, tauri.conf.json, package-lock.json (both positions) and the `fress` crate in Cargo.lock all agree. With `--release-tag vX` it additionally proves a release tag binds to the build metadata. A development build deliberately does NOT have to match the currently published release. |
 | `npm test` | local + CI (`ci.yml` → `frontend`) | Unit suite (Vitest + Testing Library, jsdom). Includes the dictionary parity test, resolver contracts, download-store and render-isolation unit tests, and the version-validator rejection tests. |
 | `npm run validate:catalog` | local + CI (`ci.yml` → `frontend`) | The catalog is the product: duplicate ids, dead links, platform-command mismatches, missing icons/translations fail. |
 | `npm run validate:security` | local + CI (`ci.yml` → `frontend`) | The documented security configuration matches the code (CSP, headers). |
@@ -41,7 +41,7 @@ All workflows live in `.github/workflows/`, least-privilege
 
 | Gate | Workflow / job | OS | Blocking? |
 |---|---|---|---|
-| Version coherence (`npm run validate:versions`; one implementation in `scripts/validate-versions.mjs`) | `ci.yml` → `version-guard` (+ step inside `frontend`) | ubuntu | Yes |
+| Version coherence (`npm run validate:versions`; one implementation in `scripts/ci/validate-versions.ts`) | `ci.yml` → `version-guard` (+ step inside `frontend`) | ubuntu | Yes |
 | Typecheck, unit tests, version coherence, catalog validator, security config validator, production build | `ci.yml` → `frontend` | ubuntu | Yes |
 | Release-artifact verifier rejection tests (`python3 -m unittest`) | `ci.yml` → `artifact-audit-tests` | ubuntu | Yes |
 | Rust fmt, clippy, tests | `ci.yml` → `rust` | ubuntu-22.04 | Yes |
@@ -374,7 +374,7 @@ hold on the integrated commit:
    an explicit, recorded decision.
 2. **`release.yml` completes** for the tag: bundles produced for Windows,
    macOS and Linux, Android build produced, and version/tag coherence
-   proven by `npm run validate:versions -- --expect-tag` in the `version`
+   proven by `npm run validate:versions -- --release-tag` in the `version`
    job (a tag that disagrees with the manifests cannot start any build).
 3. **The final published-artifact audit passed** (`release.yml` →
    `verify-release`): every uploaded asset re-hashed against

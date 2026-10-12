@@ -40,11 +40,12 @@ concurrency:
 jobs:
   version-guard:
     # Version coherence is validated by ONE authoritative implementation:
-    # scripts/validate-versions.mjs (npm run validate:versions). The rules
-    # do not live in this workflow - the shell below is only the invocation.
+    # scripts/ci/validate-versions.ts, run as `npm run validate:versions`
+    # (Agent 2's implementation, wired here by the CI owner). The rules do
+    # not live in this workflow - the steps below are only the invocation.
     # It catches drift between package.json, Cargo.toml, tauri.conf.json and
     # both lockfiles at PR time, instead of at release time. Tag binding is
-    # enforced by the same command in release.yml (--expect-tag); a normal
+    # enforced by the same command in release.yml (--release-tag); a normal
     # development build deliberately does NOT have to match the currently
     # published release version.
     name: Version consistency
@@ -57,7 +58,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - name: All manifests and lockfiles must agree (scripts/validate-versions.mjs)
+      - name: Install dependencies from the lockfile
+        # tsx (the validator's TypeScript loader) comes from devDependencies;
+        # the validator itself only touches node:fs/node:path/node:url.
+        run: npm ci
+      - name: All manifests and lockfiles must agree (scripts/ci/validate-versions.ts)
         run: npm run validate:versions
 
   frontend:

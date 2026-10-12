@@ -24,23 +24,30 @@ jobs:
           # Nothing in this workflow pushes to git; the release uploads
           # authenticate via GH_TOKEN env vars instead.
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Install dependencies from the lockfile
+        # tsx (the validator's TypeScript loader) comes from devDependencies.
+        run: npm ci
       - id: v
         run: |
           set -euo pipefail
 
           # One version everywhere, validated by ONE authoritative
-          # implementation: scripts/validate-versions.mjs (the same command
-          # CI runs as `npm run validate:versions`). This step does not
-          # re-implement the rules in shell; it only derives the job
-          # outputs the later build jobs consume. On a tag push the
-          # validator additionally proves the tag equals v<version>, so a
-          # release whose installer would report a different version than
-          # its tag stops here. On workflow_dispatch (no tag) the same
-          # coherence rules run without tag binding.
+          # implementation: scripts/ci/validate-versions.ts (Agent 2's
+          # validator, the same command CI runs as `npm run
+          # validate:versions`). This step does not re-implement the rules
+          # in shell; it only derives the job outputs the later build jobs
+          # consume. On a tag push the validator additionally proves the
+          # tag equals v<version>, so a release whose installer would
+          # report a different version than its tag stops here. On
+          # workflow_dispatch (no tag) the same coherence rules run without
+          # tag binding.
           if [ "${GITHUB_REF_TYPE:-branch}" = "tag" ]; then
-            node scripts/validate-versions.mjs --expect-tag "${GITHUB_REF_NAME}"
+            npm run validate:versions -- --release-tag "${GITHUB_REF_NAME}"
           else
-            node scripts/validate-versions.mjs
+            npm run validate:versions
           fi
 
           VERSION=$(node -p "require('./package.json').version")

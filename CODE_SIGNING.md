@@ -7,8 +7,8 @@ different questions. Do not conflate them:
 
 | Mechanism | Question it answers | Establishes | Consumed by | Current status (evidence: release v1.0.7-beta) |
 | --- | --- | --- | --- | --- |
-| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release; verified in-app via the native `fetch_self_update_text` command, fail-closed (`planUpdateDelivery`) |
-| Minisign `.sig` + `latest.json` + embedded public key | "Who authorized this updater artifact?" | Authenticity: a signature that only the holder of the private key (a repository secret) can produce | The native `verify_self_update_signature` command (implemented and tested in-app; delivery-UI wiring pending — see below), and the Tauri updater plugin (future) | Produced for the Windows installers and Linux bundles; macOS dmgs, the MSI, portable zips and all APKs ship WITHOUT updater artifacts |
+| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release since v1.0.6; verified in-app via the native `fetch_self_update_text` command, fail-closed (`planUpdateDelivery`) |
+| Minisign `.sig` + `latest.json` + embedded public key | "Who authorized this updater artifact?" | Authenticity: a signature that only the holder of the private key (a repository secret) can produce | The native `verify_self_update_signature` command, called by the REAL delivery flow (`src/features/selfUpdate/updateDelivery.ts`) after every completed update download and before any "verified" state is shown, and the Tauri updater plugin (future) | Produced for the Windows installers and Linux bundles; macOS dmgs, the MSI, portable zips and all APKs ship WITHOUT updater artifacts — those platforms are therefore NOT delivered in-app (releases-page fallback) until signed artifacts exist |
 | Authenticode (Windows) | "Is the publisher accountable to a certificate authority Windows trusts?" | Publisher identity for Explorer/SmartScreen; tamper evidence tied to that identity | Windows itself at install time | **Not applied today** — no signing secrets are configured, and the published installers carry no Authenticode certificate table. This is why Windows shows "Unknown publisher" |
 | APK signature (Android) | "Will Android accept this APK as an update of the installed app?" | OS-enforced same-signer rule: the package installer refuses an update signed with a different key | Android's package installer at install time | Applied by CI from the persistent keystore secret (see the Android section below) |
 
@@ -163,19 +163,45 @@ verification actually runs on every platform-matched update, and an update
 whose checksum cannot be established is NOT downloaded — the app opens the
 releases page instead.
 
-The SECOND layer is artifact authenticity. The app now embeds the updater
-public key at compile time and ships the native
-`verify_self_update_signature` command (`src-tauri/src/lib.rs`): it streams
-a completed download through minisign verification against the embedded key,
-refusing legacy (non-prehashed) signatures, and returns ok/error without
-ever exposing file contents. The command is implemented and unit-tested
-(genuine signature verifies; one flipped bit, one extra byte, a foreign key
-and malformed documents all fail closed) — but the delivery UI does not call
-it yet, so the IN-APP flow currently verifies integrity (SHA-256), not yet
-publisher authenticity. Wiring it into the update-delivery decision touches
-`src/features/selfUpdate/**`, which is outside the updater-trust workstream's
-file ownership; until that wiring lands, neither the UI nor this document
-claims end-to-end in-app publisher authentication.
+The SECOND layer is artifact authenticity, and it is now part of the REAL
+delivery flow (no longer command-only). The delivery lifecycle in
+`src/features/selfUpdate/updateDelivery.ts` runs every in-app update
+through three gates and only calls the result "verified" when all three
+pass:
+
+1. **Plan gate (fail-closed, shared by the header pill and the footer
+   button):** the release must carry a platform-matched asset, a published
+   SHA-256 entry for its exact filename in `SHA256SUMS.txt`, AND a
+   well-formed minisign signature sidecar (`<asset>.sig`) for that exact
+   filename. A missing sidecar routes the update to the official Releases
+   page with the explicit "unsigned" reason — it is never delivered
+   in-app and never described as publisher-authenticated.
+2. **Checksum gate (native download engine):** the file streams through the
+   download manager with the published digest attached; a mismatch deletes
+   the file and reports an integrity failure instead of a completed
+   download.
+3. **Signature gate (native verifier, post-download):** once the engine
+   reports completion — and before any verified state is rendered — the
+   flow invokes `verify_self_update_signature` with the ENGINE-reported
+   completion path (correlated through the download manager's own
+   id→url records, never a UI label) and the sidecar document fetched in
+   step 1. A rejection is an explained failure with the Releases-page
+   fallback; it is never a verified outcome and never "no update".
+
+The app embeds the updater public key at compile time; the native
+`verify_self_update_signature` command (`src-tauri/src/lib.rs`) streams the
+completed file through minisign verification against it, refusing legacy
+(non-prehashed) signatures, and returns ok/error without ever exposing file
+contents. The command is unit-tested (genuine signature verifies; one
+flipped bit, one extra byte, a foreign key and malformed documents all fail
+closed) and — since the delivery wiring landed — exercised by the real
+application flow, with frontend integration tests (`selfUpdateDelivery.test.ts`)
+and E2E Workflow I contracts covering the verified path, the rejected-signature
+fallback, cancellation, download failure and signature-fetch retry.
+
+What verification does NOT do: a passing signature establishes trust in the
+bytes. The app never auto-launches the installer — the verified state offers
+"reveal the file", and the user decides when (and whether) to run it.
 
 The release pipeline is already wired for signatures: every `tauri-action`
 build in `release.yml` produces the updater artifacts (`latest.json`,
@@ -192,7 +218,7 @@ Current status at a glance (evidence: release v1.0.7-beta):
 | Key password | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret (same backup) |
 | Public key | `fress-updater.key.pub` in this repo, embedded into every app build via `include_str!`, also recorded below |
 | Updater signatures on releases | Windows installers (regenerated post-build) and Linux bundles; **macOS dmgs, the MSI, portable zips and APKs ship without updater artifacts** — `latest.json` therefore carries no darwin entries |
-| In-app signature verification | native `verify_self_update_signature` command: implemented, unit-tested, **delivery-UI wiring pending** |
+| In-app signature verification | native command + REAL delivery-flow wiring (three-gate plan → verified download → post-download verify); unsigned platforms route to the Releases page |
 | In-app updater plugin | not wired yet (the plugin would replace the app's own flow; see the endpoint note below) |
 
 Public key (safe to distribute; embedded in the binary at compile time from
@@ -222,11 +248,52 @@ verification code the app ships (`verify_signature_over_file`):
 
 The five signed artifacts verify byte-for-byte end to end. This proves the
 RELEASE pipeline's signatures are genuine and that the in-app verifier works
-against real artifacts; it does NOT yet prove the in-app DELIVERY flow calls
-the verifier before offering an update — that is the pending wiring above.
-Also note what a signature establishes and what it does not: the macOS dmgs
-and Android APKs are delivered through the checksum-verified path, and a
-SHA-256 match remains an integrity guarantee, not publisher proof.
+against real artifacts. Also note what a signature establishes and what it
+does not: the macOS dmgs and Android APKs are NOT delivered through the
+in-app path (no publisher signature exists for them), and a SHA-256 match
+remains an integrity guarantee, not publisher proof.
+
+### Release signature audit (re-run 2026-10-12, v1.0.7-beta + v1.0.8-beta draft)
+
+Re-verified with an INDEPENDENT implementation (pure-Python RFC 8032 Ed25519
++ BLAKE2b prehash, self-checked against the RFC test vectors and the app's
+own `tauri signer sign` fixture before touching release data — script kept
+out of the repository). Every signed artifact on the two newest releases was
+downloaded in full and checked against the embedded public key:
+
+| Artifact | v1.0.7-beta | v1.0.8-beta (draft) |
+| --- | --- | --- |
+| `*_x64-setup.exe` / `*_arm64-setup.exe` | **PASS** | n/a — not on the release (yet) |
+| `*_amd64.AppImage` | **PASS** | **PASS** |
+| `*_amd64.deb` | **PASS** | **PASS** |
+| `*-1.x86_64.rpm` | **PASS** | **PASS** |
+| `*_x64.dmg` / `*_aarch64.dmg` | no signature | no signature |
+| `*_en-US.msi`, `*_portable.zip` | no signature | n/a — not on the release |
+| `*_*.apk` (all ABIs) | no signature | n/a — not on the release |
+
+Audit findings that need release-pipeline attention (Agent 6 workstream):
+
+1. **`latest.json` drift on v1.0.7-beta.** The `latest.json` asset on the
+   v1.0.7-beta release currently DESCRIBES v1.0.8-beta (uploaded
+   2026-10-11T22:26:54Z), so its digest in v1.0.7's `SHA256SUMS.txt` no
+   longer matches the asset (`sha256sum -c` reports exactly that one
+   failure). Every late change to a release's assets must regenerate that
+   release's `SHA256SUMS.txt` afterwards — otherwise the manual
+   verification instructions point at a manifest that fails.
+2. **The v1.0.8-beta draft is incomplete as of this audit:** it ships only
+   the three Linux artifacts (+ dmgs, unsigned) and `latest.json` — no
+   Windows installers, no APKs, and NO `SHA256SUMS.txt`. Publishing it
+   as-is would fail the in-app checksum gate for every platform
+   (fail-closed: Releases page), and `latest.json` references Windows
+   artifacts that are not on the release. Either complete the upload or
+   keep the draft.
+3. **Per-artifact signature policy is unchanged:** Windows setup exes and
+   the Linux bundles are signed; if macOS and Android updates are ever to
+   be delivered in-app, `release.yml` must publish minisign `.sig` sidecars
+   for the dmg and APK artifacts under the exact `<asset>.sig` naming
+   convention (the in-app updater binds each signature to the artifact's
+   exact filename). Until then those platforms correctly route to the
+   Releases page.
 
 ### Rotation caveats (updated)
 
@@ -278,27 +345,32 @@ one manual reinstall for everyone.
  not the `releases/latest/download/<asset>` alias, which only resolves for
  stable releases and would 404 while Fress publishes prereleases.
 
-### Remaining step: wire verification into the delivery decision
+### Delivery wiring: landed
 
 The layers now look like this:
 
 - **Release signing (done):** `updater-overrides.json` + the key secret make
  CI produce `.sig` sidecars and `latest.json` for the Windows installers and
- Linux bundles; the v1.0.7-beta signatures all verify against the published
- key (see the audit above).
+ Linux bundles; the signatures on v1.0.7-beta and the v1.0.8-beta draft all
+ verify against the published key (see the audits above).
 - **In-app verification (done, tested):** the public key is embedded in the
  binary at compile time and the native `verify_self_update_signature`
  command verifies a completed download's bytes against a release's `.sig`
  document.
-- **Delivery wiring (pending):** the update-delivery decision
- (`planUpdateDelivery` + `src/features/selfUpdate/**`) does not call the
- command yet, so an in-app update is currently gated on SHA-256 only. The
- wiring change — fetch the `.sig` sidecar through the existing
- `fetch_self_update_text` policy (its host allowlist already covers the
- release-asset hosts), verify after the download completes, and refuse/
- fall back to the releases page on any signature failure — touches files
- outside the updater-trust workstream's ownership and is explicitly left
- for a coordinated follow-up.
+- **Delivery wiring (done):** the update-delivery lifecycle
+ (`src/features/selfUpdate/updateDelivery.ts`) runs the three-gate plan
+ (platform asset + published checksum + signature sidecar for the exact
+ filename), fetches the sidecar through the authorized native text path,
+ downloads through the existing verified download engine, and invokes the
+ native verifier against the completed artifact BEFORE any verified state is
+ rendered. Missing/unreachable/malformed signatures, checksum failures,
+ download failures and cancellations all have explicit, distinct UI states
+ and localized messages. A plan-gate refusal or a signature rejection
+ routes to the official Releases page with the reason attached; a
+ transfer-level checksum failure stays a retryable download-manager
+ failure (a fresh transfer re-downloads and re-checks, and the failure
+ hint names the Releases page for a persistently corrupt release).
+ Verification success reveals the artifact — it never auto-launches it.
 
 The dormant `plugins.updater` block in `tauri.conf.json` remains future
 config for the Tauri updater PLUGIN (a different, flow-replacing mechanism);

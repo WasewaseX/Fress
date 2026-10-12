@@ -10,10 +10,15 @@ import {
   releaseMatchesChannel,
   pickOwnAsset,
   fetchOwnLatestRelease,
+  fetchOwnAssetSignature,
   planUpdateDelivery,
+  signatureSidecarFor,
   checkForUpdate,
 } from '../selfUpdate';
 import type { OwnRelease } from '../selfUpdate';
+
+/** Shared fixture asset name (the file every delivery-plan test plans around). */
+const ASSET_NAME = 'Fress_1.0.7-alpha_x64-setup.exe';
 
 describe('parseVersion', () => {
   it('parses plain versions', () => {
@@ -737,7 +742,7 @@ describe('pickOwnAsset, incompatible-only releases (the two-phase regression mat
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' });
     const release = mkRelease(['Fress_1.0.7-beta_arm64-setup.exe']);
     expect(pickOwnAsset(release, 'x86_64')).toBeNull();
-    expect(planUpdateDelivery(release, pickOwnAsset(release, 'x86_64'), 'a'.repeat(64))).toMatchObject({
+    expect(planUpdateDelivery(release, pickOwnAsset(release, 'x86_64'), 'a'.repeat(64), null)).toMatchObject({
       kind: 'releases-page',
       reason: 'no-asset',
     });
@@ -754,7 +759,7 @@ describe('pickOwnAsset, incompatible-only releases (the two-phase regression mat
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15' });
     const release = mkRelease(['Fress_1.0.7-beta_aarch64.dmg']);
     expect(pickOwnAsset(release, 'x86_64')).toBeNull();
-    expect(planUpdateDelivery(release, pickOwnAsset(release, 'x86_64'), 'a'.repeat(64))).toMatchObject({
+    expect(planUpdateDelivery(release, pickOwnAsset(release, 'x86_64'), 'a'.repeat(64), null)).toMatchObject({
       kind: 'releases-page',
       reason: 'no-asset',
     });
@@ -764,7 +769,7 @@ describe('pickOwnAsset, incompatible-only releases (the two-phase regression mat
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15' });
     const release = mkRelease(['Fress_1.0.7-beta_x64.dmg']);
     expect(pickOwnAsset(release, 'aarch64')).toBeNull();
-    expect(planUpdateDelivery(release, pickOwnAsset(release, 'aarch64'), 'a'.repeat(64))).toMatchObject({
+    expect(planUpdateDelivery(release, pickOwnAsset(release, 'aarch64'), 'a'.repeat(64), null)).toMatchObject({
       kind: 'releases-page',
       reason: 'no-asset',
     });
@@ -774,7 +779,7 @@ describe('pickOwnAsset, incompatible-only releases (the two-phase regression mat
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36' });
     const release = mkRelease(['Fress_1.0.7-beta_x64.apk']);
     expect(pickOwnAsset(release, 'aarch64')).toBeNull();
-    expect(planUpdateDelivery(release, pickOwnAsset(release, 'aarch64'), 'a'.repeat(64))).toMatchObject({
+    expect(planUpdateDelivery(release, pickOwnAsset(release, 'aarch64'), 'a'.repeat(64), null)).toMatchObject({
       kind: 'releases-page',
       reason: 'no-asset',
     });
@@ -791,7 +796,7 @@ describe('pickOwnAsset, incompatible-only releases (the two-phase regression mat
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' });
     const release = mkRelease(['Fress_1.0.7-beta_aarch64.AppImage']);
     expect(pickOwnAsset(release, 'x86_64')).toBeNull();
-    expect(planUpdateDelivery(release, pickOwnAsset(release, 'x86_64'), 'a'.repeat(64))).toMatchObject({
+    expect(planUpdateDelivery(release, pickOwnAsset(release, 'x86_64'), 'a'.repeat(64), null)).toMatchObject({
       kind: 'releases-page',
       reason: 'no-asset',
     });
@@ -815,7 +820,7 @@ describe('pickOwnAsset, incompatible-only releases (the two-phase regression mat
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36' });
     const release = mkRelease(['Fress_1.0.7-beta_arm64.apk', 'Fress_1.0.7-beta_x64.apk']);
     expect(pickOwnAsset(release, undefined)).toBeNull();
-    expect(planUpdateDelivery(release, pickOwnAsset(release, undefined), null)).toMatchObject({
+    expect(planUpdateDelivery(release, pickOwnAsset(release, undefined), null, null)).toMatchObject({
       kind: 'releases-page',
       reason: 'no-asset',
     });
@@ -967,6 +972,9 @@ describe('fetchOwnLatestRelease, atom fallback', () => {
 });
 
 describe('planUpdateDelivery, the fail-closed delivery rule shared by both update buttons', () => {
+  // A well-formed sidecar reference, exactly what signatureSidecarFor
+  // returns for a release that carries the .sig next to the artifact.
+  const SIDE_CAR = { name: `${ASSET_NAME}.sig`, url: `https://example.com/${ASSET_NAME}.sig` };
   const release = (assets: OwnRelease['assets'] = []): OwnRelease => ({
     tag: 'v1.0.7-alpha',
     version: '1.0.7-alpha',
@@ -974,14 +982,17 @@ describe('planUpdateDelivery, the fail-closed delivery rule shared by both updat
     htmlUrl: 'https://github.com/WasewaseX/Fress/releases',
     assets,
   });
-  const asset = { name: 'Fress_1.0.7-alpha_x64-setup.exe', size: 1000, url: 'https://example.com/x' };
+  const asset = { name: ASSET_NAME, size: 1000, url: 'https://example.com/x' };
 
-  it('downloads ONLY when a published checksum entry is in hand', () => {
-    const plan = planUpdateDelivery(release([asset]), asset, 'a'.repeat(64));
+  it('downloads ONLY when a published checksum entry AND a signature sidecar are in hand', () => {
+    const plan = planUpdateDelivery(release([asset, { name: SIDE_CAR.name, size: 420, url: SIDE_CAR.url }]), asset, 'a'.repeat(64), SIDE_CAR);
     expect(plan.kind).toBe('download');
     if (plan.kind === 'download') {
       expect(plan.sha256).toBe('a'.repeat(64));
       expect(plan.asset.name).toBe(asset.name);
+      // The signature travels in the plan: it is part of what the
+      // post-download verification will be run against.
+      expect(plan.signature.name).toBe(`${ASSET_NAME}.sig`);
     }
   });
 
@@ -989,13 +1000,166 @@ describe('planUpdateDelivery, the fail-closed delivery rule shared by both updat
     // The pre-audit behavior delivered the installer unverified whenever
     // SHA256SUMS.txt was absent, listed the asset under a different name,
     // or could not be fetched at all. Delivery now fails closed.
-    const plan = planUpdateDelivery(release([asset]), asset, null);
+    const plan = planUpdateDelivery(release([asset]), asset, null, SIDE_CAR);
     expect(plan).toMatchObject({ kind: 'releases-page', reason: 'unverifiable' });
   });
 
+  it('a missing signature sidecar NEVER becomes a download (unsigned, releases page)', () => {
+    // The macOS dmg / Android APK situation: integrity could be checked,
+    // publisher authenticity could not. The honest route is the releases
+    // page with the 'unsigned' reason - NOT a download that would be
+    // presented as if it were publisher-authenticated.
+    const plan = planUpdateDelivery(release([asset]), asset, 'a'.repeat(64), null);
+    expect(plan).toMatchObject({ kind: 'releases-page', reason: 'unsigned' });
+  });
+
   it('no platform asset at all goes to the releases page (no-asset)', () => {
-    const plan = planUpdateDelivery(release(), null, 'a'.repeat(64));
+    const plan = planUpdateDelivery(release(), null, 'a'.repeat(64), SIDE_CAR);
     expect(plan).toMatchObject({ kind: 'releases-page', reason: 'no-asset' });
+  });
+});
+
+describe('signatureSidecarFor, the exact-filename sidecar binding', () => {
+  const mkRelease = (names: string[]): OwnRelease => ({
+    tag: 'v1.0.7-beta',
+    version: '1.0.7-beta',
+    publishedAt: '2026-10-11T00:00:00Z',
+    htmlUrl: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.7-beta',
+    assets: names.map((name) => ({ name, size: 420, url: `https://example.com/${name}` })),
+  });
+
+  it('finds the sidecar published next to the artifact', () => {
+    const release = mkRelease(['Fress_1.0.7-beta_x64-setup.exe', 'Fress_1.0.7-beta_x64-setup.exe.sig']);
+    expect(signatureSidecarFor(release, 'Fress_1.0.7-beta_x64-setup.exe')).toEqual({
+      name: 'Fress_1.0.7-beta_x64-setup.exe.sig',
+      url: 'https://example.com/Fress_1.0.7-beta_x64-setup.exe.sig',
+    });
+  });
+
+  it('a sidecar for ANOTHER filename, version or architecture is not the one', () => {
+    const release = mkRelease([
+      'Fress_1.0.7-beta_x64-setup.exe',
+      // Sidecars that exist but authenticate OTHER artifacts.
+      'Fress_1.0.8-beta_x64-setup.exe.sig',
+      'Fress_1.0.7-beta_arm64-setup.exe.sig',
+      'Fress_1.0.7-beta_amd64.AppImage.sig',
+      'signature.sig',
+    ]);
+    expect(signatureSidecarFor(release, 'Fress_1.0.7-beta_x64-setup.exe')).toBeNull();
+  });
+
+  it('a release without sidecars yields null (unsigned artifact)', () => {
+    const release = mkRelease(['Fress_1.0.7-beta_x64.dmg', 'SHA256SUMS.txt']);
+    expect(signatureSidecarFor(release, 'Fress_1.0.7-beta_x64.dmg')).toBeNull();
+  });
+});
+
+describe('fetchOwnAssetSignature, the plan-time shape gate (browser fallback path)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A Tauri/minisign .sig sidecar: ONE outer-base64 line decoding to the
+   * four-line document (untrusted comment / 74-byte cryptobuf with the ED
+   * prehashed algorithm id / trusted comment / 64-byte global signature). */
+  const innerDoc = [
+    'untrusted comment: signature from tauri secret key',
+    Buffer.concat([Buffer.from('ED'), Buffer.alloc(72, 7)]).toString('base64'),
+    'trusted comment: timestamp:1791744131\tfile:Fress_1.0.7-beta_x64-setup.exe',
+    Buffer.alloc(64, 9).toString('base64'),
+  ].join('\n');
+  const SIDECAR_B64 = Buffer.from(innerDoc, 'utf8').toString('base64');
+
+  const releaseWithSidecar = (sidecarBody: string): OwnRelease => ({
+    tag: 'v1.0.7-beta',
+    version: '1.0.7-beta',
+    publishedAt: '2026-10-11T00:00:00Z',
+    htmlUrl: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.7-beta',
+    assets: [
+      { name: 'Fress_1.0.7-beta_x64-setup.exe', size: 1000, url: 'https://example.com/exe' },
+      { name: 'Fress_1.0.7-beta_x64-setup.exe.sig', size: 420, url: 'https://example.com/exe.sig' },
+    ],
+  });
+
+  it('a well-formed sidecar document is returned verbatim for the verifier', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith('.sig')) return new Response(SIDECAR_B64, { status: 200 });
+        return new Response('unexpected', { status: 404 });
+      }) as unknown as typeof fetch
+    );
+    const res = await fetchOwnAssetSignature(releaseWithSidecar(SIDECAR_B64), 'Fress_1.0.7-beta_x64-setup.exe');
+    expect(res).toEqual({ status: 'ok', document: SIDECAR_B64 });
+  });
+
+  it('no sidecar on the release -> missing (an unsigned artifact, not a network problem)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('unexpected', { status: 404 })) as unknown as typeof fetch
+    );
+    const release = { ...releaseWithSidecar(SIDECAR_B64), assets: [releaseWithSidecar(SIDECAR_B64).assets[0]] };
+    const res = await fetchOwnAssetSignature(release, 'Fress_1.0.7-beta_x64-setup.exe');
+    expect(res).toEqual({ status: 'missing' });
+  });
+
+  it('an unreachable sidecar document -> unreachable (retryable)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('gone', { status: 404 })) as unknown as typeof fetch
+    );
+    const res = await fetchOwnAssetSignature(releaseWithSidecar(SIDECAR_B64), 'Fress_1.0.7-beta_x64-setup.exe');
+    expect(res).toEqual({ status: 'unreachable' });
+  });
+
+  it('a malformed document (not a minisign signature) is refused at the plan gate', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith('.sig')) return new Response('<html>blocked</html>', { status: 200 });
+        return new Response('unexpected', { status: 404 });
+      }) as unknown as typeof fetch
+    );
+    const res = await fetchOwnAssetSignature(releaseWithSidecar(SIDECAR_B64), 'Fress_1.0.7-beta_x64-setup.exe');
+    expect(res).toEqual({ status: 'malformed' });
+  });
+
+  it('a truncated or wrong-cryptobuf document is malformed, never "ok"', async () => {
+    const badDocs = [
+      // Truncated outer base64.
+      SIDECAR_B64.slice(0, SIDECAR_B64.length - 12),
+      // Wrong sig cryptobuf length (not 74 bytes).
+      Buffer.from(
+        [
+          'untrusted comment: x',
+          Buffer.alloc(60, 7).toString('base64'),
+          'trusted comment: t',
+          Buffer.alloc(64, 9).toString('base64'),
+        ].join('\n'),
+        'utf8'
+      ).toString('base64'),
+      // Legacy (non-prehashed) algorithm id is refused like the native verifier refuses it.
+      Buffer.from(
+        [
+          'untrusted comment: x',
+          Buffer.concat([Buffer.from('Ed'), Buffer.alloc(72, 7)]).toString('base64'),
+          'trusted comment: t',
+          Buffer.alloc(64, 9).toString('base64'),
+        ].join('\n'),
+        'utf8'
+      ).toString('base64'),
+    ];
+    for (const bad of badDocs) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string | URL | Request) => {
+          if (String(url).endsWith('.sig')) return new Response(bad, { status: 200 });
+          return new Response('unexpected', { status: 404 });
+        }) as unknown as typeof fetch
+      );
+      const res = await fetchOwnAssetSignature(releaseWithSidecar(bad), 'Fress_1.0.7-beta_x64-setup.exe');
+      expect(res).toEqual({ status: 'malformed' });
+    }
   });
 });
 
@@ -1169,7 +1333,7 @@ describe('fetchExpectedSha256 hardening (via checkForUpdate, browser path)', () 
     if (res.kind === 'available') {
       expect(res.expectedSha256).toBeNull();
       // The fail-closed delivery rule turns this into a releases-page route.
-      expect(planUpdateDelivery(res.release, res.asset, res.expectedSha256)).toMatchObject({
+      expect(planUpdateDelivery(res.release, res.asset, res.expectedSha256, null)).toMatchObject({
         kind: 'releases-page',
         reason: 'unverifiable',
       });

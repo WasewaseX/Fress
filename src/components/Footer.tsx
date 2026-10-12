@@ -4,10 +4,12 @@
 //
 import React, { useState } from 'react';
 import { RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { LegalTab } from './LegalModals';
 import { openExternal } from '../lib/external';
 import { useDownloadActions } from '../lib/downloads';
-import { checkForUpdate, planUpdateDelivery, UpdateState } from '../lib/selfUpdate';
+import { checkForUpdate, UpdateState } from '../lib/selfUpdate';
+import { startOwnUpdateDelivery } from '../features/selfUpdate/updateDelivery';
 import { useI18n } from '../lib/i18n';
 import pkg from '../../package.json';
 
@@ -32,15 +34,19 @@ const UpdateButton: React.FC = () => {
 
   const startUpdate = () => {
     if (state.kind !== 'available') return;
-    // Same shared decision as the header update pill (useSelfUpdate):
-    // download ONLY when the published SHA-256 entry is in hand; otherwise
-    // open the releases page instead of delivering an unverified installer.
-    const plan = planUpdateDelivery(state.release, state.asset, state.expectedSha256);
-    if (plan.kind === 'download') {
-      void startDownload(plan.asset.url, plan.asset.name, { expectedSha256: plan.sha256 });
-    } else {
-      void openExternal(plan.release.htmlUrl);
-    }
+    // ONE delivery entry point shared with the header pill (updateDelivery
+    // module): the three-gate plan (platform asset + published SHA-256 +
+    // signature sidecar), the real signature fetch, the verified download
+    // and the post-download native signature check all happen there, so
+    // this button can never drift away from the header's fail-closed rule.
+    void startOwnUpdateDelivery(
+      {
+        release: state.release,
+        asset: state.asset,
+        expectedSha256: state.expectedSha256,
+      },
+      { startDownload, openExternal, revealItemInDir }
+    );
   };
 
   const label = (() => {

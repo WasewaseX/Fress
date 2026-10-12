@@ -57,6 +57,9 @@ interface HeaderProps {
   activeDownloadCount?: number;
   /** Set when a newer Fress release exists on GitHub. */
   updateVersion?: string | null;
+  /** Live delivery status for the pill: label override + busy flag.
+   * Null = show the default "Update {v}" text. */
+  updatePillStatus?: { label: string; busy: boolean } | null;
   onUpdateClick?: () => void;
   onCheckForUpdates?: () => void;
   onOpenWhatsNew?: () => void;
@@ -120,6 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
   compareCount = 0,
   activeDownloadCount = 0,
   updateVersion = null,
+  updatePillStatus = null,
   onUpdateClick,
   onCheckForUpdates,
   onOpenWhatsNew,
@@ -714,7 +718,11 @@ export const Header: React.FC<HeaderProps> = ({
                 title={t('header.updatePillTitle').replace('{v}', updateVersion)}
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
-                <span>{t('header.updatePill').replace('{v}', updateVersion)}</span>
+                <span>
+                  {updatePillStatus
+                    ? updatePillStatus.label
+                    : t('header.updatePill').replace('{v}', updateVersion)}
+                </span>
               </button>
             )}
 

@@ -87,6 +87,25 @@ export const BAD_SHA256 = '00000000000000000000000000000000000000000000000000000
 
 const OWN_BASE = 'https://github.com/WasewaseX/Fress/releases/download';
 
+/** The minisign signature sidecar CI publishes next to each signed updater
+ * artifact ("<asset>.sig"). Tauri signer format: the file is ONE outer-base64
+ * line that decodes to the four-line document (untrusted comment / 74-byte
+ * "ED" prehashed cryptobuf / trusted comment / 64-byte global signature).
+ * The in-app updater fetches this through the native text path and the
+ * native `verify_self_update_signature` command checks the completed
+ * download's bytes against it, so the E2E fixtures must ship a
+ * well-formed one or the fail-closed plan gate would refuse the update. */
+function tauriSigDocument(): string {
+  const doc = [
+    'untrusted comment: signature from tauri secret key',
+    Buffer.concat([Buffer.from('ED'), Buffer.alloc(72, 7)]).toString('base64'),
+    'trusted comment: timestamp:1791744131\tfile:Fress_1.0.9_amd64.AppImage',
+    Buffer.alloc(64, 9).toString('base64'),
+  ].join('\n');
+  return Buffer.from(doc, 'utf8').toString('base64');
+}
+export const OWN_SIG_TXT = tauriSigDocument();
+
 /** SHA256SUMS.txt as CI would publish it: sha256sum format, two spaces,
  * covering the assets of the valid release. */
 export const OWN_SUMS_TXT = [
@@ -124,8 +143,11 @@ export const OWN_SUMS_PARTIAL = [
 ].join('\n');
 
 /** A newer release this (x86_64, Linux) install can update into: a
- * platform-matched AppImage among the other desktop files, plus the checksum
- * document. pickOwnAsset must pick the amd64 AppImage on the Linux runner. */
+ * platform-matched AppImage among the other desktop files, the checksum
+ * document, AND the signature sidecar for the platform-matched artifact
+ * (the third delivery gate - without it the updater routes to the
+ * releases page instead of downloading). pickOwnAsset must pick the amd64
+ * AppImage on the Linux runner. */
 export const OWN_RELEASES_VALID: GhReleaseFixture[] = [
   {
     tag: 'v1.0.9-beta',
@@ -135,6 +157,7 @@ export const OWN_RELEASES_VALID: GhReleaseFixture[] = [
     prerelease: true,
     assets: [
       { name: 'Fress_1.0.9_amd64.AppImage', size: 22_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_amd64.AppImage` },
+      { name: 'Fress_1.0.9_amd64.AppImage.sig', size: 420, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_amd64.AppImage.sig` },
       { name: 'Fress_1.0.9_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_x64-setup.exe` },
       { name: 'Fress_1.0.9_aarch64.AppImage', size: 20_000_000, download_url: `${OWN_BASE}/v1.0.9-beta/Fress_1.0.9_aarch64.AppImage` },
       { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v1.0.9-beta/SHA256SUMS.txt` },

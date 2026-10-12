@@ -357,7 +357,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               <span>{t('bs.safeNote')}</span>
             </div>
             {selectedApps.length > 0 && skippedCount > 0 && (
-              <div className="flex items-center gap-2 text-[11px] text-amber-400">
+              <div className="flex items-center gap-2 text-[11px] text-amber-300 dark:text-amber-400">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                 <span>
                   {t('bs.skipNote').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}

@@ -197,4 +197,45 @@ describe('light theme token contrast (WCAG AA)', () => {
     expect(detailModal).not.toContain('text-rose-200');
     expect(detailModal).not.toContain('text-emerald-200');
   });
+
+  it('warning-text ambers resolve to the deepened light step, never the badge fill step (round 26)', () => {
+    // The light block deepens amber-400 to #dda50e (a BADGE FILL step: it
+    // needs ~2:1 against paper to carry dark ink, not to BE the ink). Real
+    // warning TEXT that renders amber in light mode must therefore use
+    // amber-300 (#8a6206, >= 4.5:1 on every paper surface) with the bright
+    // default reserved for dark mode. The three regressed usages: the
+    // detail modal's weak-pick hint, the export modal's copy-failed
+    // feedback, and the batch modal's skip note.
+    expect(contrastRatio(light.get('amber-300')!, light.get('slate-800')!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(light.get('amber-300')!, light.get('slate-950')!)).toBeGreaterThanOrEqual(4.5);
+    // The overridden 400/500 steps stay pinned AS FAILURES as text on the
+    // card, so they cannot quietly become text inks again.
+    expect(contrastRatio(light.get('amber-400')!, light.get('slate-800')!)).toBeLessThan(4.5);
+    expect(contrastRatio(light.get('amber-500')!, light.get('slate-800')!)).toBeLessThan(4.5);
+    const detailModal = readFileSync(join(__dirname, '..', '..', 'components', 'AppDetailModal.tsx'), 'utf8');
+    const exportModal = readFileSync(join(__dirname, '..', '..', 'components', 'ExportModal.tsx'), 'utf8');
+    const batchModal = readFileSync(join(__dirname, '..', '..', 'components', 'BatchInstallModal.tsx'), 'utf8');
+    for (const [name, src] of [
+      ['AppDetailModal', detailModal],
+      ['ExportModal', exportModal],
+      ['BatchInstallModal', batchModal],
+    ] as const) {
+      expect(src, name).not.toMatch(/(?<!dark:)text-amber-(400|500)(?![\w-])/);
+    }
+  });
+
+  it('the header update pill holds AA in BOTH themes (round 26)', () => {
+    // Light: bg-amber-400 (#dda50e) with amber-950 ink - the same verified
+    // recipe as the card pick badge. The old light pair (amber-900 #78350f
+    // on the OVERRIDDEN amber-300 #8a6206) measured 1.65:1. Dark keeps
+    // amber-300 (#fcd34d) with amber-900.
+    expect(contrastRatio('#451a03', light.get('amber-400')!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio('#78350f', '#fcd34d')).toBeGreaterThanOrEqual(4.5);
+    // Dark hover (amber-200 #fef08a) keeps amber-900 readable.
+    expect(contrastRatio('#78350f', '#fef08a')).toBeGreaterThanOrEqual(4.5);
+    const header = readFileSync(join(__dirname, '..', '..', 'components', 'Header.tsx'), 'utf8');
+    // The broken light pair must not return: amber-900 text directly on
+    // the overridden amber-300 fill without a dark: split.
+    expect(header).not.toMatch(/text-amber-900 bg-amber-300/);
+  });
 });

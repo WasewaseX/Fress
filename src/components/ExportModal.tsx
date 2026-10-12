@@ -270,8 +270,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </>
               ) : copyState === 'failed' ? (
                 <>
-                  <X className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
-                  <span className="text-amber-400">{t('common.copyFailed')}</span>
+                  <X className="w-3.5 h-3.5 text-amber-300 dark:text-amber-400" aria-hidden="true" />
+                  <span className="text-amber-300 dark:text-amber-400">{t('common.copyFailed')}</span>
                 </>
               ) : (
                 <>

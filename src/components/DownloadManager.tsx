@@ -39,6 +39,18 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
     };
   }, []);
 
+  // Closing the panel kills the pending SHA-copy flash, exactly like the
+  // command palette: reopening inside the 2s window must not show "Copied"
+  // left over from the previous session.
+  useEffect(() => {
+    if (isOpen) return;
+    if (copyTimerRef.current !== null) {
+      window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = null;
+    }
+    setCopiedHash(null);
+  }, [isOpen]);
+
   const handleCopyHash = async (item: { id: number; sha256?: string }) => {
     if (!item.sha256) return;
     if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
@@ -304,7 +316,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                 <span>{t('downloads.changeFolder')}</span>
               </button>
             ) : (
-              <span className="shrink-0 text-[10px] text-slate-400">{t('settings.androidFolderNote').split('.')[0]}.</span>
+              <span className="shrink-0 text-[10px] text-slate-400">{t('downloads.androidFolderShort')}</span>
             )}
           </div>
         </div>

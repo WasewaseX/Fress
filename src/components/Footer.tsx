@@ -101,6 +101,8 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenLegal,
   onOpenTauriModal
 }) => {
+  const { t } = useI18n();
+
   return (
     <footer id="main-app-footer" className="border-t border-slate-800 bg-slate-950 py-8 px-4 sm:px-6 text-xs text-slate-400">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -111,11 +113,11 @@ export const Footer: React.FC<FooterProps> = ({
                 Fress
               </span>
               <span id="footer-license-badge" className="text-[11px] font-mono bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.08] px-1.5 py-0.5 rounded text-slate-400">
-                MIT Licensed
+                {t('footer.licenseBadge')}
               </span>
             </div>
             <p id="footer-brand-desc" className="text-[11px] text-slate-400 max-w-xl leading-relaxed">
-              A short directory of free and open-source apps, based on the awesome-free-apps list. Downloads come from the official projects.
+              {t('footer.description')}
             </p>
           </div>
 
@@ -127,9 +129,9 @@ export const Footer: React.FC<FooterProps> = ({
               type="button"
               onClick={onOpenTauriModal}
               className="inline-flex items-center gap-1 text-slate-300 hover:text-slate-100 bg-slate-900 hover:bg-slate-800 px-2.5 py-1 rounded border border-slate-800 transition-colors"
-              title="For developers: how to build the desktop installer from source"
+              title={t('footer.installerGuideTip')}
             >
-              <span>Build guide (developers)</span>
+              <span>{t('footer.installerGuide')}</span>
             </button>
           </div>
         </div>
@@ -143,7 +145,7 @@ export const Footer: React.FC<FooterProps> = ({
               onClick={() => onOpenLegal('privacy')}
               className="hover:text-slate-200 underline underline-offset-2"
             >
-              Privacy
+              {t('legal.tabPrivacy')}
             </button>
             <button
               id="footer-link-terms"
@@ -151,7 +153,7 @@ export const Footer: React.FC<FooterProps> = ({
               onClick={() => onOpenLegal('terms')}
               className="hover:text-slate-200 underline underline-offset-2"
             >
-              Terms
+              {t('legal.tabTerms')}
             </button>
           </div>
 

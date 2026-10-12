@@ -25,7 +25,7 @@ import { openExternal } from '../lib/external';
 import { resolveDownloadFor, guessUserPlatform } from '../lib/releaseFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { toast } from 'sonner';
-import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
+import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars, formatStarCount } from '../lib/starFetch';
 import { iconFor } from '../data/appIcons';
@@ -217,10 +217,13 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                     keyboard-focusable and announced as an action (a plain
                     clickable heading is invisible to keyboards and AT).
                     The two-line clamp lives ON the button: the button is
-                    the text's box, and a clamp on the h3 is defeated by
+                    the text's box, and a clamp on the h2 is defeated by
                     the inline-block child (pathological names grew the
-                    card to four+ lines in the stress fixture). */}
-                <h3
+                    card to four+ lines in the stress fixture).
+                    Level: h2 - the page has exactly one h1 (the hero) and
+                    no intermediate section headings, so h3 skipped a level
+                    (axe: heading-order). */}
+                <h2
                   id={`app-title-${app.id}`}
                   className="font-bold text-slate-100 text-base leading-snug tracking-tight group-hover:text-sky-400 transition-colors break-words"
                 >
@@ -232,7 +235,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                   >
                     {app.name}
                   </button>
-                </h3>
+                </h2>
                 {app.isOwnerPick && (
                   <span
                     id={`app-owner-badge-${app.id}`}
@@ -396,9 +399,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           <span
             id={`app-license-badge-${app.id}`}
             className="font-mono text-xs text-slate-400 max-w-[14ch] truncate"
-            title={t('card.license.tip').replace('{license}', app.license)}
+            title={t('card.license.tip').replace('{license}', translateLicenseDisplay(t, app.license))}
           >
-            {app.license}
+            {translateLicenseDisplay(t, app.license)}
           </span>
 
           {app.proprietaryAlternative && (
@@ -457,7 +460,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           aria-live="polite"
         >
           <Download className={`w-3.5 h-3.5 shrink-0 ${isDownloading || resolving ? 'animate-pulse' : ''}`} aria-hidden="true" />
-          <span className="truncate">{isDownloading || resolving ? t('card.download') + '...' : t('card.download')}</span>
+          <span className="truncate">{isDownloading || resolving ? t('card.download') + '…' : t('card.download')}</span>
         </button>
 
         <button

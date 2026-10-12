@@ -893,7 +893,16 @@ export function runCli(argv: string[]): number {
     optionalReadErrors: loaded.optionalReadErrors,
     releaseTag,
   });
-  console.log(renderReport(report));
+  const rendered = renderReport(report);
+  console.log(rendered);
+  // GitHub Actions annotations: when running inside a workflow, surface each
+  // failure as a ::error:: so the PR diff shows WHERE version coherence
+  // broke. Local runs keep the plain report.
+  if (process.env.GITHUB_ACTIONS && !report.ok) {
+    for (const failure of report.failures) {
+      console.error(`::error::validate:versions: ${failure}`);
+    }
+  }
   return report.ok ? 0 : 1;
 }
 

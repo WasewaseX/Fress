@@ -658,4 +658,33 @@ describe('loadVersionFiles + the real npm script', () => {
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('unknown argument');
   });
+
+  it('inside GitHub Actions a failure emits ::error:: annotations for every violation', () => {
+    const drifted = makeFixtureRoot('1.0.10-beta', (root) => {
+      const lockPath = join(root, 'package-lock.json');
+      const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+      lock.packages[''].version = '1.0.9-beta';
+      writeFileSync(lockPath, JSON.stringify(lock, null, 2));
+    });
+    const run = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--root', drifted], {
+      cwd: resolve(process.cwd()),
+      encoding: 'utf8',
+      timeout: 120_000,
+      env: { ...process.env, GITHUB_ACTIONS: 'true' },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('::error::validate:versions:');
+    expect(run.stderr).toContain('package-lock.json .packages[""].version is "1.0.9-beta"');
+
+    // A passing run emits no annotations.
+    const good = makeFixtureRoot('1.0.10-beta');
+    const okRun = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--root', good], {
+      cwd: resolve(process.cwd()),
+      encoding: 'utf8',
+      timeout: 120_000,
+      env: { ...process.env, GITHUB_ACTIONS: 'true' },
+    });
+    expect(okRun.status).toBe(0);
+    expect(okRun.stderr).not.toContain('::error::');
+  });
 });

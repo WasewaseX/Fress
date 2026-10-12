@@ -327,36 +327,27 @@ hold on the integrated commit:
    (see below) - a known-broken contract cannot ride into a release
    silently.
 
-## 8. Open findings routed to owners (as of the v1.0.8-beta integration)
+## 8. Open findings routed to owners (as of the final-integration round)
 
-Three findings; the first is the load-bearing one for release evidence.
-The fixed list follows at the end of the section.
+Three open findings. The load-bearing one from the previous round
+(signature verification not wired into the delivery UI) was FIXED by
+PR #38 and moved to the fixed list below.
 
-1. **Signature verification is not wired into the self-update delivery UI**
-   (`src/lib/selfUpdate.ts` + delivery UI; owner: self-update/release
-   engineering, per the CODE_SIGNING.md "current platform limitations"
-   note). STATE: the native `verify_self_update_signature` command is
-   implemented, verify-only, and fully tested in Rust (genuine signature
-   verifies; flipped bit, truncated artifact, wrong-key signature and
-   malformed documents all refuse; the streaming verifier is exercised
-   over the real file). But no frontend code calls it: the in-app update
-   delivery contract today is the SHA-256 gate (published digest travels
-   with `start_download`; the engine refuses a mismatch and the transfer
-   can never complete as "verified" - asserted end to end in
-   `i-self-update.spec.ts`). CONSEQUENCE for the E2E signature matrix:
-   scenarios that need a `.sig` document to reach the UI (missing
-   signature document; valid checksum + invalid signature; signature
-   attached to a different artifact) are guarded at the Rust layer and
-   CANNOT be exercised through the browser UI until the wiring lands.
-   The Rust-layer accept/refuse matrix is the enforcement evidence for
-   them; the E2E suite covers every observable delivery-layer scenario
-   (valid checksummed update, missing manifest, partial manifest, wrong
-   published digest, incompatible-arch-only, malformed feed, retry after
-   failure). FIX DIRECTION: call `verify_self_update_signature` on the
-   completed update artifact before offering install/run, surface a
-   distinct failure state, and the E2E bridge grows a matching mock so
-   the three UI-level signature scenarios become testable. Until then
-   this is a documented limitation, not a hidden failure.
+1. **Update pill reverts to the plain "update available" label after a
+   plan-level delivery refusal** (`src/features/selfUpdate/useSelfUpdate.ts`,
+   `pillStatusFor`; owner: self-update). After the delivery planner refuses
+   an update pre-download ('unsigned' | 'unverifiable' | 'no-asset'), the
+   delivery phase is 'fallback', which the pill mapper hits as `default:
+   null`, so the pill goes back to `header.updatePill` ("Update
+   v…") - a label that implies in-app delivery is still on the table
+   when the planner just proved it is not (clicking re-runs the planner
+   and re-opens the releases page). A post-download failure with
+   `fallback: true` (phase 'failed') DOES show `header.updatePillSeeReleases`,
+   so the two refusal paths render differently today. FIX DIRECTION: map
+   phase 'fallback' to the see-releases label like 'failed'+fallback does.
+   The truth contract that MUST hold either way (no verified claim, no
+   fake progress) is pinned browser-level by the new unsigned-release E2E
+   in `i-self-update.spec.ts`.
 2. **In-app rate-limit messaging** - Tauri v2 rejects command errors as
    plain strings (`Result<T, String>` serializes `Err` verbatim), and the
    resolver reads `(e as Error).message`, which is `undefined` for a
@@ -373,6 +364,22 @@ The fixed list follows at the end of the section.
    new baselines); flagged for the i18n owner.
 
 ### Fixed this round (annotations lifted)
+
+- **Signature verification was not wired into the self-update delivery UI**
+  (previous round's load-bearing finding): PR #38 landed the real
+  signature-delivery flow (`src/features/selfUpdate/updateDelivery.ts`):
+  three-gate plan (platform asset + published SHA-256 entry + well-formed
+  `<asset>.sig` sidecar for the exact filename) -> sidecar fetched through
+  the authorized native text path (fresh fetch on every retry) -> download
+  through the verified engine -> `verify_self_update_signature` invoked
+  against the ENGINE-reported completion path before any verified state is
+  rendered. Never auto-launches. The E2E bridge grew the matching mock, and
+  the browser suite now covers the full trust boundary: verified path with
+  verifier-arg binding, rejected signature (foreign key/tampered bytes),
+  unsigned release (no sidecar), checksum-refused fallback, cancellation.
+  macOS dmg and Android APK updates are NO LONGER delivered in-app until
+  the release pipeline publishes their sidecars - the pill routes to the
+  official releases page with the 'unsigned' reason instead.
 
 - **Self-update offered an incompatible installer when no compatible
   asset existed** (`pickOwnAsset`, v1.0.7-beta finding): the two-phase

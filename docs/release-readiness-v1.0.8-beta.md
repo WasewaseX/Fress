@@ -1,5 +1,12 @@
 # Release readiness — v1.0.8-beta integrated candidate (Agent 6 final QA)
 
+> **SUPERSEDED (2026-10-12, later the same day):** this record predates the
+> final-integration round. The current acceptance record is
+> `release-readiness.md`, which adds PR #38's signature-delivery flow to the
+> candidate, the final published-artifact audit of both releases, the
+> platform/signature matrix, and the Android rotation status. Sections that
+> described the signature wiring as pending are resolved there.
+
 Status of every required quality gate for the integrated release candidate.
 Dated 2026-10-12. Supersedes `release-readiness-v1.0.7-beta.md` (kept as the
 v1.0.7 record).

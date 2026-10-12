@@ -1155,13 +1155,26 @@ jobs:
           # by-tag endpoint.)
           gh api "repos/${{ github.repository }}/releases?per_page=100" \
             --jq ".[] | select(.tag_name == \"$TAG\") | .assets[].name" > assets.txt
+          # Deterministic pub_date source: the release's created_at. The
+          # manifest must be BYTE-STABLE across job re-runs - a wall-clock
+          # pub_date makes every rerun produce different latest.json bytes,
+          # which silently invalidates the SHA256SUMS.txt entry whenever
+          # this job is re-run alone after the checksum pass. That is
+          # exactly how the historical latest.json <-> SHA256SUMS.txt drift
+          # happened; the timestamp now comes from the release object.
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .created_at" > release-created-at.txt
+          if [ ! -s release-created-at.txt ]; then
+            echo "::error::could not read release created_at for $TAG"
+            exit 1
+          fi
+          export RELEASE_CREATED_AT=$(cat release-created-at.txt)
           if [ ! -s assets.txt ]; then
             echo "::error::release $TAG not found or has no assets yet"
             exit 1
           fi
           python3 - <<'PY'
           import json, os, sys
-          from datetime import datetime, timezone
 
           version = os.environ["VERSION"]
           tag = os.environ["TAG"]
@@ -1214,7 +1227,11 @@ jobs:
 
           manifest = {
               "version": version,
-              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              # Deterministic: derived from the release object, NOT the
+              # wall clock. Re-running this job reproduces byte-identical
+              # latest.json, so a rerun can never invalidate the
+              # SHA256SUMS.txt entry the checksums job already published.
+              "pub_date": os.environ["RELEASE_CREATED_AT"].strip(),
               "platforms": platforms,
           }
           with open("latest.json", "w") as f:
@@ -1316,13 +1333,22 @@ jobs:
       contents: write # the only job privilege this workflow needs beyond read
     # The gate between "CI built something" and "users can download it".
     # Runs after every build and the checksum pass, checks that every
-    # required artifact is present and that every uploaded file still hashes
-    # to its SHA256SUMS.txt entry, and only then publishes the draft. A
-    # missing AppImage or a truncated upload now leaves the release as a
-    # private draft: re-run the failed jobs, the draft fills back up.
+    # required artifact is present, that every uploaded file still hashes
+    # to its SHA256SUMS.txt entry, and that latest.json + every signature
+    # sidecar are consistent with the exact final bytes (final artifact
+    # audit), and only then publishes the draft. A missing AppImage, a
+    # truncated upload, a stale latest.json or an invalid sidecar now
+    # leaves the release as a private draft: re-run the failed jobs, the
+    # draft fills back up.
     needs: [version, checksums, virustotal]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The audit script and tauri.conf.json come from the tagged
+          # commit; nothing here pushes to git and the checkout token is
+          # not persisted, so the untrusted release bytes can never reach it.
+          persist-credentials: false
       - name: Verify asset completeness and checksums, then publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1349,6 +1375,15 @@ jobs:
             "Fress_${VERSION}_amd64.deb"
             "Fress_${VERSION}_universal.apk"
             "Fress_${VERSION}_arm64.apk"
+            # The updater manifest and every signature sidecar of the
+            # in-app-update matrix are release-blocking too: a release
+            # without them must not promise verified in-app updates, and
+            # latest.json must never be published against a subset.
+            "latest.json"
+            "Fress_${VERSION}_x64-setup.exe.sig"
+            "Fress_${VERSION}_arm64-setup.exe.sig"
+            "Fress_${VERSION}_amd64.AppImage.sig"
+            "Fress_${VERSION}_amd64.deb.sig"
             "SHA256SUMS.txt"
           )
           MISSING=0
@@ -1364,6 +1399,11 @@ jobs:
           RPM=$(ls Fress*x86_64.rpm 2>/dev/null | head -1)
           if [ -z "$RPM" ] || [ ! -s "$RPM" ]; then
             echo "::error::required artifact missing or empty: Fress*x86_64.rpm"
+            MISSING=1
+          fi
+          RPM_SIG="${RPM}.sig"
+          if [ -z "$RPM" ] || [ ! -s "$RPM_SIG" ]; then
+            echo "::error::required sidecar missing or empty: Fress*x86_64.rpm.sig (the rpm is in the in-app-update matrix)"
             MISSING=1
           fi
           # The per-ABI APKs are produced by the --split-per-abi gradle pass
@@ -1395,5 +1435,24 @@ jobs:
           done
           [ "$STATUS" = "0" ] || { echo "::error::checksum verification failed; release stays a draft"; exit 1; }
 
-          echo "All required artifacts present, all hashes match. Publishing."
+          # FINAL ARTIFACT AUDIT - the deep consistency gate over the exact
+          # bytes about to be published. Beyond the checksum re-hash above
+          # it verifies:
+          #   - latest.json: version field, every platform URL against this
+          #     tag, every embedded signature against the <asset>.sig sidecar
+          #     bytes on the release, required platform matrix (windows x64
+          #     + arm64, linux), no references to nonexistent assets,
+          #   - every sidecar cryptographically verified over the artifact's
+          #     exact bytes against the production minisign key
+          #     (scripts/ci/verify-release-artifacts.py; the embedded
+          #     verifier self-checks against RFC 8032 vectors and the app's
+          #     own tauri signer fixture before touching release data),
+          #   - unsigned classes (dmg/msi/apk/portable) carry no sidecars -
+          #     the honest matrix: they are NOT advertised as in-app
+          #     verifiable, only the official-page fallback.
+          # Anything that mutated an asset after the manifests were
+          # generated fails here, and the release stays a private draft.
+          python3 "$GITHUB_WORKSPACE/scripts/ci/verify-release-artifacts.py" . "$TAG" "$VERSION" "${{ github.repository }}"
+
+          echo "All required artifacts present, all hashes match, final audit passed. Publishing."
           gh release edit "$TAG" --draft=false --repo "${{ github.repository }}"

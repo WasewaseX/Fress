@@ -51,11 +51,31 @@ async function jget(url: string, headers: Record<string, string> = GH_HEADERS, t
   try {
     const r = await realFetch(url, { headers, signal: AbortSignal.timeout(20_000) });
     if (treatAsFailureOn && treatAsFailureOn(r.status)) failedEndpoints.add(new URL(url).host);
-    return { status: r.status, json: (await r.json()) as unknown };
+    // Task taxonomy: a quota-exhausted API answer is neither "missing" nor
+    // "dead" - it is INCONCLUSIVE (the registry never judged the claim).
+    // GitHub signals it with x-ratelimit-remaining: 0 (403/429); surfacing
+    // the flag here lets every classifier route it to its own class
+    // instead of a generic HTTP error.
+    const rateRemaining = r.headers.get('x-ratelimit-remaining');
+    const rateLimited = r.status === 403 || r.status === 429 ? rateRemaining === '0' : false;
+    let json: unknown = null;
+    try {
+      json = await r.json();
+    } catch {
+      // Body parse failures (empty/HTML) must not crash the audit; the
+      // status code carries the classification.
+    }
+    return { status: r.status, json: json as unknown, rateLimited };
   } catch (e) {
     failedEndpoints.add(new URL(url).host);
-    return { status: 0, json: null, error: (e as Error).message };
+    return { status: 0, json: null, error: (e as Error).message, rateLimited: false };
   }
+}
+
+/** True when a jget result is a GitHub-API quota exhaustion: the honest
+ * class for it is "inconclusive - retry later", never "missing". */
+function isRateLimited(r: { status: number; rateLimited?: boolean }): boolean {
+  return !!r.rateLimited;
 }
 
 /** HEAD with a hard timeout and a catch: one dead endpoint must degrade to
@@ -80,6 +100,11 @@ async function auditGithub(appId: string, repo: string, field: string, platform?
   if (r.status === 404) {
     findings.push({ app: appId, field, severity: 'ERROR', detail: `${repo} does not exist (404)${platform ? ` [${platform}]` : ''}` });
     bump('github-404');
+    return;
+  }
+  if (isRateLimited(r)) {
+    findings.push({ app: appId, field, severity: 'WARN', detail: `${repo}: GitHub API rate limit - INCONCLUSIVE (registry did not judge; re-run later)` });
+    bump('github-rate-limited');
     return;
   }
   if (r.status !== 200 || !r.json) {
@@ -118,6 +143,11 @@ async function auditWinget(appId: string, id: string) {
   if (r.status === 200 && Array.isArray(r.json)) {
     // 200 at the exact-case directory: the id exists with this casing.
     bump('winget-ok');
+    return;
+  }
+  if (isRateLimited(r)) {
+    findings.push({ app: appId, field: 'winget', severity: 'WARN', detail: `GitHub API rate limit - INCONCLUSIVE for ${id} (registry did not judge; re-run later)` });
+    bump('winget-rate-limited');
     return;
   }
   if (r.status === 404) {

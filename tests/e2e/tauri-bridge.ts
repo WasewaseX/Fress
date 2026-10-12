@@ -180,7 +180,6 @@ const BRIDGE_BODY = String.raw`
     downloads: {},
     emits: [],
     openedUrls: [],
-    openedPaths: [],
     revealedPaths: [],
     nextId: 1001,
     hostArch: HOST_ARCH,

@@ -92,7 +92,7 @@ async function downloadIdByUrl(page: Page, fragment: string): Promise<number> {
 
 /** One snapshot of everything the frontend handed to the opener boundary. */
 async function openerTraffic(page: Page): Promise<{
-  open: Array<{ path: string; with: string | null }>;
+  open: Array<{ cmd: string; id: number; path: string; with: string | null }>;
   reveal: Array<{ paths: string[] }>;
 }> {
   return page.evaluate(() => ({
@@ -164,6 +164,14 @@ async function startFromDetail(
 function openButton(row: Locator): Locator {
   return row.getByRole('button', { name: d['downloads.openFile'] });
 }
+
+/** The shipped open contract (round-28 rewrite): EVERY artifact class is
+ * handed to plugin:opener|open_path on the first press - the OS association
+ * is the authority, and the only native fallback (the validated AppImage
+ * launcher) fires BELOW that boundary, only after open_path refuses and
+ * only where the launcher exists. There is no confirm step in the UI; the
+ * row announces its busy state (aria-busy) while the handoff is in flight
+ * and a repeat activation is ignored by the synchronous busy guard. */
 
 function showButton(row: Locator): Locator {
   return row.getByRole('button', { name: d['downloads.showFolder'] });
@@ -561,7 +569,7 @@ test.describe('Workflow K: the download-to-open journey', () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test.fail('K-G1 [pinned defect] - repeated activation while one open is pending must not stack native launches', async ({ gotoApp, page }) => {
+  test('K-G1 - repeated activation while one open is pending does not stack native launches (guard shipped)', async ({ gotoApp, page }) => {
     await gotoApp();
     await startFromDetail(page, 'localsend', 'Windows', /LocalSend-1\.17\.0-windows-x64\.exe/);
     await openDownloads(page);
@@ -573,21 +581,24 @@ test.describe('Workflow K: the download-to-open journey', () => {
     // One launch is pending (the OS handoff has not returned yet)...
     await page.evaluate(() => window.__fressTest!.setHoldOpenPath(true));
     await openButton(done).click();
-    // ...and the user (or a double-fire) activates twice more while it is.
-    await openButton(done).click();
-    await openButton(done).click();
 
-    // CORRECT contract: exactly one native launch may be in flight for
-    // that action while it is pending. The current implementation has no
-    // pending-operation guard, so this reads 3 - the test is PINNED with
-    // test.fail() (repo convention for defects owned by production).
-    // Minimal repro: complete a download, hold open_path in the bridge,
-    // click "Open file" three times, count plugin:opener|open_path calls.
-    // Owner: production frontend (src/lib/downloads.tsx openFile /
-    // DownloadManager PanelButton). Unpin this test when the fix lands.
+    // ...the row announces the pending handoff (aria-busy) while the
+    // control STAYS interactive - and the synchronous busy guard makes a
+    // repeat activation a no-op: no second native call, no toast, no
+    // state churn.
+    await expect(openButton(done)).toHaveAttribute('aria-busy', 'true');
+    await expect(openButton(done)).toBeEnabled();
+    await openButton(done).click();
+    await openButton(done).click();
+    await drainToasts(page);
+    await expect(page.getByText(d['downloads.toast.openFileFailed'])).toHaveCount(0);
+
+    // Exactly one launch reached the boundary; releasing it leaves the
+    // action honest for a genuine retry (no stuck-busy residue).
     const pending = (await openerTraffic(page)).open.length;
     await page.evaluate(() => window.__fressTest!.releaseOpenPath());
     expect(pending).toBe(1);
+    expect(await openButton(done).getAttribute('aria-busy')).toBeNull();
   });
 
   test('K-G2 - keyboard activation, visible focus and truthful accessible names on the open actions', async ({ gotoApp, page }) => {
@@ -621,7 +632,9 @@ test.describe('Workflow K: the download-to-open journey', () => {
       `the focused action must paint a visible focus indicator (got outline=${indicator.outline}, shadow=${indicator.shadow})`
     ).toBe(true);
 
-    // Enter activates the real handler exactly once per activation.
+    // Enter activates the real handler exactly once per activation: the
+    // open_path handoff is the whole journey now (no confirm step), so
+    // one keypress is exactly one native boundary call.
     let before = (await openerTraffic(page)).open.length;
     await page.keyboard.press('Enter');
     await expect.poll(async () => (await openerTraffic(page)).open.length).toBe(before + 1);
@@ -685,11 +698,58 @@ test.describe('Workflow K: the download-to-open journey', () => {
   });
 
   /* ---------------------------------------------------------------- */
+  test('K-I2 - AppImage: the opener refusal falls back to the validated launcher, once, with the same id and path', async ({ gotoApp, page }) => {
+    await gotoApp();
+    const pageErrors = collectPageErrors(page);
+    await seedSingleAssetRelease(page, 'FixtureApp-1.0.0-x86_64.AppImage');
+    await startFromDetail(page, 'localsend', 'Linux', /FixtureApp-1\.0\.0-x86_64\.AppImage/);
+    await openDownloads(page);
+    const id = await downloadIdByUrl(page, 'FixtureApp-1.0.0-x86_64.AppImage');
+    const destination = '/home/test/Downloads/FixtureApp-1.0.0-x86_64.AppImage';
+    await complete(page, id, destination, 12_345_678, SHA_C);
+    await drainToasts(page);
+    const done = page.locator(sel.downloadRow('completed')).first();
+    await expect(done).toContainText('FixtureApp-1.0.0-x86_64.AppImage');
+
+    // Stock Linux desktops have no AppImage handler: open_path refuses.
+    // The frontend's ONLY fallback retries BELOW the same boundary with
+    // the validated launcher - THIS download's id, THIS exact path.
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath('os: no handler for the file type'));
+    await openButton(done).click();
+    await expect
+      .poll(async () => (await openerTraffic(page)).open)
+      .toEqual([
+        { cmd: 'plugin:opener|open_path', id: 0, path: destination, with: null },
+        { cmd: 'launch_app_image_artifact', id, path: destination, with: null },
+      ]);
+
+    // The fallback rescued the open: NO failure toast may appear (an error
+    // here would lie about a launch that actually happened).
+    await drainToasts(page);
+    await expect(page.getByText(d['downloads.toast.openFileFailed'])).toHaveCount(0);
+
+    // When the launcher itself refuses too, the failure is honest - and
+    // still exactly one attempt per action: no retry loops at the boundary.
+    await page.evaluate(() => window.__fressTest!.setFailLaunchAppImage('open-artifact/not-registered'));
+    await openButton(done).click();
+    await expect(page.getByText(d['downloads.toast.openFileFailed'])).toBeVisible();
+    const traffic = (await openerTraffic(page)).open;
+    expect(traffic).toHaveLength(4); // two attempts: open_path + launcher each
+    expect(traffic[2]).toEqual({ cmd: 'plugin:opener|open_path', id: 0, path: destination, with: null });
+    expect(traffic[3]).toEqual({ cmd: 'launch_app_image_artifact', id, path: destination, with: null });
+
+    // The row stays completed and the failure was a handled promise.
+    await expect(done).toContainText(d['downloads.completedUnverified']);
+    expect(pageErrors).toEqual([]);
+  });
+
   /* K-I - one intended action per artifact class                       */
   /* ---------------------------------------------------------------- */
   /* For every file class the resolver can hand a user, the frontend must
    * pass the completed path to the native adapter as a value with the
-   * default-handler operation. This stays at the frontend/adapter
+   * default-handler operation - ONE uniform boundary for every class
+   * (the round-28 rewrite), with the AppImage launcher as the only
+   * in-frontend fallback (K-I2). This stays at the frontend/adapter
    * boundary BY DESIGN: a mocked open_path resolving proves the REQUEST,
    * never that a real Windows installer, macOS disk image, Linux package
    * or Android APK actually launched - that is the manual smoke matrix. */
@@ -760,6 +820,11 @@ test.describe('Workflow K: Android artifact surface', () => {
     await expect(openButton(done)).toBeVisible();
     await expect(showButton(done)).toHaveCount(0);
 
+    // The frontend's contract is the uniform open_path pass-through: the
+    // Android native adaptation (FileProvider content-URI handoff to the
+    // system package installer) slots in BELOW this same boundary in the
+    // Android adapter's own scope - the app-private path must reach the
+    // boundary as the exact value either way.
     await openButton(done).click();
     const open = (await openerTraffic(page)).open;
     expect(open).toHaveLength(1);

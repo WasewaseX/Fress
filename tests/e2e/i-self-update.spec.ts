@@ -31,6 +31,7 @@
  */
 import { expect, bridge } from './fixtures';
 import { sel, openDownloads } from './selectors';
+import { APP_VERSION } from './netpolicy';
 import { test } from './fixtures';
 import { DICTS } from '../../src/lib/i18n';
 import {
@@ -45,10 +46,12 @@ import {
   OWN_SUMS_PARTIAL,
   OWN_SIG_TXT,
   GOOD_SHA256,
+  NEXT_VERSION,
+  NEXT_SHORT,
 } from './fixtures/data';
 
 const d = DICTS.en;
-const VALID_RELEASE_URL = 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta';
+const VALID_RELEASE_URL = `https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`;
 
 test.use({ tauriMode: true });
 
@@ -92,13 +95,13 @@ test.describe('Workflow I: valid release fixture', () => {
     // The available toast names the exact version (tag without the v).
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText(d['update.availableToast'].replace('{version}', '1.0.9-beta'));
+    await expect(toast).toContainText(d['update.availableToast'].replace('{version}', NEXT_VERSION));
 
     // The header pill is on screen and names the version.
     const pill = page.locator('#header-update-pill');
     await expect(pill).toBeVisible();
-    await expect(pill).toContainText(d['header.updatePill'].replace('{v}', '1.0.9-beta'));
-    await expect(pill).toHaveAttribute('title', d['header.updatePillTitle'].replace('{v}', '1.0.9-beta'));
+    await expect(pill).toContainText(d['header.updatePill'].replace('{v}', NEXT_VERSION));
+    await expect(pill).toHaveAttribute('title', d['header.updatePillTitle'].replace('{v}', NEXT_VERSION));
 
     await drainToasts(page);
 
@@ -109,14 +112,14 @@ test.describe('Workflow I: valid release fixture', () => {
     const b = (await bridge(page))!;
     const entries = Object.values(b.downloads);
     expect(entries).toHaveLength(1);
-    expect(entries[0].url).toBe('https://github.com/WasewaseX/Fress/releases/download/v1.0.9-beta/Fress_1.0.9_amd64.AppImage');
+    expect(entries[0].url).toBe(`https://github.com/WasewaseX/Fress/releases/download/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_amd64.AppImage`);
     expect(entries[0].expectedSha256).not.toBeNull();
-    expect(entries[0].filename).toBe('Fress_1.0.9_amd64.AppImage');
+    expect(entries[0].filename).toBe(`Fress_${NEXT_SHORT}_amd64.AppImage`);
     expect(b.openedUrls).toEqual([]);
 
     // The transfer is a real download-manager row (same pipeline as any app).
     await openDownloads(page);
-    await expect(page.locator(sel.downloadsPanel)).toContainText('Fress_1.0.9_amd64.AppImage');
+    await expect(page.locator(sel.downloadsPanel)).toContainText(`Fress_${NEXT_SHORT}_amd64.AppImage`);
   });
 
   /** Workflow I, second half: the post-download signature gate. The native
@@ -132,7 +135,7 @@ test.describe('Workflow I: valid release fixture', () => {
     await page.locator('#header-update-pill').click();
     const b = (await bridge(page))!;
     const id = Number(Object.keys(b.downloads)[0]);
-    const finalPath = '/home/test/Downloads/Fress_1.0.9_amd64.AppImage';
+    const finalPath = `/home/test/Downloads/Fress_${NEXT_SHORT}_amd64.AppImage`;
 
     // The engine finishes and CONFIRMS the published digest. (The bridge's
     // emit methods only exist inside the page - functions do not survive
@@ -158,7 +161,7 @@ test.describe('Workflow I: valid release fixture', () => {
     const verifiedToast = page.locator('[data-sonner-toast]', { hasText: d['update.verifiedReady'] });
     await expect(verifiedToast.first()).toBeVisible();
     await expect(page.locator('#header-update-pill')).toContainText(
-      d['header.updatePillReady'].replace('{v}', '1.0.9-beta')
+      d['header.updatePillReady'].replace('{v}', NEXT_VERSION)
     );
     // No fallback and no auto-launch anywhere in the happy path.
     expect(b2.openedUrls).toEqual([]);
@@ -185,7 +188,7 @@ test.describe('Workflow I: valid release fixture', () => {
     const id = Number(Object.keys(b1.downloads)[0]);
     await page.evaluate(
       ({ id, path, sha }) => window.__fressTest!.emitComplete(id, path, 22_000_000, sha, true),
-      { id, path: '/home/test/Downloads/Fress_1.0.9_amd64.AppImage', sha: GOOD_SHA256 }
+      { id, path: `/home/test/Downloads/Fress_${NEXT_SHORT}_amd64.AppImage`, sha: GOOD_SHA256 }
     );
 
     const failedToast = page.locator('[data-sonner-toast]', { hasText: d['update.signatureFailed'] });
@@ -197,7 +200,7 @@ test.describe('Workflow I: valid release fixture', () => {
     );
     await expect
       .poll(async () => (await bridge(page))!.openedUrls ?? [], { timeout: 10_000 })
-      .toEqual(['https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta']);
+      .toEqual([`https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`]);
   });
 });
 
@@ -242,7 +245,7 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
     await checkForUpdates(page);
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText(d['update.latestToast'].replace('{version}', '1.0.8-beta'));
+    await expect(toast).toContainText(d['update.latestToast'].replace('{version}', APP_VERSION));
     await expect(page.locator('#header-update-pill')).toHaveCount(0);
 
     await drainToasts(page);
@@ -263,7 +266,7 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
     await checkForUpdates(page);
     const available = page.locator('[data-sonner-toast]').first();
     await expect(available).toBeVisible();
-    await expect(available).toContainText(d['update.availableToast'].replace('{version}', '1.0.9-beta'));
+    await expect(available).toContainText(d['update.availableToast'].replace('{version}', NEXT_VERSION));
     await expect(page.locator('#header-update-pill')).toBeVisible();
   });
 });
@@ -374,7 +377,7 @@ test.describe('Workflow J: published digest is wrong (corrupted release)', () =>
     const [id] = await registeredDownloadIds(page);
     const b0 = (await bridge(page))!;
     expect(b0.downloads[id].expectedSha256).toBe('d'.repeat(64));
-    expect(b0.downloads[id].filename).toBe('Fress_1.0.9_amd64.AppImage');
+    expect(b0.downloads[id].filename).toBe(`Fress_${NEXT_SHORT}_amd64.AppImage`);
 
     // The engine fetches the artifact, computes its real digest, compares,
     // refuses: kind=checksum, corrupt bytes deleted, resume is pointless.
@@ -423,7 +426,7 @@ test.describe('Workflow J: published digest is wrong (corrupted release)', () =>
         const cur2 = (await bridge(page))!;
         const calls = cur2.calls.filter((c) => c.cmd === 'start_download');
         const last = calls[calls.length - 1]?.args as { resume?: boolean; url?: string } | null;
-        return calls.length >= 2 && last?.resume === false && last?.url === 'https://github.com/WasewaseX/Fress/releases/download/v1.0.9-beta/Fress_1.0.9_amd64.AppImage';
+        return calls.length >= 2 && last?.resume === false && last?.url === `https://github.com/WasewaseX/Fress/releases/download/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_amd64.AppImage`;
       })
       .toBe(true);
   });
@@ -457,7 +460,7 @@ test.describe('Workflow J: published digest is wrong (corrupted release)', () =>
     // designed: idle phase, plain pill, zero fallbacks, zero failure
     // toasts, zero verified rows.
     await expect(page.locator('#header-update-pill')).toContainText(
-      d['header.updatePill'].replace('{v}', '1.0.9-beta'), { timeout: 10_000 }
+      d['header.updatePill'].replace('{v}', NEXT_VERSION), { timeout: 10_000 }
     );
     const cur = (await bridge(page))!;
     expect(cur.openedUrls).toEqual([]);
@@ -539,7 +542,7 @@ test.describe('Workflow J: unsigned platform artifact (no signature sidecar)', (
     // the see-releases label like a post-download failure does; tracked
     // in docs/quality-gates.md, owner: self-update.)
     await expect(page.locator('#header-update-pill')).not.toContainText(
-      d['header.updatePillReady'].replace('{v}', '1.0.9-beta')
+      d['header.updatePillReady'].replace('{v}', NEXT_VERSION)
     );
     await expect(page.locator('#header-update-pill')).not.toContainText(d['header.updatePillDownloading']);
   });

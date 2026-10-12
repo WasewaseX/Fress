@@ -182,7 +182,9 @@ advertised; unsigned classes must NOT carry sidecars).
 
 State of the workflow (kept from PR #35, verified on the candidate):
 
-- Every `fressandroid` literal is gone; all keystore commands use
+- The historical store-password literal is gone from the workflow (and the
+  password itself was rotated out-of-band on 2026-10-12, after this document
+  quoted it here); all keystore commands use
   step-level `ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}`.
 - Fail-closed guards: absent secret → error before the keystore is decoded;
   keystore that cannot be opened (alias `fress`) with the secret → error;

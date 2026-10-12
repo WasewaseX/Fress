@@ -365,9 +365,12 @@ The layers now look like this:
  native verifier against the completed artifact BEFORE any verified state is
  rendered. Missing/unreachable/malformed signatures, checksum failures,
  download failures and cancellations all have explicit, distinct UI states
- and localized messages; anything unverifiable routes to the official
- Releases page with the reason attached. Verification success reveals the
- artifact — it never auto-launches it.
+ and localized messages. A plan-gate refusal or a signature rejection
+ routes to the official Releases page with the reason attached; a
+ transfer-level checksum failure stays a retryable download-manager
+ failure (a fresh transfer re-downloads and re-checks, and the failure
+ hint names the Releases page for a persistently corrupt release).
+ Verification success reveals the artifact — it never auto-launches it.
 
 The dormant `plugins.updater` block in `tauri.conf.json` remains future
 config for the Tauri updater PLUGIN (a different, flow-replacing mechanism);

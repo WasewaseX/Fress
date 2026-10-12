@@ -407,23 +407,30 @@ describe('the complete in-app delivery path (Task 6 contract)', () => {
     h.registerItem(7, ASSET_URL);
     await flush();
     // No `verified` flag: the file was never checked against the published
-    // digest. It must not even reach the signature verifier.
+    // digest. It must not even reach the signature verifier. Transfer-level
+    // integrity failures stay retryable in the manager - no auto-redirect.
     emit('download-complete', { id: 7, path: '/downloads/unverified.exe', bytes: 21_000_000, sha256: GOOD_SHA });
     await flush();
-    expect(getDeliveryState()).toMatchObject({ phase: 'failed', reason: 'checksum', fallback: true });
+    expect(getDeliveryState()).toMatchObject({ phase: 'failed', reason: 'checksum', fallback: false });
     expect(h.verifyCalls()).toHaveLength(0);
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
   });
 
-  it('a checksum mismatch reported by the engine routes to the releases page', async () => {
+  it('an engine-reported checksum mismatch stays a retryable manager failure (no redirect)', async () => {
     const h = makeHarness();
     await h.start();
     h.registerItem(7, ASSET_URL);
     await flush();
+    // The engine compared the transferred bytes against the published digest
+    // and refused. The corrupted TRANSFER is retryable: the failure stays in
+    // the download manager (its row offers a fresh Retry) and the delivery
+    // reports a non-fallback checksum failure - nothing is opened and no
+    // completed row can exist.
     emit('download-error', { id: 7, message: 'SHA-256 mismatch', kind: 'checksum' });
     await flush();
-    expect(getDeliveryState()).toMatchObject({ phase: 'failed', reason: 'checksum', fallback: true });
+    expect(getDeliveryState()).toMatchObject({ phase: 'failed', reason: 'checksum', fallback: false });
     expect(h.verifyCalls()).toHaveLength(0);
-    expect(h.deps.openExternal).toHaveBeenCalled();
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
   });
 });
 

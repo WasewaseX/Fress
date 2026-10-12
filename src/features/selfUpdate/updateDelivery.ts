@@ -247,9 +247,12 @@ function handleCompleteForPlan(payload: { path: string; verified?: boolean }): v
   setState({ phase: 'verifying-checksum', name: current.assetName });
   // Checksum gate: the engine compares against the published digest we
   // attached. A completion that arrives WITHOUT a verified flag means the
-  // file was never checked against our expectation - fail closed.
+  // file was never checked against our expectation - fail closed. This is
+  // a transfer-level integrity failure: the recovery is a FRESH transfer
+  // from the download manager (or the pill's retry), so no releases-page
+  // redirect fires here - the failure stays honest and retryable.
   if (payload.verified !== true) {
-    failDelivery('checksum', true);
+    failDelivery('checksum', false);
     return;
   }
   setState({ phase: 'verifying-signature', name: current.assetName });
@@ -285,10 +288,14 @@ function handleErrorForPlan(payload: { message: string; kind?: string }): void {
     return;
   }
   if (payload.kind === 'checksum') {
-    // The engine deleted the file: the source did not match the published
-    // digest. Retrying would replay the same transfer; the Releases page
-    // (with manual sha256sum instructions) is the honest fallback.
-    failDelivery('checksum', true);
+    // The engine deleted the file: the transferred bytes did not match the
+    // published digest. A corrupted TRANSFER is retryable (a fresh request
+    // re-downloads and re-checks); a corrupted RELEASE will simply fail the
+    // same way, and the checksum-failure hint points at the Releases page
+    // for that case. Either way the failure stays in the download manager:
+    // the row offers Retry (fresh), the pill offers the same, and nothing
+    // is opened automatically.
+    failDelivery('checksum', false);
     return;
   }
   // Network/protocol failure before verification ever ran.

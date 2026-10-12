@@ -175,11 +175,22 @@
 :root {
   --fr-chip-active-bg: rgba(255, 255, 255, 0.14);
   --fr-chip-active-text: #ffffff;
+  --fr-chip-active-text-soft: rgba(255, 255, 255, 0.9);
+  --fr-chip-active-accent: #fde68a;
   --fr-chip-active-border: rgba(255, 255, 255, 0.25);
 }
 :root:not(.dark) {
   --fr-chip-active-bg: #7b5c3a;      /* cocoa, about 6:1 against white text */
   --fr-chip-active-text: #ffffff;
+  /* Secondary ink ON the cocoa selection: white at 90% composites to
+     about 5.3:1 on the cocoa ground (the light slate remaps are
+     calibrated for paper surfaces and collapse to ~1:1 here - the
+     command palette's selected row rendered unreadable in light). */
+  --fr-chip-active-text-soft: rgba(255, 255, 255, 0.9);
+  /* Accent ink on the cocoa selection (the "vs proprietary" chip):
+     amber-200 holds 4.9:1 on cocoa and 10.3:1 on the dark selection;
+     the light amber-300 remap (#8a6206) was 1.1:1 on cocoa. */
+  --fr-chip-active-accent: #fde68a;
   --fr-chip-active-border: #6a4d2e;
 }
 .fr-chip-active {

@@ -238,4 +238,48 @@ describe('light theme token contrast (WCAG AA)', () => {
     // the overridden amber-300 fill without a dark: split.
     expect(header).not.toMatch(/text-amber-900 bg-amber-300/);
   });
+
+  it('selection-surface inks hold AA on the fr-chip-active grounds in BOTH themes (round 27)', () => {
+    // The command palette's selected row used to render paper-calibrated
+    // inks on the cocoa selection surface in light: subtitle 1.06:1, the
+    // "vs proprietary" chip 1.12:1, the name 2.53:1 (measured in the
+    // round-27 captures). The selection surface now carries its own ink
+    // family: primary text (--fr-chip-active-text), secondary text
+    // (--fr-chip-active-text-soft, white at 90%) and the accent ink for
+    // the amber chip (--fr-chip-active-accent, amber-200).
+    //
+    // Anchor on the section comment: ':root {' alone matches the main
+    // token block at the top of the file, not the chip block.
+    const chipSection = CSS.slice(CSS.indexOf('ACTIVE / SELECTED CHIP'));
+    const chipBlock = (dark: boolean): string => {
+      const start = chipSection.indexOf(dark ? '\n:root {' : '\n:root:not(.dark)');
+      return chipSection.slice(start, chipSection.indexOf('\n}', start));
+    };
+    const bgOf = (b: string) => b.match(/--fr-chip-active-bg:\s*([^;]+);/)![1].trim();
+
+    // Light: the cocoa ground.
+    const cocoa = bgOf(chipBlock(false));
+    expect(cocoa).toBe('#7b5c3a');
+    expect(contrastRatio('#ffffff', cocoa)).toBeGreaterThanOrEqual(4.5); // primary
+    const softLight = mix('#ffffff', 0.9, cocoa);
+    expect(contrastRatio(softLight, cocoa)).toBeGreaterThanOrEqual(4.5); // secondary
+    expect(contrastRatio('#fde68a', cocoa)).toBeGreaterThanOrEqual(4.5); // accent
+
+    // Dark: the selection is white haze over the palette surfaces; the
+    // inks must hold on BOTH candidate grounds (surface and elevated).
+    for (const ground of ['#0d131f', '#182132']) {
+      const selBg = mix('#ffffff', 0.14, ground);
+      const softDark = mix('#ffffff', 0.9, selBg);
+      expect(contrastRatio('#ffffff', selBg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(softDark, selBg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio('#fde68a', selBg)).toBeGreaterThanOrEqual(4.5);
+    }
+
+    // The tokens exist in BOTH theme blocks with the verified values, so
+    // a future re-theme cannot silently drop the selection ink family.
+    for (const b of [chipBlock(false), chipBlock(true)]) {
+      expect(b).toMatch(/--fr-chip-active-text-soft:\s*rgba\(255,\s*255,\s*255,\s*0\.9\)/);
+      expect(b).toMatch(/--fr-chip-active-accent:\s*#fde68a/);
+    }
+  });
 });

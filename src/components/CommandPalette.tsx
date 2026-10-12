@@ -389,15 +389,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       className={rowCls}
                     >
                       <span className="flex items-center gap-3">
-                        <span className="p-2 rounded-md bg-sky-500/10 text-sky-400">
+                        <span className={
+                          /* The selection surface (fr-chip-active) is cocoa
+                           * in light / white-haze in dark: the paper-calibrated
+                           * slate/sky inks collapse to ~1:1 on it, so a
+                           * selected row switches to the selection-surface
+                           * inks (measured, see lightThemeContrast.test). */
+                          isSelected
+                            ? 'p-2 rounded-md bg-white/10 text-white'
+                            : 'p-2 rounded-md bg-sky-500/10 text-sky-400'
+                        }>
                           <Terminal className="w-4 h-4" aria-hidden="true" />
                         </span>
                         <span>
-                          <span className="block text-xs font-semibold text-slate-100">{item.title}</span>
-                          <span className="block text-[11px] text-slate-400">{item.subtitle}</span>
+                          <span className={`block text-xs font-semibold ${isSelected ? 'text-[color:var(--fr-chip-active-text)]' : 'text-slate-100'}`}>{item.title}</span>
+                          <span className={`block text-[11px] ${isSelected ? 'text-[color:var(--fr-chip-active-text-soft)]' : 'text-slate-400'}`}>{item.subtitle}</span>
                         </span>
                       </span>
-                      <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">
+                      <span className={`text-[11px] font-mono uppercase tracking-wider ${isSelected ? 'text-[color:var(--fr-chip-active-text-soft)]' : 'text-slate-400'}`}>
                         {t('palette.actionBadge')}
                       </span>
                     </button>
@@ -424,22 +433,29 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     className={rowCls}
                   >
                     <span className="flex items-center gap-3 min-w-0">
-                      <span className="p-2 rounded-md bg-slate-950/[0.05] dark:bg-white/[0.05] text-slate-300 shrink-0">
-                        <Code2 className="w-4 h-4 text-sky-400" aria-hidden="true" />
+                      <span className={`p-2 rounded-md shrink-0 ${isSelected ? 'bg-white/10 text-white' : 'bg-slate-950/[0.05] dark:bg-white/[0.05] text-slate-300'}`}>
+                        <Code2 className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-sky-400'}`} aria-hidden="true" />
                       </span>
                       <span className="min-w-0">
                         <span className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-slate-100 truncate">{app.name}</span>
+                          <span className={`text-xs font-semibold truncate max-w-[45%] shrink-0 ${isSelected ? 'text-[color:var(--fr-chip-active-text)]' : 'text-slate-100'}`}>{app.name}</span>
                           {app.proprietaryAlternative && (
-                            <span className="text-[11px] text-amber-300/90 font-mono bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded shrink-0">
+                            /* Truncates BEFORE the name (identity wins):
+                             * the old shrink-0 chip could push the app
+                             * name to zero width on narrow inputs. */
+                            <span className={`text-[11px] font-mono px-1.5 py-0.2 rounded min-w-0 max-w-[55%] truncate ${
+                              isSelected
+                                ? 'text-[color:var(--fr-chip-active-accent)] bg-amber-200/10 border border-amber-200/25'
+                                : 'text-amber-300/90 bg-amber-400/10 border border-amber-400/20'
+                            }`}>
                               {t('palette.vs').replace('{alt}', app.proprietaryAlternative)}
                             </span>
                           )}
-                          <span className="text-[11px] text-slate-400 font-mono">
+                          <span className={`text-[11px] font-mono shrink-0 ${isSelected ? 'text-[color:var(--fr-chip-active-text-soft)]' : 'text-slate-400'}`}>
                             ★ {formatStarCount(app.stars)}
                           </span>
                         </span>
-                        <span className="block text-[11px] text-slate-400 truncate">{item.subtitle}</span>
+                        <span className={`block text-[11px] truncate ${isSelected ? 'text-[color:var(--fr-chip-active-text-soft)]' : 'text-slate-400'}`}>{item.subtitle}</span>
                       </span>
                     </span>
                   </button>

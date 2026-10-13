@@ -4,6 +4,7 @@
 //
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Category } from '../types';
+import { setActiveLanguage, setEtaSuffix } from './currentLang';
 
 export type Language = 'en' | 'fa' | 'es' | 'fr' | 'de';
 
@@ -22,6 +23,7 @@ type Dict = Record<string, string>;
 const en: Dict = {
   'app.tagline': 'Free and open-source software, checked by hand',
   'app.subtitle': 'A hand-checked directory of free software for every platform',
+  'app.windowTitle': 'Fress: free and open-source apps',
   'hero.title': 'Free and open-source apps, ready to install',
   'hero.subtitle': 'A short list of apps we checked ourselves. Downloads come from the official project. No accounts, no ads, no tracking.',
   'header.searchPlaceholder': 'Search apps… (Ctrl+K)',
@@ -186,7 +188,7 @@ const en: Dict = {
   'pp.toastLimit': 'Up to 3 replacements per category. Remove one first.',
   'pp.toastAdded': 'added to the batch selection.',
   'pp.footNone': 'Pick what you use in a category, then choose what to replace it with. Options with a Get button install straight from here; About explains the dots.',
-  'pp.pickedSoFar': 'You picked {n} replacement(s) so far.',
+  'pp.pickedSoFar': 'Replacements picked so far: {n}.',
   'pp.footSome': 'Apps with a Get button download for your device; Guide only rows are services and pointers, listed for the name and the grade.',
 
   // Floating batch bar
@@ -197,7 +199,7 @@ const en: Dict = {
   'bar.script': 'Script',
   'bar.scriptHint': 'Generate an install script for the selection',
   'bar.compare': 'Compare',
-  'batchDL.started': 'Download started for {n} app(s).',
+  'batchDL.started': 'Batch download started ({n}).',
   'batchDL.weakNote': '{n} file(s) were auto-detected with low confidence - check the names in the download panel before running them.',
   'batchDL.skipped': '{n} app(s) need a quick pick from their official page here.',
   'batchDL.skippedHint': 'these few have no file for this device, so their official page picks the right one for you.',
@@ -501,6 +503,9 @@ const en: Dict = {
   'ls.tryLabel': 'Try:',
   'ls.emptyTitle': 'Type a name above to search GitHub.',
   'ls.emptyHint': 'Any public GitHub project can be added to your catalog.',
+  'ls.noMatchesTitle': 'No matches for “{query}”.',
+  'ls.noMatchesHint': 'Check the spelling, try another name, or add the app from the Manual tab.',
+  'ls.resultsAnnounce': '{n} results found.',
   'ls.viewGitHub': 'View GitHub',
   'ls.inCatalog': 'In Catalog',
   'ls.rateLimited': 'GitHub search limit reached. Try again in a minute, or use the Enter manually tab.',
@@ -760,6 +765,7 @@ const en: Dict = {
 const fa: Dict = {
   'app.tagline': 'نرم‌افزارهای آزاد و متن‌باز، گزینش‌شده',
   'app.subtitle': 'راهنمای دست‌چین نرم‌افزارهای رایگان برای همه سکوها',
+  'app.windowTitle': 'فریس: برنامه‌های آزاد و متن‌باز',
   'hero.title': 'نرم‌افزار آزاد و متن‌باز، آماده نصب',
   'hero.subtitle': 'برنامه را انتخاب کنید، دانلود را بزنید و نصب‌کننده رسمی را بگیرید. هر مورد دستی بررسی شده است. بدون حساب، بدون تبلیغ، بدون ردیابی.',
   'header.searchPlaceholder': 'جستجوی برنامه‌ها یا Ctrl+K...',
@@ -865,7 +871,7 @@ const fa: Dict = {
   'theme.toDark': 'تغییر به حالت تاریک',
   'detail.checkingStable': 'در حال بررسی جدیدترین نسخه پایدار…',
   'detail.noAutoDownload': 'فایل آماده‌ای برای این پلتفرم در انتشارهای پروژه پیدا نشد. به‌جای آن از یکی از گزینه‌های رسمی زیر استفاده کنید.',
-  'detail.rateLimited': 'گیتهاب در حال حاضر این شبکه را محدود کرده و جست‌وجوی خودکار انجام نشد. چند دقیقه بعد دوباره امتحان کنید یا از گزینه‌های رسمی زیر استفاده کنید.',
+  'detail.rateLimited': 'گیت‌هاب در حال حاضر این شبکه را محدود کرده و جست‌وجوی خودکار انجام نشد. چند دقیقه بعد دوباره امتحان کنید یا از گزینه‌های رسمی زیر استفاده کنید.',
   'detail.metaLine': 'اضافه‌شده در {d} · لینک‌ها هنگام فهرست‌شدن بررسی شدند',
   'detail.latestStableGithub': 'جدیدترین نسخه پایدار از GitHub',
   'detail.latestStableOfficial': 'جدیدترین فایل پایدار از منبع رسمی',
@@ -1075,7 +1081,7 @@ const fa: Dict = {
   'header.batchPill': 'دسته ({n})',
   'header.comparePill': 'مقایسه ({n})',
   'header.updatePill': 'به‌روزرسانی v{v}',
-  'header.updatePillTitle': 'نگارش {v} فرس آماده است. برای دریافت به‌روزرسانی بزنید. برنامه‌ها و داده‌های شما محفوظ می‌ماند.',
+  'header.updatePillTitle': 'نگارش {v} فریس آماده است. برای دریافت به‌روزرسانی بزنید. برنامه‌ها و داده‌های شما محفوظ می‌ماند.',
   'header.updatePillDownloading': 'در حال دریافت {v}…',
   'header.updatePillVerifyingChecksum': 'بررسی {v}…',
   'header.updatePillVerifyingSignature': 'تأیید {v}…',
@@ -1239,6 +1245,9 @@ const fa: Dict = {
   'ls.tryLabel': 'مثلاً:',
   'ls.emptyTitle': 'برای جستجو در گیت‌هاب، نامی را در بالا بنویسید.',
   'ls.emptyHint': 'هر پروژهٔ عمومی گیت‌هاب را می‌توان به فهرست شما افزود.',
+  'ls.noMatchesTitle': 'نتیجه‌ای برای «{query}» پیدا نشد.',
+  'ls.noMatchesHint': 'املای نام را بررسی کنید، نام دیگری بیازمایید، یا برنامه را از زبانهٔ دستی بیفزایید.',
+  'ls.resultsAnnounce': '{n} نتیجه پیدا شد.',
   'ls.viewGitHub': 'مشاهده در گیت‌هاب',
   'ls.inCatalog': 'در فهرست',
   'ls.rateLimited': 'سقف جستجوی گیت‌هاب پر شد. یک دقیقه بعد دوباره تلاش کنید، یا از برگهٔ «ورود دستی» استفاده کنید.',
@@ -1273,7 +1282,7 @@ const fa: Dict = {
   'add.nameRequired': 'نام برنامه الزامی است.',
   'add.duplicate': 'موردی با این نام یا مخزن از قبل در فهرست وجود دارد.',
   'add.descriptionRequired': 'توضیحات الزامی است.',
-  'add.invalidGithubUrl': 'نشانی معتبر مخزن گیت‌هاب وارد کنید (مثلاً https://github.com/owner/repo)',
+  'add.invalidGithubUrl': 'نشانی معتبر مخزن گیت‌هاب وارد کنید (مثلاً \u2066https://github.com/owner/repo\u2069)',
   'add.githubApiStatus': 'API گیت‌هاب وضعیت {status} را برگرداند. بررسی کنید که مخزن وجود دارد و عمومی است.',
   'add.inspectFailed': 'بازرسی مخزن گیت‌هاب ناموفق بود.',
   'add.inspectSuccess': 'فرادادهٔ {name} با موفقیت پر شد!',
@@ -1417,7 +1426,7 @@ const fa: Dict = {
   'downloads.toast.completedTitle': '{name} دانلود شد',
   'downloads.toast.fileFallback': 'فایل',
   'downloads.toast.downloadFallback': 'دانلود',
-  'downloads.toast.verifiedDesc': 'SHA-256 با جمع‌آزمایی منتشرشده تأیید شد. {path}',
+  'downloads.toast.verifiedDesc': 'SHA-256 با جمع‌آزمایی منتشرشده تأیید شد. \u2066{path}\u2069',
   'downloads.toast.reconnectingTitle': 'در حال اتصال مجدد {name} (تلاش {attempt})',
   'downloads.toast.reconnectingDesc': 'اتصال قطع شد. از همان‌جا که متوقف شده بود ادامه می‌یابد.',
   'downloads.toast.pausedResume': 'دانلود متوقف شد. برای ادامه از «ادامه» استفاده کنید.',
@@ -1425,23 +1434,23 @@ const fa: Dict = {
   'downloads.toast.resumeInvalid': 'ادامه دادن ممکن نیست',
   'downloads.toast.failed': 'دانلود ناموفق بود',
   'downloads.toast.startFailed': 'شروع دانلود ممکن نشد',
-  'downloads.toast.notDirectLink': 'این پیوند یک دریافت مستقیم نیست',
-  'downloads.toast.browserTabTitle': 'دریافت در زبانی جدید مرورگر باز شد',
-  'downloads.toast.browserTabDesc': 'برنامه دسکتاپ فریس مدیریتی برای دریافت‌ها با پیشرفت زنده و تأیید SHA-256 دارد.',
-  'downloads.toast.startedTitle': 'دریافت آغاز شد',
+  'downloads.toast.notDirectLink': 'این لینک یک دانلود مستقیم نیست',
+  'downloads.toast.browserTabTitle': 'دانلود در زبانه‌ای جدید مرورگر باز شد',
+  'downloads.toast.browserTabDesc': 'برنامه دسکتاپ فریس مدیریتی برای دانلودها با پیشرفت زنده و تأیید SHA-256 دارد.',
+  'downloads.toast.startedTitle': 'دانلود آغاز شد',
   'downloads.toast.openFileFailed': 'باز کردن فایل ممکن نشد',
   'downloads.toast.openFolderFailed': 'باز کردن پوشه ممکن نشد',
   'downloads.toast.openMissing': 'فایل دیگر در محل دانلود‌شده خود نیست.',
   'downloads.toast.openNotFile': 'این مسیر یک فایل معمولی نیست.',
   'downloads.toast.openUnregistered': 'فقط دانلودی که در همین نشست کامل شده را می‌توان مستقیم اجرا کرد. از «نمایش در پوشه» استفاده کنید و خودتان آن را اجرا کنید.',
-  'downloads.toast.openCrossWired': 'فرس این کار را مسدود کرد: این فایل متعلق به دانلود دیگری است.',
+  'downloads.toast.openCrossWired': 'فریس این کار را مسدود کرد: این فایل متعلق به دانلود دیگری است.',
   'downloads.toast.openReplaced': 'فایل پس از پایان دانلود تغییر کرده است. برای یک نسخهٔ قابل‌اعتماد دوباره دانلود کنید.',
   'downloads.toast.openNoHandler': 'هیچ برنامه‌ای در این سیستم برای بازکردن این نوع فایل تنظیم نشده است.',
   'downloads.toast.openPermission': 'سیستم اجازهٔ دسترسی به فایل را نداد.',
   'downloads.toast.folderPickerDesktop': 'انتخابگر پوشه در برنامه دسکتاپ موجود است',
-  'downloads.toast.chooseFolderTitle': 'انتخاب پوشه دریافت',
-  'downloads.toast.folderUpdated': 'پوشه دریافت به‌روز شد',
-  'downloads.toast.folderReset': 'پوشه دریافت به پوشه Downloads شما برگردانده شد',
+  'downloads.toast.chooseFolderTitle': 'انتخاب پوشه دانلود',
+  'downloads.toast.folderUpdated': 'پوشه دانلود به‌روز شد',
+  'downloads.toast.folderReset': 'پوشه دانلود به پوشه Downloads شما برگردانده شد',
   'batch.barAria': 'نوار عملیات دسته‌ای',
   'batch.compareHint': 'مقایسه حداکثر ۴ ابزار انتخاب‌شده کنار هم',
   'batch.clearSelection': 'پاک کردن انتخاب',
@@ -1471,7 +1480,7 @@ const fa: Dict = {
   'catalog.importRestored': '{count} نشان‌شده بازیابی شد',
   'catalog.importDone': 'پشتیبان وارد شد: {list}.',
   'catalog.importNothingNew': 'چیز جدیدی برای وارد کردن نیست ({list}).',
-  'catalog.importStripped': '{count} فرمان بسته در پشتیبان به‌عنوان ناامن حذف شد. فقط فرمان‌های ساده «<manager> install <package>» پذیرفته می‌شوند.',
+  'catalog.importStripped': '{count} فرمان بسته در پشتیبان به‌عنوان ناامن حذف شد. فقط فرمان‌های ساده «\u2066<manager> install <package>\u2069» پذیرفته می‌شوند.',
   'catalog.trendingSynced': 'نرم‌افزارهای پرمخاطب گیت‌هاب همگام‌سازی شد ({source}).',
   'catalog.trendingOffline': 'از فهرست پرمخاطب بررسی‌شده آفلاین استفاده می‌شود.',
   'filters.resetDone': 'پالایه‌ها به حالت پیش‌فرض برگشت.',
@@ -1492,6 +1501,7 @@ const fa: Dict = {
 const es: Dict = {
   'app.tagline': 'Software libre y de código abierto, seleccionado',
   'app.subtitle': 'Un directorio revisado de software libre para todas las plataformas',
+  'app.windowTitle': 'Fress: aplicaciones libres y de código abierto',
   'hero.title': 'Software libre y de código abierto, listo para instalar',
   'hero.subtitle': 'Elige una app, pulsa descargar y obtén el instalador oficial. Cada entrada está verificada a mano. Sin cuentas, sin anuncios, sin rastreo.',
   'header.searchPlaceholder': 'Buscar apps… (Ctrl+K)',
@@ -1656,7 +1666,7 @@ const es: Dict = {
   'pp.toastLimit': 'Hasta 3 sustitutos por categoría. Quita uno primero.',
   'pp.toastAdded': 'añadido(s) a la selección por lotes.',
   'pp.footNone': 'Elige lo que usas en una categoría y luego qué lo sustituye. Las opciones con botón Obtener se instalan desde aquí; «Sobre esta lista» explica los puntos.',
-  'pp.pickedSoFar': 'Has elegido {n} sustituto(s) hasta ahora.',
+  'pp.pickedSoFar': 'Sustitutos elegidos hasta ahora: {n}.',
   'pp.footSome': 'Las apps con botón Obtener se descargan para tu dispositivo; las filas «Solo guía» son servicios y referencias, listadas por su nombre y su nota.',
 
   // Floating batch bar
@@ -1667,7 +1677,7 @@ const es: Dict = {
   'bar.script': 'Script',
   'bar.scriptHint': 'Generar un script de instalación para la selección',
   'bar.compare': 'Comparar',
-  'batchDL.started': 'Descarga iniciada para {n} app(s).',
+  'batchDL.started': 'Descarga por lotes iniciada ({n}).',
   'batchDL.weakNote': '{n} archivo(s) se detectaron con poca confianza: revisa los nombres en el panel de descargas antes de ejecutarlos.',
   'batchDL.skipped': '{n} app(s) piden una elección rápida en su página oficial.',
   'batchDL.skippedHint': 'estas pocas no tienen archivo para este dispositivo; su página oficial te muestra la correcta.',
@@ -1971,6 +1981,9 @@ const es: Dict = {
   'ls.tryLabel': 'Prueba:',
   'ls.emptyTitle': 'Escribe un nombre arriba para buscar en GitHub.',
   'ls.emptyHint': 'Cualquier proyecto público de GitHub puede añadirse a tu catálogo.',
+  'ls.noMatchesTitle': 'Sin resultados para «{query}».',
+  'ls.noMatchesHint': 'Revisa la ortografía, prueba otro nombre o añade la app desde la pestaña manual.',
+  'ls.resultsAnnounce': '{n} resultados encontrados.',
   'ls.viewGitHub': 'Ver en GitHub',
   'ls.inCatalog': 'En el catálogo',
   'ls.rateLimited': 'Se alcanzó el límite de búsqueda de GitHub. Inténtalo en un minuto o usa la pestaña «Introducir manualmente».',
@@ -2141,7 +2154,7 @@ const es: Dict = {
   'detail.dl.onStore': '{product} en {store}',
   'detail.unavailable.noIosHasAndroid': 'No hay compilación para iOS; esta app se publica para Android y escritorio',
   'detail.unavailable.noIos': 'No hay compilación de esta app para iOS',
-  'detail.unavailable.noAndroid': 'No hay compilación para Android; revise las opciones de escritorio o web',
+  'detail.unavailable.noAndroid': 'No hay compilación para Android; revisa las opciones de escritorio o web',
   'detail.unavailable.noBuild': 'No hay compilación para {platform}; la app se publica para: {list}',
   // ---- Pase final: anuncios y comentarios que seguían fuera de los
   // diccionarios (toasts del contexto de descargas, hooks de features,
@@ -2225,6 +2238,7 @@ const es: Dict = {
 const fr: Dict = {
   'app.tagline': 'Logiciels libres et open source, sélectionnés',
   'app.subtitle': 'Un annuaire vérifié de logiciels libres pour toutes les plateformes',
+  'app.windowTitle': 'Fress : applications libres et open source',
   'hero.title': 'Des logiciels libres et open source, prêts à installer',
   'hero.subtitle': 'Choisissez une app, cliquez sur télécharger, obtenez l’installateur officiel. Chaque fiche est vérifiée à la main. Sans compte, sans pub, sans traçage.',
   'header.searchPlaceholder': 'Rechercher des apps… (Ctrl+K)',
@@ -2389,7 +2403,7 @@ const fr: Dict = {
   'pp.toastLimit': 'Jusqu’à 3 remplacements par catégorie. Retirez-en un d’abord.',
   'pp.toastAdded': 'ajouté(s) à la sélection par lot.',
   'pp.footNone': 'Choisissez ce que vous utilisez dans une catégorie, puis son remplacement. Les options avec un bouton Obtenir s’installent directement ici ; « À propos » explique les points.',
-  'pp.pickedSoFar': 'Vous avez choisi {n} remplacement(s) jusqu’ici.',
+  'pp.pickedSoFar': 'Remplacements choisis jusqu’à ici : {n}.',
   'pp.footSome': 'Les applis avec un bouton Obtenir se téléchargent pour votre appareil ; les lignes « Guide seul » sont des services et des repères, listés pour le nom et la note.',
 
   // Floating batch bar
@@ -2400,7 +2414,7 @@ const fr: Dict = {
   'bar.script': 'Script',
   'bar.scriptHint': 'Générer un script d’installation pour la sélection',
   'bar.compare': 'Comparer',
-  'batchDL.started': 'Téléchargement lancé pour {n} appli(s).',
+  'batchDL.started': 'Téléchargement groupé lancé ({n}).',
   'batchDL.weakNote': "{n} fichier(s) détecté(s) avec peu de confiance - vérifiez les noms dans le panneau de téléchargement avant de les exécuter.",
   'batchDL.skipped': '{n} appli(s) demandent un choix rapide sur leur page officielle.',
   'batchDL.skippedHint': 'ces quelques-unes n’ont pas de fichier pour cet appareil ; leur page officielle montre la bonne.',
@@ -2704,6 +2718,9 @@ const fr: Dict = {
   'ls.tryLabel': 'Essayez :',
   'ls.emptyTitle': 'Saisissez un nom ci-dessus pour chercher sur GitHub.',
   'ls.emptyHint': 'Tout projet public GitHub peut être ajouté à votre catalogue.',
+  'ls.noMatchesTitle': 'Aucun résultat pour « {query} ».',
+  'ls.noMatchesHint': 'Vérifiez l’orthographe, essayez un autre nom ou ajoutez l’appli depuis l’onglet manuel.',
+  'ls.resultsAnnounce': '{n} résultats trouvés.',
   'ls.viewGitHub': 'Voir sur GitHub',
   'ls.inCatalog': 'Dans le catalogue',
   'ls.rateLimited': 'Limite de recherche GitHub atteinte. Réessayez dans une minute ou utilisez l’onglet « Saisir manuellement ».',
@@ -2749,7 +2766,7 @@ const fr: Dict = {
   'add.cmdUnsafeApt': 'La commande APT semble dangereuse et n’a pas été enregistrée. Utilisez une simple commande d’installation, p. ex. « apt install name ». Les enchaînements (&&, ;, |), les substitutions et les caractères spéciaux sont interdits.',
   'cmp.title': 'Matrice de comparaison de logiciels',
   'cmp.subtitle': 'Comparaison directe des architectures, des capacités hors ligne et des licences.',
-  'cmp.clear': 'Vider la matriz',
+  'cmp.clear': 'Vider la matrice',
   'cmp.empty': 'Aucun logiciel sélectionné pour la comparaison.',
   'cmp.emptyHint': 'Cliquez sur « Comparer » sur une carte ou choisissez dans la liste ci-dessous pour comparer les fonctions côte à côte.',
   'cmp.addApp': '+ Ajouter {name}',
@@ -2958,6 +2975,7 @@ const fr: Dict = {
 const de: Dict = {
   'app.tagline': 'Freie und Open-Source-Software, kuratiert',
   'app.subtitle': 'Ein geprüftes Verzeichnis freier Software für alle Plattformen',
+  'app.windowTitle': 'Fress: freie und Open-Source-Apps',
   'hero.title': 'Freie und Open-Source-Software, bereit zur Installation',
   'hero.subtitle': 'App wählen, Download klicken, offiziellen Installer erhalten. Jeder Eintrag wird von Hand geprüft. Keine Konten, keine Werbung, kein Tracking.',
   'header.searchPlaceholder': 'Apps suchen… (Strg+K)',
@@ -3025,7 +3043,7 @@ const de: Dict = {
   'detail.checkLatest': 'Prüfen Sie die neueste Version immer auf der offiziellen Seite.',
   'downloads.title': 'Downloads',
   'downloads.empty': 'Noch keine Downloads',
-  'downloads.emptyHint': 'Dateien aus dem Katalog erscheinen hier mit liveem Fortschritt.',
+  'downloads.emptyHint': 'Dateien aus dem Katalog erscheinen hier mit Live-Fortschritt.',
   'downloads.active': 'Läuft',
   'downloads.openedInBrowser': 'Im Browser geöffnet',
   'downloads.completed': 'Fertig',
@@ -3062,7 +3080,7 @@ const de: Dict = {
   'theme.toLight': 'Zum hellen Design wechseln',
   'theme.toDark': 'Zum dunklen Design wechseln',
   'detail.checkingStable': 'Neueste stabile Version wird geprüft…',
-  'detail.noAutoDownload': 'In den Veröffentlichungen des Projekts wurde keine fertige Datei für diese Plattform gefunden. Nutze stattdessen eine der offiziellen Optionen unten.',
+  'detail.noAutoDownload': 'In den Veröffentlichungen des Projekts wurde keine fertige Datei für diese Plattform gefunden. Verwenden Sie stattdessen eine der offiziellen Optionen unten.',
   'detail.rateLimited': 'GitHub drosselt dieses Netzwerk gerade, die automatische Suche konnte nicht laufen. Versuchen Sie es in ein paar Minuten erneut oder nutzen Sie die offiziellen Optionen unten.',
   'detail.metaLine': 'Hinzugefügt am {d} · Links bei der Aufnahme geprüft',
   'detail.latestStableGithub': 'Neueste stabile Version von GitHub',
@@ -3079,10 +3097,10 @@ const de: Dict = {
   'settings.downloadFolder': 'Download-Ordner',
   'settings.changeFolder': 'Ändern…',
   'settings.resetFolder': 'Zurücksetzen',
-  'settings.androidFolderNote': 'Auf Android werden Downloads im privaten App-Speicher gespeichert (Android erlaubt keine Ordnerauswahl). Nutze nach dem Download Öffnen, um die Datei zu installieren oder zu teilen.',
+  'settings.androidFolderNote': 'Auf Android werden Downloads im privaten App-Speicher gespeichert (Android erlaubt keine Ordnerauswahl). Verwenden Sie nach dem Download Öffnen, um die Datei zu installieren oder zu teilen.',
   'detail.downloadsHintBrowser': 'Downloads öffnen sich in einem neuen Browser-Tab. Die Fress-Desktop-App hat einen Download-Manager mit Fortschrittsbalken.',
   'update.check': 'Nach Updates suchen',
-  'update.checking': 'Prüfe…',
+  'update.checking': 'Prüfen…',
   'update.uptodate': 'Aktuell',
   'update.available': 'Update verfügbar',
   'update.download': 'Aktualisieren auf',
@@ -3133,7 +3151,7 @@ const de: Dict = {
   'bar.script': 'Skript',
   'bar.scriptHint': 'Installationsskript für die Auswahl erzeugen',
   'bar.compare': 'Vergleichen',
-  'batchDL.started': 'Download für {n} App(s) gestartet.',
+  'batchDL.started': 'Stapel-Download gestartet ({n}).',
   'batchDL.weakNote': '{n} Datei(en) wurden mit geringer Sicherheit automatisch erkannt - Namen im Download-Panel vor dem Ausführen prüfen.',
   'batchDL.skipped': '{n} App(s) brauchen eine schnelle Wahl auf ihrer offiziellen Seite.',
   'batchDL.skippedHint': 'für diese wenigen gibt es keine Datei für dieses Gerät; ihre offizielle Seite zeigt die richtige.',
@@ -3437,6 +3455,9 @@ const de: Dict = {
   'ls.tryLabel': 'Vorschläge:',
   'ls.emptyTitle': 'Tippen Sie oben einen Namen ein, um GitHub zu durchsuchen.',
   'ls.emptyHint': 'Jedes öffentliche GitHub-Projekt kann in Ihren Katalog aufgenommen werden.',
+  'ls.noMatchesTitle': 'Keine Treffer für „{query}“.',
+  'ls.noMatchesHint': 'Prüfen Sie die Schreibweise, versuchen Sie einen anderen Namen oder fügen Sie die App über den manuellen Tab hinzu.',
+  'ls.resultsAnnounce': '{n} Ergebnisse gefunden.',
   'ls.viewGitHub': 'Auf GitHub ansehen',
   'ls.inCatalog': 'Im Katalog',
   'ls.rateLimited': 'GitHub-Suchlimit erreicht. Versuchen Sie es in einer Minute wieder oder nutzen Sie „Manuell eingeben“.',
@@ -3540,7 +3561,7 @@ const de: Dict = {
   'update.checksumFailedHint': 'Der Download entsprach nicht dem veröffentlichten Eintrag in SHA256SUMS.txt und wurde verworfen. Wiederholen Sie die Übertragung oder laden Sie Fress von der offiziellen Releases-Seite.',
   'update.signatureFetchFailed': 'Release-Signatur konnte nicht geladen werden.',
   'update.signatureFetchFailedHint': 'Das Signaturdokument ist gerade nicht lesbar. Tippen Sie auf die Update-Schaltfläche, um es erneut zu versuchen.',
-  'update.downloadFailed': 'Das Update-Download ist fehlgeschlagen.',
+  'update.downloadFailed': 'Der Update-Download ist fehlgeschlagen.',
   'update.downloadFailedHint': 'Die Übertragung wurde nicht abgeschlossen. Tippen Sie auf die Update-Schaltfläche, um es erneut zu versuchen, oder nutzen Sie die Releases-Seite.',
   'update.unsignedHint': 'Diese Release veröffentlicht noch keine Signatur für diese Datei, daher kann sie nicht mit Herausgeber-Verifizierung in der App geliefert werden. Laden Sie sie von der offiziellen Releases-Seite.',
   'update.releasesPage': 'Stattdessen öffnet sich die Releases-Seite',
@@ -3804,6 +3825,23 @@ export function isRtl(lang: Language): boolean {
   return lang === 'fa';
 }
 
+/**
+ * Token interpolation for dictionary strings.
+ *
+ * The consumer-side `dict.replace('{x}', v)` pattern only replaced the
+ * FIRST occurrence of a token and - worse - interpreted `$&`-style
+ * replacement patterns inside the VALUE, so a filename like "a$&b.txt"
+ * corrupted the very toast announcing it. split/join replaces every
+ * occurrence and inserts the value literally.
+ */
+export function formatMessage(template: string, values: Record<string, string | number>): string {
+  let out = template;
+  for (const [token, value] of Object.entries(values)) {
+    out = out.split(`{${token}}`).join(String(value));
+  }
+  return out;
+}
+
 interface I18nContextValue {
   lang: Language;
   setLang: (lang: Language) => void;
@@ -3813,6 +3851,22 @@ interface I18nContextValue {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
+/**
+ * First-run language: follow the OS locale when the user has never chosen
+ * one, exactly like the theme bootstrap honors prefers-color-scheme. Only
+ * an exact supported primary subtag wins - anything else stays English
+ * instead of guessing from region variants.
+ */
+function detectInitialLanguage(): Language {
+  try {
+    if (typeof navigator === 'undefined') return 'en';
+    const primary = (navigator.language || '').split('-')[0].toLowerCase();
+    return (primary in DICTS ? primary : 'en') as Language;
+  } catch {
+    return 'en';
+  }
+}
+
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Language>(() => {
     try {
@@ -3821,10 +3875,16 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-    return 'en';
+    return detectInitialLanguage();
   });
 
   const rtl = isRtl(lang);
+
+  // Synchronous mirror for the framework-free formatters (currentLang.ts):
+  // set during render so even the first provider render formats with the
+  // active language, not the module default.
+  setActiveLanguage(lang);
+  setEtaSuffix(DICTS[lang]['downloads.eta'] ?? 'left');
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -3863,7 +3923,16 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     [lang]
   );
 
-  return <I18nContext.Provider value={{ lang, setLang, t, rtl }}>{children}</I18nContext.Provider>;
+  const ctxValue = { lang, setLang, t, rtl };
+
+  // The window title is app copy, not chrome: localize it with the active
+  // language (index.html ships the English default for the pre-JS paint
+  // only). Declared AFTER t so the dependency order stays valid.
+  useEffect(() => {
+    document.title = t('app.windowTitle');
+  }, [t]);
+
+  return <I18nContext.Provider value={ctxValue}>{children}</I18nContext.Provider>;
 }
 
 export function useI18n(): I18nContextValue {

@@ -74,6 +74,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   const { t, rtl } = useI18n();
   const mobileScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Debounced mirror of totalVisible for the live region: the count changes
+  // on EVERY search keystroke, and an aria-live polite region announcing
+  // each interim number drowned the one count that mattered. The announcement
+  // follows 600ms after the value last changed (typing pauses, filters
+  // apply instantly).
+  const [announcedVisible, setAnnouncedVisible] = React.useState(totalVisible);
+  useEffect(() => {
+    const timer = setTimeout(() => setAnnouncedVisible(totalVisible), 600);
+    return () => clearTimeout(timer);
+  }, [totalVisible]);
+
   const isFiltered =
     filters.search !== '' ||
     filters.category !== 'All' ||
@@ -352,7 +363,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
       {/* Screen-reader mirror of the language-neutral visible counter. */}
       <div className="sr-only" role="status" aria-live="polite">
-        {t('filter.resultsAnnounce').replace('{visible}', String(totalVisible)).replace('{total}', String(totalAll))}
+        {t('filter.resultsAnnounce').replace('{visible}', String(announcedVisible)).replace('{total}', String(totalAll))}
       </div>
     </div>
   );

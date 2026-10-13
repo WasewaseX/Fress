@@ -91,6 +91,20 @@ const TableViewImpl: React.FC<TableViewProps> = ({
   // outcomes render on the button AND in a persistent status region.
   const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Row deletion goes through the same inline confirm as the cards: the
+  // trash button used to call onDeleteApp directly, so ONE misclick in the
+  // actions column permanently removed the custom entry (no undo).
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
+  const pendingTrashRef = useRef<HTMLButtonElement | null>(null);
+  React.useEffect(() => {
+    if (confirmDeleteId) confirmCancelRef.current?.focus();
+  }, [confirmDeleteId]);
+  const cancelRowDelete = () => {
+    setConfirmDeleteId(null);
+    pendingTrashRef.current?.focus();
+    pendingTrashRef.current = null;
+  };
   React.useEffect(() => {
     return () => {
       if (copyTimer.current) clearTimeout(copyTimer.current);
@@ -359,15 +373,58 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                     )}
 
                     {app.isCustom && onDeleteApp && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteApp(app.id)}
-                        aria-label={t('card.delete.aria').replace('{name}', app.name)}
-                        className="p-1 fr-touch-target text-slate-400 hover:text-rose-400 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
-                        title={t('card.delete.tip')}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
+                      confirmDeleteId === app.id ? (
+                        <span
+                          className="inline-flex items-center gap-1 whitespace-nowrap"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              e.stopPropagation();
+                              cancelRowDelete();
+                            }
+                          }}
+                        >
+                          <span className="sr-only">{t('card.deleteConfirm').replace('{name}', app.name)}</span>
+                          <button
+                            type="button"
+                            aria-label={`${t('card.deleteConfirmAction')}: ${app.name}`}
+                            onClick={() => {
+                              onDeleteApp(app.id);
+                              setConfirmDeleteId(null);
+                              // Same parking rule as the card confirm: the
+                              // removal unmounts this row and would drop
+                              // keyboard focus onto <body>.
+                              requestAnimationFrame(() => {
+                                const next = document.querySelector<HTMLElement>('#apps-data-table tbody button');
+                                (next ?? document.getElementById('main-content'))?.focus();
+                              });
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-rose-600 hover:bg-rose-500 text-white"
+                          >
+                            {t('card.deleteConfirmAction')}
+                          </button>
+                          <button
+                            type="button"
+                            ref={confirmCancelRef}
+                            onClick={cancelRowDelete}
+                            className="px-1.5 py-0.5 rounded text-[11px] bg-slate-950/[0.06] dark:bg-white/[0.08] text-slate-200"
+                          >
+                            {t('common.cancel')}
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            pendingTrashRef.current = e.currentTarget;
+                            setConfirmDeleteId(app.id);
+                          }}
+                          aria-label={t('card.delete.aria').replace('{name}', app.name)}
+                          className="p-1 fr-touch-target text-slate-400 hover:text-rose-400 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
+                          title={t('card.delete.tip')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )
                     )}
                   </div>
                 </td>

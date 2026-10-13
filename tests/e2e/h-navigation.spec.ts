@@ -74,7 +74,11 @@ test.describe('Workflow H: navigation and page transitions', () => {
 
     await page.reload();
     await expect(page.locator('#replace-tab')).toBeVisible();
-    await expect(page.locator(sel.privacyTab)).toHaveAttribute('aria-selected', 'true');
+    // The page switch is two whole-page states rendered as pressed toggle
+    // buttons (aria-pressed), NOT an ARIA tablist: the old role=tab /
+    // aria-selected pair promised arrow-key navigation and tabpanels that
+    // were never implemented (a11y round-8 pass).
+    await expect(page.locator(sel.privacyTab)).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('scroll position is anchored sensibly when returning from Privacy', async ({ gotoApp, page }) => {

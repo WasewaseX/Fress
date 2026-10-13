@@ -51,7 +51,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   const [category, setCategory] = useState<Category>('Utilities & System');
   const [platforms, setPlatforms] = useState<Platform[]>(['windows']);
   const [license, setLicense] = useState('MIT');
-  const [stars, setStars] = useState<number>(0);
+  // The RAW text, not a number: a number state snapped an emptied field to
+  // "0" mid-edit (you could never blank it) and "-5" triggered a native
+  // WebView-locale validation bubble instead of the modal's own errors.
+  const [stars, setStars] = useState<string>('');
   const [starsAutoFilled, setStarsAutoFilled] = useState(false);
   const [description, setDescription] = useState('');
   const [whyItsAwesome, setWhyItsAwesome] = useState('');
@@ -84,7 +87,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setCategory(initialApp.category);
       setPlatforms(initialApp.platforms);
       setLicense(initialApp.license);
-      setStars(initialApp.stars);
+      setStars(String(initialApp.stars || ''));
       setStarsAutoFilled(false);
       setDescription(initialApp.description);
       setWhyItsAwesome(initialApp.whyItsAwesome);
@@ -105,7 +108,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setCategory('Utilities & System');
       setPlatforms(['windows']);
       setLicense('MIT');
-      setStars(0); // never invent a star count for a manually added app
+      setStars(''); // never invent a star count for a manually added app
       setDescription('');
       setWhyItsAwesome('');
       setBeginnerGuide('');
@@ -138,7 +141,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     const timer = setTimeout(() => {
       void fetchLiveStarCount(url).then((n) => {
         if (alive && typeof n === 'number' && n >= 0) {
-          setStars(n);
+          setStars(String(n));
           setStarsAutoFilled(true);
         }
       });
@@ -219,6 +222,18 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     setErrorField(field);
   };
 
+  // Only http(s) URLs are meaningful for repo/website links; the type="url"
+  // input constraint used to be the only check and produced a native
+  // browser-locale bubble, not this modal's translated error UI.
+  const isHttpUrl = (value: string): boolean => {
+    try {
+      const u = new URL(value);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -227,6 +242,14 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     }
     if (!description.trim()) {
       fail(t('add.descriptionRequired'), 'description');
+      return;
+    }
+    if (githubUrl.trim() && !isHttpUrl(githubUrl.trim())) {
+      fail(t('add.invalidGithubUrl'), 'form');
+      return;
+    }
+    if (gitlabUrl.trim() && !isHttpUrl(gitlabUrl.trim())) {
+      fail(t('add.invalidGithubUrl'), 'form');
       return;
     }
 
@@ -284,12 +307,19 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       // as "no website", while "#" used to survive those guards and render
       // a dead Official Website button.
       websiteUrl: websiteUrl.trim() || githubUrl.trim() || '',
-      githubUrl: githubUrl.trim() || undefined,
-      gitlabUrl: gitlabUrl.trim() || undefined,
+      // ALWAYS a string (possibly empty), never undefined: AppCard and
+      // AppDetailModal call githubUrl.includes(...) unguarded, so a manual
+      // entry saved without a repo URL used to white-screen the whole app
+      // on the next render. The storage loader sanitizes undefined to '' -
+      // the save path must produce the same shape.
+      githubUrl: githubUrl.trim(),
+      gitlabUrl: gitlabUrl.trim(),
       category,
       platforms,
       license: license.trim() || 'Open Source',
-      stars: Number(stars) || 0,
+      // Clamp on the way out: no native min-constraint bubble, no negative
+      // or fractional garbage reaching the catalog metadata row.
+      stars: Math.max(0, Math.floor(Number(stars) || 0)),
       description: description.trim(),
       whyItsAwesome: whyItsAwesome.trim() || 'Curated community open-source application.',
       beginnerGuide: beginnerGuide.trim() || 'Download and install from the official release page.',
@@ -346,15 +376,17 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           </button>
         </div>
 
-        {/* Shared tabs: one entry point for both ways of adding an app */}
+        {/* Shared tabs: one entry point for both ways of adding an app.
+            Plain pressed buttons, matching LiveSearchModal - the tab roles
+            promised an ARIA pattern (arrows, tabpanels) that was never
+            implemented. */}
         {showTabs && onSwitchTab && !initialApp && (
-          <div className="flex items-center gap-1 px-4 sm:px-5 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label={t('ls.tabsAria')}>
+          <div className="flex items-center gap-1 px-4 sm:px-5 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="group" aria-label={t('ls.tabsAria')}>
             {([['search', t('ls.title')], ['manual', t('ls.tabManual')]] as const).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
-                role="tab"
-                aria-selected={id === 'manual'}
+                aria-pressed={id === 'manual'}
                 onClick={() => onSwitchTab(id)}
                 className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
                   id === 'manual'
@@ -368,8 +400,15 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
           </div>
         )}
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
+        {/* Form Body. noValidate: native constraint bubbles (type=url,
+            number min) render in the WebView's locale, not the app's -
+            every validation message goes through the translated alert
+            instead. The fields scroll INSIDE the form; the save/cancel row
+            is pinned below the scroll region (like every other modal
+            footer) so the primary action stays reachable at the 320px
+            floor without scrolling the whole form. */}
+        <form onSubmit={handleSubmit} noValidate className="flex-1 min-h-0 flex flex-col text-xs">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4">
           {errorMsg && (
             <div id="add-form-error" role="alert" className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-lg flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -528,11 +567,12 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-stars"
                 type="number"
-                min="0"
+                inputMode="numeric"
+                dir="ltr"
                 value={stars}
                 onChange={(e) => {
                   starsTouchedRef.current = true;
-                  setStars(Number(e.target.value));
+                  setStars(e.target.value);
                   setStarsAutoFilled(false);
                 }}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
@@ -684,8 +724,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
             </div>
           </div>
 
-          {/* Footer Save */}
-          <div className="pt-2 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-end gap-2">
+          </div>
+
+          {/* Footer Save. Pinned: outside the scroll region, always visible. */}
+          <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}

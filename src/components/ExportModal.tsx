@@ -39,7 +39,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const { t } = useI18n();
 
   const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
+  // onEscape is REQUIRED like every other stacked dialog: without it Escape
+  // fell through to the shell-wide closeAllDialogs, so one press closed the
+  // Export dialog AND every dialog stacked underneath it (e.g. export opened
+  // from the palette over the detail modal), dropping focus to <body>.
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose });
   // Reopening starts from a clean slate (never show a stale "Copied"), and
   // the reset timer never fires after the dialog is gone.
   React.useEffect(() => {

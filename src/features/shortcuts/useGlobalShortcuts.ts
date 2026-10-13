@@ -78,33 +78,37 @@ export function useGlobalShortcuts(actions: GlobalShortcutsActions): void {
         searchInput?.focus();
       } else if (e.key === 'Escape') {
         ref.current.closeAllDialogs();
-      } else if (e.key === 'a' || e.key === 'A') {
+      } else if (
+        e.key === 'a' || e.key === 'A' ||
+        e.key === 'b' || e.key === 'B' ||
+        e.key === 'm' || e.key === 'M' ||
+        e.key === 'e' || e.key === 'E' ||
+        e.key === 'd' || e.key === 'D' ||
+        e.key === 'f' || e.key === 'F' ||
+        e.key === 't' || e.key === 'T' ||
+        e.key === 'o' || e.key === 'O' ||
+        e.key === 'v' || e.key === 'V'
+      ) {
+        // Every other single-letter shortcut used to fire BEHIND an open
+        // dialog: f/t/o/v silently flipped catalog filters with zero
+        // visible feedback, and b/m/e/a/d stacked a second modal on top of
+        // the open one (pressing a documented key while READING the
+        // shortcuts dialog mutated hidden state). One guard for the whole
+        // family, exactly like '/'. Escape and Ctrl/Cmd+K above stay live
+        // so overlays remain escapable and openable by keyboard.
+        if (ref.current.hasOpenOverlay()) return;
         e.preventDefault();
-        ref.current.openAddFlowSearch();
-      } else if (e.key === 'b' || e.key === 'B') {
-        e.preventDefault();
-        ref.current.toggleBatchInstallModal();
-      } else if (e.key === 'm' || e.key === 'M') {
-        e.preventDefault();
-        ref.current.toggleCompareModal();
-      } else if (e.key === 'e' || e.key === 'E') {
-        e.preventDefault();
-        ref.current.toggleExportModal();
-      } else if (e.key === 'd' || e.key === 'D') {
-        e.preventDefault();
-        ref.current.openTauriModal();
-      } else if (e.key === 'f' || e.key === 'F') {
-        e.preventDefault();
-        ref.current.toggleFavoritesOnly();
-      } else if (e.key === 't' || e.key === 'T') {
-        e.preventDefault();
-        ref.current.toggleTrendingOnly();
-      } else if (e.key === 'o' || e.key === 'O') {
-        e.preventDefault();
-        ref.current.toggleOwnerPickOnly();
-      } else if (e.key === 'v' || e.key === 'V') {
-        e.preventDefault();
-        ref.current.toggleViewMode();
+        switch (e.key.toLowerCase()) {
+          case 'a': ref.current.openAddFlowSearch(); break;
+          case 'b': ref.current.toggleBatchInstallModal(); break;
+          case 'm': ref.current.toggleCompareModal(); break;
+          case 'e': ref.current.toggleExportModal(); break;
+          case 'd': ref.current.openTauriModal(); break;
+          case 'f': ref.current.toggleFavoritesOnly(); break;
+          case 't': ref.current.toggleTrendingOnly(); break;
+          case 'o': ref.current.toggleOwnerPickOnly(); break;
+          case 'v': ref.current.toggleViewMode(); break;
+        }
       }
     };
 

@@ -47,6 +47,11 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
   // silently keep claiming "Copy" while nothing was copied.
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'failed'>('idle');
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Switching format invalidates the previous copy feedback: the chip said
+  // "Copied" for a winget script that was never the brew script now shown.
+  React.useEffect(() => {
+    setCopyState('idle');
+  }, [scriptType]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   // onEscape is REQUIRED here: without it Escape fell through to the
@@ -89,17 +94,20 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
   const checked = selectedApps.map((a) => ({ app: a, cmd: sanitizeInstallCommand(tabManager, rawCommandOf(a)) }));
   const validCommands = checked.filter((c) => c.cmd !== null);
   const skippedCount = checked.length - validCommands.length;
+  const skippedNames = checked.filter((c) => c.cmd === null).map((c) => c.app.name);
   const hasCommands = validCommands.length > 0;
 
   // Generate scripts based on selection
   const generateScript = () => {
     if (selectedApps.length === 0) {
-      return '# No applications currently selected.\n# Check the boxes of tools you wish to install.';
+      // Localized (this comment is shown in the preview and shipped in the
+      // copied/downloaded file): the text used to be hardcoded English.
+      return t('bs.scriptEmpty');
     }
 
     const skipNote =
       skippedCount > 0
-        ? `# Note: ${skippedCount} of ${selectedApps.length} selected apps have no ${tabLabel} package and were skipped.\n\n`
+        ? `${t('bs.scriptSkipLine').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}\n\n`
         : '';
 
     if (scriptType === 'winget-ps') {
@@ -336,7 +344,11 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
         </div>
 
         {/* Selected Apps Chip Bar */}
-        <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-950/10 dark:border-white/[0.04] flex items-center gap-1.5 overflow-x-auto text-xs">
+        <div
+          className="px-5 py-2.5 bg-slate-900 border-b border-slate-950/10 dark:border-white/[0.04] flex items-center gap-1.5 overflow-x-auto text-xs"
+          tabIndex={0}
+          aria-label={t('bs.selected').replace('{n}', String(selectedApps.length))}
+        >
           <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider me-1 shrink-0">
             {t('bs.selected')} ({selectedApps.length}):
           </span>
@@ -365,8 +377,14 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
           )}
         </div>
 
-        {/* Code Preview */}
-        <div className="flex-1 p-5 overflow-y-auto bg-slate-950">
+        {/* Code Preview. Keyboard-scrollable: this is the modal's primary
+            content, arbitrarily long, and keyboard users could not move it. */}
+        <div
+          className="flex-1 p-5 overflow-y-auto bg-slate-950"
+          tabIndex={0}
+          role="region"
+          aria-label={t('bs.title')}
+        >
           <pre className="font-mono text-xs text-emerald-400 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
             {scriptOutput}
           </pre>
@@ -381,10 +399,18 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               <span>{t('bs.safeNote')}</span>
             </div>
             {selectedApps.length > 0 && skippedCount > 0 && (
-              <div className="flex items-center gap-2 text-[11px] text-amber-300 dark:text-amber-400">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span>
-                  {t('bs.skipNote').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}
+              <div className="flex flex-col gap-1 text-[11px] text-amber-300 dark:text-amber-400 min-w-0">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    {t('bs.skipNote').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}
+                  </span>
+                </div>
+                {/* Per-item visibility: the count alone never said WHICH
+                    apps lack a package for the chosen manager (the
+                    batch-download path names them in its toast). */}
+                <span className="text-amber-300/80 dark:text-amber-400/80 break-words">
+                  {skippedNames.join(', ')}
                 </span>
               </div>
             )}

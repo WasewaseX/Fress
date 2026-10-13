@@ -258,7 +258,7 @@ export const PpDropdown: React.FC<PpDropdownProps> = ({
                   tabIndex={-1}
                   id={`${listboxId}-opt-${opt.id}`}
                   onClick={() => onPick(opt.id)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-start text-xs transition-colors ${
                     opt.selected
                       ? 'bg-sky-500/10 text-sky-400'
                       : 'text-slate-200 hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.06]'

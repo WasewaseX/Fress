@@ -4,7 +4,7 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 import { AppItem, Category, Platform } from '../types';
 import { formatStarCount } from '../lib/starFetch';
 import {
@@ -198,7 +198,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           id: app.id,
           title: app.name,
           subtitle: matchAlt
-            ? t('palette.alternativeTo').replace('{alt}', app.proprietaryAlternative).replace('{tagline}', app.tagline)
+            ? formatMessage(t('palette.alternativeTo'), { alt: app.proprietaryAlternative ?? '', tagline: app.tagline })
             : app.tagline,
           alt: app.proprietaryAlternative
         });
@@ -218,12 +218,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const activeItem = filteredItems.length > 0 ? filteredItems[activeIndex] : undefined;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev + 1) % Math.max(1, filteredItems.length));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev - 1 + filteredItems.length) % Math.max(1, filteredItems.length));
+      const delta = e.key === 'ArrowDown' ? 1 : -1;
+      const count = Math.max(1, filteredItems.length);
+      const next = (activeIndex + delta + count) % count;
+      setSelectedIndex(next);
+      // Arrow presses that originate on a ROW button must keep DOM focus in
+      // sync with the highlight: the highlight and aria-activedescendant
+      // moved while focus stayed on the old row, so Enter then activated the
+      // row that was neither highlighted nor announced. Row focus sets the
+      // index again via onFocus - harmless, and it keeps all three signals
+      // (visual highlight, SR announcement, Enter target) on one row.
+      if (e.target !== inputRef.current) {
+        const row = filteredItems[next];
+        if (row) document.getElementById(`palette-item-${row.id}`)?.focus();
+      }
     } else if (e.key === 'Enter') {
       // APG combobox: Enter activates the highlighted option only while
       // focus is IN the query input. When focus sits on a real button
@@ -267,6 +277,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       copyTimerRef.current = null;
     }, 2000);
   };
+
+  // Keep the highlighted option inside the scrollable list viewport.
+  // Chromium auto-scrolls aria-activedescendant targets, but the Tauri
+  // webview is not Chromium-shaped on every platform - and 'nearest' with
+  // no behavior option is instant, so this also respects reduced motion.
+  const activeRowId = activeItem ? `palette-item-${activeItem.id}` : null;
+  React.useEffect(() => {
+    if (!isOpen || !activeRowId) return;
+    // Optional call: jsdom (and some old webviews) do not implement
+    // scrollIntoView; the highlight must never crash the palette there.
+    document.getElementById(activeRowId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [isOpen, activeRowId]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   keepFocusInside(panelRef, isOpen, { onEscape: onClose, initialFocus: inputRef });
@@ -361,7 +383,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 ) : (
                   <>
                     <Copy className="w-3 h-3" aria-hidden="true" />
-                    <span>{t('palette.copyCommandFor').replace('{name}', activeApp.name)}</span>
+                    <span>{formatMessage(t('palette.copyCommandFor'), { name: activeApp.name })}</span>
                   </>
                 )}
               </button>
@@ -462,7 +484,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                                 ? 'text-[color:var(--fr-chip-active-accent)] bg-amber-200/10 border border-amber-200/25'
                                 : 'text-amber-300/90 bg-amber-400/10 border border-amber-400/20'
                             }`}>
-                              {t('palette.vs').replace('{alt}', app.proprietaryAlternative)}
+                              {formatMessage(t('palette.vs'), { alt: app.proprietaryAlternative })}
                             </span>
                           )}
                           <span className={`text-[11px] font-mono shrink-0 ${isSelected ? 'text-[color:var(--fr-chip-active-text-soft)]' : 'text-slate-400'}`}>
@@ -483,7 +505,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             role="status"
             className="p-8 text-center text-xs text-slate-400"
           >
-            {t('palette.noMatch').replace('{query}', query)}
+            {formatMessage(t('palette.noMatch'), { query })}
           </div>
         )}
 
@@ -507,7 +529,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↵</kbd> {t('palette.select')}</span>
             <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">ESC</kbd> {t('palette.dismiss')}</span>
           </div>
-          <span className="font-mono text-[11px] text-slate-400">{t('palette.toolsIndexed').replace('{count}', String(apps.length))}</span>
+          <span className="font-mono text-[11px] text-slate-400">{formatMessage(t('palette.toolsIndexed'), { count: apps.length })}</span>
         </div>
       </div>
     </div>

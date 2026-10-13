@@ -5,6 +5,7 @@
 import React, { useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { useI18n } from '../lib/i18n';
+import { PALETTE_KEY } from '../lib/utils';
 import { X, Keyboard } from 'lucide-react';
 
 interface KeyboardShortcutsModalProps {
@@ -24,7 +25,10 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   if (!isOpen) return null;
 
   const shortcuts = [
-    { key: '⌘K / Ctrl+K', description: t('ks.desc.palette') },
+    // Platform-actual combo, same source as the header chip: advertising
+    // "⌘K / Ctrl+K" verbatim implied the wrong combo works on Windows/Linux
+    // (and vice versa on macOS).
+    { key: PALETTE_KEY, description: t('ks.desc.palette') },
     { key: '/', description: t('ks.desc.search') },
     { key: 'Esc', description: t('ks.desc.escape') },
     { key: 'V', description: t('ks.desc.view') },

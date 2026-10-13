@@ -330,7 +330,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                     e.target.value = '';
                   }
                 }}
-                className="bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] text-xs text-slate-100 px-2 py-1 rounded focus:outline-none"
+                className="bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] text-xs text-slate-100 px-2 py-1 rounded focus:outline-none focus:ring-2 focus:ring-fr-focus focus:border-fr-focus"
                 defaultValue=""
               >
                 <option value="" disabled>{t('cmp.selectPlaceholder')}</option>

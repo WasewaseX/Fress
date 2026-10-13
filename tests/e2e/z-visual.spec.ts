@@ -173,6 +173,34 @@ test.describe('visual: 320px floor regression guards', () => {
     expect(db.y + db.height, 'export Download button bottom inside the panel').toBeLessThanOrEqual(panel.y + panel.height + 1);
     await shoot(page, 'export-320');
   });
+
+  test('manual add-app modal at 320: form and primary action reachable', async ({ gotoApp, page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await gotoApp();
+    // 'a' opens the add flow (LiveSearch); the Manual tab swaps the dialog.
+    await page.keyboard.press('a');
+    await expect(page.locator('#live-search-modal-backdrop')).toBeVisible();
+    await page.getByRole('button', { name: 'Enter manually' }).click();
+    await expect(page.locator('#add-app-modal-backdrop')).toBeVisible();
+    await expectNoDocOverflow(page);
+    // Name field visible, the primary action inside the viewport, and the
+    // stars field reachable (the form's validation UI changed in the
+    // a11y round-8 pass: no native constraint bubbles, translated errors).
+    const nameInput = page.locator('#input-app-name');
+    await expect(nameInput).toBeVisible();
+    await expectInsideWidth(page, '#input-app-name', 320);
+    // The save/cancel row is PINNED below the form's scroll region (the
+    // round-8 fix; before it the buttons sat at the end of a scrollable
+    // form, off-panel at this height). Fully inside the viewport, always.
+    const submit = page.locator('#add-app-modal-backdrop button[type="submit"]');
+    await expect(submit).toBeVisible();
+    const sb = (await submit.boundingBox())!;
+    const vh = await page.evaluate(() => document.documentElement.clientHeight);
+    expect(sb.y, 'pinned add-app submit top inside the viewport').toBeGreaterThanOrEqual(-1);
+    expect(sb.y + sb.height, 'pinned add-app submit fully inside the viewport').toBeLessThanOrEqual(vh + 1);
+    await expect(page.locator('#input-stars')).toBeVisible();
+    await shoot(page, 'add-app-320');
+  });
 });
 
 test.describe('visual: 320px RTL floor guard', () => {

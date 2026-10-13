@@ -45,7 +45,7 @@ const THEME_COLORS: Record<Theme, string> = {
   dark: '#090d16',
 };
 
-export function applyTheme(theme: Theme): Theme {
+export function applyTheme(theme: Theme, opts: { persist?: boolean } = {}): Theme {
   if (typeof document === 'undefined') return theme;
   document.documentElement.classList.toggle('dark', theme === 'dark');
   document.documentElement.style.colorScheme = theme;
@@ -56,10 +56,12 @@ export function applyTheme(theme: Theme): Theme {
     document.head.appendChild(meta);
   }
   meta.setAttribute('content', THEME_COLORS[theme]);
-  try {
-    localStorage.setItem(STORAGE_KEY, theme);
-  } catch {
-    // Storage can be unavailable (private mode); the page theme still works.
+  if (opts.persist !== false) {
+    try {
+      localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      // Storage can be unavailable (private mode); the page theme still works.
+    }
   }
   return theme;
 }
@@ -68,12 +70,28 @@ export function toggleTheme(current: Theme): Theme {
   return applyTheme(current === 'dark' ? 'light' : 'dark');
 }
 
-/** Follow the OS setting if the user never chose one manually. */
-export function systemTheme(): Theme {
-  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-    return 'light';
-  }
-  return 'dark';
+/**
+ * Live system-theme sync for users who never picked a theme manually.
+ *
+ * The old `systemTheme()` read the media query once and was never imported:
+ * an OS switch while the app was open was silently ignored until the user
+ * toggled manually. This wiring applies OS switches ONLY while no explicit
+ * choice is stored - the moment a user picks light/dark in the menu, their
+ * choice wins forever (until they clear it).
+ */
+export function enableSystemThemeSync(onChange: (theme: Theme) => void): () => void {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => undefined;
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const handler = (e: MediaQueryListEvent) => {
+    // A stored choice is an explicit user decision: never override it.
+    if (readStoredTheme()) return;
+    // Persist=false: an OS switch is NOT a user choice - it must stay
+    // ephemeral so a later manual pick (or its absence) keeps controlling
+    // the default.
+    onChange(e.matches ? 'dark' : 'light');
+  };
+  mq.addEventListener('change', handler);
+  return () => mq.removeEventListener('change', handler);
 }
 
 export { readStoredTheme };

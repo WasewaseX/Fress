@@ -4,7 +4,7 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
+import { formatMessage, useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { translateAppTextDefault } from '../lib/appText';
 import { openExternal } from '../lib/external';
 import { 
@@ -34,6 +34,61 @@ interface LiveSearchModalProps {
   onSwitchTab?: (tab: 'search' | 'manual') => void;
 }
 
+/**
+ * Map a GitHub repo object (from the search API or a hypothetical server
+ * proxy) to a catalog AppItem. Single source of truth for BOTH fetch
+ * branches so the proxy path can never render raw repo objects again
+ * (that used to crash the modal on `item.platforms.includes`).
+ */
+function mapRepoToAppItem(repo: any): AppItem {
+  const text = `${repo.name} ${repo.description || ''} ${(repo.topics || []).join(' ')}`.toLowerCase();
+  let category: Category = 'Utilities & System';
+  if (text.includes('code') || text.includes('editor') || text.includes('terminal') || text.includes('compiler') || text.includes('git')) {
+    category = 'Developer & Code';
+  } else if (text.includes('note') || text.includes('markdown') || text.includes('office') || text.includes('todo')) {
+    category = 'Productivity & Office';
+  } else if (text.includes('password') || text.includes('security') || text.includes('privacy') || text.includes('vault')) {
+    category = 'Privacy & Security';
+  } else if (text.includes('video') || text.includes('audio') || text.includes('player') || text.includes('media')) {
+    category = 'Media, Audio & Video';
+  } else if (text.includes('paint') || text.includes('draw') || text.includes('3d') || text.includes('design')) {
+    category = 'Design & Creative';
+  }
+  if (text.includes('llm') || text.includes('ai') || text.includes('gpt')) {
+    category = 'Productivity & Office';
+  }
+
+  const hasAndroid = text.includes('android') || (repo.topics || []).includes('android');
+  const platforms: Platform[] = ['windows', 'mac', 'linux'];
+  if (hasAndroid) platforms.push('android');
+
+  return {
+    id: `custom-gh-${repo.id}`,
+    name: repo.name,
+    tagline: repo.description ? repo.description.slice(0, 110) : 'Open-source application',
+    description: repo.description || 'Community open-source repository.',
+    whyItsAwesome: `Community-backed open-source project with ${repo.stargazers_count.toLocaleString()} stars on GitHub.`,
+    beginnerGuide: 'Visit the GitHub project page for release downloads and setup instructions.',
+    githubUrl: repo.html_url,
+    websiteUrl: repo.homepage || repo.html_url,
+    category,
+    platforms,
+    license: repo.license?.spdx_id || repo.license?.name || 'Open Source',
+    stars: repo.stargazers_count,
+    beginnerRating: 'Quick Learning Curve',
+    isOwnerPick: false,
+    isTrendingToday: false,
+    tags: repo.topics && repo.topics.length > 0 ? repo.topics.slice(0, 4) : ['open-source', 'github'],
+    wingetCommand: `winget install ${repo.name}`,
+    brewCommand: `brew install --cask ${repo.name.toLowerCase()}`,
+    flatpakCommand: `flatpak install flathub ${repo.name.toLowerCase()}`,
+    isPortable: true,
+    offlineReady: true,
+    isCustom: true,
+    addedAt: new Date().toISOString().split('T')[0]
+  };
+}
+
 export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   isOpen,
   onClose,
@@ -47,6 +102,11 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Whether at least one search has COMPLETED in this dialog session. The
+  // empty state before that first answer is a different situation from "the
+  // search ran and found nothing" - both used to render the same "type a
+  // name above" copy, which read as nonsense after a 0-hit search.
+  const [hasSearched, setHasSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Monotonic id: only the newest search may touch state (stale responses
@@ -79,6 +139,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
       setAddedIds(new Set());
       setErrorMsg(null);
       setLoading(false);
+      setHasSearched(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -109,6 +170,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
     if (!q) {
       setResults([]);
       setLoading(false);
+      setHasSearched(false);
       return;
     }
 
@@ -116,14 +178,19 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
     setErrorMsg(null);
 
     try {
-      // 1. Try server-side live search proxy
+      // 1. Try server-side live search proxy (a deployment MAY serve one;
+      //    the shipped app does not, so this 404s into the fallback).
       const res = await fetch(`/api/github/search?q=${encodeURIComponent(q)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.items && data.items.length > 0) {
           if (myId === searchReqId.current) {
-            setResults(data.items);
+            // Proxy payloads are GitHub repo objects, not AppItems: they
+            // used to be set as-is, so the very next render crashed on
+            // item.platforms.includes if a proxy ever shipped.
+            setResults(data.items.map(mapRepoToAppItem));
             setLoading(false);
+            setHasSearched(true);
           }
           return;
         }
@@ -135,55 +202,11 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
       );
       if (ghRes.ok) {
         const ghData = await ghRes.json();
-        const mappedItems: AppItem[] = (ghData.items || []).map((repo: any) => {
-          const text = `${repo.name} ${repo.description || ''} ${(repo.topics || []).join(' ')}`.toLowerCase();
-          let category: Category = 'Utilities & System';
-          if (text.includes('code') || text.includes('editor') || text.includes('terminal') || text.includes('compiler') || text.includes('git')) {
-            category = 'Developer & Code';
-          } else if (text.includes('note') || text.includes('markdown') || text.includes('office') || text.includes('todo')) {
-            category = 'Productivity & Office';
-          } else if (text.includes('password') || text.includes('security') || text.includes('privacy') || text.includes('vault')) {
-            category = 'Privacy & Security';
-          } else if (text.includes('video') || text.includes('audio') || text.includes('player') || text.includes('media')) {
-            category = 'Media, Audio & Video';
-          } else if (text.includes('paint') || text.includes('draw') || text.includes('3d') || text.includes('design')) {
-            category = 'Design & Creative';
-          }
-          if (text.includes('llm') || text.includes('ai') || text.includes('gpt')) {
-            category = 'Productivity & Office';
-          }
-
-          const hasAndroid = text.includes('android') || (repo.topics || []).includes('android');
-          const platforms: Platform[] = ['windows', 'mac', 'linux'];
-          if (hasAndroid) platforms.push('android');
-
-          return {
-            id: `custom-gh-${repo.id}`,
-            name: repo.name,
-            tagline: repo.description ? repo.description.slice(0, 110) : 'Open-source application',
-            description: repo.description || 'Community open-source repository.',
-            whyItsAwesome: `Community-backed open-source project with ${repo.stargazers_count.toLocaleString()} stars on GitHub.`,
-            beginnerGuide: 'Visit the GitHub project page for release downloads and setup instructions.',
-            githubUrl: repo.html_url,
-            websiteUrl: repo.homepage || repo.html_url,
-            category,
-            platforms,
-            license: repo.license?.spdx_id || repo.license?.name || 'Open Source',
-            stars: repo.stargazers_count,
-            beginnerRating: 'Quick Learning Curve',
-            isOwnerPick: false,
-            isTrendingToday: false,
-            tags: repo.topics && repo.topics.length > 0 ? repo.topics.slice(0, 4) : ['open-source', 'github'],
-            wingetCommand: `winget install ${repo.name}`,
-            brewCommand: `brew install --cask ${repo.name.toLowerCase()}`,
-            flatpakCommand: `flatpak install flathub ${repo.name.toLowerCase()}`,
-            isPortable: true,
-            offlineReady: true,
-            isCustom: true,
-            addedAt: new Date().toISOString().split('T')[0]
-          };
-        });
-        if (myId === searchReqId.current) setResults(mappedItems);
+        const mappedItems: AppItem[] = (ghData.items || []).map(mapRepoToAppItem);
+        if (myId === searchReqId.current) {
+          setResults(mappedItems);
+          setHasSearched(true);
+        }
       } else {
         if (myId === searchReqId.current) setErrorMsg(t('ls.rateLimited'));
       }
@@ -225,7 +248,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
     <div 
       ref={panelRef}
       id="live-search-modal-backdrop" 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="live-search-title"
@@ -260,15 +283,19 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
           </button>
         </div>
 
-        {/* Shared tabs: one entry point for both ways of adding an app */}
+        {/* Shared tabs: one entry point for both ways of adding an app.
+            Plain pressed buttons (no tab roles): the two flows swap the
+            whole dialog, there is no tabpanel relationship, and the ARIA
+            tabs pattern (arrow keys, aria-controls) was never implemented
+            here - the same contract LegalModals already dropped for the
+            same reason. */}
         {showTabs && onSwitchTab && (
-          <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="tablist" aria-label={t('ls.tabsAria')}>
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-900" role="group" aria-label={t('ls.tabsAria')}>
             {([['search', t('ls.title')], ['manual', t('ls.tabManual')]] as const).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
-                role="tab"
-                aria-selected={id === 'search'}
+                aria-pressed={id === 'search'}
                 onClick={() => onSwitchTab(id)}
                 className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
                   id === 'search'
@@ -323,8 +350,10 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
 
         {/* Results List. aria-busy announces the in-flight search to AT:
             the spinner is decorative, so a sighted and a non-sighted user
-            previously got different information about the same wait. */}
-        <div id="live-search-results-list" className="flex-1 overflow-y-auto p-4 space-y-2.5" aria-busy={loading}>
+            previously got different information about the same wait.
+            Keyboard-scrollable (tabIndex=0): the list is the modal's primary
+            content and overflows on every short viewport. */}
+        <div id="live-search-results-list" role="region" aria-label={t('ls.searchAria')} tabIndex={0} className="flex-1 overflow-y-auto p-4 space-y-2.5" aria-busy={loading}>
           {errorMsg && (
             <div role="alert" className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs rounded-lg">
               {errorMsg}
@@ -332,13 +361,23 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
           )}
 
           {results.length === 0 && !loading && (
-            <div role="status" className="text-center py-12 text-slate-400 text-xs">
-              <FolderGit2 className="w-8 h-8 mx-auto mb-2 text-slate-400" aria-hidden="true" />
-              <p>{t('ls.emptyTitle')}</p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                {t('ls.emptyHint')}
-              </p>
-            </div>
+            hasSearched ? (
+              // A completed search with zero hits: the old copy told users
+              // to "type a name above" - which they had just done.
+              <div role="status" className="text-center py-12 text-slate-400 text-xs">
+                <FolderGit2 className="w-8 h-8 mx-auto mb-2 text-slate-400" aria-hidden="true" />
+                <p className="font-semibold text-slate-300">{formatMessage(t('ls.noMatchesTitle'), { query })}</p>
+                <p className="text-[11px] text-slate-400 mt-1">{t('ls.noMatchesHint')}</p>
+              </div>
+            ) : (
+              <div role="status" className="text-center py-12 text-slate-400 text-xs">
+                <FolderGit2 className="w-8 h-8 mx-auto mb-2 text-slate-400" aria-hidden="true" />
+                <p>{t('ls.emptyTitle')}</p>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {t('ls.emptyHint')}
+                </p>
+              </div>
+            )
           )}
 
           {results.map((item) => {
@@ -418,8 +457,11 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
                   ) : (
                     <button
                       type="button"
-                      id={`btn-add-live-app-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                      // Repo id, not name: same-named repos from different
+                      // owners collided into duplicate DOM ids.
+                      id={`btn-add-live-app-${item.id}`}
                       onClick={() => handleAddTool(item)}
+                      aria-label={`${t('common.add')}: ${item.name}`}
                       className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md border border-sky-400 transition-colors shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" aria-hidden="true" />
@@ -443,6 +485,13 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
             {t('common.done')}
           </button>
         </div>
+
+        {/* Result count for the completed search, announced politely: the
+            visual rows were the only signal, and aria-busy only covers the
+            loading phase, never the outcome. */}
+        <span className="sr-only" role="status">
+          {!loading && !errorMsg && hasSearched ? formatMessage(t('ls.resultsAnnounce'), { n: results.length }) : ''}
+        </span>
       </div>
     </div>
   );

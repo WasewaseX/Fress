@@ -365,8 +365,16 @@ if (!TESTED_SHA) {
     }
     return b.workflow_runs;
   });
+  // The query already carries `head_sha=<TESTED_SHA>`, but a run from
+  // ANOTHER commit must never stand in for the tested one - not even if a
+  // proxy, cache or API quirk returns unfiltered history. Every returned
+  // run is re-checked against the tested SHA locally; mismatches are
+  // counted and reported, never silently folded into the aggregate.
+  const returned = pageData.items.filter((r) => r && typeof r === 'object');
+  const mismatched = returned.filter((r) => r.head_sha !== TESTED_SHA);
+  const onTestedSha = returned.filter((r) => r.head_sha === TESTED_SHA);
   const latest = new Map();
-  for (const run of pageData.items) {
+  for (const run of onTestedSha) {
     if (!run || typeof run !== 'object') continue;
     const id = typeof run.workflow_id === 'number' ? run.workflow_id : String(run.workflow_id ?? run.name ?? 'unknown');
     const prev = latest.get(id);
@@ -388,6 +396,10 @@ if (!TESTED_SHA) {
   const failing = runs.filter((r) => r.conclusion !== null && CI_FAILURE_CONCLUSIONS.has(r.conclusion));
   const pending = runs.some((r) => r.status && r.status !== 'completed');
   const aggregated = runs.length === 0 ? 'none' : failing.length > 0 ? 'failing' : pending ? 'pending' : 'pass';
+  const notes = [];
+  if (pageData.truncated) notes.push(`inventory capped at ${pageData.items.length} runs (pagination safety limit) — list may be incomplete`);
+  if (mismatched.length > 0) notes.push(`${mismatched.length} API-returned run(s) ignored because their head_sha is not the tested SHA — a passing historical run cannot stand in for the tested commit`);
+  if (runs.length === 0) notes.push('no workflow runs recorded for the tested SHA (yet)');
     return {
       status: 'ok',
       tested_sha_filter: TESTED_SHA, // every run below was queried by this exact commit SHA
@@ -396,8 +408,8 @@ if (!TESTED_SHA) {
       runs,
       pages_fetched: pageData.pagesFetched,
       truncated: pageData.truncated,
-      ...(pageData.truncated ? { note: `inventory capped at ${pageData.items.length} runs (pagination safety limit) — list may be incomplete` } : {}),
-      ...(runs.length === 0 ? { note: 'no workflow runs recorded for the tested SHA (yet)' } : {}),
+      excluded_head_sha_mismatch: mismatched.length,
+      ...(notes.length > 0 ? { note: notes.join('; ') } : {}),
     };
   });
 }
@@ -618,6 +630,10 @@ md.push('');
 if (ciRuns.value) {
   if (ciRuns.value.runs.length === 0) {
     md.push('**CI aggregate: none** — no workflow runs recorded for the tested SHA.');
+    if (ciRuns.value.excluded_head_sha_mismatch > 0) {
+      md.push('');
+      md.push(`${ciRuns.value.excluded_head_sha_mismatch} API-returned run(s) were excluded: their head_sha is not the tested SHA. A passing historical run cannot stand in for the tested commit.`);
+    }
   } else {
     const agg = ciRuns.value.aggregated_conclusion;
     const aggLine =
@@ -633,6 +649,10 @@ if (ciRuns.value) {
     md.push(`Every run below was queried by the exact tested SHA (\`${TESTED_SHA.slice(0, 12)}…\`).`);
     md.push('');
     for (const r of ciRuns.value.runs) md.push(`- ${fmtRun(r)}`);
+    if (ciRuns.value.excluded_head_sha_mismatch > 0) {
+      md.push('');
+      md.push(`${ciRuns.value.excluded_head_sha_mismatch} API-returned run(s) were excluded: their head_sha is not the tested SHA. A passing historical run cannot stand in for the tested commit.`);
+    }
   }
 } else {
   md.push(`unavailable: ${ciRuns.unavailable}`);

@@ -43,6 +43,7 @@ All workflows live in `.github/workflows/`, least-privilege
 | Gate | Workflow / job | OS | Blocking? |
 |---|---|---|---|
 | Version coherence (`npm run validate:versions`; one implementation in `scripts/ci/validate-versions.ts`) | `ci.yml` → `version-guard` (+ step inside `frontend`) | ubuntu-latest | Yes |
+| Ubuntu 26 canary (the SAME version toolchain on the explicit `ubuntu-26.04` image) | `ci.yml` → `ubuntu26-canary` | ubuntu-26.04 | Yes — red means pin the floating jobs to ubuntu-24.04 before the 2026-10-19 alias flip (section 2.4) |
 | Typecheck, unit tests, version coherence, catalog validator, security config validator, production build | `ci.yml` → `frontend` | ubuntu-latest | Yes |
 | Release-artifact verifier rejection tests + workflow publication-boundary contract (49 tests) | `ci.yml` → `artifact-audit-tests` | ubuntu-latest | Yes |
 | **Integration snapshot (public evidence: newest-release re-audit + API/git facts)** | `integration-snapshot.yml` → `artifact-audit` (real release bytes through the real verifier), `snapshot` (API + git facts → step summary + JSON artifact) | ubuntu-24.04 (pinned; evidence determinism) | Evidence, not a merge gate - but a RED snapshot run is a real signal: the newest release failed its integrity re-audit, a gate failed, or a required observation was unavailable (never silently empty) |
@@ -191,7 +192,10 @@ be observed):
   (`pass` / `failing` / `pending` / `none`) plus `failing_workflows` make
   a red workflow impossible to miss, and a failing aggregate is announced
   as a warning annotation on the run. Pagination facts are recorded here
-  as well.
+  as well. Every API-returned run is additionally re-checked against the
+  tested SHA locally: runs from other commits are EXCLUDED and counted in
+  `excluded_head_sha_mismatch` (with the reason in `note`) — a passing
+  historical run can never stand in for the tested commit.
 - **`artifact_integrity_audit`** (from the `artifact-audit` job) and
   **`version_coherence`** (from `npm run validate:versions`) - gate
   verdicts measured by the authoritative implementations, never
@@ -253,7 +257,8 @@ numbers must never be copied into prose as if they were current):
     "failing_workflows": [],
     "runs": [{ "workflow": "<workflow-name>", "workflow_id": "<id>", "event": "push", "status": "completed", "conclusion": "success", "run_url": "<run-url>", "head_sha": "<same as tested.sha>", "created_at": "<RFC-3339 timestamp>" }],
     "pages_fetched": 1,
-    "truncated": false
+    "truncated": false,
+    "excluded_head_sha_mismatch": 0
   },
   "artifact_integrity_audit": { "verdict": "pass|fail|unavailable", "release_tag": "<tag-or-null>", "verifier_exit_code": "<int-or-null>", "hard_failures": "<int-or-null>" },
   "version_coherence": { "implementation": "npm run validate:versions (scripts/ci/validate-versions.ts — the one authoritative validator)", "result": "pass|fail|unavailable", "exit_code": "<int-or-null>" },
@@ -431,6 +436,13 @@ the reason for each** (every pin remains a full 40-char commit SHA):
   kept**: their measurements are distro-insensitive (toolchains pinned by
   `setup-node` + lockfiles); float deliberately so routine image refreshes
   get exercised somewhere cheap.
+- `ubuntu26-canary` → **ubuntu-26.04 explicit**: the floating migration is
+  TESTED, not just accepted. The canary runs the same deterministic
+  toolchain as `version-guard` on the new image, so the 2026-10-19 alias
+  flip is proven before it happens; a red canary is the instruction to
+  pin the floaters to ubuntu-24.04 first. Image availability verified
+  against `actions/runner-images` (release `ubuntu26/20261012.163`) and
+  the canary's own green CI run.
 - `rust-native` (windows-latest, macos-latest) unchanged: tests only, no
   artifacts, and the release bundles are built on release.yml's own
   runners.
@@ -444,6 +456,10 @@ the reason for each** (every pin remains a full 40-char commit SHA):
 2. A newer runner image (e.g. Ubuntu 26) is adopted for the
    rendering-sensitive jobs only by a deliberate PR that regenerates the
    E2E visual baselines ON that image and proves the whole suite green.
+   For the distro-insensitive jobs the alias flip is de-risked in advance
+   by the `ubuntu26-canary` job (explicit ubuntu-26.04, same deterministic
+   toolchain); if that canary is red, the floaters are pinned to 24.04
+   first.
 3. Required commands never gain `continue-on-error`, catch-all retries or
    shell wrappers that swallow failures; the only advisory step in the
    fleet remains `security.yml`'s `cargo-audit` (documented policy, see

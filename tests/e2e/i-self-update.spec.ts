@@ -48,6 +48,7 @@ import {
   GOOD_SHA256,
   NEXT_VERSION,
   NEXT_SHORT,
+  CHANNEL_CANDIDATE_VERSION,
 } from './fixtures/data';
 
 const d = DICTS.en;
@@ -239,9 +240,10 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
   test('Stable hides the prerelease, switching channels surfaces it', async ({ gotoApp, page }) => {
     await gotoApp();
 
-    // On the Stable channel the only newer build (v1.0.9-beta, flagged
-    // prerelease) is invisible; the stable v1.0.6 is OLDER than the running
-    // 1.0.8-beta. The check must report "latest".
+    // On the Stable channel the only newer build (the forced-prerelease
+    // channel candidate, newer than the app on any track) is invisible; the
+    // stable filler is older than the running app on any track. The check
+    // must report "latest".
     await checkForUpdates(page);
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
@@ -268,7 +270,7 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
     await checkForUpdates(page);
     const available = page.locator('[data-sonner-toast]').first();
     await expect(available).toBeVisible();
-    await expect(available).toContainText(d['update.availableToast'].replace('{version}', NEXT_VERSION));
+    await expect(available).toContainText(d['update.availableToast'].replace('{version}', CHANNEL_CANDIDATE_VERSION));
     await expect(page.locator('#header-update-pill')).toBeVisible();
   });
 });

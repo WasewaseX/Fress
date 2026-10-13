@@ -105,6 +105,46 @@ export const NEXT_VERSION = APP_VERSION.replace(
  * -beta suffix (Fress_1.0.10_amd64.AppImage). */
 export const NEXT_SHORT = NEXT_VERSION.replace(/-beta$/, '');
 
+// The stable-track discontinuity: APP_VERSION can now be a STABLE version
+// (1.0.0) while the beta sequence continues at a higher patch number. Every
+// fixture version below is therefore DERIVED from the running app's version
+// so the suite stays correct across ANY release bump — no hardcoded 1.0.x
+// literal can silently become "newer than the app" again (a hardcoded older
+// filler like v1.0.8-beta turned into the newest eligible release the moment
+// the app version dropped to 1.0.0, because SemVer ranks 1.0.8-beta > 1.0.0).
+
+/** The Workflows I/J candidate's prerelease flag, derived from the tag
+ * shape exactly like the real feed does ("prerelease flags match the tag
+ * shape"): a -suffixed candidate is a prerelease, a plain one is not. */
+const NEXT_IS_PRERELEASE = NEXT_VERSION.includes('-');
+
+/** A guaranteed-older PRERELEASE filler ("an old release that must be
+ * ignored"): previous major of the running version, always -beta-tagged.
+ * For a 1.x app this is a 0.x version, so it is older than both the app
+ * and the candidate on every track, forever. */
+const FILLER_PRERELEASE_VERSION = APP_VERSION.replace(
+  /(\d+)\.(\d+)\.(\d+)(-.*)?$/,
+  (_all, a: string, b: string, c: string) => `${Number(a) - 1}.${b}.${c}-beta`
+);
+
+/** A guaranteed-older STABLE filler for the channel fixture ("a stable tag
+ * neither channel may offer because it predates the running build"): also
+ * previous-major, so it stays older than any 1.x app on any track. */
+const FILLER_STABLE_VERSION = APP_VERSION.replace(
+  /(\d+)\.(\d+)\.(\d+)(-.*)?$/,
+  (_all, a: string, b: string, c: string) => `${Number(a) - 1}.${b}.${c}`
+);
+
+/** The channel fixture's candidate must be a PRERELEASE regardless of the
+ * app's track (the Stable-channel test hides it, the Beta switch surfaces
+ * it): patch+1 with a forced -beta suffix. For a 1.0.0 app this is
+ * 1.0.1-beta — newer than the app on the beta track, invisible on Stable. */
+export const CHANNEL_CANDIDATE_VERSION = APP_VERSION.replace(
+  /(\d+)\.(\d+)\.(\d+)(-.*)?$/,
+  (_all, a: string, b: string, c: string) => `${a}.${b}.${Number(c) + 1}-beta`
+);
+const CHANNEL_CANDIDATE_SHORT = CHANNEL_CANDIDATE_VERSION.replace(/-beta$/, '');
+
 /** The minisign signature sidecar CI publishes next to each signed updater
  * artifact ("<asset>.sig"). Tauri signer format: the file is ONE outer-base64
  * line that decodes to the four-line document (untrusted comment / 74-byte
@@ -172,7 +212,7 @@ export const OWN_RELEASES_VALID: GhReleaseFixture[] = [
     name: `Fress ${NEXT_VERSION}`,
     published_at: '2026-10-12T00:00:00Z',
     html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`,
-    prerelease: true,
+    prerelease: NEXT_IS_PRERELEASE,
     assets: [
       { name: `Fress_${NEXT_SHORT}_amd64.AppImage`, size: 22_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_amd64.AppImage` },
       { name: `Fress_${NEXT_SHORT}_amd64.AppImage.sig`, size: 420, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_amd64.AppImage.sig` },
@@ -182,10 +222,10 @@ export const OWN_RELEASES_VALID: GhReleaseFixture[] = [
     ],
   },
   {
-    tag: 'v1.0.8-beta',
-    name: 'Fress 1.0.8-beta',
+    tag: `v${FILLER_PRERELEASE_VERSION}`,
+    name: `Fress ${FILLER_PRERELEASE_VERSION}`,
     published_at: '2026-10-11T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.8-beta',
+    html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${FILLER_PRERELEASE_VERSION}`,
     prerelease: true,
     assets: [],
   },
@@ -204,7 +244,7 @@ export const OWN_RELEASES_NO_SIG: GhReleaseFixture[] = [
     name: `Fress ${NEXT_VERSION}`,
     published_at: '2026-10-12T00:00:00Z',
     html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`,
-    prerelease: true,
+    prerelease: NEXT_IS_PRERELEASE,
     assets: [
       { name: `Fress_${NEXT_SHORT}_amd64.AppImage`, size: 22_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_amd64.AppImage` },
       { name: `Fress_${NEXT_SHORT}_x64-setup.exe`, size: 21_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_x64-setup.exe` },
@@ -231,29 +271,32 @@ export const OWN_RELEASE_MALFORMED: GhReleaseFixture[] = [
   },
 ];
 
-/** Channel-filter fixture: the newest build is a beta (invisible on the
- * Stable channel, visible on Beta/Alpha), the stable tag is OLDER than the
- * running 1.0.8-beta so neither channel may offer it. */
+/** Channel-filter fixture: the newest build is a prerelease (invisible on
+ * the Stable channel, visible on Beta/Alpha), and the stable filler tag is
+ * OLDER than the running app on any track, so neither channel may offer it.
+ * The candidate is FORCED to a -beta suffix (CHANNEL_CANDIDATE_VERSION) so
+ * the Stable-hides-it invariant holds no matter which track the running
+ * build is on. */
 export const OWN_RELEASES_CHANNEL: GhReleaseFixture[] = [
   {
-    tag: `v${NEXT_VERSION}`,
-    name: `Fress ${NEXT_VERSION}`,
+    tag: `v${CHANNEL_CANDIDATE_VERSION}`,
+    name: `Fress ${CHANNEL_CANDIDATE_VERSION}`,
     published_at: '2026-10-12T00:00:00Z',
-    html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`,
+    html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${CHANNEL_CANDIDATE_VERSION}`,
     prerelease: true,
     assets: [
-      { name: `Fress_${NEXT_SHORT}_x64-setup.exe`, size: 21_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_x64-setup.exe` },
-      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v${NEXT_VERSION}/SHA256SUMS.txt` },
+      { name: `Fress_${CHANNEL_CANDIDATE_SHORT}_x64-setup.exe`, size: 21_000_000, download_url: `${OWN_BASE}/v${CHANNEL_CANDIDATE_VERSION}/Fress_${CHANNEL_CANDIDATE_SHORT}_x64-setup.exe` },
+      { name: 'SHA256SUMS.txt', size: 300, download_url: `${OWN_BASE}/v${CHANNEL_CANDIDATE_VERSION}/SHA256SUMS.txt` },
     ],
   },
   {
-    tag: 'v1.0.6',
-    name: 'Fress 1.0.6',
+    tag: `v${FILLER_STABLE_VERSION}`,
+    name: `Fress ${FILLER_STABLE_VERSION}`,
     published_at: '2026-10-01T00:00:00Z',
-    html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.6',
+    html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${FILLER_STABLE_VERSION}`,
     prerelease: false,
     assets: [
-      { name: 'Fress_1.0.6_x64-setup.exe', size: 21_000_000, download_url: `${OWN_BASE}/v1.0.6/Fress_1.0.6_x64-setup.exe` },
+      { name: `Fress_${FILLER_STABLE_VERSION}_x64-setup.exe`, size: 21_000_000, download_url: `${OWN_BASE}/v${FILLER_STABLE_VERSION}/Fress_${FILLER_STABLE_VERSION}_x64-setup.exe` },
     ],
   },
 ];
@@ -268,7 +311,7 @@ export const OWN_RELEASE_ARM_ONLY: GhReleaseFixture[] = [
     name: `Fress ${NEXT_VERSION}`,
     published_at: '2026-10-12T00:00:00Z',
     html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`,
-    prerelease: true,
+    prerelease: NEXT_IS_PRERELEASE,
     assets: [
       { name: `Fress_${NEXT_SHORT}_aarch64.AppImage`, size: 22_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_aarch64.AppImage` },
       { name: `Fress_${NEXT_SHORT}_arm64-setup.exe`, size: 20_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_arm64-setup.exe` },
@@ -286,7 +329,7 @@ export const OWN_RELEASE_NO_SUMS: GhReleaseFixture[] = [
     name: `Fress ${NEXT_VERSION}`,
     published_at: '2026-10-12T00:00:00Z',
     html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`,
-    prerelease: true,
+    prerelease: NEXT_IS_PRERELEASE,
     assets: [
       { name: `Fress_${NEXT_SHORT}_amd64.AppImage`, size: 22_000_000, download_url: `${OWN_BASE}/v${NEXT_VERSION}/Fress_${NEXT_SHORT}_amd64.AppImage` },
     ],

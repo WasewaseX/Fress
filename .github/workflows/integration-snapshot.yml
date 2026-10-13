@@ -7,14 +7,17 @@ name: Integration snapshot
 # result where it cannot be edited out of date: the Actions run summary.
 #
 # What it reports (docs/quality-gates.md, "Public integration snapshot"):
-#   - the exact tested ref + full SHA and the default-branch head (and
-#     whether they are the same commit),
+#   - the exact tested ref + full SHA of the ACTUAL checkout (with the
+#     event SHA recorded separately if it ever differs) and the live
+#     default-branch head (and whether they are the same commit),
 #   - the source version from package.json (the authoritative manifest),
 #   - the newest published release, its tag commit SHA, and whether that
 #     commit is an ancestor of the tested SHA (release provenance),
-#   - the observed open-PR inventory with links (never an empty list when
-#     the API call failed - the run goes red instead),
-#   - every workflow's latest result on the tested SHA with run URLs,
+#   - the observed open-PR inventory with links, fetched across ALL API
+#     pages (never an empty list when the API call failed - the run goes
+#     red instead),
+#   - every workflow's latest result on the tested SHA with run URLs and
+#     an aggregate conclusion, so a failing workflow cannot hide in a list,
 #   - the artifact-integrity audit verdict for the newest release (job 1
 #     below downloads the real bytes and runs the real verifier),
 #   - the version-coherence verdict (the one authoritative validator),
@@ -24,7 +27,9 @@ name: Integration snapshot
 #
 # Read-only: the workflow token holds contents: read, pull-requests: read
 # and actions: read; nothing is committed, pushed or released. Output
-# lives in the step summary and run artifacts only.
+# lives in the step summary and run artifacts only. The machine-readable
+# artifact carries schema fress/integration-snapshot@v2 (field meanings
+# documented in docs/quality-gates.md, section 2.2).
 #
 # Job split: artifact-audit (downloads ~350 MB of release bytes and runs
 # the verifier) is separated from snapshot (API + git facts) so a red run

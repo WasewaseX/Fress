@@ -25,7 +25,7 @@ Run from the repository root after `npm ci`:
 | `npm run test:visual` | local | The visual subset alone (`tests/e2e/z-visual.spec.ts`). |
 | `npm run perf:catalog` | local | The Node-side filter-pipeline benchmark (pre-existing; complements `test:perf`, which measures the real UI). |
 | `python3 -m unittest discover -s scripts/ci -p 'test_*.py'` | local + CI (`ci.yml` → `artifact-audit-tests`) | Rejection-behavior suite of the release-artifact audit (tampered checksums, missing/unlisted assets, wrong-version manifests, altered or foreign signatures, stray/orphan sidecars, malformed manifests, duplicated mappings, manifest-laundering attempts - all FAIL on synthetic temp-dir fixtures) PLUS the workflow contract tests that pin the publication boundary itself: the version validator invocation, the `needs:` chain from `version` to `verify-release`, and that the draft flip can only happen after the artifact audit. A CLI test proves the verifier exits NON-ZERO on a corrupted set (exit status, not just an error log). |
-| `node scripts/ci/integration-snapshot.mjs` | CI (`integration-snapshot.yml` → `snapshot`); runnable locally with `GH_TOKEN=<read token>` | Builds the current public integration-state snapshot (tested SHA, source version, newest release + provenance, open PRs, CI results on the tested SHA, artifact-integrity + version-coherence verdicts) as a step summary + JSON artifact. Read-only; never commits. See section 2.2. |
+| `node scripts/ci/integration-snapshot.mjs` | CI (`integration-snapshot.yml` → `snapshot`); runnable locally with `GH_TOKEN=<read token>` | Builds the current public integration-state snapshot (tested SHA vs live branch head, source version, newest release + provenance, paginated open-PR inventory, aggregate CI results on the tested SHA, artifact-integrity + version-coherence verdicts) as a step summary + JSON artifact (schema v2). Read-only; never commits. See section 2.2. |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | local (with Rust) + CI (`ci.yml` → `rust`, ubuntu-22.04) | Rust formatting. |
 | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | local (with Rust) + CI (`ci.yml` → `rust`, ubuntu-22.04) | Rust lint-clean including test targets. |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | local (with Rust) + CI (`ci.yml` → `rust` on ubuntu-22.04, `rust-native` on windows-latest + macos-latest) | The Rust suite (state machine, network policy, download finalize). |
@@ -151,89 +151,193 @@ state from an Actions run instead of trusting a stale file:
 | Workflow | `.github/workflows/integration-snapshot.yml` ("Integration snapshot") |
 | Triggers | push to `main`, schedule (Mon 06:40 UTC), `workflow_dispatch` |
 | Job `artifact-audit` | finds the newest published release, downloads every uploaded asset (one documented retry for transient download failures; integrity verdicts are never retried into green) and runs `scripts/ci/verify-release-artifacts.py` on those exact bytes with the production key |
-| Job `snapshot` | runs `npm run validate:versions` (verdict RECORDED, never swallowed), then `node scripts/ci/integration-snapshot.mjs`: API + git facts + both gate verdicts → `$GITHUB_STEP_SUMMARY` (human summary) + the `integration-snapshot` artifact (JSON) |
+| Job `snapshot` | runs `npm run validate:versions` (verdict RECORDED, never swallowed), then `node scripts/ci/integration-snapshot.mjs`: API + git facts + both gate verdicts → `$GITHUB_STEP_SUMMARY` (human summary) + the `integration-snapshot` artifact (JSON, schema `fress/integration-snapshot@v2`) |
 | Token | the workflow's own `GITHUB_TOKEN` with `contents: read`, `pull-requests: read`, `actions: read` - read-only, nothing is committed, pushed or released |
-| Exit semantics | `0` complete and green; `3` a required observation was unavailable (the run is red and the summary says which field); `4` a reported gate FAILED. The summary and artifact are still attached on red runs |
+| Exit semantics | `0` complete and green; `3` a required observation was unavailable - including a LOST or unparsable gate verdict, which is never an implicit pass (the run is red and the summary says which field); `4` a reported gate FAILED; `2` the snapshot could not be produced at all. The summary and artifact are still attached on red runs |
 
-What each snapshot reports, and where to look:
+What each snapshot reports, and where to look (schema
+`fress/integration-snapshot@v2`; every externally-sourced section carries
+`status: "ok" | "unavailable"` plus a `reason` when unavailable — a
+successful-looking default is never substituted for a fact that could not
+be observed):
 
-- **Tested ref + full SHA** and the default-branch head, with an explicit
-  "same commit" / "NOT the tested SHA" marker - a snapshot produced on an
-  older branch (or a scheduled run) can never be mistaken for current
-  main.
-- **Source version** from `package.json` (the authoritative manifest).
-- **Newest published release**: tag, tag commit SHA, published date,
-  whether that commit is an ANCESTOR of the tested SHA and how many
-  commits the tested ref moved since (release provenance).
-- **Open pull requests**: observed count and a linked table. If the API
-  call fails, the field says `unavailable` and the run goes red - an
-  empty list is never displayed when the list could not be fetched.
-- **CI results on the tested SHA**: every workflow's latest run for that
-  exact SHA with status/conclusion and run URLs.
-- **Artifact-integrity verdict** for the newest release (from the
-  `artifact-audit` job) and the **version-coherence verdict** (from
-  `npm run validate:versions`) - gate verdicts measured by the
-  authoritative implementations, never re-implemented in the snapshot
-  script.
-- **Known unavailable observations**: branch-protection enforcement (an
+- **`tested.sha` — the commit ACTUALLY checked out** (`git rev-parse HEAD`
+  of the run), with `tested.event_sha` recorded separately when the
+  workflow event's `GITHUB_SHA` differs from it (a checkout override can
+  never silently mislabel the observation). **`tested.is_default_branch_head`**
+  states whether the tested SHA equaled the live default-branch head at
+  observation time - a snapshot produced on an older commit (a queued
+  push, a scheduled run) can never be mistaken for current main, and
+  `default_branch.head_sha` records that head explicitly with a compare
+  link in the summary.
+- **`source_version`** from `package.json` (the authoritative manifest);
+  a missing, unparsable or non-string version is a required-unavailable
+  observation, not a blank field.
+- **`release`**: the newest published release with `tag`, **`tag_sha`**
+  (the tag's target commit), published date and the provenance facts
+  determined from Git: **`is_ancestor_of_tested`**,
+  `commits_tested_ahead_of_release` / `commits_release_ahead_of_tested`.
+  A release commit missing from the checkout is reported as
+  `is_ancestor_of_tested: null` with a `provenance_note` - unproven, not
+  fabricated.
+- **`open_pull_requests`**: the observed inventory fetched across ALL API
+  pages (`count`, `pages_fetched`, `truncated`, linked `items`). If the
+  API call fails or returns a malformed body, the section says
+  `status: "unavailable"` with the reason, `count` stays `null` and the
+  run goes red - an empty list is never displayed for an unfetchable list.
+- **`ci`**: workflow runs whose `head_sha` is exactly `ci.tested_sha_filter`
+  (the tested commit), each with workflow name, id, event, status,
+  conclusion and run URL; `aggregated_conclusion`
+  (`pass` / `failing` / `pending` / `none`) plus `failing_workflows` make
+  a red workflow impossible to miss, and a failing aggregate is announced
+  as a warning annotation on the run. Pagination facts are recorded here
+  as well.
+- **`artifact_integrity_audit`** (from the `artifact-audit` job) and
+  **`version_coherence`** (from `npm run validate:versions`) - gate
+  verdicts measured by the authoritative implementations, never
+  re-implemented in the snapshot script. A verdict that is missing, lost
+  or unparsable is a required-unavailable observation (the run goes red
+  with a diagnostic) - never an implicit pass.
+- **`unavailable_observations`** (this run's failures, each with its
+  reason) and **`known_limitations`**: branch-protection enforcement (an
   admin-only Settings fact - the snapshot can neither confirm nor deny
   it), and the standing device/assistive-tech limitations from section 4.
 
-Example machine-readable output (trimmed; the artifact carries the full
-record):
+Schema example (values are PLACEHOLDERS, not observations - the live
+facts live in each run's `integration-snapshot` artifact; historical
+numbers must never be copied into prose as if they were current):
 
 ```json
 {
-  "schema": "fress/integration-snapshot@v1",
-  "generated_at": "2026-10-12T22:15:41.836Z",
-  "repository": "WasewaseX/Fress",
+  "schema": "fress/integration-snapshot@v2",
+  "generated_at": "<RFC-3339 timestamp of the run>",
+  "repository": "<owner>/<repo>",
+  "snapshot_run": { "url": "<https://github.com/<owner>/<repo>/actions/runs/<run-id>>" },
   "tested": {
-    "ref": "main",
-    "sha": "<full 40-char sha of the checked-out commit>",
+    "ref": "<observed-current-branch-name>",
+    "sha": "<observed-current-branch-sha>",
+    "event_sha": "<event-declared-sha, or null>",
     "is_default_branch_head": true,
     "note": "the workflow code producing this snapshot comes from the same checkout as the tested SHA"
   },
-  "source_version": "1.0.10-beta",
-  "latest_published_release": {
-    "tag": "v1.0.10-beta",
-    "commit_sha": "<full tag commit sha>",
-    "html_url": "https://github.com/WasewaseX/Fress/releases/tag/v1.0.10-beta",
-    "published_at": "2026-10-12T20:09:33Z",
-    "prerelease": true,
-    "draft": false
+  "default_branch": {
+    "status": "ok",
+    "name": "<default-branch-name>",
+    "head_sha": "<observed-default-branch-head-sha>",
+    "html_url": "<commit-url>"
   },
-  "release_provenance": {
-    "release_commit_is_ancestor_of_tested": true,
+  "source_version": "<observed-source-version>",
+  "release": {
+    "status": "ok",
+    "tag": "<observed-release-tag>",
+    "tag_sha": "<observed-release-tag-commit-sha>",
+    "html_url": "<release-url>",
+    "published_at": "<RFC-3339 timestamp>",
+    "prerelease": true,
+    "draft": false,
+    "is_ancestor_of_tested": true,
     "commits_tested_ahead_of_release": 0,
     "commits_release_ahead_of_tested": 0
   },
   "open_pull_requests": {
-    "count": 5,
-    "possibly_truncated": false,
-    "items": [{ "number": 57, "title": "ci(release): executable integration gates", "html_url": "https://github.com/WasewaseX/Fress/pull/57", "head_ref": "quality/ci-release-gates", "head_sha": "<sha>", "draft": false }]
+    "status": "ok",
+    "count": "<observed-open-pr-count>",
+    "truncated": false,
+    "pages_fetched": 1,
+    "items": [{ "number": "<pr-number>", "title": "<pr-title>", "html_url": "<pr-url>", "head_ref": "<branch>", "head_sha": "<sha>", "draft": false, "created_at": "<RFC-3339 timestamp>" }]
   },
-  "ci_on_tested_sha": {
-    "runs": [{ "workflow": "CI", "event": "push", "status": "completed", "conclusion": "success", "run_url": "https://github.com/WasewaseX/Fress/actions/runs/<id>" }]
+  "ci": {
+    "status": "ok",
+    "tested_sha_filter": "<same as tested.sha>",
+    "aggregated_conclusion": "pass",
+    "failing_workflows": [],
+    "runs": [{ "workflow": "<workflow-name>", "workflow_id": "<id>", "event": "push", "status": "completed", "conclusion": "success", "run_url": "<run-url>", "head_sha": "<same as tested.sha>", "created_at": "<RFC-3339 timestamp>" }],
+    "pages_fetched": 1,
+    "truncated": false
   },
-  "artifact_integrity_audit": { "verdict": "pass", "verifier_exit_code": 0, "hard_failures": 0, "release_tag": "v1.0.10-beta" },
-  "version_coherence": { "implementation": "npm run validate:versions (scripts/ci/validate-versions.ts — the one authoritative validator)", "result": "pass", "exit_code": 0 },
-  "branch_protection": { "enforced": "unavailable", "reason": "GitHub API 404 — admin-only Settings fact, not observable with a repository-scoped read token" },
-  "known_limitations": ["CI Rust jobs and the mocked E2E suite are not GUI-opening or device tests"]
+  "artifact_integrity_audit": { "verdict": "pass|fail|unavailable", "release_tag": "<tag-or-null>", "verifier_exit_code": "<int-or-null>", "hard_failures": "<int-or-null>" },
+  "version_coherence": { "implementation": "npm run validate:versions (scripts/ci/validate-versions.ts — the one authoritative validator)", "result": "pass|fail|unavailable", "exit_code": "<int-or-null>" },
+  "branch_protection": { "enforced": "unavailable", "reason": "GitHub API 403/404 — admin-only Settings fact, not observable with a repository-scoped read token" },
+  "unavailable_observations": [{ "field": "<field-name>", "reason": "<why it could not be observed>" }],
+  "known_limitations": ["…"]
 }
 ```
 
-To run the snapshot locally against the real repository:
+To run the snapshot locally against the real repository (read-only; the
+same command the workflow executes):
 
 ```sh
 GH_TOKEN=<read-only token> node scripts/ci/integration-snapshot.mjs \
   --out snapshot.json \
   --version-coherence pass --version-coherence-rc 0 \
-  --artifact-audit '{"verdict":"pass","verifier_exit_code":0,"hard_failures":0,"release_tag":"v1.0.10-beta"}'
+  --artifact-audit '{"verdict":"pass","verifier_exit_code":0,"hard_failures":0,"release_tag":"<observed-release-tag>"}'
 ```
 
-(without the flags the corresponding fields are reported `unavailable`,
-which is the honest local-dev mode; the markdown summary goes to stdout
-when `GITHUB_STEP_SUMMARY` is unset.)
+Without the two verdict flags the corresponding gates are reported
+`unavailable` and the command exits `3` - that is the honest local-dev
+mode (the verdicts are CI measurements this run did not make), and the
+markdown summary goes to stdout when `GITHUB_STEP_SUMMARY` is unset.
+
+### 2.3 Gate taxonomy: what blocks, what publishes, what only observes
+
+The flat table in section 2 answers "which job runs where"; this
+subsection answers "what KIND of gate is this". Five categories, each
+naming the actual workflow file, job, command, trigger, tested code scope
+and blocking status. `continue-on-error` appears nowhere in any workflow
+(except the one documented `cargo-audit` advisory in `security.yml`).
+
+**1. Required blocking CI checks (every PR and every push to `main`)**
+
+| Gate | Workflow file → job | Command | Tested code scope | Blocking? |
+|---|---|---|---|---|
+| Version coherence (dev mode) | `ci.yml` → `version-guard` | `npm run validate:versions` | whole checkout (six authoritative version fields) | Yes |
+| Typecheck + unit suite + catalog/security validators + production build | `ci.yml` → `frontend` | `npm run typecheck`, `npm test`, `npm run validate:catalog`, `npm run validate:security`, `npm run build` | frontend + config (whole tree) | Yes |
+| Verifier rejection suite + workflow publication-boundary contract | `ci.yml` → `artifact-audit-tests` | `python3 -m unittest discover -s scripts/ci -p 'test_*.py'` | `scripts/ci/` (verifier + workflow contracts) | Yes |
+| Rust fmt / clippy / tests | `ci.yml` → `rust` (ubuntu-22.04) | `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test` | `src-tauri/` (engine) | Yes |
+| Rust tests on native OSes | `ci.yml` → `rust-native` (windows-latest, macos-latest) | `cargo test` | `src-tauri/` (engine) | Yes |
+| E2E workflows A-J + visual regression | `ci.yml` → `e2e` (ubuntu, Chromium headless) | `npm run test:e2e` | production build via `vite preview` | Yes |
+| Perf invariants (render isolation, persistence coalescing) | `ci.yml` → `perf` | `npm run test:perf` | production build | Yes (invariants); timings informational |
+| Commit author guard | `author-guard.yml` → `authors` (pushes + PRs) | repo-configured author check | commit metadata | Yes |
+
+**2. Release-publication gates (`release.yml`, tag pushes `v*` + manual)**
+
+| Gate | Job | Command | Tested code scope | Blocking? |
+|---|---|---|---|---|
+| Version/tag binding | `version` | `npm run validate:versions -- --release-tag` (tag pushes only) | the tagged commit's six authoritative fields vs the pushed tag | Yes - a disagreeing tag starts no build |
+| Platform bundles | `build-*` matrix | `tauri build` per OS + Android | the tagged commit | Yes (a missing bundle fails the release) |
+| Final published-artifact audit | `verify-release` | `python3 scripts/ci/verify-release-artifacts.py` on the freshly downloaded draft assets | the EXACT release bytes | **Yes - the release stays a private draft until this passes**; the draft flip (`--draft=false`) is the only publication switch |
+| VirusTotal overlay | `virustotal` | external scan API | the release artifacts | Informational only - skipped with a labeled notice when the key is unset; deliberately NOT in `verify-release`'s `needs:` |
+
+**3. Scheduled / manual smoke and evidence workflows (never on PRs)**
+
+| Gate | Workflow file | Trigger | Tested code scope | Blocking? |
+|---|---|---|---|---|
+| LIVE resolver smoke | `network-smoke.yml` | schedule Mon 06:20 UTC + manual dispatch | real endpoints (GitHub, F-Droid, vendor) | Advisory by design - red means "investigate", not "revert" |
+| Dependency/RustSec scanning | `security.yml` → `npm-audit`, `cargo-audit` | schedule Mon 06:00 UTC + manual + lockfile pushes to `main` | manifests | npm prod deps blocking (`npm-audit`); dev deps / `cargo-audit` advisory by DOCUMENTED policy |
+| Integration snapshot | `integration-snapshot.yml` | push to `main` + schedule Mon 06:40 UTC + manual dispatch | repo state + newest release bytes | Evidence, not a merge gate - but a RED run is a real signal (see 2.2) |
+
+**4. Current-state observation tooling**
+
+- `integration-snapshot.yml` (above) is the designated current-state
+  instrument: tested SHA vs live branch head, release provenance, open-PR
+  inventory, CI-on-tested-SHA aggregate, both gate verdicts - published
+  per run as a step summary + JSON artifact, never as an editable file
+  (see 2.2 for the schema).
+- The `integration-snapshot` artifacts are retained 90 days; older
+  artifacts describe older states and must be read together with their
+  `generated_at` and `tested.sha`.
+
+**5. Checks that require physical devices or repository-admin settings**
+(UNVERIFIED by automation; see section 4 for the manual checklist, and
+section 2's note for the Settings actions)
+
+- Android on a real device (no emulator gate exists); Windows/macOS
+  packaged-app smoke; screen-reader (NVDA/VoiceOver) passes; real-network
+  resume behavior.
+- Branch-protection enforcement itself: making the section-1 checks
+  REQUIRED for merge is a maintainer Settings action - no workflow can do
+  it, and the snapshot honestly reports this fact as unobservable with a
+  read token.
 
 ### Android signing secrets: maintainer procedure (new requirement)
 

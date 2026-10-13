@@ -17,7 +17,7 @@ Fress's first stable release. The application ships the complete, fully verified
 - The version-coherence validator pins every authoritative version field to `1.0.0` for this tag — package.json, both package-lock roots, Cargo.toml, the `fress` Cargo.lock entry and tauri.conf.json — and refuses any partial bump before the pipeline starts.
 
 ### Update channels: stable and beta stay separate
-- This build defaults to the **Stable** update channel and is only ever offered stable releases: `v1.0.12-beta` (a higher prerelease number on the other track) is never offered to stable clients.
+- On the **Stable** update channel this build is only ever offered stable releases: `v1.0.12-beta` (a higher prerelease number on the other track) is never offered to stable clients, and the in-app picker is what selects the channel a fresh install listens on.
 - Beta clients are not silently downgraded to 1.0.0 by the updater; the beta sequence continues with newer prereleases on its own channel.
 - **Coming from a 1.0.x-beta build?** Move deliberately, not automatically: run the v1.0.0 installer over your existing install on Windows (the MSI requires uninstalling the beta first) or replace the app on macOS; on Linux install the v1.0.0 bundle (deb/rpm need an explicit downgrade flag: `apt install --allow-downgrades` or `rpm -U --oldpackage`); on Android uninstall the beta APK first, which clears the app's private data. Desktop settings live in your user profile, not the install directory, and survive the transition.
 

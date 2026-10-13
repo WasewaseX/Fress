@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.12-beta (2026-10-13): the frontend-quality release
+
+A full-frontend quality pass landed as one integrated candidate and was re-verified on the merged tree: typecheck clean, 629 unit tests passed, the full E2E suite green in CI, and the production build clean. Every change below was held inside the frontend; the download engine, the open contract and the release pipeline were untouched.
+
+### Accessibility and semantics
+- **Every interactive surface now names itself properly.** Modal titles, table headers, the export format group, the palette search field and the batch bar carry real labels and ARIA relationships instead of visual-only affordances; the catalog table announces itself as a table, and result counts are polite live regions so screen readers hear "showing 12 of 57" without stealing focus.
+- Feedback that used to be color-only is now text-backed: destructive actions confirm their consequences, and the star-fetch and offline indicators explain their state in words, not just icons.
+- A new `scripts/a11y-scan.mjs` pass plus a dedicated frontend-quality test suite pin these invariants, so a regression cannot merge quietly.
+
+### Small screens and right-to-left
+- **320 pixels is now a supported floor, not a crash site.** The batch action bar, catalog grid, export dialog and command palette reflow below 360px instead of clipping or scrolling sideways; new visual snapshots at 320px pin the layouts in both themes.
+- Right-to-left layouts hardened across the detail modal, palette and header: icons mirror, truncation behaves, and the Farsi experience no longer inherits left-to-right assumptions from shared components.
+
+### State behavior you can trust
+- **Favorites and catalog edits no longer double-fire.** Side effects (toasts, storage writes) moved out of React state updaters into explicit, once-per-action paths with latest-value refs, so StrictMode and concurrent renders can no longer duplicate a toast or write storage twice. The callbacks keep their identity, so memoized cards don't re-render.
+- Adding an app that already exists in the catalog now says so plainly (name or repository match) instead of silently creating a near-duplicate.
+- The update-channel picker speaks five languages, and the palette's shortcut hint stopped inventing a modifier key it doesn't require.
+
 ## 1.0.11-beta (2026-10-13): the open-contract release
 
 The download → open journey became real, then was proven as one integrated candidate: five parallel rounds (the desktop open contract, the end-to-end journey suite, executable version coherence, release-verifier hardening, user-facing docs truth) merged and re-verified together — full E2E suite 92/92, unit suite 605 passed, typecheck and build clean, and the new version validator green on the release candidate itself.

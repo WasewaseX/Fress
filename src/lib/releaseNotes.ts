@@ -21,6 +21,16 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: '1.0.12-beta',
+    date: '2026-10-13',
+    title: 'The frontend-quality release',
+    items: [
+      'Every interactive surface now names itself properly: real labels and ARIA relationships across the modals, the catalog table, the palette and the batch bar, with polite live regions announcing result counts. Feedback that used to be color-only is text-backed now, and a dedicated quality test suite plus an accessibility scan pin the invariants so a regression cannot merge quietly.',
+      '320 pixels is a supported floor: the batch bar, catalog grid, export dialog and command palette reflow below 360px instead of clipping, with new visual snapshots at 320px in both themes. Right-to-left layouts hardened across the detail modal, palette and header, so the Farsi experience no longer inherits left-to-right assumptions.',
+      'Favorites and catalog edits no longer double-fire: the side effects (toasts, storage writes) moved out of React state updaters into once-per-action paths, so StrictMode cannot duplicate them. Adding an app that already exists now says so plainly instead of silently creating a near-duplicate, and the update-channel picker speaks five languages.',
+    ],
+  },
+  {
     version: '1.0.11-beta',
     date: '2026-10-13',
     title: 'The open-contract release',

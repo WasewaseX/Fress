@@ -1027,6 +1027,9 @@ test.describe('Workflow D2: download-to-open on Android (UA override)', () => {
     const done = completedRow(page, 'LocalSend-1.17.0-windows-x64.exe');
     await expect(done).toHaveCount(1);
     await expect(openBtnOf(done)).toBeEnabled();
+    // The stable accessible hook the adapter PR added to the row action
+    // (uniform Open affordance on every platform).
+    await expect(done.getByTestId('download-open')).toHaveCount(1);
     // Android saves into app-private storage no file manager can browse:
     // Show in folder must not be offered there.
     await expect(showBtnOf(done)).toHaveCount(0);
@@ -1035,5 +1038,18 @@ test.describe('Workflow D2: download-to-open on Android (UA override)', () => {
 
     await openBtnOf(done).click();
     expect(await openCalls(page)).toEqual([PATH]);
+
+    // The adapter contract, pinned at the E2E level: on Android the SAME
+    // open action routes through the registry-validated adapter command,
+    // not the opener plugin. The bridge records the command into the same
+    // open stream (uniform assertion surface) and deliberately does NOT
+    // simulate the FileProvider handoff or the system installer - the
+    // recorded call is a routing proof, never an installation proof.
+    const b = (await bridge(page))!;
+    const adapter = b.openedPaths.filter((r) => r.cmd === 'open_downloaded_file');
+    expect(adapter).toHaveLength(1);
+    expect(adapter[0].path).toBe(PATH);
+    expect(b.calls.filter((c) => c.cmd === 'plugin:opener|open_path')).toHaveLength(0);
+    expect(b.calls.filter((c) => c.cmd === 'launch_app_image_artifact')).toHaveLength(0);
   });
 });

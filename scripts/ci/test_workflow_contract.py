@@ -238,6 +238,220 @@ class TestReleaseWorkflowContract(unittest.TestCase):
             "the static prerelease line must not be an unconditional release-notes literal",
         )
 
+    # ------------------------------------------------------------------
+    # v1.0.0 stable: gate hardening (agent3/b-gates). Each test pins one
+    # property of the publication boundary listed in docs/quality-gates.md.
+
+    def test_no_chinese_gate_step_fails_closed_on_every_failure_mode(self):
+        # Three failure modes must all stop the release: the checker file is
+        # missing, the checker rejects the tree (exit 1), or the scan cannot
+        # run at all (exit 2 - node throws). None may be swallowed: the gate
+        # step starts with set -euo pipefail, exits 1 on the missing checker,
+        # and invokes the checker as a bare node command whose exit code
+        # becomes the step's exit code (default bash -e + explicit errexit).
+        code = _code(self.jobs["version"]["body"])
+        gate_at = code.index("No-Chinese source gate")
+        gate = code[gate_at : code.index("- id: v", gate_at)]
+        self.assertIn(
+            "set -euo pipefail", gate,
+            "the no-Chinese gate must set errexit explicitly, not rely on the runner default",
+        )
+        self.assertIn("if [ ! -f scripts/ci/check-no-chinese.mjs ]; then", gate)
+        self.assertIn("::error::scripts/ci/check-no-chinese.mjs is missing", gate)
+        missing_at = gate.index("check-no-chinese.mjs is missing")
+        self.assertGreater(gate.find("exit 1", missing_at), -1,
+                           "a missing checker must exit nonzero, not print and continue")
+        self.assertRegex(
+            gate, r"(?m)^\s*node scripts/ci/check-no-chinese\.mjs\s*$",
+            "the checker must be invoked bare (PR #79 contract) so its exit code decides",
+        )
+        for swallow in ("|| true", "|| :", "; true", "set +e", "2>/dev/null"):
+            self.assertNotIn(swallow, gate, f"the gate must not swallow failures via {swallow!r}")
+
+    def test_version_job_runs_both_gates_and_never_uploads_or_publishes(self):
+        # The version job is the root of the release graph and carries both
+        # gates (no-Chinese scan, version validation). It must contain no
+        # upload, publish or build command of its own: everything it produces
+        # is an output consumed by downstream jobs.
+        code = _code(self.jobs["version"]["body"])
+        gate_at = code.index("node scripts/ci/check-no-chinese.mjs")
+        validator_at = code.index("npm run validate:versions")
+        self.assertLess(
+            gate_at, validator_at,
+            "the no-Chinese scan must run before the version step finalizes the job outputs",
+        )
+        for forbidden in ("gh release", "--draft=false", "tauri build", "gh api -X PATCH"):
+            self.assertNotIn(forbidden, code, f"the version job must not {forbidden}")
+
+    def test_gate_steps_cannot_swallow_failures_anywhere(self):
+        # No release step may neutralize a nonzero exit: `|| true` and its
+        # variants would turn a red gate green at the exact point the release
+        # depends on it.
+        for pattern in ("|| true", "|| :", "&& true", "set +e"):
+            self.assertNotIn(pattern, self.text)
+
+    def test_prerelease_flag_is_derived_from_the_validator_and_consumed_as_an_expression(self):
+        # The GitHub prerelease flag must be wired end to end from the one
+        # authoritative classifier: validate-versions.ts --is-prerelease
+        # writes the job output, and create-release consumes it as an
+        # expression - never as a hardcoded true/false literal.
+        version_code = _code(self.jobs["version"]["body"])
+        derived_at = version_code.index(
+            'PRERELEASE=$(npx tsx scripts/ci/validate-versions.ts --is-prerelease "$VERSION")'
+        )
+        output_at = version_code.index('echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"')
+        self.assertLess(derived_at, output_at,
+                        "the prerelease output must be written from the validator's verdict")
+        create_body = self.jobs["create-release"]["body"]
+        self.assertIn("prerelease: ${{ needs.version.outputs.prerelease == 'true' }}", create_body)
+        self.assertIsNone(
+            re.search(r"(?m)^\s*prerelease:\s*(?:true|false)\s*$", create_body),
+            "the GitHub prerelease flag must be the validator-derived expression, never a hardcoded literal",
+        )
+
+    def test_stable_channel_note_says_stable_without_prerelease_wording(self):
+        # Both branches of the channel-conditional note must exist and each
+        # must keep its own vocabulary: the prerelease branch carries the
+        # "Pre-release:" line; the stable branch carries "**Stable release.**"
+        # and must not borrow prerelease vocabulary that would contradict a
+        # prerelease:false flag on the published release.
+        code = _code(self.jobs["version"]["body"])
+        self.assertIn('if [ "$PRERELEASE" = "true" ]; then', code)
+        # Anchor on the PRERELEASE conditional itself: the version job also
+        # has an if/else around GITHUB_REF_TYPE, which comes first.
+        if_at = code.index('if [ "$PRERELEASE" = "true" ]; then')
+        m_else = re.search(r"(?m)^\s*else\s*$", code[if_at:])
+        self.assertIsNotNone(m_else, "the channel note must have a stable else-branch")
+        else_at = if_at + m_else.start()
+        else_end = if_at + m_else.end()
+        m_fi = re.search(r"(?m)^\s*fi\s*$", code[else_end:])
+        self.assertIsNotNone(m_fi, "the channel-note conditional must be closed")
+        pre_branch = code[if_at:else_at]
+        stable_branch = code[else_end:else_end + m_fi.start()]
+        self.assertIn("Pre-release: features may change between releases.", pre_branch,
+                      "the prerelease branch must keep its prerelease wording")
+        self.assertIn("**Stable release.**", stable_branch,
+                      "the stable branch must say stable in so many words")
+        self.assertIsNone(
+            re.search(r"pre.?release", stable_branch, re.I),
+            "the stable release notes must contain no contradictory prerelease wording",
+        )
+
+    def test_static_release_body_carries_no_contradictory_channel_wording(self):
+        # The only prerelease mention in create-release must be the flag
+        # expression itself; the hand-written body template must be neutral
+        # so the channel note alone decides the wording.
+        code = _code(self.jobs["create-release"]["body"])
+        mentions = [l for l in code.splitlines() if re.search(r"pre.?release", l, re.I)]
+        self.assertEqual(
+            len(mentions), 1,
+            f"create-release must mention prerelease only on the flag line, got: {mentions}",
+        )
+        self.assertIn("prerelease: ${{", mentions[0])
+
+    def test_draft_first_flow_creates_private_and_needs_every_build(self):
+        # The release is born a draft (a failed build then leaves nothing
+        # public), every build job uploads against the draft's release_id,
+        # and only the verify job - after the artifact audit - flips the
+        # draft (pinned elsewhere). A failed platform build, signing step or
+        # audit therefore leaves the release a private draft forever.
+        create_code = _code(self.jobs["create-release"]["body"])
+        self.assertRegex(
+            create_code, r"(?m)^\s*draft:\s*true\s*$",
+            "the release must be created as a draft",
+        )
+        for n in ("build-windows", "build-windows-arm64", "build-linux",
+                  "build-macos-arm", "build-macos-intel", "build-android",
+                  "updater-manifest", "checksums"):
+            self.assertIn("create-release", self.jobs[n]["needs"],
+                          f"{n} must upload against the draft created by create-release")
+
+    def test_tag_conflict_refusal_compares_candidate_sha_and_exits_nonzero(self):
+        # On a tag push the version job re-resolves the pushed tag from the
+        # remote and compares it against the checked-out candidate commit
+        # (HEAD); a mismatch - a re-pointed or stale tag - must print an
+        # error annotation and exit nonzero, before anything is built.
+        code = _code(self.jobs["version"]["body"])
+        conflict_at = code.index("Refuse a tag that exists in a conflicting state")
+        step = code[conflict_at : code.index("No-Chinese source gate", conflict_at)]
+        self.assertIn('git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"', step)
+        self.assertIn('git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}"', step)
+        self.assertIn("git rev-parse HEAD", step)
+        mismatch_at = step.index('if [ "$TAGGED" != "$HEAD_SHA" ]; then')
+        self.assertIn("::error::", step[mismatch_at:])
+        self.assertGreater(step.find("exit 1", mismatch_at), -1,
+                           "a conflicting tag must exit nonzero, never be built anyway")
+
+    def test_workflow_never_pushes_deletes_or_repoints_a_tag(self):
+        # Refusal is the only remedy for a conflicting tag: no step may push,
+        # delete or rewrite any ref. The only remote ref operation in the
+        # file is the read-only fetch used to RESOLVE the tag for comparison.
+        for pattern, what in ((r"git\s+push", "push"),
+                              (r"git\s+tag\s+(?:-d|--delete)", "delete a tag"),
+                              (r"git\s+update-ref", "rewrite a ref"),
+                              (r"git\s+replace", "replace an object")):
+            self.assertIsNone(re.search(pattern, self.text),
+                              f"release.yml must never {what}")
+
+    def test_needs_graph_is_well_founded_and_acyclic(self):
+        # Every needs: edge must point at a defined job and the graph must
+        # be resolvable: a typo'd or cyclic needs list would silently change
+        # what blocks publication.
+        for name, job in self.jobs.items():
+            for dep in job["needs"]:
+                self.assertIn(dep, self.jobs, f"{name} needs unknown job {dep!r}")
+        resolved = set()
+        pending = set(self.jobs)
+        while pending:
+            ready = {n for n in pending if all(d in resolved for d in self.jobs[n]["needs"])}
+            if not ready:
+                self.fail(f"needs graph has a cycle or unresolvable edges: {sorted(pending)}")
+            resolved |= ready
+            pending -= ready
+
+    def test_verify_release_transitively_depends_on_every_build_job(self):
+        # The publish gate sits at the bottom of the whole graph: if any
+        # build job could be bypassed on the path to verify-release, its
+        # missing artifacts would surface as a published hole instead of a
+        # skipped draft fill.
+        seen = set()
+        stack = ["verify-release"]
+        while stack:
+            cur = stack.pop()
+            for dep in self.jobs[cur]["needs"]:
+                if dep not in seen:
+                    seen.add(dep)
+                    stack.append(dep)
+        for n in self.jobs:
+            if n.startswith("build-"):
+                self.assertIn(n, seen, f"verify-release must transitively depend on {n}")
+
+    def test_release_workflow_contains_zero_chinese_characters(self):
+        # The zero-Chinese rule (PR #79's checker) applies to the workflow
+        # files too: the release pipeline itself must be free of Chinese/CJK
+        # content so the tree-wide scan can stay zero-hit.
+        cjk = re.compile(
+            "[\u2e80-\u2eff\u2f00-\u2fdf\u3000-\u303f\u3040-\u30ff\u3100-\u312f"
+            "\u3130-\u318f\u3190-\u319f\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff"
+            "\uac00-\ud7af\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]"
+        )
+        m = cjk.search(self.text)
+        if m:
+            self.fail(f"Chinese/CJK content in release.yml at offset {m.start()}: {m.group(0)!r}")
+
+    def test_checker_path_and_invocation_match_the_ci_agents_contract(self):
+        # Cross-PR contract (PR #79): the ONE no-Chinese checker lives at
+        # scripts/ci/check-no-chinese.mjs and is invoked bare - no flags, no
+        # redirections - with its exit code deciding the step. The release
+        # gate must use exactly that path and invocation so the PR gate and
+        # the release gate judge the tree with the same command.
+        code = _code(self.jobs["version"]["body"])
+        self.assertIn("scripts/ci/check-no-chinese.mjs", code)
+        for drift in ("check-no-chinese.js", "no-chinese.sh", "check_no_chinese"):
+            self.assertNotIn(drift, code, f"checker path drifted from the PR #79 contract: {drift}")
+        self.assertRegex(code, r"(?m)^\s*node scripts/ci/check-no-chinese\.mjs\s*$",
+                         "the release gate must invoke the checker bare, exactly like the CI job")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,8 @@ import { useEffect, useRef } from 'react';
 export interface GlobalShortcutsActions {
   toggleCommandPalette: () => void;
   closeAllDialogs: () => void;
+  /** True while any modal/panel is open (see useAppDialogs.anyOverlayOpen). */
+  hasOpenOverlay: () => boolean;
   openAddFlowSearch: () => void;
   toggleBatchInstallModal: () => void;
   toggleCompareModal: () => void;
@@ -66,6 +68,11 @@ export function useGlobalShortcuts(actions: GlobalShortcutsActions): void {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       if (e.key === '/') {
+        // Focus-moving shortcut: while any dialog is open it would yank
+        // focus out of the trapped surface to the search input hidden
+        // behind the backdrop, stranding keyboard users inside the modal
+        // stack. No-op while an overlay is up.
+        if (ref.current.hasOpenOverlay()) return;
         e.preventDefault();
         const searchInput = document.getElementById('app-search-input');
         searchInput?.focus();

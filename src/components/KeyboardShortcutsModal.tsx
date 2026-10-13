@@ -41,7 +41,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   return (
     <div
       ref={panelRef}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="shortcuts-dialog-title"
@@ -67,14 +67,18 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
           </button>
         </div>
 
-        <div className="p-4 space-y-2 max-h-[65vh] overflow-y-auto">
+        {/* dir=ltr on every kbd: "⌘K / Ctrl+K" starts with a neutral-bidi
+            symbol that detaches and reorders inside an RTL paragraph (fa
+            rendered it as "K / Ctrl+K⌘"). Key caps are technical tokens -
+            they read LTR in every locale. */}
+        <div className="p-4 space-y-2 max-h-[65vh] overflow-y-auto" tabIndex={0} role="region" aria-label={t('ks.title')}>
           {shortcuts.map((s) => (
             <div
               key={s.key}
               className="flex items-center justify-between py-1.5 px-2 bg-slate-950 rounded border border-slate-800 text-xs"
             >
               <span className="text-slate-300">{s.description}</span>
-              <kbd className="font-mono text-[11px] bg-slate-800 border border-slate-700 text-slate-200 px-2 py-0.5 rounded">
+              <kbd dir="ltr" className="font-mono text-[11px] bg-slate-800 border border-slate-700 text-slate-200 px-2 py-0.5 rounded">
                 {s.key}
               </kbd>
             </div>

@@ -43,7 +43,7 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
   return (
     <div
       ref={panelRef}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="legal-modal-heading"
@@ -89,8 +89,9 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
           </button>
         </div>
 
-        {/* Tab Content */}
-        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto text-xs text-slate-300 leading-relaxed">
+        {/* Tab Content. Keyboard-scrollable: long localized legal bodies overflow
+            at short viewport heights and keyboard users could not scroll. */}
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto text-xs text-slate-300 leading-relaxed" tabIndex={0} role="region" aria-label={t('legal.title')}>
           {activeTab === 'privacy' && (
             <div className="space-y-3">
               <h3 className="text-sm font-bold text-slate-100">{t('legal.privacyHeading')}</h3>

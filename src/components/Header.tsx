@@ -32,7 +32,12 @@ import {
 import { useTheme } from './ThemeProvider';
 import { useDownloadState, useDownloadActions, isAndroidWebview } from '../lib/downloads';
 import { LANGUAGES, useI18n } from '../lib/i18n';
+import { toast } from 'sonner';
 import pkg from '../../package.json';
+
+/** macOS uses ⌘K; every other platform prints the literal key combo. */
+const IS_MAC = typeof navigator !== 'undefined' && /mac/i.test(`${navigator.platform || ''} ${navigator.userAgent}`);
+const PALETTE_KEY = IS_MAC ? '⌘K' : 'Ctrl+K';
 
 interface HeaderProps {
   searchQuery: string;
@@ -171,8 +176,22 @@ export const Header: React.FC<HeaderProps> = ({
         onImportCatalog(text);
       }
     };
+    // A failed/aborted read used to vanish: no toast, no state change, the
+    // menu just closed. Surface it with the same localized import-failure
+    // message the parse path uses.
+    reader.onerror = () => toast.error(t('catalog.importParseFailed'));
+    reader.onabort = () => toast.error(t('catalog.importParseFailed'));
     reader.readAsText(file);
     e.target.value = '';
+    setShowMoreMenu(false);
+  };
+
+  // Close the menu from a chip that does NOT open a dialog (section, view,
+  // theme): hand focus back to the trigger, or the unmounting menu drops
+  // keyboard focus onto <body>. Dialog-opening items keep their own close
+  // (the dialog's focus management takes over from there).
+  const closeMenuBackToTrigger = () => {
+    moreBtnRef.current?.focus();
     setShowMoreMenu(false);
   };
 
@@ -233,7 +252,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* ---- Primary group: Add App (dominant) + Downloads ---- */}
-            <div id="header-actions-group" className="order-2 md:order-4 flex items-center gap-1.5 md:gap-2 shrink-0 ml-auto md:ml-0">
+            <div id="header-actions-group" className="order-2 md:order-4 flex items-center gap-1.5 md:gap-2 shrink-0 ms-auto md:ms-0">
               <button
                 id="header-add-app-btn"
                 type="button"
@@ -383,7 +402,6 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-label={t('header.moreMenu')}
                   aria-expanded={showMoreMenu}
                   aria-controls="header-more-dropdown"
-                  aria-haspopup="true"
                 >
                   <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
                 </button>
@@ -394,6 +412,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} aria-hidden="true" />
                     <div
                       id="header-more-dropdown"
+                      role="region"
                       aria-label={t('header.moreMenu')}
                       className="absolute end-0 mt-1.5 w-60 max-w-[calc(100vw-2rem)] max-h-[min(75vh,640px)] overflow-y-auto overscroll-contain bg-fr-surface-elevated border border-fr-border-strong rounded-xl shadow-2xl z-50 py-1 text-xs divide-y divide-fr-border"
                     >
@@ -411,7 +430,7 @@ export const Header: React.FC<HeaderProps> = ({
                                 aria-pressed={page === 'catalog'}
                                 onClick={() => {
                                   onPageChange('catalog');
-                                  setShowMoreMenu(false);
+                                  closeMenuBackToTrigger();
                                 }}
                                 className={page === 'catalog' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                                 title={t('header.browseCatalog')}
@@ -423,7 +442,7 @@ export const Header: React.FC<HeaderProps> = ({
                                 aria-pressed={page === 'replace'}
                                 onClick={() => {
                                   onPageChange('replace');
-                                  setShowMoreMenu(false);
+                                  closeMenuBackToTrigger();
                                 }}
                                 className={page === 'replace' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                                 title={t('header.privacyPackTitle')}
@@ -445,7 +464,7 @@ export const Header: React.FC<HeaderProps> = ({
                             aria-pressed={viewMode === 'grid'}
                             onClick={() => {
                               onToggleViewMode('grid');
-                              setShowMoreMenu(false);
+                              closeMenuBackToTrigger();
                             }}
                             className={viewMode === 'grid' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                           >
@@ -457,7 +476,7 @@ export const Header: React.FC<HeaderProps> = ({
                             aria-pressed={viewMode === 'table'}
                             onClick={() => {
                               onToggleViewMode('table');
-                              setShowMoreMenu(false);
+                              closeMenuBackToTrigger();
                             }}
                             className={viewMode === 'table' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                           >
@@ -573,13 +592,16 @@ export const Header: React.FC<HeaderProps> = ({
                                   type="button"
                                   onClick={() => onUpdateChannelChange(ch)}
                                   aria-pressed={updateChannel === ch}
-                                  className={`flex-1 px-2 py-1.5 rounded-md border text-[11px] capitalize transition-colors ${
+                                  className={`flex-1 px-2 py-1.5 rounded-md border text-[11px] transition-colors ${
                                     updateChannel === ch
                                       ? 'fr-chip-active font-semibold'
                                       : 'text-fr-text bg-fr-bg border-fr-border'
                                   }`}
                                 >
-                                  {ch}
+                                  {/* Channel names are product vocabulary, not
+                                      identifiers: they translate like every
+                                      other label. */}
+                                  {t(`header.channel.${ch}`)}
                                 </button>
                               ))}
                             </div>
@@ -660,7 +682,7 @@ export const Header: React.FC<HeaderProps> = ({
                         <div className="px-3 pb-1.5 flex items-center gap-1.5" role="group" aria-label={t('header.theme')}>
                           <button
                             type="button"
-                            onClick={() => { setTheme('light'); setShowMoreMenu(false); }}
+                            onClick={() => { setTheme('light'); closeMenuBackToTrigger(); }}
                             aria-pressed={theme === 'light'}
                             className={theme === 'light' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                           >
@@ -669,7 +691,7 @@ export const Header: React.FC<HeaderProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setTheme('dark'); setShowMoreMenu(false); }}
+                            onClick={() => { setTheme('dark'); closeMenuBackToTrigger(); }}
                             aria-pressed={theme === 'dark'}
                             className={theme === 'dark' ? MORE_CHIP_ON : MORE_CHIP_OFF}
                           >
@@ -720,6 +742,7 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-update-pill"
                 type="button"
                 onClick={onUpdateClick}
+                aria-busy={updatePillStatus?.busy || undefined}
                 className="order-4 md:order-2 max-md:basis-full max-md:justify-center inline-flex items-center gap-1 self-center text-[11px] font-bold text-amber-950 bg-amber-400 hover:brightness-105 border border-amber-400 dark:text-amber-900 dark:bg-amber-300 dark:hover:bg-amber-200 px-2 py-1 rounded-lg transition-colors"
                 title={
                   /* The tooltip must tell the same truth as the visible
@@ -735,7 +758,11 @@ export const Header: React.FC<HeaderProps> = ({
                 }
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
-                <span>
+                {/* aria-live: the delivery state machine flips this label
+                    (downloading -> verifying -> ready / see-releases); the
+                    change used to be silent for screen readers, and `busy`
+                    was carried in props but never exposed. */}
+                <span aria-live="polite">
                   {updatePillStatus
                     ? updatePillStatus.label
                     : t('header.updatePill').replace('{v}', updateVersion)}
@@ -749,7 +776,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="order-5 md:order-3 max-md:basis-full min-w-0 md:flex-1 md:max-w-lg relative"
             >
               <label htmlFor="app-search-input" className="sr-only">
-                {t('header.search')} Ctrl+K
+                {t('header.search')} {PALETTE_KEY}
               </label>
               <div className="relative">
                 <Search
@@ -782,9 +809,17 @@ export const Header: React.FC<HeaderProps> = ({
                       type="button"
                       onClick={onOpenCommandPalette}
                       className="text-[11px] font-mono bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong text-fr-text px-1.5 py-0.5 rounded transition-colors"
-                      title={t('header.openPalette')}
+                      // Name-from-content used to be just "Ctrl+K" (and
+                      // stayed "Ctrl+K" on macOS where the real combo is
+                      // ⌘K). The accessible name must convey purpose AND
+                      // contain the visible text (axe
+                      // label-content-name-mismatch) - so it is composed
+                      // with the platform-actual key, and without
+                      // parentheses (axe's fuzzy match fails on them).
+                      title={`${t('header.openPalette')} ${PALETTE_KEY}`}
+                      aria-label={`${t('header.openPalette')} ${PALETTE_KEY}`}
                     >
-                      Ctrl+K
+                      {PALETTE_KEY}
                     </button>
                   )}
                 </div>

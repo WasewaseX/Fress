@@ -205,6 +205,14 @@ export function useLiveStars(githubUrl?: string): number | null {
   });
 
   useEffect(() => {
+    // A repo switch must invalidate the previous repo's number BEFORE its
+    // own fetch resolves: the detail modal stays mounted across app switches
+    // (app -> null -> app), so without this reset app B rendered app A's
+    // star count until (or unless) B's own lookup answered - indefinitely
+    // when B has no queryable repo (offline, quota dry, self-hosted forge).
+    // The reset reuses the same fresh-cache rule as the initializer.
+    const cached = repo ? readCache()[repo.key] : undefined;
+    setStars(cached && Date.now() - cached.t < TTL_MS ? cached.n : null);
     if (!repo) return;
     let alive = true;
     void fetchStars(repo).then((n) => {

@@ -95,6 +95,71 @@ describe('palette clipboard feedback', () => {
     expect(screen.queryByText('Copied')).toBeNull();
   });
 
+  it('Enter on the focused copy button COPIES instead of navigating (Enter-hijack regression)', async () => {
+    writeText.mockResolvedValueOnce(undefined);
+    const onClose = vi.fn();
+    const onOpenAppDetail = vi.fn();
+    render(
+      <I18nProvider>
+        <CommandPalette
+          isOpen
+          onClose={onClose}
+          apps={APPS}
+          favorites={[]}
+          onToggleFavorite={() => {}}
+          onOpenAppDetail={onOpenAppDetail}
+          onSelectCategory={() => {}}
+          onToggleViewMode={() => {}}
+          viewMode="grid"
+          onOpenBatchInstall={() => {}}
+          onOpenCompare={() => {}}
+          onOpenExport={() => {}}
+        />
+      </I18nProvider>
+    );
+    const copyBtn = screen.getByRole('button', { name: 'Copy install command for Alpha Tool' });
+    copyBtn.focus();
+    // The container-level keydown used to preventDefault() this Enter and
+    // open the highlighted app's detail instead - keyboard users could
+    // never copy. The hijack symptom is the navigation: with focus on the
+    // button, Enter must NOT navigate (jsdom does not synthesize the
+    // button's native click from keydown, so the copy itself is asserted
+    // by the click path below).
+    fireEvent.keyDown(copyBtn, { key: 'Enter' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onOpenAppDetail).not.toHaveBeenCalled();
+    // The copy path itself (native activation / mouse) still works.
+    fireEvent.click(copyBtn);
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('winget install alpha'));
+  });
+
+  it('Enter in the query input still activates the highlighted row', () => {
+    const onClose = vi.fn();
+    const onOpenAppDetail = vi.fn();
+    render(
+      <I18nProvider>
+        <CommandPalette
+          isOpen
+          onClose={onClose}
+          apps={APPS}
+          favorites={[]}
+          onToggleFavorite={() => {}}
+          onOpenAppDetail={onOpenAppDetail}
+          onSelectCategory={() => {}}
+          onToggleViewMode={() => {}}
+          viewMode="grid"
+          onOpenBatchInstall={() => {}}
+          onOpenCompare={() => {}}
+          onOpenExport={() => {}}
+        />
+      </I18nProvider>
+    );
+    const input = screen.getByRole('combobox');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onOpenAppDetail).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('the contextual copy control sits outside the listbox and names the highlighted app', () => {
     renderPalette(true);
     const copyBtn = screen.getByRole('button', { name: 'Copy install command for Alpha Tool' });

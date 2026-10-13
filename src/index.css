@@ -294,6 +294,11 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* The duration kill-switch above does not touch scrolling: smooth
+     anchor jumps (skip link, in-page hashes) still animated. */
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 /* Scrollbars that match each theme */

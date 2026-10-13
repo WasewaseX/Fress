@@ -65,6 +65,11 @@ export interface AppDialogs {
 
   /** The Escape handler's behavior: close every transient surface. */
   closeAllDialogs: () => void;
+
+  /** True while any modal/panel is open. The global shortcut layer uses it
+   *  to stop focus-moving shortcuts (like '/') from yanking focus to the
+   *  catalog search from BEHIND an open dialog's backdrop. */
+  anyOverlayOpen: boolean;
 }
 
 export function useAppDialogs(): AppDialogs {
@@ -113,6 +118,20 @@ export function useAppDialogs(): AppDialogs {
     }
   }, []);
 
+  const anyOverlayOpen =
+    !!selectedApp ||
+    !!editingApp ||
+    isAddModalOpen ||
+    isTauriModalOpen ||
+    isShortcutsModalOpen ||
+    isCommandPaletteOpen ||
+    isBatchInstallModalOpen ||
+    isCompareModalOpen ||
+    isExportModalOpen ||
+    isDownloadsOpen ||
+    addFlow !== null ||
+    legalModal.isOpen;
+
   return {
     selectedApp,
     openDetail: setSelectedApp,
@@ -154,5 +173,7 @@ export function useAppDialogs(): AppDialogs {
     closeLegal: () => setLegalModal((prev) => ({ ...prev, isOpen: false })),
 
     closeAllDialogs,
+
+    anyOverlayOpen,
   };
 }

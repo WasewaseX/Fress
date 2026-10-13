@@ -48,7 +48,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
     <div
       ref={panelRef}
       id="compare-modal-backdrop"
-      role="dialog" aria-modal="true" aria-labelledby="compare-modal-title" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+      role="dialog" aria-modal="true" aria-labelledby="compare-modal-title" className="fixed inset-0 z-50 fr-backdrop flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
@@ -93,8 +93,11 @@ export const CompareModal: React.FC<CompareModalProps> = ({
           </div>
         </div>
 
-        {/* Matrix Content */}
-        <div className="flex-1 overflow-auto p-5">
+        {/* Matrix Content. Keyboard-scrollable region: min-w-[650px] forces
+            ~400px of horizontal overflow at the 320px floor and every
+            attribute label is non-interactive, so a keyboard user could not
+            scroll the matrix at all. */}
+        <div className="flex-1 overflow-auto p-5" tabIndex={0} role="region" aria-label={t('cmp.title')}>
           {appsToCompare.length === 0 ? (
             <div className="py-16 text-center">
               <p className="text-slate-400 text-sm mb-4">
@@ -126,7 +129,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                 {appsToCompare.map((app) => (
                   <div key={app.id} className="px-3">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-slate-100 text-base truncate">{app.name}</h3>
+                      <h3 className="font-bold text-slate-100 text-base truncate" title={app.name}>{app.name}</h3>
                       <button
                         type="button"
                         onClick={() => onRemoveAppFromCompare(app.id)}
@@ -292,21 +295,27 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                 {/* Package Manager Command */}
                 <div className="grid grid-cols-[160px_repeat(auto-fit,minmax(200px,1fr))] py-3 items-center">
                   <div className="font-semibold text-slate-400">{t('cmp.rowInstall')}</div>
-                  {appsToCompare.map((app) => (
-                    <div key={app.id} className="px-3">
-                      <code className="fr-code-well text-[11px] font-mono text-sky-300 border px-2 py-1 rounded block truncate select-all">
-                        {app.wingetCommand || app.brewCommand || t('cmp.directInstaller')}
-                      </code>
-                    </div>
-                  ))}
+                  {appsToCompare.map((app) => {
+                    const cmpCmd = app.wingetCommand || app.brewCommand || '';
+                    return (
+                      <div key={app.id} className="px-3">
+                        {/* title keeps the full command recoverable when the
+                            truncate hides its tail; dir=ltr for the RTL locales. */}
+                        <code dir="ltr" title={cmpCmd || undefined} className="fr-code-well text-[11px] font-mono text-sky-300 border px-2 py-1 rounded block truncate select-all">
+                          {cmpCmd || t('cmp.directInstaller')}
+                        </code>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Footer with add extra tool dropdown */}
-        <div className="px-5 py-3 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between">
+        {/* Footer with add extra tool dropdown. Wraps: the counter plus the
+            labelled select exceed the 320px panel in de/fr. */}
+        <div className="px-5 py-3 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="text-xs text-slate-400">
             {(appsToCompare.length === 1 ? t('cmp.comparingOne') : t('cmp.comparingMany')).replace('{n}', String(appsToCompare.length))}
           </div>

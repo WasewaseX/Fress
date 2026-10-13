@@ -22,7 +22,28 @@ import { sel, openPalette, openDownloads, dict, paletteInput } from './selectors
 import { DICTS } from '../../src/lib/i18n';
 import { PAYLOAD_SHA256 } from './fixtures/data';
 
-const VIEWPORTS = [390, 768, 1366, 1600, 1920];
+const VIEWPORTS = [320, 390, 768, 1366, 1600, 1920];
+
+/** Deterministic usability measurements that pair with a screenshot:
+ *  a snapshot alone cannot catch a clipped primary action or sideways
+ *  document scroll, so the 320px-floor guards assert the geometry. */
+async function expectNoDocOverflow(page: import('@playwright/test').Page): Promise<void> {
+  const overflow = await page.evaluate(() => ({
+    scrollW: document.documentElement.scrollWidth,
+    clientW: document.documentElement.clientWidth,
+  }));
+  expect(
+    overflow.scrollW,
+    `document scrollWidth (${overflow.scrollW}) exceeds clientWidth (${overflow.clientW}) at the 320px floor`
+  ).toBeLessThanOrEqual(overflow.clientW + 1);
+}
+
+async function expectInsideWidth(page: import('@playwright/test').Page, selector: string, width: number): Promise<void> {
+  const box = await page.locator(selector).first().boundingBox();
+  expect(box, `${selector} has a bounding box`).not.toBeNull();
+  expect(box!.x, `${selector} start edge`).toBeGreaterThanOrEqual(-1);
+  expect(box!.x + box!.width, `${selector} end edge past the ${width}px viewport`).toBeLessThanOrEqual(width + 1);
+}
 
 async function shoot(
   page: import('@playwright/test').Page,
@@ -92,6 +113,78 @@ test.describe('visual: catalog', () => {
       await shoot(page, `catalog-${width}`);
     });
   }
+});
+
+test.describe('visual: 320px floor regression guards', () => {
+  // The 320px floor is the smallest supported viewport. These guards pair
+  // the catalog-320 screenshot with the measurements a snapshot cannot
+  // express: no sideways document scroll, and primary actions neither
+  // clipped by their card nor pushed past the viewport edge.
+  test('catalog at 320: no overflow, header and card actions inside the viewport', async ({ gotoApp, page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await gotoApp();
+    await shoot(page, 'catalog-320');
+    await expectNoDocOverflow(page);
+    for (const id of ['header-add-app-btn', 'header-downloads-btn', 'header-more-menu-btn']) {
+      await expect(page.locator(`#${id}`)).toBeVisible();
+      await expectInsideWidth(page, `#${id}`, 320);
+    }
+    await expectInsideWidth(page, '[id^="download-btn-"]', 320);
+    await expectInsideWidth(page, '[id^="app-card-"]', 320);
+  });
+
+  test('batch action bar at 320 wraps and stays inside its pill', async ({ gotoApp, page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await gotoApp();
+    // Select two apps: the floating bar appears with all four controls.
+    const boxes = page.locator('input[id^="batch-check-"]');
+    await boxes.nth(0).click();
+    await boxes.nth(1).click();
+    const bar = page.locator('#floating-batch-action-bar');
+    await expect(bar).toBeVisible();
+    // The bar's own pill must not exceed the viewport, and every control
+    // inside it must sit within the pill (the pre-wrap bar spilled its
+    // buttons past the rounded border at this width, and in German up to
+    // ~520px).
+    await expectInsideWidth(page, '#floating-batch-action-bar', 320);
+    const barBox = (await bar.boundingBox())!;
+    for (const btn of await bar.locator('button').all()) {
+      const bb = (await btn.boundingBox())!;
+      expect(bb.x, 'bar control start edge').toBeGreaterThanOrEqual(barBox.x - 1);
+      expect(bb.x + bb.width, 'bar control end edge').toBeLessThanOrEqual(barBox.x + barBox.width + 1);
+    }
+    await expectNoDocOverflow(page);
+    await shoot(page, 'batch-bar-320');
+  });
+
+  test('export modal at 320: footer actions stay reachable', async ({ gotoApp, page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await gotoApp();
+    await page.keyboard.press('e');
+    await expect(page.locator('#export-modal')).toBeVisible();
+    await expectNoDocOverflow(page);
+    // The primary export action must be fully visible (it was clipped by
+    // the panel's overflow-hidden before the footer wrapped). The default
+    // format is markdown, so the filename appears in the button label.
+    const download = page.getByRole('button', { name: 'Download README.md' });
+    await expect(download).toBeVisible();
+    const db = (await download.boundingBox())!;
+    const panel = (await page.locator('#export-modal').boundingBox())!;
+    expect(db.y + db.height, 'export Download button bottom inside the panel').toBeLessThanOrEqual(panel.y + panel.height + 1);
+    await shoot(page, 'export-320');
+  });
+});
+
+test.describe('visual: 320px RTL floor guard', () => {
+  test.use({ lang: 'fa' });
+
+  test('RTL (fa) catalog at 320: no horizontal overflow', async ({ gotoApp, page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await gotoApp();
+    await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+    await expectNoDocOverflow(page);
+    await expectInsideWidth(page, '[id^="download-btn-"]', 320);
+  });
 });
 
 test.describe('visual: privacy pack', () => {

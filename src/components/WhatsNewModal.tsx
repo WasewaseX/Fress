@@ -72,7 +72,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
     <div
       ref={panelRef}
       id="whats-new-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="whats-new-title"
@@ -162,7 +162,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                         </h3>
                         <ul className="space-y-1.5">
                           {s.items.map((item, i) => (
-                            <li key={i} className="text-[12px] text-slate-300 leading-relaxed pl-3 border-l border-slate-700/60">
+                            <li key={i} className="text-[12px] text-slate-300 leading-relaxed ps-3 border-s border-slate-700/60">
                               {item}
                             </li>
                           ))}
@@ -219,7 +219,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                                   </h4>
                                   <ul className="space-y-1">
                                     {s.items.map((item, i) => (
-                                      <li key={i} className="text-[11.5px] text-slate-300 leading-relaxed pl-2.5 border-l border-slate-700/60">
+                                      <li key={i} className="text-[11.5px] text-slate-300 leading-relaxed ps-2.5 border-s border-slate-700/60">
                                         {item}
                                       </li>
                                     ))}

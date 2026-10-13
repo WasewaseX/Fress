@@ -31,13 +31,27 @@ ONE frontend→native boundary serves every artifact class:
   `.deb`/`.rpm`/archives. Gatekeeper, UAC and package-manager checks stay
   in force; Fress never disables them and never claims an installer
   succeeded merely because the installer UI launched.
-- On ANDROID the same boundary carries the app-private path. The native
-  adaptation below it (FileProvider content URIs; APK handoff to the
-  system package installer with `REQUEST_INSTALL_PACKAGES`; MIME-matched
-  viewer with a share fallback for other files) is the Android adapter's
-  own native implementation. The frontend does not branch for Android:
-  Show in folder is hidden (app-private storage is not browsable), the
-  footer says so, and Open passes the exact path through.
+- On ANDROID the same boundary carries the app-private path, and the
+  native adaptation below it is LANDED: the provider's `openPath` dep binds
+  to the registry-validated adapter command `open_downloaded_file`
+  (`src-tauri/src/lib.rs`, native half in `src-tauri/plugins/fress-open`).
+  The command resolves the exact path against the session download
+  registry (the same discipline as the updater's signature verification),
+  routes `.apk` artifacts to the system package installer through a
+  FileProvider `content://` URI scoped to `filesDir/Download` (temporary
+  read grant; `REQUEST_INSTALL_PACKAGES` makes the standard unknown-sources
+  consent reachable, never bypassed) and serves every other artifact via a
+  MIME-matched viewer with a share fallback (read grant only). Its
+  refusals reuse the typed namespace: `open-artifact/not-registered`
+  (out of registry - including restored-after-restart rows, which keep
+  their affordance and are refused honestly), `open-artifact/not-found`,
+  `open-artifact/not-a-file`, `open-artifact/replaced`; OS-shaped I/O
+  text flows through the same parser as opener-plugin errors. The
+  frontend does not branch for Android: Show in folder is hidden
+  (app-private storage is not browsable), the footer says so, Open passes
+  the exact path through, and the row's action keeps the uniform
+  "Open" label (`data-testid="download-open"`), and the e2e bridge records
+  the adapter command in the same `openedPaths` stream the opener writes.
 
 ## The one desktop exception: Linux AppImage
 
@@ -116,3 +130,10 @@ never substitutes for it.
   registry record is written only by the engine's commit path, so a
   (id, path) pair that does not match a genuine engine completion is
   refused before any filesystem mutation.
+- The Android adapter is the second consumer of the same completed-artifact
+  registry discipline (shared `resolve_completed_artifact` in `lib.rs`,
+  also used by the updater's signature-verification boundary), and it adds
+  `REQUEST_INSTALL_PACKAGES` - the only permission the open boundary needs
+  - via the `fress-open` plugin manifest; no capability entries change
+  (the adapter command is an app command, callable only by the app's own
+  webview).

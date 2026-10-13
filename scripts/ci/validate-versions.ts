@@ -146,13 +146,16 @@ export function isProjectVersion(v: string): boolean {
  * under that setting TypeScript does not narrow boolean-literal
  * discriminated unions (verified with tsc 5.8) — string literals narrow
  * fine. Do not "simplify" this back to a boolean discriminant. */
-export type ParseResult = { kind: 'ok'; value: string } | { kind: 'err'; error: string };
+export type ParseResult =
+  | { kind: 'ok'; value: string }
+  | { kind: 'delegated' }
+  | { kind: 'err'; error: string };
 
 /** Extract a required string field from parsed JSON. `field` is a display
  * path like `.version` or `.packages[""].version`; `segments` carries the
  * real lookup keys ("" is a real key inside packages, so paths are spelled
  * out instead of being re-parsed from the display string). */
-function jsonField(data: unknown, file: string, field: string, segments: string[]): ParseResult {
+function jsonField(data: unknown, file: string, field: string, segments: string[]): RequiredParseResult {
   let cur: unknown = data;
   for (const seg of segments) {
     if (cur === null || typeof cur !== 'object') {
@@ -170,7 +173,7 @@ function jsonField(data: unknown, file: string, field: string, segments: string[
 }
 
 /** package.json — the canonical application version. */
-export function parsePackageJsonVersion(text: string): ParseResult {
+export function parsePackageJsonVersion(text: string): RequiredParseResult {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -181,7 +184,7 @@ export function parsePackageJsonVersion(text: string): ParseResult {
 }
 
 /** package-lock.json — BOTH root version fields. */
-export function parsePackageLockVersions(text: string): { root: ParseResult; pkg: ParseResult } {
+export function parsePackageLockVersions(text: string): { root: RequiredParseResult; pkg: RequiredParseResult } {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -196,7 +199,7 @@ export function parsePackageLockVersions(text: string): { root: ParseResult; pkg
 }
 
 /** src-tauri/tauri.conf.json — the Tauri/bundle version. */
-export function parseTauriConfVersion(text: string): ParseResult {
+export function parseTauriConfVersion(text: string): RequiredParseResult {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -247,12 +250,19 @@ export function parseTauriAndroidVersionName(text: string): OptionalParseResult 
 /** src-tauri/gen/android/app/build.gradle.kts — the generated Android
  * project's versionName. Kotlin DSL assignments come in two shapes Tauri
  * emits/accepts: `versionName = "1.0.0"` and Groovy-style
- * `versionName "1.0.0"`. Comments are ignored; exactly ONE uncommented
- * assignment must exist — zero means the authoritative field is missing,
- * several means it is ambiguous, and both fail closed. */
+ * `versionName "1.0.0"`. Newer Tauri CLI releases (2.11+) delegate the
+ * value to the generated `app/tauri.properties` instead of inlining it:
+ * `versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")`
+ * — that shape returns kind 'delegated' and the authoritative value must
+ * be read from the sibling properties file (the call site resolves it).
+ * Comments are ignored; exactly ONE uncommented assignment (literal or
+ * delegation) must exist — zero means the authoritative field is missing,
+ * a literal MIXED with a delegation is ambiguous, and all of these fail
+ * closed. */
 export function parseGradleKtsVersionName(text: string): ParseResult {
   const FILE = 'src-tauri/gen/android/app/build.gradle.kts';
   const found: string[] = [];
+  let delegated = 0;
 
   for (const rawLine of text.split('\n')) {
     let line = rawLine.trim();
@@ -268,14 +278,50 @@ export function parseGradleKtsVersionName(text: string): ParseResult {
     const assign = /^(?:[a-zA-Z_][\w.]*\.)?versionName\s*(?:=\s*)?"((?:[^"\\]|\\.)*)"\s*$/.exec(line);
     if (assign) {
       found.push(assign[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+      continue;
     }
+    // The delegation shape current CLIs generate: the value lives in the
+    // sibling tauri.properties (versionName = tauriProperties.getProperty(
+    // "tauri.android.versionName", "1.0")); the default literal inside the
+    // call is NOT authoritative and must not be parsed as a literal.
+    const delegate = /^(?:[a-zA-Z_][\w.]*\.)?versionName\s*=\s*tauriProperties\.getProperty\(\s*["']tauri\.android\.versionName["']\s*(?:,\s*["'][^"']*["']\s*)?\)\s*$/.exec(line);
+    if (delegate) delegated++;
   }
 
-  if (found.length === 0) {
+  if (found.length === 0 && delegated === 0) {
     return { kind: 'err', error: `${FILE} exists but has no parseable versionName assignment (the authoritative Android version field is missing or mangled)` };
   }
+  if (found.length > 1 || (found.length >= 1 && delegated >= 1) || delegated > 1) {
+    const shapes = [...found, ...(delegated > 0 ? ['tauriProperties.getProperty(tauri.android.versionName)'] : [])];
+    return { kind: 'err', error: `${FILE} has ${shapes.length} versionName assignments (${shapes.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+  }
+  if (delegated === 1) return { kind: 'delegated' };
+  return { kind: 'ok', value: found[0] };
+}
+
+/** src-tauri/gen/android/app/tauri.properties — the generated properties
+ * file the delegating build.gradle.kts reads its versionName from
+ * (`tauri.android.versionName=...`). Comments (#) are ignored; exactly one
+ * uncommented assignment must exist; an empty value fails closed. This
+ * file never delegates further, so it returns the required two-shape
+ * result only. */
+export function parseTauriPropertiesVersionName(text: string): RequiredParseResult {
+  const FILE = 'src-tauri/gen/android/app/tauri.properties';
+  const found: string[] = [];
+  for (const rawLine of text.split('\n')) {
+    let line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const assign = /^tauri\.android\.versionName\s*=\s?(.*)$/.exec(line);
+    if (assign) found.push(assign[1].trim());
+  }
+  if (found.length === 0) {
+    return { kind: 'err', error: `${FILE} exists but has no parseable tauri.android.versionName entry (the delegating build.gradle.kts reads the Android version from here)` };
+  }
   if (found.length > 1) {
-    return { kind: 'err', error: `${FILE} has ${found.length} versionName assignments (${found.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+    return { kind: 'err', error: `${FILE} has ${found.length} tauri.android.versionName entries (${found.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+  }
+  if (found[0] === '') {
+    return { kind: 'err', error: `${FILE} has an empty tauri.android.versionName value` };
   }
   return { kind: 'ok', value: found[0] };
 }
@@ -313,7 +359,7 @@ function readTomlStringLine(line: string): { key: string; value: string; rest: s
  * like [package.metadata] do not count; comments are ignored; a duplicated
  * version key inside [package] is malformed (TOML forbids redefining a
  * key). */
-export function parseCargoTomlVersion(text: string, file = 'src-tauri/Cargo.toml'): ParseResult {
+export function parseCargoTomlVersion(text: string, file = 'src-tauri/Cargo.toml'): RequiredParseResult {
   let current: string | null = null;
   let seenPackage = false;
   let version: string | null = null;
@@ -405,7 +451,7 @@ function scanCargoLockPackageRecords(text: string): { records: LockPackage[] } |
  * src-tauri/Cargo.lock. Zero or several such records is a failure, not a
  * guess; `missingMessage` lets each crate carry a diagnostic that names the
  * reason that crate must exist in the lock. */
-function parseCargoLockEntryVersion(text: string, crateName: string, missingMessage: string): ParseResult {
+function parseCargoLockEntryVersion(text: string, crateName: string, missingMessage: string): RequiredParseResult {
   const scanned = scanCargoLockPackageRecords(text);
   if ('error' in scanned) {
     return { kind: 'err', error: scanned.error };
@@ -429,7 +475,7 @@ function parseCargoLockEntryVersion(text: string, crateName: string, missingMess
  *
  * Only the [[package]] record whose name is exactly "fress" counts. Zero or
  * several such records is a failure, not a guess. */
-export function parseCargoLockFressVersion(text: string): ParseResult {
+export function parseCargoLockFressVersion(text: string): RequiredParseResult {
   return parseCargoLockEntryVersion(
     text,
     'fress',
@@ -441,7 +487,7 @@ export function parseCargoLockFressVersion(text: string): ParseResult {
  * The plugin is a path dependency of the app crate, so its record must
  * exist and carry the same version the manifest declares (missing record =
  * stale lockfile; several = corrupted). */
-export function parseCargoLockPluginVersion(text: string): ParseResult {
+export function parseCargoLockPluginVersion(text: string): RequiredParseResult {
   return parseCargoLockEntryVersion(
     text,
     'tauri-plugin-fress-open',
@@ -474,6 +520,7 @@ export type RequiredFile = (typeof REQUIRED_FILES)[number];
  * agree with the canonical version. */
 export const OPTIONAL_FILES = [
   'src-tauri/gen/android/app/build.gradle.kts',
+  'src-tauri/gen/android/app/tauri.properties',
   'src-tauri/plugins/fress-open/Cargo.toml',
 ] as const;
 
@@ -515,6 +562,11 @@ export interface ValidateInput {
   releaseTag?: string;
 }
 
+/** The result shape the REQUIRED-file extractors produce: always a real
+ * value or a real failure — the 'delegated' kind only arises from the
+ * OPTIONAL generated-Android parsers, which the field loop never calls. */
+type RequiredParseResult = { kind: 'ok'; value: string } | { kind: 'err'; error: string };
+
 interface FieldSpec {
   file: RequiredFile;
   field: string;
@@ -523,7 +575,7 @@ interface FieldSpec {
   id: string;
   /** package-lock.json is parsed once for BOTH fields, so it has no
    * single-field extractor; the loop handles it explicitly. */
-  extract?: (text: string) => ParseResult;
+  extract?: (text: string) => RequiredParseResult;
   hint: string;
 }
 
@@ -778,19 +830,50 @@ export function validateVersions(input: ValidateInput): ValidationReport {
         failures.push(parsed.error);
         continue;
       }
+      // Delegation form (Tauri CLI 2.11+): build.gradle.kts reads the
+      // version from the generated sibling tauri.properties. The value is
+      // still authoritative — it just lives one file over, so resolve it
+      // there, failing closed when the file is missing or unparsable.
+      // Rows are attributed to the file that actually carries the value.
+      const PROP_FILE = 'src-tauri/gen/android/app/tauri.properties';
+      let reportFile: string = optPath;
+      let reportField = 'versionName';
+      let value: string | null = null;
+      if (parsed.kind === 'delegated') {
+        reportFile = PROP_FILE;
+        reportField = 'tauri.android.versionName';
+        const propText = input.optionalFiles?.[PROP_FILE];
+        if (typeof propText !== 'string') {
+          const msg = `${optPath} delegates versionName to tauriProperties.getProperty("tauri.android.versionName", …) but ${PROP_FILE} is absent — the authoritative Android version cannot be verified (fail closed; re-run "tauri android init" or pin a literal versionName).`;
+          checks.push({ file: optPath, field: 'versionName', value: '(delegated, unresolved)', status: 'fail', detail: msg });
+          failures.push(msg);
+          continue;
+        }
+        const prop = parseTauriPropertiesVersionName(propText);
+        if (prop.kind === 'err') {
+          checks.push({ file: PROP_FILE, field: 'tauri.android.versionName', value: '(unparsable)', status: 'fail', detail: prop.error });
+          failures.push(prop.error);
+          continue;
+        }
+        value = prop.value;
+      } else if (parsed.kind === 'ok') {
+        value = parsed.value;
+      } else {
+        continue; // unreachable: 'err' already reported above
+      }
       if (canonical === null) {
-        const msg = `${optPath} versionName is "${parsed.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
-        checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'fail', detail: msg });
+        const msg = `${reportFile} versionName is "${value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
+        checks.push({ file: reportFile, field: reportField, value, status: 'fail', detail: msg });
         failures.push(msg);
         continue;
       }
-      if (stripVPrefix(parsed.value) !== canonical) {
-        const msg = expectedLine(optPath, 'versionName', `"${parsed.value}"`, `"${canonical}"`, 're-run "tauri android build" so the generated project records the current version');
-        checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'fail', detail: msg, hint: 're-run "tauri android build" so the generated project records the current version' });
+      if (stripVPrefix(value) !== canonical) {
+        const msg = expectedLine(reportFile, 'versionName', `"${value}"`, `"${canonical}"`, 're-run "tauri android build" so the generated project records the current version');
+        checks.push({ file: reportFile, field: reportField, value, status: 'fail', detail: msg, hint: 're-run "tauri android build" so the generated project records the current version' });
         failures.push(msg);
         continue;
       }
-      checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'ok' });
+      checks.push({ file: reportFile, field: reportField, value, status: 'ok' });
     }
   }
 

@@ -218,7 +218,13 @@ pub(crate) fn plan_open(
     // A restored row has a negative local id and no engine identity: it
     // cannot prove the path still refers to engine-committed bytes. Fail
     // closed (the row keeps Show in folder).
-    if id < 0 {
+    //
+    // The id gate covers the engine's WHOLE id domain, not just negativity:
+    // engine ids are `AtomicU32`, so a caller id outside `0..=u32::MAX` was
+    // never issued by this engine. Refusing it BEFORE the `as u32` cast
+    // keeps a forged or corrupt large id from wrapping into a small record
+    // id and passing the mismatch check.
+    if id < 0 || id > u32::MAX as i64 {
         return Err(OpenRejection::NotRegistered);
     }
     let record = registry
@@ -534,6 +540,26 @@ mod tests {
         register(&registry, 9, &app);
         let err = plan_open(&registry, -1, app.to_str().unwrap()).unwrap_err();
         assert_eq!(err, OpenRejection::NotRegistered);
+    }
+
+    #[test]
+    fn an_id_outside_the_engine_u32_domain_is_refused_before_the_cast() {
+        // Engine ids come from an AtomicU32, so no REAL id exceeds
+        // u32::MAX. The id (1<<32)+1 would wrap onto record id 1 under a
+        // raw `as u32` cast - the exact forgery that would pass the
+        // mismatch check - so the domain gate refuses it as unregistered.
+        let dir = TempDir::new("appimage-id-domain");
+        let app = dir.path().join("wrapped.AppImage");
+        write(&app, b"elf");
+        let registry = DownloadRegistry::default();
+        register(&registry, 1, &app);
+        let err = plan_open(&registry, (1i64 << 32) + 1, app.to_str().unwrap()).unwrap_err();
+        assert_eq!(err, OpenRejection::NotRegistered);
+        // The upper edge of the domain is still legal input shape: it is
+        // compared honestly against the record (mismatch, never a
+        // wrap-around onto another record's id).
+        let err = plan_open(&registry, u32::MAX as i64, app.to_str().unwrap()).unwrap_err();
+        assert_eq!(err, OpenRejection::IdMismatch);
     }
 
     #[test]

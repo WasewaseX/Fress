@@ -32,7 +32,7 @@
  * revealed anything, or Android's PackageInstaller took an intent - those
  * are native surfaces covered by docs/testing/download-open-smoke.md.
  */
-import { expect, bridge, test } from './fixtures';
+import { expect, bridge, test, waitForCatalogReady } from './fixtures';
 import { sel, openDownloads } from './selectors';
 import type { Locator, Page } from '@playwright/test';
 import { DICTS } from '../../src/lib/i18n';
@@ -703,6 +703,74 @@ test.describe('Workflow D2: download-to-open', () => {
     await settle(page);
     await expect(page.locator(sel.downloadRow('completed'))).toHaveCount(2);
     expect(await openCalls(page)).toEqual([PATH_A, PATH_B]);
+  });
+
+  test('G: a remounted provider (app restart) keeps one completion listener and restored rows still open their own path', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await startFromDetail(page, 'localsend', 'LocalSend-1.17.0-windows-x64.exe', 1);
+    await openDownloads(page);
+    const [id] = await registeredIds(page);
+    const PATH = '/home/test/Downloads/LocalSend-1.17.0-windows-x64.exe';
+    const SHA = 'a'.repeat(64);
+    await complete(page, id, PATH, BYTES, SHA, true);
+    await drainToasts(page);
+
+    // A completed row is durable history: the restart restores exactly
+    // what storage holds, so wait for the persisted payload first (the
+    // terminal transition flushes synchronously - this poll is a state
+    // wait, not a sleep).
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('fress.downloadItems.v1') ?? ''))
+      .toContain('"status":"completed"');
+
+    // REMOUNT = the app restarting. All in-memory state dies; the init
+    // scripts (the test bridge included) re-run, and the panel restores
+    // from storage with fresh NEGATIVE local ids.
+    await page.reload();
+    await waitForCatalogReady(page);
+
+    // (a) The remounted provider registered EXACTLY one listener per
+    // download event - a duplicate registration would double every
+    // completion from here on.
+    const b1 = (await bridge(page))!;
+    for (const ev of ['download-progress', 'download-complete', 'download-retrying', 'download-error']) {
+      const regs = b1.calls.filter(
+        (c) => c.cmd === 'plugin:event|listen' && (c.args as { event?: string } | null)?.event === ev
+      );
+      expect(regs, `exactly one listener for ${ev} after remount`).toHaveLength(1);
+    }
+
+    // (b) The restored row (fresh negative id, no engine identity) still
+    // hands ITS OWN exact completed path to the opener - restore cannot
+    // reassign or lose the path.
+    await openDownloads(page);
+    const restored = completedRow(page, SHA.slice(0, 24));
+    await expect(restored).toHaveCount(1);
+    await expect(restored).toContainText(d['downloads.verified']);
+    await openBtnOf(restored).click();
+    expect(await openCalls(page)).toEqual([PATH]);
+
+    // (c) A fresh download started after the remount completes with
+    // single-fire feedback (one toast, one new row) and opens ITS own
+    // path: the remount left no duplicated completion handling behind,
+    // and restored vs freshly-registered rows stay independent.
+    await page.locator(sel.downloadsPanel).getByRole('button', { name: d['common.close'] }).click();
+    await expect(page.locator(sel.downloadsPanel)).toHaveCount(0);
+    await startFromDetail(page, 'vlc', 'vlc-3.0.21-win64.exe', 1);
+    await openDownloads(page);
+    const freshId = (await registeredIds(page)).find((n) => n > 0)!;
+    const PATH_VLC = '/home/test/Downloads/vlc-3.0.21-win64.exe';
+    const SHA_VLC = 'b'.repeat(64);
+    await drainToasts(page);
+    await trackToasts(page);
+    await complete(page, freshId, PATH_VLC, 41_000_000, SHA_VLC, true);
+    await settle(page);
+    expect(await toastMounts(page)).toBe(1);
+    await expect(page.locator(sel.downloadRow('completed'))).toHaveCount(2);
+    await drainToasts(page);
+    const freshRow = completedRow(page, SHA_VLC.slice(0, 24));
+    await openBtnOf(freshRow).click();
+    expect(await openCalls(page)).toEqual([PATH, PATH_VLC]);
   });
 
   // -------------------------------------------------------------------------

@@ -77,8 +77,11 @@ evidence yet.
 Executed 2026-10-13, Chromium (Linux CI container), production build via
 `vite preview`, native boundary mocked by `tests/e2e/tauri-bridge.ts`;
 `npx playwright test tests/e2e/download-open.spec.ts tests/e2e/d-download-open.spec.ts`
-→ all green, exit 0 (Workflow K: 22 tests; Workflow D2: the state-gating
-round — see its own mapping table at the end of this section).
+→ 36 passed, exit 0 (Workflow K: 22 tests; Workflow D2: 14 tests — the
+state-gating/listener-hygiene round, now including the remounted-provider
+test). Companion runs on the same build: `tests/e2e/d-download-states.spec.ts`
+→ 6 passed; `cargo test` (src-tauri) → 206 passed; `cargo fmt -- --check` and
+`cargo clippy --all-targets -- -D warnings` clean.
 
 | Workflow K test | Journey contract proven (UI level) |
 |---|---|
@@ -196,8 +199,8 @@ fill it from the mock suite.
 | D2 › A (exact path + pending silence) | W1, M1, L1, A1 |
 | D2 › B (concurrent, out-of-order, duplicate names) | any row after two downloads |
 | D2 › C (no Open outside completion; keyboard never reaches the opener) | A6, and every row's precondition |
-| D2 › D (opener rejection, retry, no unhandled rejection) | W6, M6, L4 |
-| D2 › E (Show in folder, parent fallback, both failing) | W4, M4, L5 |
+| D2 › D (opener rejection, retry, no unhandled rejection) | W3 (no-handler toast), M5 (gone file), L4 (launcher failure) |
+| D2 › E (Show in folder, parent fallback, both failing) | W4, M4, L6 |
 | D2 › F (checksum-mismatched artifact never openable; no-path rows) | row preconditions (Verified/Done only after real completion) |
-| D2 › G (byte-exact odd paths; one completion listener, stale events cannot cross-wire) | W5 |
+| D2 › G (byte-exact odd paths; one completion listener, stale events cannot cross-wire; remounted provider keeps one listener and restored rows keep their own path) | W5, W1 after an app restart |
 | D2 › H (artifact-class pass-through; Android UA drops Show in folder) | W2/W3/L1–L3, M1–M3, A1–A5 |

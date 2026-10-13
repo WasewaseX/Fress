@@ -257,20 +257,15 @@ async fn read_capped_api_text_with_cap(
         return Err("Response body too large".to_string());
     }
     let mut buf: Vec<u8> = Vec::new();
-    loop {
-        match resp
-            .chunk()
-            .await
-            .map_err(|e| format!("Bad response: {}", e))?
-        {
-            Some(chunk) => {
-                if buf.len() as u64 + chunk.len() as u64 > cap {
-                    return Err("Response body too large".to_string());
-                }
-                buf.extend_from_slice(&chunk);
-            }
-            None => break,
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("Bad response: {}", e))?
+    {
+        if buf.len() as u64 + chunk.len() as u64 > cap {
+            return Err("Response body too large".to_string());
         }
+        buf.extend_from_slice(&chunk);
     }
     // API JSON is UTF-8 by RFC 8259; a body that is not is a broken answer
     // (reqwest's text() would silently replace invalid bytes, moving the

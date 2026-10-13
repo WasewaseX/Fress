@@ -42,6 +42,20 @@
  * read also fails — an unreadable manifest must never silently disable its
  * check.
  *
+ * IN-REPO ANDROID PLUGIN (conditional-authoritative, same policy).
+ * src-tauri/plugins/fress-open is a path dependency of the app crate: once
+ * it exists, its crate version ships inside the release binary and is part
+ * of the application version surface:
+ *
+ *   src-tauri/plugins/fress-open/Cargo.toml  [package] version
+ *   src-tauri/Cargo.lock         [[package]] name="tauri-plugin-fress-open" -> version
+ *
+ * Both must equal the canonical version (and therefore each other). The
+ * checks are conditional on the plugin manifest EXISTING: absent manifest
+ * + absent lock entry is the legitimate pre-plugin state of every
+ * checkout; an orphan lock entry without the manifest (or a manifest
+ * without its lock entry) is stale-lockfile drift and fails closed.
+ *
  * Why lockfiles are checked, not just manifests: a release cut from a stale
  * lockfile ships an old `npm view` version and embeds the old crate version
  * in the binary metadata even though every manifest was bumped.
@@ -299,7 +313,7 @@ function readTomlStringLine(line: string): { key: string; value: string; rest: s
  * like [package.metadata] do not count; comments are ignored; a duplicated
  * version key inside [package] is malformed (TOML forbids redefining a
  * key). */
-export function parseCargoTomlVersion(text: string): ParseResult {
+export function parseCargoTomlVersion(text: string, file = 'src-tauri/Cargo.toml'): ParseResult {
   let current: string | null = null;
   let seenPackage = false;
   let version: string | null = null;
@@ -320,17 +334,17 @@ export function parseCargoTomlVersion(text: string): ParseResult {
       const parsed = readTomlStringLine(line);
       if (!parsed || parsed.key !== 'version' || !parsed.value) continue;
       if (version !== null) {
-        return { kind: 'err', error: 'src-tauri/Cargo.toml [package] redefines the "version" key (malformed TOML)' };
+        return { kind: 'err', error: `${file} [package] redefines the "version" key (malformed TOML)` };
       }
       version = parsed.value;
     }
   }
 
   if (!seenPackage) {
-    return { kind: 'err', error: 'src-tauri/Cargo.toml has no [package] table' };
+    return { kind: 'err', error: `${file} has no [package] table` };
   }
   if (version === null) {
-    return { kind: 'err', error: 'src-tauri/Cargo.toml [package] has no "version" key' };
+    return { kind: 'err', error: `${file} [package] has no "version" key` };
   }
   return { kind: 'ok', value: version };
 }
@@ -340,14 +354,12 @@ interface LockPackage {
   version: string | null;
 }
 
-/** src-tauri/Cargo.lock — the version of the fress crate entry.
- *
- * The lockfile's top-level `version = <format>` (e.g. 4) is the lockfile
- * FORMAT version, not an application version; it sits outside any
- * [[package]] record and is never read. Only the [[package]] record whose
- * name is exactly "fress" counts. Zero or several such records is a
- * failure, not a guess. */
-export function parseCargoLockFressVersion(text: string): ParseResult {
+/** Scan src-tauri/Cargo.lock [[package]] records: name/version string keys
+ * per record, corrupted (duplicated) keys rejected. The lockfile's
+ * top-level `version = <format>` sits outside any record and is never
+ * read. Returns { error } instead of throwing so every caller fails with
+ * the same corrupted-lockfile diagnostics. */
+function scanCargoLockPackageRecords(text: string): { records: LockPackage[] } | { error: string } {
   const records: LockPackage[] = [];
   let current: LockPackage | null = null;
 
@@ -374,30 +386,67 @@ export function parseCargoLockFressVersion(text: string): ParseResult {
       if (!parsed || parsed.value === '') continue;
       if (parsed.key === 'name') {
         if (current.name !== null) {
-          return { kind: 'err', error: 'src-tauri/Cargo.lock has a [[package]] record with a duplicated "name" key (corrupted lockfile)' };
+          return { error: 'src-tauri/Cargo.lock has a [[package]] record with a duplicated "name" key (corrupted lockfile)' };
         }
         current.name = parsed.value;
       } else {
         if (current.version !== null) {
-          return { kind: 'err', error: 'src-tauri/Cargo.lock has a [[package]] record with a duplicated "version" key (corrupted lockfile)' };
+          return { error: 'src-tauri/Cargo.lock has a [[package]] record with a duplicated "version" key (corrupted lockfile)' };
         }
         current.version = parsed.value;
       }
     }
   }
 
-  const fress = records.filter((r) => r.name === 'fress');
-  if (fress.length === 0) {
-    return { kind: 'err', error: 'src-tauri/Cargo.lock has no [[package]] entry with name = "fress" (stale or foreign lockfile?)' };
+  return { records };
+}
+
+/** The version of ONE named crate's [[package]] record in
+ * src-tauri/Cargo.lock. Zero or several such records is a failure, not a
+ * guess; `missingMessage` lets each crate carry a diagnostic that names the
+ * reason that crate must exist in the lock. */
+function parseCargoLockEntryVersion(text: string, crateName: string, missingMessage: string): ParseResult {
+  const scanned = scanCargoLockPackageRecords(text);
+  if ('error' in scanned) {
+    return { kind: 'err', error: scanned.error };
   }
-  if (fress.length > 1) {
-    return { kind: 'err', error: `src-tauri/Cargo.lock has ${fress.length} [[package]] entries named "fress" (ambiguous, corrupted lockfile)` };
+
+  const entries = scanned.records.filter((r) => r.name === crateName);
+  if (entries.length === 0) {
+    return { kind: 'err', error: missingMessage };
   }
-  const entry = fress[0];
+  if (entries.length > 1) {
+    return { kind: 'err', error: `src-tauri/Cargo.lock has ${entries.length} [[package]] entries named "${crateName}" (ambiguous, corrupted lockfile)` };
+  }
+  const entry = entries[0];
   if (entry.version === null) {
-    return { kind: 'err', error: 'src-tauri/Cargo.lock: the [[package]] entry named "fress" has no "version" key' };
+    return { kind: 'err', error: `src-tauri/Cargo.lock: the [[package]] entry named "${crateName}" has no "version" key` };
   }
   return { kind: 'ok', value: entry.version };
+}
+
+/** src-tauri/Cargo.lock — the version of the fress crate entry.
+ *
+ * Only the [[package]] record whose name is exactly "fress" counts. Zero or
+ * several such records is a failure, not a guess. */
+export function parseCargoLockFressVersion(text: string): ParseResult {
+  return parseCargoLockEntryVersion(
+    text,
+    'fress',
+    'src-tauri/Cargo.lock has no [[package]] entry with name = "fress" (stale or foreign lockfile?)'
+  );
+}
+
+/** src-tauri/Cargo.lock — the version of the in-repo plugin crate's record.
+ * The plugin is a path dependency of the app crate, so its record must
+ * exist and carry the same version the manifest declares (missing record =
+ * stale lockfile; several = corrupted). */
+export function parseCargoLockPluginVersion(text: string): ParseResult {
+  return parseCargoLockEntryVersion(
+    text,
+    'tauri-plugin-fress-open',
+    'src-tauri/Cargo.lock has no [[package]] entry with name = "tauri-plugin-fress-open" (the in-repo plugin crate is missing from the lockfile — run any cargo command in src-tauri/)'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -419,10 +468,14 @@ export type RequiredFile = (typeof REQUIRED_FILES)[number];
 
 /** Optional-authoritative files: checked ONLY when present on disk. Absent
  * means the build input does not exist in this checkout (the Android Gradle
- * project is generated by `tauri android init`), which is legitimate — not
- * a skip of a required check. Present means authoritative: it must parse
- * and must agree with the canonical version. */
-export const OPTIONAL_FILES = ['src-tauri/gen/android/app/build.gradle.kts'] as const;
+ * project is generated by `tauri android init`; the plugin directory is
+ * simply not part of pre-plugin trees), which is legitimate — not a skip of
+ * a required check. Present means authoritative: it must parse and must
+ * agree with the canonical version. */
+export const OPTIONAL_FILES = [
+  'src-tauri/gen/android/app/build.gradle.kts',
+  'src-tauri/plugins/fress-open/Cargo.toml',
+] as const;
 
 export type OptionalFile = (typeof OPTIONAL_FILES)[number];
 
@@ -704,6 +757,10 @@ export function validateVersions(input: ValidateInput): ValidationReport {
   }
 
   for (const optPath of OPTIONAL_FILES) {
+    // The plugin crate manifest is checked in its own section below (it
+    // additionally needs the Cargo.lock content); handling its read errors
+    // there keeps every plugin failure reported exactly once.
+    if (optPath === 'src-tauri/plugins/fress-open/Cargo.toml') continue;
     if (optPath in (input.optionalReadErrors ?? {})) {
       const reason = input.optionalReadErrors![optPath];
       const msg = `${optPath} exists but could not be read (${reason}) — an unreadable build input must not silently disable its check.`;
@@ -734,6 +791,127 @@ export function validateVersions(input: ValidateInput): ValidationReport {
         continue;
       }
       checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'ok' });
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // IN-REPO ANDROID PLUGIN crate (conditional-authoritative).
+  //
+  // src-tauri/plugins/fress-open is a path dependency of the app crate; its
+  // crate version is compiled into the release binary. When the plugin
+  // exists, its manifest version and its Cargo.lock record are part of the
+  // application version surface and must equal the canonical version (and
+  // therefore each other):
+  //   manifest present + lock entry present  -> both must equal canonical
+  //   manifest present + lock entry missing  -> stale lockfile, fail closed
+  //   manifest absent  + lock entry present  -> orphan record, fail closed
+  //   manifest absent  + lock entry absent   -> the legitimate pre-plugin
+  //                                             state: no rows at all
+  // When the lock itself is missing/unparsable, the required-file failure
+  // above already blocks the run; no plugin lock row is added (no double
+  // reporting from untrustworthy content).
+  const pluginManifestPath: OptionalFile = 'src-tauri/plugins/fress-open/Cargo.toml';
+  const lockText = files['src-tauri/Cargo.lock'];
+  const lockEntry = observed.get('Cargo.lock:fress.version');
+  const lockUsable = typeof lockText === 'string' && !!lockEntry && lockEntry.error === null;
+
+  if (pluginManifestPath in (input.optionalReadErrors ?? {})) {
+    const reason = input.optionalReadErrors![pluginManifestPath];
+    const msg = `${pluginManifestPath} exists but could not be read (${reason}) — an unreadable build input must not silently disable its check.`;
+    checks.push({ file: pluginManifestPath, field: '(file)', value: '(unreadable)', status: 'fail', detail: msg });
+    failures.push(msg);
+  } else {
+    const pluginText = input.optionalFiles?.[pluginManifestPath];
+    if (typeof pluginText !== 'string') {
+      // Plugin absent. The only plugin-related failure possible is an
+      // orphan Cargo.lock record for a crate this tree does not contain.
+      if (lockUsable) {
+        const orphan = parseCargoLockPluginVersion(lockText!);
+        if (orphan.kind === 'ok') {
+          const msg =
+            `src-tauri/Cargo.lock [[package] name="tauri-plugin-fress-open"] is "${orphan.value}" but ${pluginManifestPath} does not exist — ` +
+            'the lockfile records a crate the tree does not contain (stale lockfile). Fix: run any cargo command in src-tauri/ so Cargo.lock matches the manifest graph.';
+          checks.push({
+            file: 'src-tauri/Cargo.lock',
+            field: '[[package] name="tauri-plugin-fress-open"] version',
+            value: orphan.value,
+            status: 'fail',
+            detail: msg,
+          });
+          failures.push(msg);
+        }
+      }
+    } else {
+      // Plugin present: its manifest version is authoritative app-version
+      // surface, checked exactly like a required field.
+      const pluginVersion = parseCargoTomlVersion(pluginText, pluginManifestPath);
+      if (pluginVersion.kind === 'err') {
+        checks.push({ file: pluginManifestPath, field: '[package] version', value: '(malformed)', status: 'fail', detail: pluginVersion.error });
+        failures.push(pluginVersion.error);
+      } else if (!isProjectVersion(pluginVersion.value)) {
+        const msg = `${pluginManifestPath} [package] version is "${pluginVersion.value}" — not a valid project version (expected a SemVer string like 1.0.12-beta).`;
+        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg, hint: 'set the plugin crate version to the canonical app version (it is a path dependency that ships inside the app binary)' });
+        failures.push(msg);
+      } else if (canonical === null) {
+        const msg = `${pluginManifestPath} [package] version is "${pluginVersion.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
+        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg });
+        failures.push(msg);
+      } else if (stripVPrefix(pluginVersion.value) !== canonical) {
+        const msg = expectedLine(
+          pluginManifestPath,
+          '[package] version',
+          `"${pluginVersion.value}"`,
+          `"${canonical}"`,
+          'set the plugin crate version to the canonical app version (it is a path dependency that ships inside the app binary)'
+        );
+        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg, hint: 'set the plugin crate version to the canonical app version' });
+        failures.push(msg);
+      } else {
+        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'ok' });
+      }
+
+      // The lock record must exist and agree — but only when the lockfile
+      // itself parsed cleanly (otherwise the required-field failure above
+      // already reports the real problem; piling plugin rows onto corrupt
+      // content would double-report without adding information).
+      if (lockUsable) {
+        const lockPlugin = parseCargoLockPluginVersion(lockText!);
+        if (lockPlugin.kind === 'err') {
+          checks.push({
+            file: 'src-tauri/Cargo.lock',
+            field: '[[package] name="tauri-plugin-fress-open"] version',
+            value: '(missing)',
+            status: 'fail',
+            detail: lockPlugin.error,
+            hint: 'run any cargo command in src-tauri/ so Cargo.lock records the in-repo plugin crate',
+          });
+          failures.push(lockPlugin.error);
+        } else if (canonical !== null && stripVPrefix(lockPlugin.value) !== canonical) {
+          const msg = expectedLine(
+            'src-tauri/Cargo.lock',
+            '[[package] name="tauri-plugin-fress-open"] version',
+            `"${lockPlugin.value}"`,
+            `"${canonical}"`,
+            'run any cargo command in src-tauri/ so Cargo.lock records the plugin crate at the canonical version'
+          );
+          checks.push({
+            file: 'src-tauri/Cargo.lock',
+            field: '[[package] name="tauri-plugin-fress-open"] version',
+            value: lockPlugin.value,
+            status: 'fail',
+            detail: msg,
+            hint: 'run any cargo command in src-tauri/ so Cargo.lock records the plugin crate at the canonical version',
+          });
+          failures.push(msg);
+        } else if (canonical !== null) {
+          checks.push({
+            file: 'src-tauri/Cargo.lock',
+            field: '[[package] name="tauri-plugin-fress-open"] version',
+            value: lockPlugin.value,
+            status: 'ok',
+          });
+        }
+      }
     }
   }
 
@@ -841,6 +1019,8 @@ Options:
 Android metadata (src-tauri/gen/android/app/build.gradle.kts versionName and
 the tauri.conf.json .bundle.android.versionName override) is checked whenever
 it exists; its absence is legitimate because it is generated at build time.
+The in-repo plugin crate (src-tauri/plugins/fress-open/Cargo.toml and its
+Cargo.lock record) is checked the same way whenever the plugin exists.
 
 Exit codes: 0 pass, 1 validation failure, 2 usage error.`;
 

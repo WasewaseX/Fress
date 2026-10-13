@@ -305,6 +305,20 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         failures = self._failures()
         self.assertTrue(any(target in f and "SHA256SUMS.txt says" in f for f in failures), failures)
 
+    def test_checksum_manifest_omitting_one_entry_fails(self):
+        # "Missing SHA-256 entry" in its partial form: the manifest exists
+        # but one uploaded asset has no line at all. The reverse direction
+        # of the checksum audit (every release file must be listed) must
+        # catch it BY NAME — a partially-stale manifest is as good as none,
+        # because the omitted artifact's downloads could not be verified.
+        path = os.path.join(self.dir, "SHA256SUMS.txt")
+        target = f"Fress_{VERSION}_x64_en-US.msi"
+        lines = [l for l in open(path).read().splitlines() if not l.endswith("  " + target)]
+        self.assertEqual(len(lines), len(open(path).read().splitlines()) - 1, "fixture precondition: exactly one entry removed")
+        open(path, "w").write("\n".join(lines) + "\n")
+        failures = self._failures()
+        self.assertTrue(any(target in f and "without a SHA256SUMS.txt entry" in f for f in failures), failures)
+
     def test_attacker_cannot_launder_tampered_sidecar_via_manifest(self):
         # Brief case 7 (full form): the attacker replaces an artifact with
         # malware, also rewrites the sidecar signature bytes AND updates

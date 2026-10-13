@@ -6,7 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
-import { useI18n } from '../../lib/i18n';
+import { useI18n, formatMessage } from '../../lib/i18n';
 import { openExternal } from '../../lib/external';
 import { useDownloadActions, useDownloadItems } from '../../lib/downloads';
 import {
@@ -134,7 +134,10 @@ export function useSelfUpdate(
   const handleUpdateChannelChange = (channel: UpdateChannel) => {
     setUpdateChannelState(channel);
     setUpdateChannel(channel);
-    toast.info(t('update.channelSet').replace('{channel}', channel), {
+    // The channel NAME is localized (the raw id is an internal value, not
+    // user-facing wording - "stable" showed as-is in Persian before).
+    const label = t(`header.channel.${channel}`);
+    toast.info(t('update.channelSet').replace('{channel}', label), {
       description: t('update.channelSetHint'),
     });
   };
@@ -151,6 +154,30 @@ export function useSelfUpdate(
         });
       } else if (res.kind === 'latest') {
         toast.success(t('update.latestToast').replace('{version}', pkg.version));
+      } else if (res.kind === 'track-migration') {
+        // A beta client that selected Stable while the newest stable release
+        // is OLDER than the running build. "Up to date" would be a lie, a
+        // downgrade download would be destructive: the toast says plainly
+        // that the build is ahead of the channel, that nothing is downgraded,
+        // and offers the official releases page (the supported path for
+        // moving to the stable track) as a real action button.
+        const channelLabel = t(`header.channel.${res.channel}`);
+        toast.info(
+          formatMessage(t('update.trackMigration'), {
+            bv: pkg.version,
+            cv: res.channelVersion,
+            channel: channelLabel,
+          }),
+          {
+            description: formatMessage(t('update.trackMigrationHint'), {
+              channel: channelLabel,
+            }),
+            action: {
+              label: t('update.releasesPageAction'),
+              onClick: () => void openExternal(res.release.htmlUrl),
+            },
+          }
+        );
       } else {
         // Both the API and the atom fallback failed (offline, firewall). This
         // is normal and must not look like the app is broken: quiet note, no

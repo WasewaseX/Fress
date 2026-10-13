@@ -277,7 +277,9 @@ function handleCompleteForPlan(payload: { path: string; verified?: boolean }): v
       // `payload.path` - but nothing is executed or opened automatically.
       plan = null;
       setState({ phase: 'verified', name: current.assetName, path: payload.path });
-      toast.success(t('update.verifiedReady').replace('{name}', current.assetName), {
+      // split/join interpolation: an asset name can never corrupt the
+      // message the way String.prototype.replace("$&") would.
+      toast.success(t('update.verifiedReady').split('{name}').join(current.assetName), {
         description: t('update.verifiedReadyHint'),
       });
     })

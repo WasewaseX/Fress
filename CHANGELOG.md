@@ -2,7 +2,7 @@
 
 ## 1.0.12-beta (2026-10-13): the frontend-quality release
 
-A full-frontend quality pass landed as one integrated candidate and was re-verified on the merged tree: typecheck clean, 629 unit tests passed, the full E2E suite green in CI, and the production build clean. Every change below was held inside the frontend; the download engine, the open contract and the release pipeline were untouched.
+A full-frontend quality pass landed as one integrated candidate and was re-verified on the merged tree: typecheck clean, 650 unit tests passed (2 environment-skipped), the full E2E suite green in CI, and the production build clean — all proven on the exact tagged commit (CI run on v1.0.12-beta, 2026-10-13). Every change below was held inside the frontend; the download engine, the open contract and the release pipeline were untouched.
 
 ### Accessibility and semantics
 - **Every interactive surface now names itself properly.** Modal titles, table headers, the export format group, the palette search field and the batch bar carry real labels and ARIA relationships instead of visual-only affordances; the catalog table announces itself as a table, and result counts are polite live regions so screen readers hear "showing 12 of 57" without stealing focus.

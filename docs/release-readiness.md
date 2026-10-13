@@ -244,3 +244,32 @@ Evidence classes — kept strictly apart per the audit rules:
   releases API for asset counts and timestamps.
 - **What this audit did NOT do**: execute any OS-level open/install on real hardware; observe branch
   settings; and it treats no CI result as evidence for a SHA other than the one it ran on.
+
+---
+
+## 11. Close-out addendum (final re-fetch, 2026-10-13T00:45Z)
+
+Per the audit rules, the default branch and PR state were re-fetched AFTER the integration
+continued, and this addendum was written last:
+
+- **Two agent rounds surfaced during the release window and were integrated on their own branches,
+  then merged**: PR #60 (Agent 2's `validate:versions` round-2 — Android metadata surfaces,
+  `--expect-tag` accepted as an alias of `--release-tag` so both workflows keep working,
+  `::error::` annotations under GITHUB_ACTIONS, malformed-manifest hardening; coherence suite
+  22 → 37 tests; CI 10/10 on the merged head `fcd5def`) and PR #61 (Agent 6's Workflow-D2 E2E
+  round — 13 state-gating/listener-hygiene tests, reconciled with the unified bridge record shape;
+  the smoke-matrix doc merged with the in-main version, the stale K-G1 row corrected to the
+  shipped-guard truth, the D2 traceability mapping appended; CI 11/11 on the merged head
+  `bdd9885`). PR #63 (this report) itself merged as `8ffe24d`.
+- **Final integrated tip: `main` = `bdd9885`**; open PRs: **zero**.
+- **Release currency** — the `v1.0.11-beta → main` delta was enumerated file-by-file
+  (`git diff --stat v1.0.11-beta main`): docs (this report, the smoke matrix), CI tooling
+  (`scripts/ci/validate-versions.ts`) and tests (the coherence suite, the D2 spec). **No
+  binary-relevant source changed** — no `src/` and no `src-tauri/` file is in the delta — so the
+  published v1.0.11-beta installers remain byte-equivalent to what the current tip builds and
+  **no new release is cut for this delta**. The next development bump will carry it; until then
+  `validate:versions`' development-mode non-check (§2) keeps the tree green by design.
+- **Journey suite totals after the integration**: Workflow K 22 + Workflow D2 13 = 35 open-journey
+  tests; full E2E suite **105/105** locally on the reconciled tree; unit suite 605/605 (2 opt-in
+  skips). The audited-SHA gate results in §5 remain the CI evidence for the release commit
+  (`6cc1d62`); the post-release commits carry their own green CI runs (linked above by merged head).

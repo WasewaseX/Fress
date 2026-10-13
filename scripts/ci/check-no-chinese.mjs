@@ -24,9 +24,17 @@
 //     UTF-8 nor visibly binary is reported as unreadable-suspect (never
 //     silently passed)
 //   - binary blobs are NOT regexed raw (compressed image bytes would false-
-//     positive); instead: PNG text chunks (tEXt/iTXt/zTXt) and JPEG
-//     COM/APPn textual payloads are parsed and scanned; other binaries get
-//     a printable-run ("strings"-style) scan; fonts (.ttf/.otf/.woff/
+//     positive); instead: PNG text chunks (tEXt/iTXt/zTXt) and JPEG COM
+//     comment segments are parsed and scanned (strict-UTF-8 decode first,
+//     Latin-1 + printable-run fallback), JPEG APPn payloads keep the
+//     conservative printable-run path (they are usually binary EXIF/ICC
+//     structures); other binaries get
+//     a printable-run ("strings"-style) scan that also decodes valid
+//     multi-byte UTF-8 sequences; every printable-run scan reports CJK
+//     code points only when a single run carries at least 3 of them (an
+//     isolated CJK-looking byte triplet inside binary data is noise; real
+//     embedded language content is a string of characters); fonts
+//     (.ttf/.otf/.woff/
 //     .woff2/.eot) are skipped entirely - glyph coverage inside a font is
 //     NOT Chinese-language UI copy
 //   - every hit prints path, line, code-point column, U+ code point,
@@ -131,17 +139,47 @@ function isProbablyBinary(buf) {
 }
 
 // Printable-run extraction ("strings"-style) for opaque binary payloads.
+// A run may span valid multi-byte UTF-8 sequences so Chinese text embedded
+// in an opaque binary stays detectable; any other byte breaks the run.
+// Pure-ASCII runs decode identically to the previous Latin-1 behavior.
 function printableRuns(buf, minLen = 6) {
   const runs = [];
   let cur = [];
-  const push = () => { if (cur.length >= minLen) runs.push(Buffer.from(cur).toString('latin1')); cur = []; };
-  for (let i = 0; i < buf.length; i += 1) {
+  const push = () => { if (cur.length >= minLen) runs.push(Buffer.from(cur).toString('utf8')); cur = []; };
+  for (let i = 0; i < buf.length; ) {
     const b = buf[i];
-    if ((b >= 0x20 && b <= 0x7e) || b === 0x09) cur.push(b);
-    else push();
+    if ((b >= 0x20 && b <= 0x7e) || b === 0x09) { cur.push(b); i += 1; continue; }
+    // Admit a well-formed 2-4 byte UTF-8 sequence into the run; a lead byte
+    // without valid continuation bytes (or any other high byte) breaks it.
+    const extra = b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : b >= 0xc0 ? 1 : -1;
+    if (extra > 0 && i + extra < buf.length) {
+      let ok = true;
+      for (let k = 1; k <= extra; k += 1) if (buf[i + k] < 0x80 || buf[i + k] > 0xbf) { ok = false; break; }
+      if (ok) { for (let k = 0; k <= extra; k += 1) cur.push(buf[i + k]); i += extra + 1; continue; }
+    }
+    push();
+    i += 1;
   }
   push();
   return runs;
+}
+
+// Evidence bar for printable-run scans: runs are a HEURISTIC extraction
+// from binary payloads (opaque binaries, JPEG APPn structures, non-UTF-8
+// metadata), where compressed data occasionally contains byte triplets that
+// happen to decode to isolated CJK code points. Real embedded language
+// content is a string of characters, so a run must carry at least
+// RUN_CJK_MIN CJK-family code points before any of them are reported.
+// Declared-textual content (text files, PNG text chunks, UTF-8 JPEG COM)
+// is scanned at full 1-character sensitivity instead. This is a declared,
+// documented threshold - not a suppression list: every run above the bar
+// reports ALL of its findings.
+const RUN_CJK_MIN = 3;
+
+function countCjkCodePoints(text) {
+  let n = 0;
+  for (const ch of text) if (classifyCodePoint(ch.codePointAt(0))) n += 1;
+  return n;
 }
 
 // PNG: parse chunks, decode the TEXT-bearing ones only (IDAT stays compressed
@@ -208,8 +246,21 @@ function jpegTextPayloads(buf) {
     if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { off += 2; continue; }
     if (marker === 0xda || marker === 0xd9) break; // entropy-coded data starts
     const segLen = buf.readUInt16BE(off + 2);
-    if (marker === 0xfe || (marker >= 0xe0 && marker <= 0xef)) {
-      out.push({ source: marker === 0xfe ? 'COM' : `APP${marker - 0xe0}`, text: buf.toString('latin1', off + 4, off + 2 + segLen) });
+    if (marker === 0xfe) {
+      const raw = buf.subarray(off + 4, off + 2 + segLen);
+      // COM is a declared textual segment: decode strict-UTF-8 first so
+      // Chinese metadata written as UTF-8 is fully visible (line/column and
+      // locale ids), falling back to the Latin-1 printable-run path only
+      // when the payload is not valid UTF-8.
+      let text = null;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(raw); } catch { /* not UTF-8 */ }
+      out.push({ source: 'COM', text: text ?? raw.toString('latin1'), utf8: text !== null });
+    } else if (marker >= 0xe0 && marker <= 0xef) {
+      // APPn payloads (JFIF/EXIF/ICC/XMP structures) are usually BINARY:
+      // whole-payload text scanning would classify random code points from
+      // binary junk, so they keep the conservative Latin-1 printable-run
+      // path (ASCII + valid UTF-8 runs, locale regex still applied).
+      out.push({ source: `APP${marker - 0xe0}`, text: buf.toString('latin1', off + 4, off + 2 + segLen), utf8: false });
     }
     off += 2 + segLen;
   }
@@ -273,10 +324,14 @@ function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allow
     if (allowLocale) {
       const loc = LOCALE_RE_CI_SUBTAGS.exec(line);
       if (loc) {
-        const idx = loc.index + loc[0].length - loc[1].length - (loc[2] ? loc[2].length + 1 : 0);
-        found.push({ severity: 'blocking', kind: 'locale-identifier', line: li + 1, col: idx + 1, codepoint: null,
-          category: `Chinese locale identifier "${loc[0].trim()}"`, family: 'locale registry',
-          match_escaped: escapeForDisplay(loc[0].trim()),
+        // loc[0] includes the consumed boundary character; the reported
+        // identifier is the clean root+subtag form, and the column points
+        // at the root's first character.
+        const idStart = loc[0].indexOf(loc[1]);
+        const id = loc[0].slice(idStart);
+        found.push({ severity: 'blocking', kind: 'locale-identifier', line: li + 1, col: loc.index + idStart + 1, codepoint: null,
+          category: `Chinese locale identifier "${id}"`, family: 'locale registry',
+          match_escaped: escapeForDisplay(id),
           context_escaped: escapeForDisplay(line.slice(Math.max(0, loc.index - 24), loc.index + loc[0].length + 24)),
           ...(sourceLabel ? { source: sourceLabel } : {}),
           role_hint: roleHint(relPath),
@@ -339,8 +394,13 @@ function scanBinaryFile(kind, scope, absPath, relPath, buf) {
     const payloads = jpegTextPayloads(buf);
     if (payloads) {
       for (const p of payloads) {
-        for (const run of printableRuns(Buffer.from(p.text, 'latin1'))) {
-          for (const hit of scanTextPayload('binary-metadata', scope, relPath, run, { sourceLabel: `JPEG ${p.source}` })) pushHit2(hit, 'binary-metadata', scope, relPath);
+        if (p.utf8) {
+          for (const hit of scanTextPayload('binary-metadata', scope, relPath, p.text, { sourceLabel: `JPEG ${p.source}` })) pushHit2(hit, 'binary-metadata', scope, relPath);
+        } else {
+          for (const run of printableRuns(Buffer.from(p.text, 'latin1'))) {
+            if (countCjkCodePoints(run) < RUN_CJK_MIN) continue;
+            for (const hit of scanTextPayload('binary-metadata', scope, relPath, run, { sourceLabel: `JPEG ${p.source}` })) pushHit2(hit, 'binary-metadata', scope, relPath);
+          }
         }
       }
     }
@@ -349,10 +409,12 @@ function scanBinaryFile(kind, scope, absPath, relPath, buf) {
   // Opaque binary: conservative printable-run scan of the whole payload.
   // Locale-id detection is DISABLED here: random byte runs in compressed
   // data routinely contain root-like fragments in mixed case that are
-  // noise, not locale registration. CJK code points in a decoded run
-  // remain real findings.
+  // noise, not locale registration. CJK code points in a decoded run ARE
+  // real findings once the run clears the RUN_CJK_MIN evidence bar
+  // (see printableRuns) - declared policy, not a suppression list.
   SUMMARY.binaryStringScans += 1;
   for (const run of printableRuns(buf)) {
+    if (countCjkCodePoints(run) < RUN_CJK_MIN) continue;
     for (const hit of scanTextPayload('binary-string', scope, relPath, run, { sourceLabel: 'binary printable-run', allowLocale: false })) pushHit2(hit, 'binary-string', scope, relPath);
   }
 }
@@ -377,9 +439,11 @@ function scanFilename(kind, scope, relPath) {
   }
   const loc = LOCALE_RE_CI_SUBTAGS.exec(norm);
   if (loc) {
-    pushHit('locale-identifier', scope, relPath, { severity: 'blocking', line: null, col: loc.index + 1, codepoint: null,
-      category: `Chinese locale identifier "${loc[0].trim()}" in path`, family: 'locale registry',
-      match_escaped: escapeForDisplay(loc[0].trim()), context_escaped: escapeForDisplay(norm),
+    const idStart = loc[0].indexOf(loc[1]);
+    const id = loc[0].slice(idStart);
+    pushHit('locale-identifier', scope, relPath, { severity: 'blocking', line: null, col: loc.index + idStart + 1, codepoint: null,
+      category: `Chinese locale identifier "${id}" in path`, family: 'locale registry',
+      match_escaped: escapeForDisplay(id), context_escaped: escapeForDisplay(norm),
       role_hint: 'path name containing a Chinese locale id - rename',
       owner_action: 'rename the path; Chinese locale registration is not supported here' });
   }
@@ -460,6 +524,41 @@ if (historyMode) {
     blobs.push([sha, path]);
   }
   const trackedSet = new Set(tracked);
+  // Content-based still-present check: a historical finding is "still
+  // present" only when the SAME code points (or the exact locale id) can be
+  // found in the current working-tree file at that path. A path-based check
+  // would label every hit of a since-cleaned file as STILL PRESENT.
+  const currentTextCache = new Map();
+  const currentTreeText = (relPath) => {
+    if (currentTextCache.has(relPath)) return currentTextCache.get(relPath);
+    let text = null;
+    if (trackedSet.has(relPath)) {
+      try {
+        const buf = readFileSync(join(repoTop, relPath));
+        if (!isProbablyBinary(buf)) {
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { text = null; }
+        }
+      } catch { text = null; }
+    }
+    currentTextCache.set(relPath, text);
+    return text;
+  };
+  const stillPresentInCurrentTree = (relPath, findings) => {
+    const text = currentTreeText(relPath);
+    if (text === null) return false;
+    for (const f of findings) {
+      if (f.codepoint) {
+        const cp = parseInt(f.codepoint.slice(2), 16);
+        if (Number.isFinite(cp) && text.includes(String.fromCodePoint(cp))) return true;
+      } else if (f.kind === 'locale-identifier') {
+        const m = /"([^"]+)"/.exec(f.category || '');
+        if (m && text.includes(m[1])) return true;
+      } else if (f.kind === 'filename') {
+        return trackedSet.has(relPath); // the offending NAME itself still exists
+      }
+    }
+    return false;
+  };
   for (const [sha, path] of blobs) {
     const show = spawnSync('git', ['cat-file', '-t', sha], { encoding: 'utf8' });
     if (show.status !== 0 || show.stdout.trim() !== 'blob') continue;
@@ -485,8 +584,10 @@ if (historyMode) {
     const attribution = cSha ? `${cSha.slice(0, 12)} ${cSubj.join('|')}` : 'unattributed';
     const newHits = HITS.splice(hitsBefore); // history findings live in HISTORY_HITS only
     const newWarns = WARNINGS.splice(warnsBefore);
-    for (const f of [...newHits, ...newWarns]) {
-      HISTORY_HITS.push({ ...f, blob: sha.slice(0, 12), introducing_commit: attribution, still_present: trackedSet.has(pseudoPath) });
+    const findings = [...newHits, ...newWarns];
+    const stillThere = stillPresentInCurrentTree(pseudoPath, findings);
+    for (const f of findings) {
+      HISTORY_HITS.push({ ...f, blob: sha.slice(0, 12), introducing_commit: attribution, still_present: stillThere });
     }
   }
   // Sanity: a repo with objects but ZERO scannable blobs means the parsing

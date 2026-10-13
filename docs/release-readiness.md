@@ -2,10 +2,17 @@
 
 Status: **public main is integration-ready at the evidence level reachable without physical devices;
 `v1.0.11-beta` is published from release source `6cc1d62` and its exact published bytes independently
-re-audited PASS on `2026-10-13T04:59:40Z`; the current default-branch tip is `e2bcdc4`, which differs
+re-audited PASS on `2026-10-13T04:59:40Z`; the audited default-branch tip is `e2bcdc4`, which differs
 from the release source only by docs, CI tooling and tests (§3); PR inventory zero-open in the audit
 window, one new open PR (#65, tests-only) at finalization re-fetch (§4). The known limits below
 are named, not hidden.**
+
+**Merge-time addendum (2026-10-13T05:25Z, by the reviewing integrator, before this report's own PR
+#66 merged):** #65 merged as `45299fd` (tests-only: 3 new verifier/workflow-contract tests, CI 10/10
+green on head `3e9ece4`, 11/11 on the merge commit — observed via the check-runs API). The tip this
+report's publication merge lands on is therefore `45299fd` + this docs commit; the delta from the
+audited tip `e2bcdc4` remains exactly "docs, CI tooling and tests" (§3's classification is
+unaffected), and the release source `6cc1d62` is unchanged.
 
 Audit time: **2026-10-13T05:00–05:10Z** — every "current" claim in §1–§7 was re-fetched or re-executed
 inside that window. Anything older is explicitly labelled **historical**.
@@ -123,11 +130,11 @@ merged tree live in §6 (tip) and §7 (release source), never borrowed from a PR
 | #62 | `527e0d8` | `6cc1d62` | **the release PR**: version 1.0.11-beta on all six surfaces + CHANGELOG + What's-New | CI 38324485674 + Release 38324489730 (§6/§7) |
 | #63 | `7d141a6` | `8ffe24d` | readiness report round 7 (previous generation of this file) | docs-only |
 | #64 | `36e7b63` | `e2bcdc4` | readiness close-out addendum + smoke-matrix doc (the current tip) | **11/11 green on e2bcdc4 (§6, observed now)** |
-| #65 (OPEN) | `3e9ece4` | — | verifier tamper-case-11 pin: a hard integrity verdict cannot retry itself into a pass (tests only) | open at finalization; not merged, not part of this audit's tip |
+| #65 (OPEN at finalization → **MERGED as `45299fd`** at 2026-10-13T05:25Z, merge-time addendum) | `3e9ece4` | `45299fd` | verifier tamper-case-11 pin: a hard integrity verdict cannot retry itself into a pass (tests only) | 10/10 green on head `3e9ece4`; 11/11 on the merge commit (check-runs API, observed at merge time) |
 
 Every head SHA of the merged PRs (#55–#64) proven an ancestor of `origin/main` by local
 `git merge-base --is-ancestor` (observed now) — no merged PR's content is missing from the
-integrated tree; open PR #65 is intentionally not an ancestor yet. #56/#57 and #58/#59 required
+integrated tree. #65 joined them at merge time (addendum above). #56/#57 and #58/#59 required
 parallel-collision reconciliations before merge; those resolutions are historical and recorded in
 this file's git history (at `e2bcdc4^` and earlier).
 

@@ -457,6 +457,182 @@ describe('validateVersions: Android metadata', () => {
   });
 });
 
+// -- in-repo Android plugin crate (conditional-authoritative) -------------------
+
+const PLUGIN_MANIFEST_PATH = 'src-tauri/plugins/fress-open/Cargo.toml';
+
+/** The plugin crate manifest as PR #74 checks it in: [package] with a
+ * version, a `links` key, publish = false, build-dependencies and
+ * dependencies tables whose version constraints must NOT be mistaken for
+ * the crate version. */
+function pluginCargoToml(version = '1.0.10-beta'): string {
+  return [
+    '[package]',
+    'name = "tauri-plugin-fress-open"',
+    `version = "${version}"`,
+    'description = "Fress\'s validated native open boundary"',
+    'edition = "2021"',
+    'links = "tauri-plugin-fress-open"',
+    'publish = false',
+    '',
+    '[build-dependencies]',
+    'tauri-plugin = { version = "2", features = ["build"] }',
+    '',
+    '[dependencies]',
+    'tauri = { version = "2", features = [] }',
+    'serde = { version = "1", features = ["derive"] }',
+    'serde_json = "1"',
+  ].join('\n');
+}
+
+/** Append the plugin's Cargo.lock record to the (already coherent) lock
+ * fixture, mirroring the real lockfile: a [[package]] record between the
+ * other records, dependencies after the version. */
+function withPluginLock(files: Partial<Record<RequiredFile, string>>, version = '1.0.10-beta'): Partial<Record<RequiredFile, string>> {
+  const lock = files['src-tauri/Cargo.lock']!;
+  const record = [
+    '',
+    '[[package]]',
+    'name = "tauri-plugin-fress-open"',
+    `version = "${version}"`,
+    'dependencies = [',
+    ' "serde",',
+    ' "serde_json",',
+    ' "tauri",',
+    ' "tauri-plugin",',
+    ']',
+  ].join('\n');
+  return { ...files, 'src-tauri/Cargo.lock': lock + record };
+}
+
+function coherentWithPlugin(version = '1.0.10-beta'): Partial<Record<RequiredFile, string>> {
+  return withPluginLock(coherentFiles(version), version);
+}
+
+describe('validateVersions: in-repo plugin crate (conditional-authoritative)', () => {
+  it('a coherent candidate with the plugin at the app version passes; the matrix reports both plugin rows', () => {
+    const report = validate(coherentWithPlugin(), { optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml('1.0.10-beta') } });
+    expect(report.ok).toBe(true);
+    expect(report.checks.find((c) => c.file === PLUGIN_MANIFEST_PATH)?.status).toBe('ok');
+    const lockRow = report.checks.find((c) => c.field === '[[package] name="tauri-plugin-fress-open"] version');
+    expect(lockRow?.status).toBe('ok');
+    expect(lockRow?.value).toBe('1.0.10-beta');
+  });
+
+  it('a stale plugin crate manifest fails, naming file, field, observed and expected', () => {
+    // The exact defect open PR #74 ships today: the plugin manifest says
+    // 1.0.10-beta while the app manifests AND the plugin's own Cargo.lock
+    // record say 1.0.12-beta — a partial bump the binary would not survive.
+    const drifted = withPluginLock(coherentFiles('1.0.12-beta'), '1.0.12-beta');
+    const report = validate(drifted, { optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml('1.0.10-beta') } });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'src-tauri/plugins/fress-open/Cargo.toml [package] version is "1.0.10-beta", expected "1.0.12-beta"'
+    );
+    const row = report.checks.find((c) => c.file === PLUGIN_MANIFEST_PATH);
+    expect(row?.status).toBe('fail');
+    // The lock record itself is coherent with the app — only the manifest lags.
+    expect(report.checks.find((c) => c.field === '[[package] name="tauri-plugin-fress-open"] version')?.status).toBe('ok');
+  });
+
+  it('a plugin manifest newer/older than the app fails with the exact diagnostic', () => {
+    // app at 1.0.11-beta, plugin left at 1.0.10-beta: the partial-bump case.
+    const report = validate(coherentFiles('1.0.11-beta'), {
+      optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml('1.0.10-beta') },
+    });
+    // NOTE: the lock fixture in coherentFiles has NO plugin record, so the
+    // stale-manifest failure and the missing-lock-entry failure BOTH fire.
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'src-tauri/plugins/fress-open/Cargo.toml [package] version is "1.0.10-beta", expected "1.0.11-beta"'
+    );
+    expect(failureText(report)).toContain('no [[package]] entry with name = "tauri-plugin-fress-open"');
+    const row = report.checks.find((c) => c.file === PLUGIN_MANIFEST_PATH);
+    expect(row?.status).toBe('fail');
+  });
+
+  it('a stale plugin lock record fails even when the manifest was bumped', () => {
+    // Manifest bumped to 1.0.11-beta with the app, lock still says 1.0.10.
+    const drifted = withPluginLock(coherentFiles('1.0.11-beta'), '1.0.10-beta');
+    const report = validate(drifted, { optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml('1.0.11-beta') } });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'src-tauri/Cargo.lock [[package] name="tauri-plugin-fress-open"] version is "1.0.10-beta", expected "1.0.11-beta"'
+    );
+  });
+
+  it('a plugin manifest without a lockfile record fails (stale lockfile)', () => {
+    const report = validate(coherentFiles(), { optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml() } });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'no [[package]] entry with name = "tauri-plugin-fress-open" (the in-repo plugin crate is missing from the lockfile'
+    );
+  });
+
+  it('an orphan plugin lock record without the plugin manifest fails (drift in the other direction)', () => {
+    // The plugin directory was removed but Cargo.lock still records it —
+    // the lockfile disagrees with the manifest graph.
+    const report = validate(withPluginLock(coherentFiles()));
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'but src-tauri/plugins/fress-open/Cargo.toml does not exist'
+    );
+    expect(failureText(report)).toContain('stale lockfile');
+  });
+
+  it('plugin absent + no lock record: the pre-plugin state passes with no plugin rows', () => {
+    const report = validate(coherentFiles());
+    expect(report.ok).toBe(true);
+    expect(report.checks.some((c) => c.file === PLUGIN_MANIFEST_PATH)).toBe(false);
+    expect(report.checks.some((c) => c.field === '[[package] name="tauri-plugin-fress-open"] version')).toBe(false);
+  });
+
+  it('missing version key and malformed [package] in the plugin manifest fail closed', () => {
+    const noVersion = validate(coherentFiles(), {
+      optionalFiles: { [PLUGIN_MANIFEST_PATH]: '[package]\nname = "tauri-plugin-fress-open"\nedition = "2021"' },
+    });
+    expect(noVersion.ok).toBe(false);
+    expect(failureText(noVersion)).toContain('src-tauri/plugins/fress-open/Cargo.toml [package] has no "version" key');
+
+    const noPackage = validate(coherentFiles(), {
+      optionalFiles: { [PLUGIN_MANIFEST_PATH]: '[lib]\nname = "x"' },
+    });
+    expect(noPackage.ok).toBe(false);
+    expect(failureText(noPackage)).toContain('src-tauri/plugins/fress-open/Cargo.toml has no [package] table');
+  });
+
+  it('a non-project plugin version (junk grammar) fails instead of drifting silently', () => {
+    const report = validate(coherentFiles(), {
+      optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml('1.0.10junk') },
+    });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain('not a valid project version');
+  });
+
+  it('an unreadable plugin manifest fails closed', () => {
+    const report = validate(coherentFiles(), {
+      optionalReadErrors: { [PLUGIN_MANIFEST_PATH]: 'EACCES: permission denied' },
+    });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain('src-tauri/plugins/fress-open/Cargo.toml exists but could not be read');
+  });
+
+  it('release-tag mode stays enforced while the plugin is present and coherent', () => {
+    const ok = validate(coherentWithPlugin(), {
+      optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml() },
+      releaseTag: 'v1.0.10-beta',
+    });
+    expect(ok.ok).toBe(true);
+
+    const mismatch = validate(coherentWithPlugin(), {
+      optionalFiles: { [PLUGIN_MANIFEST_PATH]: pluginCargoToml() },
+      releaseTag: 'v1.0.9-beta',
+    });
+    expect(mismatch.ok).toBe(false);
+    expect(failureText(mismatch)).toContain('release tag "v1.0.9-beta"');
+  });
+});
+
 // -- malformed manifests must not disable validation (new brief case 10) --------
 
 describe('validateVersions: malformed manifests cannot silently disable validation', () => {

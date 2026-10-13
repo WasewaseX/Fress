@@ -343,6 +343,18 @@ function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allow
 }
 
 function scanTextFile(kind, scope, absPath, relPath) {
+  // A symlinked DIRECTORY (e.g. a worktree's node_modules link, which the
+  // "node_modules/" ignore rule does not match because git sees a symlink,
+  // not a directory) is not a file: git stores the link, not its contents.
+  // Skip it with a declared warning instead of misreporting EISDIR as an
+  // unreadable file. Broken symlinks still fall through to the read-error
+  // path and fail closed.
+  try {
+    if (statSync(absPath).isDirectory()) {
+      process.stderr.write(`::warning::check-no-chinese: skipping directory entry ${relPath} (symlinked directory; git stores the link, not its contents)\n`);
+      return;
+    }
+  } catch { /* stat failed: let readFileSync produce the fail-closed hit */ }
   let buf;
   try {
     buf = readFileSync(absPath);

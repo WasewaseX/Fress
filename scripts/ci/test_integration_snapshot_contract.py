@@ -151,10 +151,17 @@ class TestIntegrationSnapshotWorkflowContract(unittest.TestCase):
         self.assertIn("if: always()", upload.group(0))
 
     def test_snapshot_outputs_are_attached_even_on_red_runs(self):
+        # Brief case 14 (workflow side): when the overall check fails, the
+        # machine-readable snapshot must still be attached - `if: always()`,
+        # a fixed artifact name readers can find, and a bounded retention.
         body = self.jobs["snapshot"]["body"]
         upload = re.search(r"name: Attach the machine-readable snapshot.*?(?=\Z)", body, re.S)
         self.assertIsNotNone(upload)
-        self.assertIn("if: always()", upload.group(0))
+        block = upload.group(0)
+        self.assertIn("if: always()", block)
+        self.assertIn("name: integration-snapshot", block)
+        self.assertIn("path: integration-snapshot.json", block)
+        self.assertIn("retention-days: 90", block)
 
     # -- authoritative implementations, never re-implemented -----------------
 

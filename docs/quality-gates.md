@@ -26,9 +26,9 @@ Run from the repository root after `npm ci`:
 | `npm run perf:catalog` | local | The Node-side filter-pipeline benchmark (pre-existing; complements `test:perf`, which measures the real UI). |
 | `python3 -m unittest discover -s scripts/ci -p 'test_*.py'` | local + CI (`ci.yml` → `artifact-audit-tests`) | Rejection-behavior suite of the release-artifact audit (tampered checksums, missing/unlisted assets, wrong-version manifests, altered or foreign signatures, stray/orphan sidecars, malformed manifests, duplicated mappings, manifest-laundering attempts - all FAIL on synthetic temp-dir fixtures) PLUS the workflow contract tests that pin the publication boundary itself: the version validator invocation, the `needs:` chain from `version` to `verify-release`, and that the draft flip can only happen after the artifact audit. A CLI test proves the verifier exits NON-ZERO on a corrupted set (exit status, not just an error log). |
 | `node scripts/ci/integration-snapshot.mjs` | CI (`integration-snapshot.yml` → `snapshot`); runnable locally with `GH_TOKEN=<read token>` | Builds the current public integration-state snapshot (tested SHA vs live branch head, source version, newest release + provenance, paginated open-PR inventory, aggregate CI results on the tested SHA, artifact-integrity + version-coherence verdicts) as a step summary + JSON artifact (schema v2). Read-only; never commits. See section 2.2. |
-| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | local (with Rust) + CI (`ci.yml` → `rust`, ubuntu-22.04) | Rust formatting. |
-| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | local (with Rust) + CI (`ci.yml` → `rust`, ubuntu-22.04) | Rust lint-clean including test targets. |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | local (with Rust) + CI (`ci.yml` → `rust` on ubuntu-22.04, `rust-native` on windows-latest + macos-latest) | The Rust suite (state machine, network policy, download finalize). |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | local (with Rust) + CI (`ci.yml` → `rust`, ubuntu-24.04) | Rust formatting. |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | local (with Rust) + CI (`ci.yml` → `rust`, ubuntu-24.04) | Rust lint-clean including test targets. |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | local (with Rust) + CI (`ci.yml` → `rust` on ubuntu-24.04, `rust-native` on windows-latest + macos-latest) | The Rust suite (state machine, network policy, download finalize). |
 | `npx playwright test --config=playwright.live.config.ts` | ONLY scheduled/manual (`network-smoke.yml`); never a PR gate | LIVE resolver smoke against real endpoints. Red here means "investigate", not "revert the PR" - see its workflow header. |
 | `python3 scripts/ci/verify-release-artifacts.py <assets-dir> <tag> <version> <owner/repo>` | ONLY in CI (`release.yml` → `verify-release`) | The final published-artifact audit over the EXACT bytes just downloaded from the draft release (see section 2.1). Requires a real assembled release; not runnable locally by design. |
 
@@ -42,14 +42,14 @@ All workflows live in `.github/workflows/`, least-privilege
 
 | Gate | Workflow / job | OS | Blocking? |
 |---|---|---|---|
-| Version coherence (`npm run validate:versions`; one implementation in `scripts/ci/validate-versions.ts`) | `ci.yml` → `version-guard` (+ step inside `frontend`) | ubuntu | Yes |
-| Typecheck, unit tests, version coherence, catalog validator, security config validator, production build | `ci.yml` → `frontend` | ubuntu | Yes |
-| Release-artifact verifier rejection tests + workflow publication-boundary contract (34 tests) | `ci.yml` → `artifact-audit-tests` | ubuntu | Yes |
-| **Integration snapshot (public evidence: newest-release re-audit + API/git facts)** | `integration-snapshot.yml` → `artifact-audit` (real release bytes through the real verifier), `snapshot` (API + git facts → step summary + JSON artifact) | ubuntu | Evidence, not a merge gate - but a RED snapshot run is a real signal: the newest release failed its integrity re-audit, a gate failed, or a required observation was unavailable (never silently empty) |
-| Rust fmt, clippy, tests | `ci.yml` → `rust` | ubuntu-22.04 | Yes |
+| Version coherence (`npm run validate:versions`; one implementation in `scripts/ci/validate-versions.ts`) | `ci.yml` → `version-guard` (+ step inside `frontend`) | ubuntu-latest | Yes |
+| Typecheck, unit tests, version coherence, catalog validator, security config validator, production build | `ci.yml` → `frontend` | ubuntu-latest | Yes |
+| Release-artifact verifier rejection tests + workflow publication-boundary contract (49 tests) | `ci.yml` → `artifact-audit-tests` | ubuntu-latest | Yes |
+| **Integration snapshot (public evidence: newest-release re-audit + API/git facts)** | `integration-snapshot.yml` → `artifact-audit` (real release bytes through the real verifier), `snapshot` (API + git facts → step summary + JSON artifact) | ubuntu-24.04 (pinned; evidence determinism) | Evidence, not a merge gate - but a RED snapshot run is a real signal: the newest release failed its integrity re-audit, a gate failed, or a required observation was unavailable (never silently empty) |
+| Rust fmt, clippy, tests | `ci.yml` → `rust` | ubuntu-24.04 (deliberate 22.04→24.04 migration, tested in CI) | Yes |
 | Rust tests (native) | `ci.yml` → `rust-native` | windows-latest, macos-latest | Yes |
-| **E2E workflows A-J + visual regression** | `ci.yml` → `e2e` | ubuntu (Chromium headless) | Yes |
-| **Perf invariants (render isolation, persistence coalescing) + recorded wall-clock baseline** | `ci.yml` → `perf` | ubuntu (Chromium headless) | Yes (invariants); informational (timings) |
+| **E2E workflows A-J + visual regression** | `ci.yml` → `e2e` | ubuntu-24.04 pinned (Chromium headless; visual baselines are green on this image) | Yes |
+| **Perf invariants (render isolation, persistence coalescing) + recorded wall-clock baseline** | `ci.yml` → `perf` | ubuntu-24.04 pinned (Chromium headless) | Yes (invariants); informational (timings) |
 | Dependency/RustSec scanning | `security.yml` (weekly schedule + lockfile pushes + manual; never on PRs) | ubuntu | npm prod deps blocking; dev deps and RustSec advisory (`continue-on-error` on cargo-audit is DOCUMENTED policy until the RustSec baseline is triaged) |
 | Commit author guard | `author-guard.yml` (all pushes + PRs) | ubuntu | Yes |
 | LIVE resolver smoke | `network-smoke.yml` (weekly Monday 06:20 UTC + manual dispatch; NEVER on PRs) | ubuntu | Advisory by design - upstream outages/rate limits must not block code review; red runs are investigated, not auto-retried |
@@ -278,6 +278,18 @@ Without the two verdict flags the corresponding gates are reported
 mode (the verdicts are CI measurements this run did not make), and the
 markdown summary goes to stdout when `GITHUB_STEP_SUMMARY` is unset.
 
+**How to inspect a run's output** (the whole point of the workflow): open
+the run on github.com (from the Actions tab, workflow "Integration
+snapshot"). The human-readable snapshot IS the run's **Summary tab**
+(the workflow wrote it to `$GITHUB_STEP_SUMMARY`; it needs no artifact
+download). The machine-readable copy is the run's **`integration-snapshot`
+artifact** (JSON, schema `fress/integration-snapshot@v2`, retained 90
+days): open the run page → Artifacts → download and read the JSON. Each
+section's `status: "unavailable"` + reason, `generated_at` and
+`tested.sha` are the fields that keep an old artifact from being read as
+current state. A failed artifact audit additionally keeps a raw
+`artifact-audit-log` artifact (30 days) with the verifier's full output.
+
 ### 2.3 Gate taxonomy: what blocks, what publishes, what only observes
 
 The flat table in section 2 answers "which job runs where"; this
@@ -293,11 +305,30 @@ and blocking status. `continue-on-error` appears nowhere in any workflow
 | Version coherence (dev mode) | `ci.yml` → `version-guard` | `npm run validate:versions` | whole checkout (six authoritative version fields) | Yes |
 | Typecheck + unit suite + catalog/security validators + production build | `ci.yml` → `frontend` | `npm run typecheck`, `npm test`, `npm run validate:catalog`, `npm run validate:security`, `npm run build` | frontend + config (whole tree) | Yes |
 | Verifier rejection suite + workflow publication-boundary contract | `ci.yml` → `artifact-audit-tests` | `python3 -m unittest discover -s scripts/ci -p 'test_*.py'` | `scripts/ci/` (verifier + workflow contracts) | Yes |
-| Rust fmt / clippy / tests | `ci.yml` → `rust` (ubuntu-22.04) | `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test` | `src-tauri/` (engine) | Yes |
+| Rust fmt / clippy / tests | `ci.yml` → `rust` (ubuntu-24.04) | `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test` | `src-tauri/` (engine) | Yes |
 | Rust tests on native OSes | `ci.yml` → `rust-native` (windows-latest, macos-latest) | `cargo test` | `src-tauri/` (engine) | Yes |
-| E2E workflows A-J + visual regression | `ci.yml` → `e2e` (ubuntu, Chromium headless) | `npm run test:e2e` | production build via `vite preview` | Yes |
+| E2E workflows A-J + visual regression | `ci.yml` → `e2e` (ubuntu-24.04, Chromium headless) | `npm run test:e2e` | production build via `vite preview` | Yes |
 | Perf invariants (render isolation, persistence coalescing) | `ci.yml` → `perf` | `npm run test:perf` | production build | Yes (invariants); timings informational |
 | Commit author guard | `author-guard.yml` → `authors` (pushes + PRs) | repo-configured author check | commit metadata | Yes |
+
+What each gate's environment actually is - **mocked, native-OS, or
+physical** - and why that matters for what it can prove:
+
+- **Mocked / deterministic**: the E2E + perf suites answer every
+  network, vendor and self-update endpoint from fixtures
+  (`tests/e2e/netpolicy.ts` aborts all non-loopback requests), so shared
+  GitHub quota can never flake a PR and no live service is contacted.
+  The verifier rejection suite and both contract-test suites run on
+  synthetic temp-dir fixtures with no real release, tag or token.
+- **Native OS, no device**: the Rust suites execute real OS process,
+  filesystem and networking behavior on the three desktop platforms
+  (linux / windows-latest / macos-latest) - but headless, without a GUI
+  session, an installer, or a device.
+- **Physical device / real network**: everything in section 4 - Android
+  on hardware, packaged-app smoke per OS, screen readers, real-network
+  resume - is UNVERIFIED by automation by design.
+- **Admin-only Settings**: branch-protection enforcement (category 5
+  below; exact owner action spelled out there).
 
 **2. Release-publication gates (`release.yml`, tag pushes `v*` + manual)**
 
@@ -337,7 +368,90 @@ section 2's note for the Settings actions)
 - Branch-protection enforcement itself: making the section-1 checks
   REQUIRED for merge is a maintainer Settings action - no workflow can do
   it, and the snapshot honestly reports this fact as unobservable with a
-  read token.
+  read token. The exact owner action: repository **Settings → Branches →
+  Branch protection rules for `main`** → enable *Require status checks to
+  pass before merging* and add the section-1 jobs as required checks
+  (`Version consistency`, `Typecheck, tests, catalog, security, build`,
+  `Release-artifact verifier tests`, `Rust fmt, clippy, tests (linux)`,
+  `Rust tests (windows-latest)`, `Rust tests (macos-latest)`,
+  `E2E + visual (linux)`, `Perf invariants (linux)`), plus *Require a pull
+  request before merging* if direct pushes to `main` should be refused.
+  Until that is observed as configured, the snapshot's
+  `branch_protection.enforced` stays `"unavailable"` by design.
+
+### 2.4 Runner images, action runtimes, and maintenance policy
+
+CI must not rot silently: runner images migrate and action runtimes get
+deprecated, and both arrive as surprise reds unless the runbook pins who
+depends on what. State verified against real logs of run 38353143300
+(2026-10-13) and the maintained releases of each action:
+
+**Observed signals that triggered maintenance** (real annotations on every
+`ci.yml` job):
+
+- `Node.js 20 is deprecated. The following actions target Node.js 20 but
+  are being forced to run on Node.js 24: actions/checkout@11d5960a…,
+  actions/setup-node@49933ea…, actions/upload-artifact@ea165f8…` - the
+  v4-era pins target Node 20 while the hosted runner now runs node24
+  actions under force-upgrade. Fixed by moving to maintained majors that
+  run Node 24 natively (below), NOT by removing the SHA pins.
+- `The ubuntu-latest label will migrate to Ubuntu 26 beginning October
+  19, 2026` (runner-images#14748) - a floating-label platform change six
+  days out at the time of the audit, directly relevant to the
+  pixel-comparing E2E/visual and perf jobs.
+
+**Pins in the owned workflows (`ci.yml`, `integration-snapshot.yml`) and
+the reason for each** (every pin remains a full 40-char commit SHA):
+
+| Action | Was | Now | Reason |
+|---|---|---|---|
+| `actions/checkout` | v4.4.0 (node20) | **v7.0.1** (`3d3c42e5…`) | node24 native - clears the real deprecation warning; inputs Fress uses (`persist-credentials`, `fetch-depth`) unchanged; v6's creds-file change is moot with `persist-credentials: false`; v7's fork-PR guard only affects `pull_request_target`/`workflow_run`, which Fress never uses |
+| `actions/setup-node` | v4.4.0 (node20) | **v7.1.0** (`949feb24…`) | node24 native; the ACTION's runtime is independent of the toolchain it installs - `node-version: 20` and explicit `cache: npm` are kept, so the project's Node toolchain does not move |
+| `actions/upload-artifact` | v4.6.2 (node20) | **v7.0.2** (`cf430e03…`) | node24 native since v6; Fress uses only `name`/`path`/`retention-days`/`if-no-files-found`, all unchanged; v7's `archive: false` direct-upload mode is opt-in and unused |
+| `swatinem/rust-cache` | v2 (2024-era SHA) | **v2.9.2** (`6323deb1…`) | same major, cache-key/cleanup fixes; not part of the node20 warning but kept current while the pin format stays identical |
+| `dtolnay/rust-toolchain` | `686976e…` (2026-10-09) | unchanged | already the freshest master commit (4 days old at audit); the action has no stable versioned releases, is composite (no Node runtime, not flagged by the warning), and its SHA pin IS its integrity guarantee |
+
+**Runner-image decisions** (who is pinned and why):
+
+- `e2e` + `perf` → **ubuntu-24.04 pinned**: visual baselines are pixel
+  comparisons (`*-chromium-linux.png`) and font rasterization changes with
+  distro upgrades; a floating label migrating to Ubuntu 26 must never
+  arrive as an unexplained red. 24.04 is the image the baselines are green
+  on today (verified: run 38353143300 provisioned ubuntu-24.04 for these
+  jobs via ubuntu-latest).
+- `integration-snapshot.yml` jobs → **ubuntu-24.04 pinned**: the workflow
+  is the public-evidence instrument; its observations must not drift with
+  image migrations.
+- `rust` → **ubuntu-24.04** (deliberate migration from ubuntu-22.04,
+  tested by the introducing PR's own CI run): 22.04 is an aging image,
+  and the release path builds the Linux bundle on ubuntu-latest (=24.04 at
+  audit time), so CI now compiles/tests on the same Linux the installers
+  ship from.
+- `version-guard`, `frontend`, `artifact-audit-tests` → **ubuntu-latest
+  kept**: their measurements are distro-insensitive (toolchains pinned by
+  `setup-node` + lockfiles); float deliberately so routine image refreshes
+  get exercised somewhere cheap.
+- `rust-native` (windows-latest, macos-latest) unchanged: tests only, no
+  artifacts, and the release bundles are built on release.yml's own
+  runners.
+
+**Maintenance policy going forward:**
+
+1. Action updates land as reviewed PRs whose own CI run is the test; a
+   version bump that turns red is not merged. Pins are never loosened to
+   tags or removed to silence a warning - the warning is silenced by the
+   maintained release, the pin stays.
+2. A newer runner image (e.g. Ubuntu 26) is adopted for the
+   rendering-sensitive jobs only by a deliberate PR that regenerates the
+   E2E visual baselines ON that image and proves the whole suite green.
+3. Required commands never gain `continue-on-error`, catch-all retries or
+   shell wrappers that swallow failures; the only advisory step in the
+   fleet remains `security.yml`'s `cargo-audit` (documented policy, see
+   section 2), and the snapshot's single asset-download retry is bounded
+   and can never retry an integrity VERDICT into green.
+4. Branch-protection enforcement is claimed nowhere: it is a Settings
+   fact, reported by the snapshot as `"unavailable"` with the owner action
+   spelled out (section 2.3, category 5).
 
 ### Android signing secrets: maintainer procedure (new requirement)
 
@@ -642,6 +756,15 @@ not here. State verified against the code as of this runbook's update:
 3. **Category label on cards untranslated** (FIXED, verified in code:
    the card badge renders through the same shared category mapping the
    filters, table and detail modal use).
+4. **Workflows outside the CI owner's scope still pin the Node-20-era
+   action versions** (OPEN; owner: release/workflow owners for
+   `release.yml`, `network-smoke.yml`, `security.yml`,
+   `author-guard.yml`). The same `Node.js 20 is deprecated` warning that
+   `ci.yml` and `integration-snapshot.yml` fixed (section 2.4) fires for
+   their `checkout@v4.4.0` / `setup-node@v4.4.0` / `upload-artifact@v4.6.2`
+   pins too. The fix is mechanical - the same pinned SHAs documented in
+   section 2.4 - but each owner must run their own green CI before
+   adopting; nothing here forces it from the outside.
 
 ## 9. A developer-machine run is not release evidence
 

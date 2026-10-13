@@ -36,6 +36,13 @@ name: Integration snapshot
 # names its cause: an integrity failure fails the audit job, an API
 # failure fails the snapshot job, and the snapshot still publishes what it
 # could observe (needs: artifact-audit + if: always()).
+#
+# Runner note: both jobs are PINNED to ubuntu-24.04, not ubuntu-latest,
+# on purpose - this workflow is the project's public-evidence instrument,
+# and ubuntu-latest migrates to Ubuntu 26 on 2026-10-19
+# (runner-images#14748). Pinning keeps evidence reproducible and moves
+# any image change behind a deliberate, reviewed PR
+# (docs/quality-gates.md, section 2.4).
 
 on:
   push:
@@ -63,12 +70,14 @@ jobs:
     # shipped. Verdict travels to the snapshot job via job output; the
     # raw log travels as an artifact.
     name: Artifact-integrity audit (newest release)
-    runs-on: ubuntu-latest
+    # Pinned image: integrity evidence must not drift with ubuntu-latest
+    # migrations (docs/quality-gates.md, 2.4).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
       result_json: ${{ steps.verdict.outputs.result_json }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           # The verifier + production pubkey come from the tested commit,
           # so the tooling version is itself part of the evidence.
@@ -139,7 +148,7 @@ jobs:
           python3 -c "import json;print('result_json='+json.dumps(json.load(open('audit-result.json')),separators=(',',':')))" >> "$GITHUB_OUTPUT"
       - name: Keep the raw audit log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24 native since v6)
         with:
           name: artifact-audit-log
           path: |
@@ -156,16 +165,18 @@ jobs:
     name: Integration snapshot (public evidence)
     needs: artifact-audit
     if: always()
-    runs-on: ubuntu-latest
+    # Pinned image: the snapshot is the current-state record - same
+    # determinism rule as the audit job (docs/quality-gates.md, 2.4).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           # Full history: the snapshot proves release provenance locally
           # (merge-base ancestry), which a shallow clone cannot.
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
           cache: npm
@@ -190,7 +201,7 @@ jobs:
         run: node scripts/ci/integration-snapshot.mjs --out integration-snapshot.json --version-coherence "${VERSION_COHERENCE}" --version-coherence-rc "${VERSION_COHERENCE_RC}" --artifact-audit "${ARTIFACT_AUDIT_JSON}"
       - name: Attach the machine-readable snapshot
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24 native since v6)
         with:
           name: integration-snapshot
           path: integration-snapshot.json

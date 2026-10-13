@@ -306,6 +306,27 @@ describe('integration-snapshot.mjs (spawned against fixtures + a mock GitHub API
     expect(r.stdout).toContain('unproven');
   });
 
+  it('5b. a GENUINELY shallow history leaves release provenance unproven, never guessed', async () => {
+    // A real shallow clone (depth 1): the release commit exists upstream but
+    // is NOT present in this checkout — the scheduled-run scenario when
+    // fetch-depth is not 0. The ancestry answer must stay unavailable, not
+    // become a fabricated true/false.
+    const { root, shas } = makeFixture(3);
+    const shallowRoot = `${root}-shallow`;
+    git(process.cwd(), ['clone', '--depth', '1', `file://${root}`, shallowRoot]);
+    scratchRoots.push(shallowRoot);
+    // A real Actions checkout points origin at GitHub; the slug parser needs it.
+    git(shallowRoot, ['remote', 'set-url', 'origin', `https://github.com/${REPO}.git`]);
+    freshHandlers(shallowRoot, { tagTargets: { [TAG]: shas[0] } });
+    const r = await runSnapshot(shallowRoot, { args: ['--version-coherence', 'pass', '--version-coherence-rc', '0', '--artifact-audit', JSON.stringify({ verdict: 'pass', verifier_exit_code: 0, hard_failures: 0, release_tag: TAG })] });
+    expect(r.status).toBe(0);
+    const snap = r.json();
+    expect(snap.release.is_ancestor_of_tested).toBeNull();
+    expect(snap.release.provenance_note).toContain('shallow clone');
+    expect(snap.release.commits_tested_ahead_of_release).toBeNull();
+    expect(r.stdout).toContain('unproven');
+  });
+
   it('6. fetches ALL pages of the open-PR inventory and reports the pagination facts', async () => {
     const { root } = makeFixture(1);
     const full = Array.from({ length: 100 }, (_, i) => pr(i + 1, `PR number ${i + 1}`));
@@ -341,6 +362,27 @@ describe('integration-snapshot.mjs (spawned against fixtures + a mock GitHub API
     expect(r.stderr).toContain('open_pull_requests');
   });
 
+  it('7b. a GENUINE zero open-PR inventory is an ok zero, never an unavailable', async () => {
+    // The counterpart of test 7: when the API genuinely answers "no open
+    // pull requests", the snapshot must show a real zero (status ok,
+    // count 0, one fetched page) — not hide behind unavailable, and not
+    // invent items. Together the two tests pin the distinction between
+    // "observed empty" and "could not observe".
+    const { root } = makeFixture(1);
+    freshHandlers(root, { pulls: [] });
+    const r = await runSnapshot(root, { args: ['--version-coherence', 'pass', '--version-coherence-rc', '0', '--artifact-audit', JSON.stringify({ verdict: 'pass', verifier_exit_code: 0, hard_failures: 0, release_tag: TAG })] });
+    expect(r.status).toBe(0);
+    const snap = r.json();
+    expect(snap.open_pull_requests.status).toBe('ok');
+    expect(snap.open_pull_requests.count).toBe(0);
+    expect(snap.open_pull_requests.items).toEqual([]);
+    expect(snap.open_pull_requests.pages_fetched).toBe(1);
+    expect(snap.open_pull_requests.truncated).toBe(false);
+    expect(snap.unavailable_observations.map((u: { field: string }) => u.field)).not.toContain('open_pull_requests');
+    expect(r.stdout).toContain('**0 open**');
+    expect(r.stdout).not.toContain('**unavailable:');
+  });
+
   it('8. missing Actions results for the tested SHA are a real observation, not a failure', async () => {
     const { root } = makeFixture(1);
     freshHandlers(root, { runs: [] });
@@ -352,6 +394,28 @@ describe('integration-snapshot.mjs (spawned against fixtures + a mock GitHub API
     expect(snap.ci.aggregated_conclusion).toBe('none');
     expect(snap.ci.note).toContain('no workflow runs recorded');
     expect(r.stdout).toContain('**CI aggregate: none**');
+  });
+
+  it('8b. only historical successful CI results exist: they are excluded, never shown for the tested SHA', async () => {
+    // The runs query carries the tested SHA, but the response "leaks" a
+    // successful run from ANOTHER commit (unfiltered history). That green
+    // run must be excluded and counted — never presented as CI on the
+    // tested SHA, and never folded into a passing aggregate.
+    const { root } = makeFixture(1);
+    const oldSha = 'c'.repeat(40);
+    freshHandlers(root, { runs: [defaultRun(oldSha, 'success')] });
+    const r = await runSnapshot(root, { args: ['--version-coherence', 'pass', '--version-coherence-rc', '0', '--artifact-audit', JSON.stringify({ verdict: 'pass', verifier_exit_code: 0, hard_failures: 0, release_tag: TAG })] });
+    expect(r.status).toBe(0);
+    const snap = r.json();
+    expect(snap.ci.aggregated_conclusion).toBe('none');
+    expect(snap.ci.runs).toEqual([]);
+    expect(snap.ci.excluded_head_sha_mismatch).toBe(1);
+    expect(snap.ci.note).toContain('historical');
+    // The historical run's URL must appear nowhere as evidence.
+    expect(r.stdout).toContain('**CI aggregate: none**');
+    expect(r.stdout).toContain('were excluded');
+    expect(r.stdout).not.toContain('/actions/runs/999');
+    expect(JSON.stringify(snap)).not.toContain('/actions/runs/999');
   });
 
   it('9. a failed version check is a gate failure: exit 4 with an annotation', async () => {

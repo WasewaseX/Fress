@@ -45,6 +45,12 @@ name: CI
 #   - Distro-insensitive jobs (version-guard, frontend, artifact-audit-tests)
 #     stay on ubuntu-latest: their toolchains are pinned by setup-node and
 #     the lockfiles, and nothing they measure depends on the distro.
+#   - The floating migration itself is TESTED, not just accepted: the
+#     ubuntu26-canary job runs the cheapest owned toolchain on the explicit
+#     ubuntu-26.04 image before the alias flip (2026-10-19, runner-images
+#     #14748), so the floaters' first day on the new distro is not a
+#     surprise red. A red canary means: pin the floaters to ubuntu-24.04
+#     first, then fix the gap.
 
 on:
   push:
@@ -82,6 +88,29 @@ jobs:
       - name: Install dependencies from the lockfile
         # tsx (the validator's TypeScript loader) comes from devDependencies;
         # the validator itself only touches node:fs/node:path/node:url.
+        run: npm ci
+      - name: All manifests and lockfiles must agree (scripts/ci/validate-versions.ts)
+        run: npm run validate:versions
+
+  ubuntu26-canary:
+    # Deliberate image-migration test (docs/quality-gates.md, section 2.4):
+    # the distro-insensitive jobs float on ubuntu-latest, which migrates to
+    # Ubuntu 26 beginning 2026-10-19. This job runs that same cheap,
+    # deterministic toolchain on the EXPLICIT ubuntu-26.04 image, so the
+    # alias flip is proven before it happens. Green = the floaters'
+    # toolchain (checkout, setup-node, npm ci, the version validator) works
+    # on the new distro. Red = pin the floaters to ubuntu-24.04 FIRST.
+    name: Ubuntu 26 canary (version toolchain)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native)
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
+        with:
+          node-version: 20
+      - name: Install dependencies from the lockfile
         run: npm ci
       - name: All manifests and lockfiles must agree (scripts/ci/validate-versions.ts)
         run: npm run validate:versions

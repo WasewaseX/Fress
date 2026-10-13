@@ -4,25 +4,25 @@ This document records, per platform and per artifact, what each release
 actually carries: which files are signed, by what, what each layer proves,
 and where Fress intentionally falls back to the official Releases page.
 It is scoped to the published releases — the numbers in the current audit
-below were verified against release `v1.0.11-beta` (published 2026-10-13)
-on 2026-10-13, from the release's actual bytes (all 22 assets downloaded and
-re-hashed; every embedded manifest signature compared with its sidecar; all
-five signed artifacts minisign-verified with the production key) and its CI
-build run. The per-artifact signing policy has not changed since it was
-first audited on v1.0.7-beta; the v1.0.9-beta audit is kept further down,
-clearly labelled as historical.
+below were verified against release `v1.0.12-beta` (published
+2026-10-13T10:06Z) on 2026-10-13, from the release's actual bytes (all 22
+assets downloaded and re-hashed; every embedded manifest signature compared
+with its sidecar; all five signed artifacts minisign-verified with the
+production key) and its CI build run. The per-artifact signing policy has
+not changed since it was first audited on v1.0.7-beta; the v1.0.9-beta and
+v1.0.11-beta audits are kept further down, clearly labelled as historical.
 
 ## What each release mechanism actually establishes
 
 Four independent mechanisms touch a Fress release, and they answer four
 different questions. Do not conflate them:
 
-| Mechanism | Question it answers | Establishes | Consumed by | Current status (evidence: release v1.0.11-beta) |
+| Mechanism | Question it answers | Establishes | Consumed by | Current status (evidence: release v1.0.12-beta) |
 | --- | --- | --- | --- | --- |
-| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release (back to v1.0.0-beta); since v1.0.7-beta the in-app updater reads it through the native `fetch_self_update_text` command, fail-closed (`planUpdateDelivery`); all 21 entries on v1.0.11-beta matched the re-hashed published bytes |
+| `SHA256SUMS.txt` | "Is this file byte-for-byte what CI built?" | Integrity: a checksum comparison against CI's manifest, delivered over HTTPS from the release page | The in-app self-update (verifies before offering the installer) and any manual `sha256sum -c` | On every release (back to v1.0.0-beta); since v1.0.7-beta the in-app updater reads it through the native `fetch_self_update_text` command, fail-closed (`planUpdateDelivery`); all 21 entries on v1.0.12-beta matched the re-hashed published bytes |
 | Minisign `.sig` + `latest.json` + embedded public key | "Who authorized this updater artifact?" | Authenticity: a signature that only the holder of the private key (a repository secret) can produce | The native `verify_self_update_signature` command, called by the real delivery flow (`src/features/selfUpdate/updateDelivery.ts`) after every completed update download and before any "verified" state is shown | Produced for the Windows installers and Linux bundles; the MSI, macOS dmgs, portable zips and all APKs ship WITHOUT updater artifacts — those platforms are therefore NOT delivered in-app (releases-page fallback) |
-| Authenticode (Windows) | "Is the publisher accountable to a certificate authority Windows trusts?" | Publisher identity for Explorer/SmartScreen; tamper evidence tied to that identity | Windows itself at install time | **Not applied today** — no signing secrets are configured (the v1.0.11-beta build ran the workflow's "no signing certificate" path), and the published installers carry no Authenticode certificate table (byte-verified: both setup exes' PE certificate tables are empty, the MSI has no digital-signature stream). This is why Windows shows "Unknown publisher" |
-| APK signature (Android) | "Will Android accept this APK as an update of the installed app?" | OS-enforced same-signer rule: the package installer refuses an update signed with a different key | Android's package installer at install time | Applied by CI from the persistent keystore secret; on v1.0.11-beta CI restored the persistent keystore and signed all five APKs with it |
+| Authenticode (Windows) | "Is the publisher accountable to a certificate authority Windows trusts?" | Publisher identity for Explorer/SmartScreen; tamper evidence tied to that identity | Windows itself at install time | **Not applied today** — no signing secrets are configured (the v1.0.12-beta build ran the workflow's "no signing certificate" path), and the published installers carry no Authenticode certificate table (byte-verified: both setup exes' PE certificate tables are empty, the MSI has no digital-signature stream). This is why Windows shows "Unknown publisher" |
+| APK signature (Android) | "Will Android accept this APK as an update of the installed app?" | OS-enforced same-signer rule: the package installer refuses an update signed with a different key | Android's package installer at install time | Applied by CI from the persistent keystore secret; on v1.0.12-beta CI restored the persistent keystore and signed all five APKs with it |
 
 A checksum proves the file matches the manifest but not who made the manifest;
 a minisign signature proves who authorized the artifact but is only visible to
@@ -53,12 +53,12 @@ CLI:
 
 ```bash
 # 1. decode the sidecar and the public key to plain minisign documents
-base64 -d Fress_1.0.11-beta_x64-setup.exe.sig > /tmp/fress-installer.sig
+base64 -d Fress_1.0.12-beta_x64-setup.exe.sig > /tmp/fress-installer.sig
 base64 -d fress-updater.key.pub        > /tmp/fress-updater.pub
 
 # 2. verify the exact installer bytes against the decoded signature
 minisign -V -p /tmp/fress-updater.pub -s /tmp/fress-installer.sig \
-  -m Fress_1.0.11-beta_x64-setup.exe
+  -m Fress_1.0.12-beta_x64-setup.exe
 ```
 
 `fress-updater.key.pub` is the public verification key published in this
@@ -131,7 +131,7 @@ generating a throwaway self-signed certificate per build (a fresh identity
 every build proves nothing and accumulates no reputation with Defender or
 SmartScreen). The steps run ONLY when the secrets exist — with no secrets set,
 the installers ship unsigned, which is the state every release so far
-(through v1.0.11-beta) actually shipped in:
+(through v1.0.12-beta) actually shipped in:
 
 - `WINDOWS_PFX_B64`, the `.pfx` (certificate + private key), base64-encoded
 - `WINDOWS_PFX_PASSWORD`, the .pfx export password
@@ -180,12 +180,16 @@ classic trigger, and release builds were additionally stripped (`strip = true`
 in Cargo.toml), which makes them look even more packer-like. Countermeasures
 in place: release builds are unstripped, the updater signature is persistent,
 Fress is distributed only through GitHub Releases with SHA256SUMS.txt, and a
-`virustotal` CI job scans every release asset when the `VIRUSTOTAL_API_KEY`
-secret is set (it is configured). One honest caveat: through v1.0.11-beta the
-job's scan-links section has not appeared on any published release page
-(re-confirmed on the v1.0.11-beta release body), so treat the multi-engine
+`virustotal` CI job would scan every release asset when the
+`VIRUSTOTAL_API_KEY` secret is set. One honest caveat: the key is NOT
+configured for the current releases — on v1.0.12-beta (and v1.0.11-beta
+before it) the job logged "VirusTotal scan skipped - VIRUSTOTAL_API_KEY is
+not configured", and a scan-links section has never appeared on any
+published release page through v1.0.12-beta — so treat the multi-engine
 links as unavailable and verify with `SHA256SUMS.txt` and, for the signed
-artifacts, the minisign signature instead. If a build is still flagged,
+artifacts, the minisign signature instead. (Configuring the key or
+recording the decision not to is tracked as a maintainer action in
+docs/release-readiness.md §11.) If a build is still flagged,
 submit it at <https://www.microsoft.com/en-us/wdsi/filesubmission> and check
 the SHA256 against `SHA256SUMS.txt` before running anything.
 
@@ -210,7 +214,7 @@ value appeared in command lines of past CI runs.)
 The keystore path is not just configured but enforced: the release workflow
 refuses to build the APKs at all when the keystore secret is absent, checks
 the certificate fingerprint of the restored keystore against the expected
-permanent Fress key, and signs with `apksigner`. On the v1.0.11-beta run the
+permanent Fress key, and signs with `apksigner`. On the v1.0.12-beta run the
 "Restore the persistent signing keystore" step executed and all five APKs
 (universal, arm64, arm, x64, x86) were signed with it. Consequence for
 users: release-to-release APK upgrades install normally (same signing
@@ -296,8 +300,8 @@ configured. **The keypair was generated and the secrets were set on
 2026-09-22**, so every recent release ships the manifests and signatures
 automatically.
 
-Current status at a glance (evidence: release v1.0.11-beta, published
-2026-10-13, and its CI run):
+Current status at a glance (evidence: release v1.0.12-beta, published
+2026-10-13T10:06Z, and its CI run):
 
 | Item | State |
 | --- | --- |
@@ -317,7 +321,7 @@ Public key (safe to distribute; embedded in the binary at compile time from
 dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MzhDNjgxMjNGQjYzM0IKUldRN1kvc2pnY1k0VnNHRXkyL2UycG5NZFhvdUFLM3I0YXNsYTN4c2sxUlc4YVUyRktUdDM4Vk4K
 ```
 
-### Release signature audit (v1.0.11-beta — the current release, verified 2026-10-13)
+### Release signature audit (v1.0.12-beta — the current release, verified 2026-10-13)
 
 Every artifact class on the newest published release was checked from the
 release's actual published bytes. Method: all 22 assets were downloaded from
@@ -334,22 +338,22 @@ MSI's OLE digital-signature stream were inspected directly; and the release
 run's job steps were checked for which signing path executed. What was
 checked:
 
-| Artifact (exact name on v1.0.11-beta) | SHA-256 vs `SHA256SUMS.txt` | Updater `.sig` | Minisign verification | Publisher signature |
+| Artifact (exact name on v1.0.12-beta) | SHA-256 vs `SHA256SUMS.txt` | Updater `.sig` | Minisign verification | Publisher signature |
 | --- | --- | --- | --- | --- |
-| `Fress_1.0.11-beta_x64-setup.exe` | match | yes | **PASS** | none — PE certificate table empty |
-| `Fress_1.0.11-beta_arm64-setup.exe` | match | yes | **PASS** | none — PE certificate table empty |
-| `Fress_1.0.11-beta_amd64.AppImage` | match | yes | **PASS** | n/a |
-| `Fress_1.0.11-beta_amd64.deb` | match | yes | **PASS** | n/a |
-| `Fress-1.0.11-beta-1.x86_64.rpm` | match | yes | **PASS** | n/a |
-| `Fress_1.0.11-beta_x64_en-US.msi` | match | no | n/a | none — no digital-signature stream |
-| `Fress_1.0.11-beta_x64-portable.zip` / `_arm64-portable.zip` | match | no | n/a | n/a (plain archives, never Authenticode-signed) |
-| `Fress_1.0.11-beta_x64.dmg` / `_aarch64.dmg` | match | no | n/a | unsigned — the build job's signed-and-notarized step was skipped, its unsigned fallback ran |
-| `Fress_1.0.11-beta_{universal,arm64,arm,x64,x86}.apk` | match | no | n/a | APK-signed by CI's persistent keystore (Android's same-signer rule, not an updater signature) |
+| `Fress_1.0.12-beta_x64-setup.exe` | match | yes | **PASS** | none — PE certificate table empty |
+| `Fress_1.0.12-beta_arm64-setup.exe` | match | yes | **PASS** | none — PE certificate table empty |
+| `Fress_1.0.12-beta_amd64.AppImage` | match | yes | **PASS** | n/a |
+| `Fress_1.0.12-beta_amd64.deb` | match | yes | **PASS** | n/a |
+| `Fress-1.0.12-beta-1.x86_64.rpm` | match | yes | **PASS** | n/a |
+| `Fress_1.0.12-beta_x64_en-US.msi` | match | no | n/a | none — no digital-signature stream |
+| `Fress_1.0.12-beta_x64-portable.zip` / `_arm64-portable.zip` | match | no | n/a | n/a (plain archives, never Authenticode-signed) |
+| `Fress_1.0.12-beta_x64.dmg` / `_aarch64.dmg` | match | no | n/a | unsigned — the build job's signed-and-notarized step was skipped, its unsigned fallback ran |
+| `Fress_1.0.12-beta_{universal,arm64,arm,x64,x86}.apk` | match | no | n/a | APK-signed by CI's persistent keystore (Android's same-signer rule, not an updater signature) |
 | `latest.json` | match | n/a | n/a | integrity only — see below |
 
-`latest.json` on v1.0.11-beta carries exactly eight platform entries —
+`latest.json` on v1.0.12-beta carries exactly eight platform entries —
 windows-x86_64(-nsis), windows-aarch64(-nsis), linux-x86_64(-appimage/-deb/
--rpm) — all with versioned `releases/download/v1.0.11-beta/...` URLs that
+-rpm) — all with versioned `releases/download/v1.0.12-beta/...` URLs that
 resolve to real assets, no darwin/android entries, and each embedded
 signature byte-identical to its sidecar (after the base64 unwrap described
 above). The ten artifacts without sidecars are exactly the classes the
@@ -361,12 +365,29 @@ it does not is unchanged: the macOS dmgs and Android APKs are NOT delivered
 through the in-app path (no publisher signature exists for them), and a
 SHA-256 match remains an integrity guarantee, not publisher proof.
 
+### Release signature audit (v1.0.11-beta, verified 2026-10-13) — historical
+
+The same method (all 22 assets downloaded and re-hashed, the repository's
+artifact verifier run over the downloaded bytes with the production key,
+publisher-signature absence checked directly on the Windows exes and the
+MSI) was applied to v1.0.11-beta earlier the same day with the identical
+verdict: 21/21 checksum entries match, the same five artifacts
+minisign-verify, `latest.json` carries the same eight platform entries with
+versioned URLs, the same ten artifact classes ship without sidecars, and
+both setup exes' PE certificate tables are empty. Its full record lives in
+that release's docs round
+([PR #67](https://github.com/WasewaseX/Fress/pull/67)) and in
+docs/release-readiness.md §7 (an independent re-download and
+re-verification, PASS exit 0). The
+per-artifact signing policy has not changed between v1.0.9-beta,
+v1.0.11-beta and v1.0.12-beta.
+
 ### Release signature audit (v1.0.9-beta, verified 2026-10-13) — historical
 
-Kept as the round that established this audit's method and as the evidence
-base the v1.0.10/v1.0.11 docs passes built on; for the current release, use
-the v1.0.11-beta audit above (the per-artifact signing policy has not
-changed between them). Every artifact class on the then-newest release was
+Kept as the round that established this audit's method (including the
+independent Ed25519 implementation) and as the evidence base the later docs
+passes built on; for the current release, use the v1.0.12-beta audit above
+(the per-artifact signing policy has not changed between them). Every artifact class on the then-newest release was
 checked from the release's actual published bytes. Method: all downloaded artifacts were
 verified against the release's `SHA256SUMS.txt`; every signed artifact was
 additionally verified against the repository's published public key with an
@@ -413,7 +434,7 @@ the per-artifact signing policy has not changed since.)
 
 1. **macOS updater pair gap (unchanged).** The macOS build jobs pass the
    updater config when the key secret exists, but every release so far
-   (through v1.0.11-beta) has shipped dmgs WITHOUT the `.app.tar.gz` + `.sig`
+   (through v1.0.12-beta) has shipped dmgs WITHOUT the `.app.tar.gz` + `.sig`
    updater pair, so the manifest job has no darwin entries to embed. If
    macOS updates are ever to be delivered in-app, that gap needs a CI
    investigation (Agent 6's workstream) and `release.yml` must publish
@@ -421,10 +442,13 @@ the per-artifact signing policy has not changed since.)
    `<asset>.sig` naming convention (the in-app updater binds each signature
    to the artifact's exact filename). The same applies to the APKs.
 2. **VirusTotal links do not land on the release pages.** The `virustotal`
-   job runs (its secret is configured) but its scan-links section is absent
-   from every published release body through v1.0.11-beta. The docs above
-   therefore do not promise those links; the CI job's body-edit step needs
-   a look (Agent 6).
+   job runs, but its scan step has been skipped on the recent releases
+   because `VIRUSTOTAL_API_KEY` is not configured (stated verbatim in the
+   job log on v1.0.11-beta and v1.0.12-beta), and its scan-links section is
+   absent from every published release body through v1.0.12-beta. The docs
+   above therefore do not promise those links; configuring the key (or
+   recording the decision not to) is a maintainer action tracked in
+   docs/release-readiness.md §11.
 3. **Per-artifact signature policy is unchanged:** Windows setup exes and
    the Linux bundles are signed; everything else is intentionally not, and
    those platforms correctly route to the Releases page.
@@ -463,7 +487,7 @@ one manual reinstall for everyone.
  via `--config`, but only when the key secret exists. On macOS and Linux the
  `tauri-action` builds pass it conditionally and sign the updater bundles at
  build time - safe there, because nothing rewrites those binaries afterwards.
- Observed so far (through v1.0.11-beta): the Linux releases carry their `.sig`
+ Observed so far (through v1.0.12-beta): the Linux releases carry their `.sig`
  files, while the macOS releases ship dmgs WITHOUT the `.app.tar.gz` + `.sig`
  updater pair, so the manifest job has no darwin entries to embed (see the
  pipeline notes above) — until then macOS updates flow through the
@@ -482,7 +506,7 @@ one manual reinstall for everyone.
  Its platform URLs use the versioned `releases/download/<tag>/<asset>` form,
  not the `releases/latest/download/<asset>` alias, which only resolves for
  stable releases and would 404 while Fress publishes prereleases (confirmed
- on v1.0.11-beta: every `latest.json` URL is versioned).
+ on v1.0.12-beta: every `latest.json` URL is versioned).
 
 ### Delivery wiring: landed
 
@@ -490,7 +514,7 @@ The layers now look like this:
 
 - **Release signing (done):** `updater-overrides.json` + the key secret make
  CI produce `.sig` sidecars and `latest.json` for the Windows installers and
- Linux bundles; the signatures on v1.0.11-beta verify against the published
+ Linux bundles; the signatures on v1.0.12-beta verify against the published
  key (see the audit above).
 - **In-app verification (done, tested):** the public key is embedded in the
  binary at compile time and the native `verify_self_update_signature`
@@ -539,7 +563,7 @@ rewrites the artifact.
 
 ## macOS: signing and notarization
 
-Current status (evidence: the v1.0.11-beta release run): **the Apple
+Current status (evidence: the v1.0.12-beta release run): **the Apple
 credentials are not configured**, so both macOS build jobs ran their
 unsigned fallback steps — the published dmgs are unsigned AND unnotarized.
 Practical effect for users: the first launch of the app needs a right-click

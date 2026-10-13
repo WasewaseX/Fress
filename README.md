@@ -52,7 +52,7 @@ The web preview works without Rust: download buttons hand off to your browser. I
 
 ## Releases
 
-Releases are tagged and published on the [official Releases page](https://github.com/WasewaseX/Fress/releases). Every published release ships installers for all platforms, built by GitHub Actions. The table below uses `*` in place of the version, so it does not go stale; the shapes were re-verified file-by-file against release [`v1.0.11-beta`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.11-beta) (2026-10-13, 22 files: the 20 installers/archives below plus `SHA256SUMS.txt` and the updater manifest `latest.json`):
+Releases are tagged and published on the [official Releases page](https://github.com/WasewaseX/Fress/releases). Every published release ships installers for all platforms, built by GitHub Actions. The table below uses `*` in place of the version, so it does not go stale; the shapes were re-verified file-by-file against release [`v1.0.12-beta`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.12-beta) (published 2026-10-13, 22 files: the 20 installers/archives below plus `SHA256SUMS.txt` and the updater manifest `latest.json`):
 
 | Platform | File | Updater signature | In-app update |
 | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Releases are tagged and published on the [official Releases page](https://github
 
 **Fress is distributed only through this repository's GitHub Releases page**, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer anywhere else (a file host, a mirror, a "download site"), it is not ours.
 
-Every published release includes a `SHA256SUMS.txt` covering every other asset on the release (21 entries on the 22-file v1.0.11-beta — a checksum file cannot cover itself). Verify before running:
+Every published release includes a `SHA256SUMS.txt` covering every other asset on the release (21 entries on every 22-file release — a checksum file cannot cover itself). Verify before running:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
@@ -80,7 +80,7 @@ Two platform notes, so nothing surprises you: on **macOS**, the dmgs are unsigne
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header, right next to the name — the version you see is the release tag the build was published as (for example, a build published as `v1.0.11-beta` shows `v1.0.11-beta`). The version badge at the top of this page tracks the newest **published** release; the development sources on `main` carry the version that will ship next (`package.json` is the source of truth — it moves ahead of the badge as soon as a release is published), so a newer version number in the repository does not always mean that version has been published yet. If your installed app does not show the version you expect, install the newest installer from the [Releases page](https://github.com/WasewaseX/Fress/releases). Old installers keep working and can silently sit on your machine next to the new one.
+Each Fress app shows its exact version in the header, right next to the name — the version you see is the release tag the build was published as (for example, a build published as `v1.0.12-beta` shows `v1.0.12-beta`). The version badge at the top of this page tracks the newest **published** release; the development sources on `main` carry the version that will ship next (`package.json` is the source of truth — it moves ahead of the badge as soon as a release is published), so a newer version number in the repository does not always mean that version has been published yet. If your installed app does not show the version you expect, install the newest installer from the [Releases page](https://github.com/WasewaseX/Fress/releases). Old installers keep working and can silently sit on your machine next to the new one.
 
 ### Where downloads are saved (per operating system)
 
@@ -94,7 +94,7 @@ Fress picks each operating system's own download location, the same place your b
 | Android | The app's private storage (Android does not let apps pick arbitrary folders) | No — and in-app **Open** cannot hand the file to other Android apps yet (the system-installer/share handoff is not implemented), so the file stays in that private storage. To install an APK, download it with your **browser** from the [Releases page](https://github.com/WasewaseX/Fress/releases) |
 
 ### Why Windows shows "Unknown publisher"
-The Windows installer is **not Authenticode-signed today**: no signing certificate is configured for CI, and the published installers carry no certificate table (verified on the current release's bytes, `v1.0.11-beta` — see [CODE_SIGNING.md](CODE_SIGNING.md) for the audit and the free routes), so Windows shows the blue "Unknown publisher" / "Windows protected your PC" warning and will keep showing it until the publisher is covered by a certificate Windows already trusts. What protects the file you download is the release integrity and authenticity chain, not a publisher certificate:
+The Windows installer is **not Authenticode-signed today**: no signing certificate is configured for CI, and the published installers carry no certificate table (verified on the current release's bytes, `v1.0.12-beta` — see [CODE_SIGNING.md](CODE_SIGNING.md) for the audit and the free routes), so Windows shows the blue "Unknown publisher" / "Windows protected your PC" warning and will keep showing it until the publisher is covered by a certificate Windows already trusts. What protects the file you download is the release integrity and authenticity chain, not a publisher certificate:
 
 - Every release ships a `SHA256SUMS.txt` covering every other asset on the release, and the app itself verifies its own updates against that file before offering the installer. Verify manually with `sha256sum -c SHA256SUMS.txt` after downloading.
 - The Windows setup installers and Linux bundles additionally carry a minisign updater signature produced by CI; the signatures on the current release have been verified byte-for-byte against the published public key (see the release signature audit in [CODE_SIGNING.md](CODE_SIGNING.md)). For its own in-app updates, Fress checks the downloaded file against that signature — through the key embedded in the app — before it reports the update as verified, and an update without a verifiable signature is routed to the releases page instead. A checksum proves integrity with the release manifest, the signature proves who authorized the artifact — they are separate guarantees, and neither is an Authenticode publisher identity.

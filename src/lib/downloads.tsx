@@ -13,7 +13,7 @@ import { formatBytes, formatSpeed, formatEta } from './format';
 import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
 import { serializeItems, deserializeItems, DOWNLOAD_ITEMS_KEY } from './downloadItemsStore';
 import { createDownloadPersistence } from './downloadPersistence';
-import { useI18n } from './i18n';
+import { formatMessage, useI18n } from './i18n';
 import {
   openCompletedArtifact,
   revealCompletedArtifact,
@@ -473,12 +473,19 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const item = itemsRef.current.find((it) => it.id === p.id);
       activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
       const tt = tRef.current;
+      // formatMessage, not .replace: a value is inserted LITERALLY, so a
+      // name or a Windows path carrying `$&`/`$$`-style replacement
+      // patterns cannot corrupt the very toast announcing it (and a token
+      // used twice in a translation is replaced everywhere).
+      const completedTitle = formatMessage(tt('downloads.toast.completedTitle'), {
+        name: item?.name || tt('downloads.toast.fileFallback'),
+      });
       if (p.verified === true) {
-        toast.success(tt('downloads.toast.completedTitle').replace('{name}', item?.name || tt('downloads.toast.fileFallback')), {
-          description: tt('downloads.toast.verifiedDesc').replace('{path}', p.path),
+        toast.success(completedTitle, {
+          description: formatMessage(tt('downloads.toast.verifiedDesc'), { path: p.path }),
         });
       } else {
-        toast.success(tt('downloads.toast.completedTitle').replace('{name}', item?.name || tt('downloads.toast.fileFallback')), {
+        toast.success(completedTitle, {
           description: p.path,
         });
       }
@@ -493,9 +500,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const item = itemsRef.current.find((it) => it.id === p.id);
       applyItemUpdate(p.id, (it) => ({ ...it, status: 'active', canResume: false }));
       const tt = tRef.current;
-      toast.info(tt('downloads.toast.reconnectingTitle').replace('{name}', item?.name || tt('downloads.toast.downloadFallback')).replace('{attempt}', String(p.attempt)), {
-        description: tt('downloads.toast.reconnectingDesc'),
-      });
+      // Literal interpolation for the same reason as the completion toast:
+      // the display name is untrusted content (URL/Content-Disposition).
+      toast.info(
+        formatMessage(tt('downloads.toast.reconnectingTitle'), {
+          name: item?.name || tt('downloads.toast.downloadFallback'),
+          attempt: p.attempt,
+        }),
+        {
+          description: tt('downloads.toast.reconnectingDesc'),
+        }
+      );
     }).then((un) => unlisteners.push(un));
 
     listen<{ id: number; message: string; kind?: string }>('download-error', (event) => {

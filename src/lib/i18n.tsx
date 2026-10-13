@@ -3804,6 +3804,23 @@ export function isRtl(lang: Language): boolean {
   return lang === 'fa';
 }
 
+/**
+ * Token interpolation for dictionary strings.
+ *
+ * The consumer-side `dict.replace('{x}', v)` pattern only replaced the
+ * FIRST occurrence of a token and - worse - interpreted `$&`-style
+ * replacement patterns inside the VALUE, so a filename like "a$&b.txt"
+ * corrupted the very toast announcing it. split/join replaces every
+ * occurrence and inserts the value literally.
+ */
+export function formatMessage(template: string, values: Record<string, string | number>): string {
+  let out = template;
+  for (const [token, value] of Object.entries(values)) {
+    out = out.split(`{${token}}`).join(String(value));
+  }
+  return out;
+}
+
 interface I18nContextValue {
   lang: Language;
   setLang: (lang: Language) => void;

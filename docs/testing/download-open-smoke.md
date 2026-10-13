@@ -7,20 +7,28 @@ checklist that complements the two automated open-journey suites:
 `tests/e2e/download-open.spec.ts` (Workflow K) and `tests/e2e/d-download-open.spec.ts`
 (Workflow D2, the state-gating/listener-hygiene round).
 
-## Read this first: what a green mock does and does not prove
+## Read this first: what each evidence class does and does not prove
+
+Every claim about the download-to-open journey belongs to exactly one of
+these classes. Rows below are only satisfied by the class the row names —
+never by a weaker one.
 
 | Evidence class | Meaning | Where it lives |
 |---|---|---|
-| **UI-tested (mocked native boundary)** | The real frontend, driven in Chromium, is proven to send the exact path/operation to the native opener boundary at the right time and no earlier. The OS call itself is a test double. | `tests/e2e/download-open.spec.ts` (Workflow K), automated |
-| **Native-unit-tested** | The Rust/engine layer's own tests prove its half of the contract (digest, commit path, verifier). | `src-tauri` Rust test suites, automated in CI |
-| **Verified on a real desktop OS** | A human executed a row of this matrix on Windows/macOS/Linux and the OS actually opened (or honestly refused) the artifact. | This file, filled-in rows |
-| **Verified on a real Android device** | A human executed the Android rows on physical hardware, including the system package-installer handoff. | This file, filled-in rows |
-| **Not yet verified** | No evidence exists. Must stay visibly NOT RUN — never inferred from a mock. | This file |
+| **1. Automated unit/native tests** | The engine/native layer's own test suite proves its half of the contract (registry binding, staging/sidecar/traversal gates, typed refusals, committed-size checks) and pure frontend logic (error classification, interpolation, label wiring) is pinned at module level. No UI, no OS. | `src-tauri` Rust suites (CI), `src/lib/__tests__/*` (vitest) |
+| **2. Mocked frontend E2E tests** | The real production frontend, driven in Chromium against the production bundle, is proven to send the exact path/operation to the native open boundary at the right time and no earlier, and to classify every refusal honestly. The OS call itself is a test double (`tests/e2e/tauri-bridge.ts`); the Android adapter command is recorded, never simulated into an installation. | `tests/e2e/download-open.spec.ts` (Workflow K), `tests/e2e/d-download-open.spec.ts` (Workflow D2), automated |
+| **3. Packaged app tested with a real OS handler** | A human executed a row of this matrix on Windows/macOS/Linux with a PACKAGED Fress build and the OS actually opened (or honestly refused) the artifact through the real shell handler / file manager / quarantine gate. | This file, filled-in rows |
+| **4. Physical Android package-installer test** | A human executed the Android rows on real (or emulator, noted) hardware, including the system package-installer handoff and the FileProvider read-grant. | This file, filled-in rows |
+| **Not yet verified** | No evidence exists. Must stay visibly NOT RUN — never inferred from a weaker class. | This file |
 
 **No green mock test substitutes for a missing platform test.** A mocked
 `plugin:opener|open_path` resolving proves only that the frontend asked
 correctly; it says nothing about a real shell handler, file manager,
-quarantine gate or package installer.
+quarantine gate or package installer. On Android, a recorded
+`open_downloaded_file` call proves the adapter received the exact final
+path — the FileProvider content-URI handoff, the system installer consent
+screen and the unknown-sources gate sit BELOW that record and are
+proven only by class 4.
 
 ## Rules for every row
 
@@ -74,12 +82,28 @@ evidence yet.
 
 ## Automated coverage (already executed — for orientation only)
 
+### Class 1 — automated unit / native tests
+
+| Suite | What it pins | Where it runs |
+|---|---|---|
+| `src-tauri/src/artifact_open.rs` native tests | Staging/`.sig`/traversal gates, symlink refusal, regular-file shape, ID/path registry binding, canonical stability, committed-size check, restored negative IDs refused, AppImage launch restricted to the validated registered artifact, chmod scoped to that file, argument-safe direct exec | CI (cargo test; not runnable in this sandbox — no cargo) |
+| `src-tauri/src/download_finalize.rs` | Registry records created at commit; checksum mismatch leaves NO completed record | CI (cargo test) |
+| Android adapter native tests (`resolve_completed_artifact` + typed refusals, PR #74) | Session registry match, staging names never, canonical stability, regular file, committed size; `open-artifact/not-registered` / `not-found` / `replaced` / `not-a-file` reuse the desktop typed namespace | CI (cargo test, PR #74 tree) |
+| `src/lib/__tests__/artifactOpen.test.tsx` | The open/reveal policy: exact path through the boundary, AppImage-only retry scoping, typed failure classification, provider wiring incl. the Android adapter binding (opener never touched on Android; launcher stays desktop-only) | vitest |
+| `src/lib/__tests__/downloadOpenFlow.test.tsx` (PR #74) | Adapter dep binding: exact-path routing, uniform Open affordance (`download-open` testid, no Install split), typed classification, retryable refusals | vitest |
+| `src/lib/__tests__/downloadPanelFormatting.test.tsx` | Literal toast interpolation (`$&`/`$$` values and repeated tokens cannot corrupt completion/reconnecting toasts or the aria-live announcement), live localized speed label (en/fa), logical `me-1` icon margin | vitest |
+
+### Class 2 — mocked frontend E2E (Chromium, production bundle)
+
 Executed 2026-10-13, Chromium (Linux CI container), production build via
 `vite preview`, native boundary mocked by `tests/e2e/tauri-bridge.ts`;
 `npx playwright test tests/e2e/download-open.spec.ts tests/e2e/d-download-open.spec.ts`
 → all green, exit 0 (Workflow K: 22 tests; Workflow D2: the state-gating
 round plus the fallback-scoping/restored-identity additions — see the
-mapping table at the end of this section).
+mapping table at the end of this section). The Android adapter command
+(`open_downloaded_file`) is recorded by the bridge seam (PR #74) into the
+same open stream so D2's Android assertions stay uniform; the bridge
+deliberately does NOT simulate the FileProvider/installer half.
 
 | Workflow K test | Journey contract proven (UI level) |
 |---|---|
@@ -162,30 +186,35 @@ but note it in the row.
 | A4 | Android 14, same device | `.zip` (or any non-APK the device has a viewer for — e.g. a text file) | A viewer app for the type present (e.g. the Files app) | Download, Done, tap **Open** | Honest completion state; open hands the file to the OS | The Android chooser or the default viewer opens the content via the app's shared URI (FileProvider/SAF); the URI must be readable by the target app | If the chooser opens but the target app cannot read the content (permission/URI bug), capture which app and the failure; also record the app-private-location behavior the OS shows | NOT RUN / — / — |
 | A5 | Android 14, same device | Test `.apk` as A1 | Installer open (mid-handoff) | Download, Done, tap **Open**, then press BACK on the system installer screen | Fress shows no false completion about the INSTALL; the download row's own "Done" refers to the FILE, which is true and stays true | The installer is cancelled; nothing is installed; Fress' row state is unchanged (Done for the file — the app must never claim the INSTALL happened) | If any UI claims installation occurred after back-navigation, that is a truth defect — file it | NOT RUN / — / — |
 | A6 | Android 14, same device | Same apk as A1 | Same as A1 | Repeat A1 but with the device in a locale different from Fress' current language | Installer language follows the SYSTEM locale; Fress' own strings follow Fress' language; both honest | Same as A1 | Record any mismatch between the two | NOT RUN / — / — |
+| A7 | Android 14, same device | Restored completed row (force-stop Fress after a completed download, relaunch) | Same device state as A1 | Relaunch Fress, find the restored completed row, tap **Open** | The typed `not-registered` refusal surfaces honestly (title "Could not open the file" + localized reason); the row stays completed and retryable; NO installer opens | The adapter refuses the request natively: a persisted, webview-writable history row has no engine registry identity, so the open fails closed — a restored path must never feed a native open | If the installer opens for a restored row, that is a boundary defect (persisted state treated as proof of registration) — file it | NOT RUN / — / — |
 
 ## Device coverage honesty ledger (fill before release sign-off)
 
-| Surface | UI-tested (mock) | Native-unit-tested | Real OS verified | Real Android device verified |
+| Surface | Class 1: unit/native | Class 2: mocked E2E | Class 3: real OS (packaged app) | Class 4: real Android device |
 |---|---|---|---|---|
-| Open a completed file (desktop) | YES — Workflow K | partial (engine commit/verifier suites) | ______ | n/a |
-| Show in folder / reveal (desktop) | YES — Workflow K | partial | ______ | n/a |
-| Open-failure honesty (desktop) | YES — Workflow K | n/a | ______ | n/a |
-| Path/filename fidelity (desktop) | YES — Workflow K | partial | ______ | n/a |
-| Artifact-class open requests (exe/msi/zip/dmg/pkg/deb/rpm/AppImage/apk) | YES — Workflow K | n/a | ______ | ______ |
-| System package-installer handoff (Android) | n/a (out of webview reach) | n/a | n/a | ______ |
-| App-private storage / URI read-access (Android) | partial — path-pass-through only | n/a | n/a | ______ |
-| Installer permission not granted (Android) | n/a | n/a | n/a | ______ |
-| Cancel/back from system installer (Android) | n/a | n/a | n/a | ______ |
+| Open a completed file (desktop) | YES — artifact_open.rs suites | YES — Workflow K | ______ | n/a |
+| Show in folder / reveal (desktop) | partial (registry gates) | YES — Workflow K | ______ | n/a |
+| Open-failure honesty (desktop) | YES — typed refusal matrix | YES — Workflow K + D2-I | ______ | n/a |
+| Path/filename fidelity (desktop) | partial | YES — Workflow K + D2-G | ______ | n/a |
+| Artifact-class open requests (exe/msi/zip/dmg/pkg/deb/rpm/AppImage/apk) | partial | YES — Workflow K | ______ | ______ |
+| AppImage fallback (launch only the validated registered artifact) | YES — native unit tests + D2-I/J/K | YES — Workflow K + D2 | ______ (L3) | n/a |
+| Android adapter receives the exact final path | YES — adapter Rust suites + downloadOpenFlow unit tests | YES — D2-H (bridge records the command; installer NOT simulated) | n/a | ______ (A1/A4 — the real handoff) |
+| FileProvider content-URI read grant (Android) | n/a (native half) | n/a (deliberately not mocked) | n/a | ______ |
+| System package-installer consent + unknown-sources gate (Android) | n/a | n/a | n/a | ______ (A1/A2) |
+| Installer permission not granted (Android) | n/a | n/a | n/a | ______ (A2) |
+| Cancel/back from system installer (Android) | n/a | n/a | n/a | ______ (A5) |
+| Restored row refused by the adapter (fail closed) | YES — restored-ID refusals | YES — D2-J (desktop leg); Android leg via the same typed namespace | n/a | ______ (A7) |
 
 A blank cell keeps the release claim honest: it is NOT verified. Do not
-fill it from the mock suite.
+fill it from a weaker class.
 
 ## Maintenance
 
-- When `src/lib/downloads.tsx` (openFile/openFolder), `DownloadManager.tsx`
-  (the row actions), or the opener capability configuration changes, rerun
-  `npm run test:e2e` and re-execute the affected rows of this matrix before
-  the next release.
+- When `src/lib/downloads.tsx` (openFile/openFolder, the Android adapter
+  dep binding), `DownloadManager.tsx` (the row actions), the opener
+  capability configuration, or the `open_downloaded_file` adapter command
+  changes, rerun `npm run test:e2e` and re-execute the affected rows of
+  this matrix before the next release.
 - The automated Workflow K contract is the reference for what "honest"
   means at the boundary; if the UI contract changes deliberately, update
   Workflow K AND the corresponding rows together in the same change.
@@ -201,7 +230,7 @@ fill it from the mock suite.
 | D2 › E (Show in folder, parent fallback, both failing) | W4, M4, L5 |
 | D2 › F (checksum-mismatched artifact never openable; no-path rows) | row preconditions (Verified/Done only after real completion) |
 | D2 › G (byte-exact odd paths; one completion listener, stale events cannot cross-wire) | W5 |
-| D2 › H (artifact-class pass-through; Android UA drops Show in folder) | W2/W3/L1–L3, M1–M3, A1–A5 |
+| D2 › H (artifact-class pass-through; Android UA drops Show in folder; the Android adapter command receives the EXACT final path — opener plugin untouched, launcher never called, installer never simulated) | W2/W3/L1–L3, M1–M3, A1–A5 |
 | D2 › I (a non-AppImage open refusal triggers ZERO launcher calls — the validated launcher is class-scoped, never a general launcher) | L1/L2/L5 (refusal honesty), L3 fallback scoping |
 | D2 › J (restored-after-restart row: reveal + OS open preserved, the launch request carries the restored negative identity, the typed not-registered refusal surfaces honestly — fail closed without engine identity) | L3 with a pre-existing download, M5 |
 | D2 › K (a cross-wired id-mismatch launch refusal surfaces the blocked message exactly once, row stays retryable) | L3 (record belongs to another download) |

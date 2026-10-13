@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useDownloadState, useDownloadActions, useArtifactActionBusy, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
 import { summarizeDownloadStates } from '../lib/downloadsAnnouncement';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 
 export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   // Split context: state re-renders on every progress tick, actions never do.
@@ -93,11 +93,12 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
           Kept restrained by summarizeDownloadStates: state-count changes
           announce, byte-level churn does not. */}
       <div className="sr-only" role="status" aria-live="polite">
-        {summarizeDownloadStates(items, (key, params) => {
-          let s: string = t(key);
-          if (params) for (const [k, v] of Object.entries(params)) s = s.replace(`{${k}}`, String(v));
-          return s;
-        })}
+        {summarizeDownloadStates(items, (key, params) =>
+          // formatMessage, not .replace: announce values are file names and
+          // counts - untrusted content that must land literally (a `$&` in
+          // a file name must not rewrite the announcement).
+          formatMessage(t(key), params ?? {})
+        )}
       </div>
       {/* Clipboard completion feedback for the SHA row. */}
       <div className="sr-only" role="status" aria-live="polite">
@@ -212,14 +213,23 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                     {item.status === 'completed' && ` (${pct}%)`}
                   </span>
                   <span className="flex items-center gap-2">
-                    {item.status === 'active' && <span>{formatSpeed(item.speed)}</span>}
+                    {/* The unit string is locale-neutral, but the readout
+                        itself is not self-describing between the byte count
+                        and the ETA; the localized speed key names it for
+                        assistive tech without changing the visible value. */}
+                    {item.status === 'active' && (
+                      <span>
+                        <span className="sr-only">{t('downloads.speed')}: </span>
+                        {formatSpeed(item.speed)}
+                      </span>
+                    )}
                     {item.status === 'active' && item.eta > 0 && <span>{formatEta(item.eta)}</span>}
                   </span>
                 </div>
 
                 {item.status === 'error' && item.error && (
                   <p className="text-[11px] text-rose-300 mb-2 leading-snug" role="alert">
-                    <AlertTriangle className="w-3 h-3 inline mr-1 -mt-0.5" aria-hidden="true" />
+                    <AlertTriangle className="w-3 h-3 inline me-1 -mt-0.5" aria-hidden="true" />
                     {item.error}
                   </p>
                 )}

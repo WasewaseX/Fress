@@ -427,8 +427,10 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
       comPayload,
       Buffer.from([0xff, 0xd9]),
     ]);
-    // ASCII COM carrying a banned locale id.
-    writeFileSync(join(root, 'meta-locale.jpg'), jpeg(Buffer.from('generated for zh-CN users', 'latin1')));
+    // ASCII COM carrying a banned locale id (built from code points - even
+    // ASCII locale ids must not appear as committed literals, or the checker
+    // would detect its own fixture in this file).
+    writeFileSync(join(root, 'meta-locale.jpg'), jpeg(Buffer.from(`generated for ${ZH_LOCALE} users`, 'latin1')));
     // UTF-8 COM carrying a Han character (strict-UTF-8-first decode path).
     writeFileSync(join(root, 'meta-han.jpg'), jpeg(Buffer.from(`photo ${HANChar} proof`, 'utf8')));
     commitAll(root);

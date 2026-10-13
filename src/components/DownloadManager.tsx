@@ -288,7 +288,11 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                           (aria-busy) but stays interactive - repeat
                           activations LAND and are swallowed by the action's
                           authoritative guard (check-then-set before any
-                          await), so exactly one native launch is in flight. */}
+                          await), so exactly one native launch is in flight.
+                          On Android the SAME action hands the exact path to
+                          the adapter command below the boundary, which
+                          routes .apk artifacts to the system package
+                          installer (label stays the uniform Open). */}
                       <PanelButton
                         onClick={() => {
                           if (openBusy.has(item.id)) return;
@@ -296,6 +300,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                         }}
                         icon={<CheckCircle2 className="w-3 h-3" />}
                         label={t('downloads.openFile')}
+                        testId="download-open"
                         primary
                         busy={openBusy.has(item.id)}
                       />
@@ -403,6 +408,7 @@ function PanelButton({
   label,
   primary,
   busy,
+  testId,
 }: {
   onClick: () => void;
   icon: React.ReactNode;
@@ -416,12 +422,15 @@ function PanelButton({
    * state is communicated visually (dimmed) and via aria-busy, which
    * blocks neither clicking nor keyboard activation. */
   busy?: boolean;
+  /** Stable hook for the e2e suite (Agent 6): download-open. */
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-busy={busy || undefined}
+      data-testid={testId}
       className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-md border transition-colors ${
         busy
           ? 'opacity-50 cursor-default '

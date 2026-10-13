@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Android: the APK installer handoff below the open boundary
+- **Completed APK downloads now install through Android's normal package installer.** The Android adapter promised by the 1.0.11 open-contract release landed: on Android the SAME `openCompletedArtifact` policy runs with one dep bound to a registry-validated native command (`open_downloaded_file`), which resolves the exact completed path against the download engine's session registry (the same discipline as the updater's signature verification - registry match, canonical stability, regular file, committed size; one uniform `open-artifact/not-registered` refusal for everything else) and routes `.apk` artifacts to the system installer via a FileProvider `content://` URI scoped to the app's `files/Download` directory, with a temporary read grant. The installer's own consent and unknown-source restrictions are never bypassed; every other artifact opens with a capable viewer or falls back to the share sheet, read-grant only. Failures surface through the existing typed-reason UI (`open-artifact/<code>` codes the boundary already parses), so Android refusals classify exactly like desktop ones.
+- **The Android download directory moved under `files/Download`** (from the dataDir root) so the FileProvider can scope sharing precisely; APK installs declare `REQUEST_INSTALL_PACKAGES` via the new in-repo `fress-open` plugin, which makes the standard per-app "install unknown apps" consent reachable. The completed row keeps the contract's uniform "Open" action on Android (e2e hook: `download-open`; the D2 Android journey now records the adapter command in the shared bridge). A physical-device QA pass of `docs/testing/download-open-smoke.md`'s Android rows is tracked separately from mocked tests and stays visibly NOT RUN until executed on hardware.
+
 ## 1.0.12-beta (2026-10-13): the frontend-quality release
 
 A full-frontend quality pass landed as one integrated candidate and was re-verified on the merged tree: typecheck clean, 650 unit tests passed (2 environment-skipped), the full E2E suite green in CI, and the production build clean — all proven on the exact tagged commit (CI run on v1.0.12-beta, 2026-10-13). Every change below was held inside the frontend; the download engine, the open contract and the release pipeline were untouched.

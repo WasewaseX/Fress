@@ -163,3 +163,61 @@ rule.
   connection, and byte-count mismatches (cut short / short subrange). A
   checksum failure, `resume-invalid` answer, HTTP status error or disk error
   is never retried.
+
+## 9. The open boundary: from "downloaded" to "opened / installed"
+
+The download-to-open contract lives in `docs/download-open-contract.md`
+(frontend policy `src/lib/artifactOpen.ts`, desktop opener wiring, Linux
+AppImage launcher `src-tauri/src/artifact_open.rs`). The ANDROID adapter
+lands below the SAME boundary: on Android the provider binds the policy's
+`openPath` dep to the registry-validated native command
+`open_downloaded_file` (`src-tauri/src/lib.rs`), because the opener plugin
+cannot hand out app-private files there.
+
+The command shares the completed-artifact resolution with the updater's
+signature-verification boundary (`resolve_completed_artifact`): session-scoped
+registry match (exact reported path first, canonical fallback), staging names
+never, canonical stability re-check, regular file, committed byte size.
+Anything else receives one uniform typed refusal
+(`open-artifact/not-registered` - the same `open-artifact/<code>` namespace
+the AppImage launcher reports and the frontend's `parseOpenError` classifies),
+so the command is not a filesystem probe: a compromised webview cannot point
+it at arbitrary paths, distinguish existing from missing files, or learn
+anything about unregistered paths.
+
+The registry is intentionally in-memory and session-scoped. Panel rows
+restored from localStorage after an app restart have no record here, so an
+open attempt on them is refused with the typed `not-registered` code and an
+honest, retryable failure - persisted, webview-writable state never feeds a
+native open.
+
+What a validated path does with:
+
+- **Android, `.apk` artifact** (extension of the registry-recorded path,
+  case-insensitive): handed to Android's normal package installer through the
+  in-repo plugin `src-tauri/plugins/fress-open`:
+  1. The Rust command classifies the artifact (`open_disposition`) and calls
+     the plugin's Kotlin side (`FressOpenPlugin`).
+  2. Kotlin wraps the file in a `content://` URI via androidx `FileProvider`,
+     whose authority is `<applicationId>.fileprovider`. The provider itself is
+     the one the Tauri app template generates; the plugin's build.rs patches
+     the generated `gen/android/app/src/main/res/xml/file_paths.xml` (idempotently)
+     so its roots cover EXACTLY `filesDir/Download` - the
+     directory the engine commits downloads into on Android (see
+     `platform_download_dir`). A path outside that root throws, so even a
+     caller that bypassed the Rust validation cannot mint a URI for other
+     app or device files.
+  3. The URI is opened with `ACTION_VIEW`,
+     `application/vnd.android.package-archive` and
+     `FLAG_GRANT_READ_URI_PERMISSION` (plus `FLAG_ACTIVITY_NEW_TASK`), which
+     routes to the system package installer. This is the standard,
+     user-consented install flow: the installer - not Fress - shows the
+     package details and enforces the unknown-sources restrictions. The
+     plugin's manifest declares `REQUEST_INSTALL_PACKAGES`, which is what
+     makes that STANDARD consent flow reachable for the calling app on
+     Android 8+; Fress never touches `PackageInstaller` internals, silent
+     install, or any bypass.
+- **Android, any other artifact**: the safe fallback - `ACTION_VIEW` with a
+  MIME type guessed from the extension when a viewer exists, otherwise an
+  `ACTION_SEND` share chooser. Both grant temporary READ permission only;
+  nothing is ever copied, written or executed by the plugin itself.

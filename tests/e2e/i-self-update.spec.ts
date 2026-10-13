@@ -34,6 +34,13 @@ import { sel, openDownloads } from './selectors';
 import { APP_VERSION } from './netpolicy';
 import { test } from './fixtures';
 import { DICTS } from '../../src/lib/i18n';
+// The channel fixture derives its guaranteed-older stable filler from the
+// running app version (previous major), so the assertion must use the same
+// derivation instead of a hardcoded literal that drifts on every bump.
+const FILLER_STABLE_VERSION = APP_VERSION.replace(
+  /(\d+)\.(\d+)\.(\d+)(-.*)?$/,
+  (_all: string, a: string, b: string, c: string) => `${Number(a) - 1}.${b}.${c}`
+);
 import {
   OWN_RELEASES_VALID,
   OWN_RELEASE_MALFORMED,
@@ -240,18 +247,19 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
   test('Stable hides the prerelease, switching channels surfaces it', async ({ gotoApp, page }) => {
     await gotoApp();
 
-    // On the Stable channel the only eligible release (stable v1.0.6) is
-    // OLDER than the running 1.0.12-beta. The check must NOT say "up to
-    // date" (the channel switch is not a no-op) and must NOT offer a
-    // downgrade: the honest track-migration state names the build, the
-    // channel and the channel's version, and the pill stays absent.
+    // On the Stable channel the only eligible release (the previous-major
+    // stable filler, derived from the running version) is OLDER than the
+    // running build. The check must NOT say "up to date" (the channel
+    // switch is not a no-op) and must NOT offer a downgrade: the honest
+    // track-migration state names the build, the channel and the channel's
+    // version, and the pill stays absent.
     await checkForUpdates(page);
     const toast = page.locator('[data-sonner-toast]').first();
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(
       d['update.trackMigration']
         .replace('{bv}', APP_VERSION)
-        .replace('{cv}', '1.0.6')
+        .replace('{cv}', FILLER_STABLE_VERSION)
         .replace('{channel}', d['header.channel.stable'])
     );
     await expect(toast).toContainText(d['update.trackMigrationHint'].replace('{channel}', d['header.channel.stable']));

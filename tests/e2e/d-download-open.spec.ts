@@ -44,6 +44,10 @@ const OPEN_FILE = d['downloads.openFile'];
 const SHOW_FOLDER = d['downloads.showFolder'];
 const OPEN_FAILED = d['downloads.toast.openFileFailed'];
 const FOLDER_FAILED = d['downloads.toast.openFolderFailed'];
+/** Typed refusal descriptions (the toast body classifies WHY the privileged
+ * route refused); asserted verbatim so a re-worded lie cannot slip through. */
+const OPEN_UNREGISTERED_DESC = d['downloads.toast.openUnregistered'];
+const OPEN_CROSSWIRED_DESC = d['downloads.toast.openCrossWired'];
 
 /** Realistic Android webview identity for the Android routing scenario
  * (scenario H): matches the app's isAndroidWebview()/isAndroidDevice check
@@ -57,12 +61,36 @@ const ANDROID_UA =
 // polling); the toast/observation helpers are local to this file.
 // ---------------------------------------------------------------------------
 
-/** Starts a transfer from the detail modal's resolved download button. */
-async function startFromDetail(page: Page, appId: string, assetName: string, awaitRegistered?: number): Promise<void> {
+/** Replaces the localsend release fixture with a single-asset release so
+ * the detail modal's resolved button offers exactly the artifact class the
+ * scenario needs (same seam Workflow K uses for its class matrix). */
+async function seedSingleAssetRelease(page: Page, assetName: string): Promise<void> {
+  await page.evaluate((name) => {
+    window.__fressTest!.setRelease('localsend/localsend', [
+      {
+        tag: 'v1.17.0',
+        name: 'LocalSend 1.17.0',
+        published_at: '2025-10-01T00:00:00Z',
+        html_url: 'https://github.com/localsend/localsend/releases/tag/v1.17.0',
+        assets: [
+          {
+            name,
+            size: 12_345_678,
+            download_url: 'https://github.com/localsend/localsend/releases/download/v1.17.0/' + name,
+          },
+        ],
+      },
+    ]);
+  }, assetName);
+}
+
+/** Starts a transfer from the detail modal's resolved download button.
+ * `platformTab` selects the modal's platform tab (default Windows). */
+async function startFromDetail(page: Page, appId: string, assetName: string, awaitRegistered?: number, platformTab = 'Windows'): Promise<void> {
   await page.locator(`#app-title-${appId}`).click();
   const box = page.locator(sel.detailDownloadBox);
   await expect(box).toBeVisible();
-  await box.getByRole('button', { name: 'Windows' }).click();
+  await box.getByRole('button', { name: platformTab, exact: true }).click();
   await expect(box.getByText(assetName, { exact: false })).toBeVisible({ timeout: 15_000 });
   await box.getByRole('button', { name: new RegExp(assetName) }).click();
   await page.keyboard.press('Escape');
@@ -775,6 +803,194 @@ test.describe('Workflow D2: download-to-open', () => {
     const b = (await bridge(page))!;
     const foreign = b.calls.map((c) => c.cmd).filter((cmd) => /shell|spawn|execute|Command|process\.run/.test(cmd));
     expect(foreign).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // I - The AppImage fallback is CLASS-SCOPED, not a general launcher
+  // (task verification 12 + 13, frontend leg: the launcher seam must never
+  // see a non-AppImage target, no matter how strongly the OS refusal begs
+  // for a fallback; the native side refuses non-AppImages regardless -
+  // pinned by artifact_open.rs's own unit tests.)
+  // -------------------------------------------------------------------------
+
+  test('I: a non-AppImage refusal is ONE open_path attempt - the validated launcher never fires for another class', async ({ gotoApp, page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (e) => pageErrors.push(e.message));
+
+    await gotoApp();
+    await startFromDetail(page, 'localsend', 'LocalSend-1.17.0-windows-x64.exe', 1);
+    await openDownloads(page);
+    const [id] = await registeredIds(page);
+    const PATH = '/home/test/Downloads/LocalSend-1.17.0-windows-x64.exe';
+    await complete(page, id, PATH, BYTES, 'a'.repeat(64), true);
+    await drainToasts(page);
+
+    const done = completedRow(page, 'LocalSend-1.17.0-windows-x64.exe');
+    const openBtn = openBtnOf(done);
+
+    // The strongest possible reason to fall back - the OS has NO handler -
+    // on the artifact class the privileged launcher must NEVER rescue.
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath('No application is registered as handling this file'));
+    await trackToasts(page);
+    await openBtn.click();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: OPEN_FAILED })).toHaveCount(1);
+
+    // Exactly ONE boundary call, and it is the opener's: the launcher
+    // command does not appear in the recorded traffic at all.
+    expect(await openCalls(page)).toEqual([PATH]);
+    let b = (await bridge(page))!;
+    expect(b.openedPaths.filter((r) => r.cmd === 'launch_app_image_artifact')).toHaveLength(0);
+
+    // The row stays completed and retryable; a retry after the fault clears
+    // is again a single open_path attempt - still zero launcher traffic.
+    await expect(done).toContainText(d['downloads.verified']);
+    await expect(openBtn).toBeEnabled();
+
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath(null));
+    await drainToasts(page);
+    await openBtn.click();
+    await settle(page);
+    expect(await openCalls(page)).toEqual([PATH, PATH]);
+    b = (await bridge(page))!;
+    expect(b.openedPaths.filter((r) => r.cmd === 'launch_app_image_artifact')).toHaveLength(0);
+    expect(await toastLog(page)).not.toContain(OPEN_FAILED);
+    expect(pageErrors).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // J - Restored-after-restart rows fail CLOSED on the privileged route
+  // (section 2: a restored row has no engine identity - it cannot prove the
+  // path still refers to engine-committed bytes. Reveal stays available, the
+  // OS-associated open stays first, and the launcher request carries the
+  // restored (negative) id, which the native registry refuses. The native
+  // refusal itself is pinned by artifact_open.rs's
+  // a_restored_after_restart_row_is_never_auto_launched; this pins the
+  // frontend half: what it sends, and that it surfaces the refusal honestly.)
+  // -------------------------------------------------------------------------
+
+  test('J: a restored completed row keeps reveal + OS open, and its launch fails closed on the missing engine identity', async ({ gotoApp, page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (e) => pageErrors.push(e.message));
+
+    // Persisted history exactly as the previous session would have left it:
+    // a completed (verified) AppImage download. Restored ids are NEGATIVE
+    // (downloadItemsStore: Rust hands out positive ids per launch).
+    const RESTORED_PATH = '/home/test/Downloads/FixtureApp-1.0.0-x86_64.AppImage';
+    const RESTORED_SHA = 'a'.repeat(64);
+    await page.addInitScript(
+      ({ key, entry }) => {
+        try {
+          localStorage.setItem(key, entry);
+        } catch {
+          /* ignore */
+        }
+      },
+      {
+        key: 'fress.downloadItems.v1',
+        entry: JSON.stringify([
+          {
+            url: 'https://github.com/localsend/localsend/releases/download/v1.17.0/FixtureApp-1.0.0-x86_64.AppImage',
+            name: 'FixtureApp-1.0.0-x86_64.AppImage',
+            dir: '/home/test/Downloads',
+            bytes: 12_345_678,
+            total: 12_345_678,
+            status: 'completed',
+            path: RESTORED_PATH,
+            sha256: RESTORED_SHA,
+            verified: true,
+            canResume: false,
+            startedAt: 1_700_000_000_000,
+          },
+        ]),
+      }
+    );
+    await gotoApp();
+    await openDownloads(page);
+
+    // The row came back completed and Verified, with BOTH actions: reveal
+    // stays available for restored rows (it is not a privileged launch).
+    const restored = completedRow(page, RESTORED_SHA.slice(0, 24));
+    await expect(restored).toHaveCount(1);
+    await expect(restored).toContainText(d['downloads.verified']);
+    await expect(openBtnOf(restored)).toBeEnabled();
+    await expect(showBtnOf(restored)).toBeEnabled();
+
+    // Reveal: the exact restored path, no registry needed.
+    await showBtnOf(restored).click();
+    await settle(page);
+    expect(await revealCalls(page)).toEqual([RESTORED_PATH]);
+    await drainToasts(page);
+
+    // Open: the OS association is still tried FIRST for the restored file.
+    // Stock desktops refuse AppImages, so the frontend falls back - and the
+    // launcher request must carry the restored row's identity (id < 0: the
+    // honest "no engine identity" marker) with the exact path. The mock
+    // launcher refuses with the typed code the real native command produces
+    // for exactly this case (not-registered).
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath('os: no handler for the file type'));
+    await page.evaluate(() => window.__fressTest!.setFailLaunchAppImage('open-artifact/not-registered'));
+    await trackToasts(page);
+    await openBtnOf(restored).click();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: OPEN_FAILED })).toHaveCount(1);
+
+    const b = (await bridge(page))!;
+    const launch = b.openedPaths.filter((r) => r.cmd === 'launch_app_image_artifact');
+    expect(launch).toHaveLength(1);
+    expect(launch[0].path).toBe(RESTORED_PATH);
+    expect(launch[0].id).toBeLessThan(0);
+
+    // The typed refusal is reported distinctly - "only a download completed
+    // in this session can be launched directly" - not a generic failure.
+    expect(await toastLog(page)).toEqual([expect.stringContaining(OPEN_UNREGISTERED_DESC)]);
+
+    // The row stays completed, the action stays retryable, nothing leaked.
+    await expect(restored).toContainText(d['downloads.verified']);
+    await expect(openBtnOf(restored)).toBeEnabled();
+    expect(pageErrors).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // K - A cross-wired launch refusal is reported as BLOCKED, distinctly
+  // (task verification 10, frontend leg: the typed id-mismatch refusal maps
+  // to its own honest copy - the UI says Fress blocked the action because
+  // the file belongs to a DIFFERENT download, and never retries on its own.)
+  // -------------------------------------------------------------------------
+
+  test('K: a cross-wired launch refusal surfaces the blocked message exactly once and stays retryable', async ({ gotoApp, page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (e) => pageErrors.push(e.message));
+
+    await gotoApp();
+    await seedSingleAssetRelease(page, 'FixtureApp-1.0.0-x86_64.AppImage');
+    await startFromDetail(page, 'localsend', 'FixtureApp-1.0.0-x86_64.AppImage', 1, 'Linux');
+    await openDownloads(page);
+    const [id] = await registeredIds(page);
+    const PATH = '/home/test/Downloads/FixtureApp-1.0.0-x86_64.AppImage';
+    await complete(page, id, PATH, BYTES, 'c'.repeat(64), true);
+    await drainToasts(page);
+
+    const done = completedRow(page, 'FixtureApp-1.0.0-x86_64.AppImage');
+    const openBtn = openBtnOf(done);
+
+    // OS refuses (stock desktop, no AppImage handler); the registry-bound
+    // launcher refuses the (id, path) pair as CROSS-WIRED - the record
+    // belongs to a different download.
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath('os: no handler for the file type'));
+    await page.evaluate(() => window.__fressTest!.setFailLaunchAppImage('open-artifact/id-mismatch'));
+    await trackToasts(page);
+    await openBtn.click();
+    await expect(page.locator('[data-sonner-toast]').filter({ hasText: OPEN_FAILED })).toHaveCount(1);
+
+    // Exactly one attempt per stage - no retry loop behind the refusal.
+    const b = (await bridge(page))!;
+    expect(b.calls.filter((c) => c.cmd === 'plugin:opener|open_path')).toHaveLength(1);
+    expect(b.calls.filter((c) => c.cmd === 'launch_app_image_artifact')).toHaveLength(1);
+    expect(await toastLog(page)).toEqual([expect.stringContaining(OPEN_CROSSWIRED_DESC)]);
+
+    // Row intact, honest chip, retryable, no unhandled rejection.
+    await expect(done).toContainText(d['downloads.verified']);
+    await expect(openBtn).toBeEnabled();
+    expect(pageErrors).toEqual([]);
   });
 });
 

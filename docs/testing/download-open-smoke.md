@@ -78,7 +78,8 @@ Executed 2026-10-13, Chromium (Linux CI container), production build via
 `vite preview`, native boundary mocked by `tests/e2e/tauri-bridge.ts`;
 `npx playwright test tests/e2e/download-open.spec.ts tests/e2e/d-download-open.spec.ts`
 → all green, exit 0 (Workflow K: 22 tests; Workflow D2: the state-gating
-round — see its own mapping table at the end of this section).
+round plus the fallback-scoping/restored-identity additions — see the
+mapping table at the end of this section).
 
 | Workflow K test | Journey contract proven (UI level) |
 |---|---|
@@ -138,7 +139,7 @@ the corresponding package handlers present where the row says so.
 |---|---|---|---|---|---|---|---|---|
 | L1 | Ubuntu 24.04 LTS (or Debian 12), x64 | `.deb` — `dpkg-deb` fixture, amd64 | `dpkg` present; no sudo needed if the fixture installs to user space — otherwise run once with sudo OUTSIDE Fress to pre-approve the handler | Download via Fress, Done, **Open file** | Open appears after Done; no error toast | The configured .deb handler opens (GNOME Software / `apt` install prompt), or an already-installed fixture launches | If no handler exists, the OS refuses — Fress must show "Could not open the file"; verify the toast | NOT RUN / — / — |
 | L2 | Fedora 40 (or openSUSE), x64 | `.rpm` — `rpmbuild` fixture, x86_64 | `rpm`/`dnf` handler present | Same as L1 | Same as L1 | The RPM handler opens (Software install prompt or package installer) | Same honest-refusal check as L1 | NOT RUN / — / — |
-| L3 | Ubuntu 24.04, x64 | `.AppImage` — appimagetool reference demo, x86_64 | FUSE or `--appimage-extract` fallback available; executable bit PRESERVED by the download engine (verify `ls -l` shows `x`) | Download, Done, **Open file** | Open works | The AppImage launches its window; if the exec bit was stripped, the OS refuses | With the exec bit deliberately removed: Fress/OS must fail honestly (no fake success). Record whether the engine preserves the bit on this filesystem | NOT RUN / — / — |
+| L3 | Ubuntu 24.04, x64 | `.AppImage` — appimagetool reference demo, x86_64 | FUSE or `--appimage-extract` fallback available; exec bit irrelevant at open time (the fallback owns it) | Download, Done, **Open file** | Open works; no error toast | The OS handler runs if one exists; on a stock desktop (no AppImage handler) the OS open is refused and the registry-validated fallback sets the execute bit on THIS completed file only and launches it directly — the AppImage's window appears | With the exec bit deliberately removed: the SAME fallback must still launch it (that is its designed job). If the launcher instead refuses (not-registered/replaced), the honest typed toast appears and the row stays completed — no fake success either way. Record whether the launch happened | NOT RUN / — / — |
 | L4 | Ubuntu 24.04, x64 | `.AppImage` with a deliberately missing dependency (fixture links a nonexistent .so via its AppRun) | The fixture from L3 with a broken AppRun | Download, Done, **Open file** | Open accepted, then the launcher's own error (or nothing) appears — Fress must NOT invent success or failure beyond the OS answer | The launcher fails with a loader error in a dialog/log | Document actual behavior; if Fress shows "Could not open the file" for a slow-failing launcher, evaluate whether that is honest at the boundary | NOT RUN / — / — |
 | L5 | Ubuntu 24.04, x64 | `.zip` — one-file archive | `file-roller`/`unzip` handler or GNOME Files zip support | Download, Done, **Open file** | Archive manager lists contents | Same as handler | Missing-handler case: remove the association, verify the honest error toast | NOT RUN / — / — |
 | L6 | Ubuntu 24.04, x64 | Any completed download | GNOME Files / Dolphin running | Click **Show in folder** | No error toast | File manager opens with the file selected (DBus `org.freedesktop.FileManager1` or the FM's reveal mechanism) | If no file manager is installed: Fress falls back to opening the containing folder; total failure shows "Could not open the folder" | NOT RUN / — / — |
@@ -201,3 +202,6 @@ fill it from the mock suite.
 | D2 › F (checksum-mismatched artifact never openable; no-path rows) | row preconditions (Verified/Done only after real completion) |
 | D2 › G (byte-exact odd paths; one completion listener, stale events cannot cross-wire) | W5 |
 | D2 › H (artifact-class pass-through; Android UA drops Show in folder) | W2/W3/L1–L3, M1–M3, A1–A5 |
+| D2 › I (a non-AppImage open refusal triggers ZERO launcher calls — the validated launcher is class-scoped, never a general launcher) | L1/L2/L5 (refusal honesty), L3 fallback scoping |
+| D2 › J (restored-after-restart row: reveal + OS open preserved, the launch request carries the restored negative identity, the typed not-registered refusal surfaces honestly — fail closed without engine identity) | L3 with a pre-existing download, M5 |
+| D2 › K (a cross-wired id-mismatch launch refusal surfaces the blocked message exactly once, row stays retryable) | L3 (record belongs to another download) |

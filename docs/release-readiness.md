@@ -284,13 +284,14 @@ substitute for a real screen-reader session, and nothing in this report claims o
 
 ---
 
-## 12. Close-out re-fetch (final, 2026-10-13T10:40Z)
+## 12. Close-out re-fetch (final, 2026-10-13T10:40Z, with a merge-time addendum)
 
 Per the audit rules, the default branch and PR state were re-fetched AFTER the last integration and
 this addendum written last:
 
-- **Final integrated tip: `main` = `d0df83a9d98750bf1c162b22873c974c47fd3a8e`**; open PRs: **zero**;
-  the CI run on that exact tip completed **success** (38382878431) before this report was committed.
+- **Final integrated tip: `main` = `d0df83a9d98750bf1c162b22873c974c47fd3a8e`**; open PRs: **zero**
+  at the re-fetch this section records; the CI run on that exact tip completed **success**
+  (38382878431) before this report was committed.
 - **Release currency**: the `v1.0.12-beta → tip` delta is the 8-file docs/CI/tests class of §3 —
   no `src/` (non-test) and no `src-tauri/` file — so the published v1.0.12-beta installers remain
   byte-equivalent to what the tip builds, and **no new release is cut for this delta**.
@@ -299,3 +300,15 @@ this addendum written last:
   record that carries it are named in the session handoff that publishes it, and this section is
   written inside that same commit — so the report identifies its audited tip (`d0df83a`) separately
   from its own publication commit by construction.
+
+**Merge-time addendum (2026-10-13T10:5xZ, before this report's own publication merge was final):**
+PR #72 (docs-only: README + CODE_SIGNING re-verified against the v1.0.12-beta release bytes, head
+`8e0fb59`, all check-runs green, author-guard compliant) was created at 2026-10-13T10:30:22Z — in
+race with this report's zero-open re-fetch — and was reviewed and merged as `a18f206` by this round
+under the standing review-merge directive. The tip this report ultimately sits under is therefore
+`a18f206`, and the delta from the audited tip `d0df83a` to `a18f206` is exactly three docs files:
+`README.md`, `CODE_SIGNING.md` (PR #72) and this report itself (`db27e95`). §3's release-currency
+classification is unaffected — still zero application code — and every other section's evidence
+(CI, snapshot, release audit) is anchored to SHAs, not to "the tip" prose, so nothing else needs
+re-running. Final state: **`main` = `a18f206`, zero open PRs, newest release `v1.0.12-beta`
+(audited PASS, §7), development delta docs/tests/CI-only.**

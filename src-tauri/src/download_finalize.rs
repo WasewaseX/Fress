@@ -731,7 +731,15 @@ pub(crate) struct PartMeta {
 }
 
 pub(crate) async fn read_part_meta(part: &Path) -> Option<PartMeta> {
-    let raw = tokio::fs::read_to_string(meta_path_for(part)).await.ok()?;
+    use tokio::io::AsyncReadExt as _;
+    // The sidecar is our own tiny JSON document (a URL plus two header
+    // strings). The size bound keeps even a tampered or corrupted sidecar
+    // from being buffered without limit; a sidecar that is truncated by
+    // the bound fails the JSON parse below and reads as "no validators",
+    // which fail-closes the resume into a discard.
+    let mut file = tokio::fs::File::open(meta_path_for(part)).await.ok()?;
+    let mut raw = String::new();
+    file.take(64 * 1024).read_to_string(&mut raw).await.ok()?;
     serde_json::from_str(&raw).ok()
 }
 
@@ -1638,7 +1646,20 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
             drop(file);
             return Err((format!("Disk write failed: {}", e), None));
         }
-        downloaded += bytes.len() as u64;
+        // The running byte count must stay representable like every other
+        // server-reachable sum: a wrapped counter would poison the exact
+        // completion equality check below. No real transfer can overflow
+        // u64 here (the 60 s stall window and disk-bound writes make an
+        // 18-exabyte stream physically impossible), so an overflow is a
+        // broken counter, not a bandwidth event - refuse the attempt.
+        let Some(new_downloaded) = downloaded.checked_add(bytes.len() as u64) else {
+            drop(file);
+            return Err((
+                "Byte count overflowed; the download was refused".to_string(),
+                None,
+            ));
+        };
+        downloaded = new_downloaded;
 
         // Emit progress at most ~10x per second
         if last_emit.elapsed() >= Duration::from_millis(100) {
@@ -1710,11 +1731,25 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
             match already_have.checked_add(range_len) {
                 Some(sum) => Some(sum),
                 None => {
+                    // The refusal fires AFTER this attempt's tail bytes were
+                    // appended to the staging file and this response's
+                    // validators were recorded, so the .part currently holds
+                    // an honest prefix plus a tail the server's own header
+                    // makes unaccountable. Keeping it (resumable, with those
+                    // validators) would let a later byte-identity resume glue
+                    // the poisoned tail into a final file; a server that
+                    // announces an impossible range has forfeited the byte
+                    // accounting this design trusts. Discard the staging
+                    // files entirely - the next attempt starts clean (the
+                    // 416 path below discards for the same reason), and the
+                    // error stays final (kind None) because there is nothing
+                    // left to resume.
+                    discard_staging(&part).await;
                     return Err((
                         "Server announced an impossible byte range; the download was refused"
                             .to_string(),
                         None,
-                    ))
+                    ));
                 }
             }
         }
@@ -2159,6 +2194,30 @@ mod tests {
     fn rejects_a_total_not_larger_than_the_end() {
         assert!(validate_resume_content_range("bytes 1024-2047/2047", 1024).is_err());
         assert!(validate_resume_content_range("bytes 1024-2047/0", 1024).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_oversized_part_meta_sidecar_reads_as_no_validators() {
+        // The 64 KiB take() bound on read_part_meta: a corrupted or
+        // tampered sidecar larger than the bound is truncated mid-JSON,
+        // fails the parse, and reads as "no validators" - the same
+        // fail-closed shape as a missing sidecar (the resume then discards
+        // the staging unless a trusted checksum exists).
+        let tmp = TempDir::new("meta-oversize");
+        let part = tmp.path().join("f.bin.part");
+        std::fs::write(&part, b"staged").unwrap();
+        let meta = meta_path_for(&part);
+        let mut huge = String::from("{\"url\":\"https://example.com/f\",\"etag\":\"x\"");
+        huge.push_str(&" ".repeat(80 * 1024)); // > 64 KiB, never closed
+        std::fs::write(&meta, huge).unwrap();
+        assert!(
+            read_part_meta(&part).await.is_none(),
+            "an oversized sidecar must read as no validators"
+        );
+        // A normal sidecar still reads fine.
+        write_part_meta(&part, "https://example.com/f", &Default::default()).await;
+        let read = read_part_meta(&part).await.expect("small meta reads");
+        assert_eq!(read.url, "https://example.com/f");
     }
 
     #[test]
@@ -3114,6 +3173,17 @@ mod tests {
         // No completed-artifact record either: a refused transfer never
         // reaches the commit path.
         assert_eq!(session.registry.completed_len(), 0);
+        // And the staging files are GONE: the refusal fires after the
+        // hostile tail was appended and the response's validators were
+        // recorded, so what is on disk is honest-prefix + unaccountable
+        // tail. Keeping it would let a later byte-identity resume glue the
+        // poisoned tail into the final file; the discard leaves the next
+        // attempt a clean start (pinned since the staging-poison fix).
+        assert!(!part.exists(), "the poisoned .part must be discarded");
+        assert!(
+            !meta_path_for(&part).exists(),
+            "the poisoned sidecar must be discarded"
+        );
     }
 
     #[tokio::test]

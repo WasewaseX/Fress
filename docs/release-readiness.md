@@ -1,346 +1,246 @@
-# Fress release readiness — public-main coherence and release acceptance (round 5)
+# Fress release readiness — public-main integration audit (round 7)
 
-Status: **public main is coherent; v1.0.9-beta published bytes independently audited PASS;
-Android signing gate CONFIRMED; one open PR (#47) awaits owner merge.**
-Date: 2026-10-13 (evidence gathered 2026-10-12/13 UTC). Owner: integration/CI/release QA (Agent 6 round 5).
-Supersedes the round-4 report previously in this file (its release-conditional
-verdict items (a) Android secret, (b) protected Android run, (c) first release
-under the new audit gate — have all since been satisfied and are re-proven here).
+Status: **public main is integration-ready at the evidence level reachable without physical devices;
+v1.0.11-beta published from the exact default-branch tip and its bytes independently audited PASS;
+zero open PRs; the known limits below are named, not hidden.**
+Audit time: **2026-10-13T00:11:00Z** (all evidence gathered fresh at execution time, 2026-10-13 00:00–00:11 UTC).
+Auditor: integration lead (round 7 mandate: "bring the public-main integration-readiness report to an
+evidence-backed 10/10 standard"). This file is owned exclusively by the integration auditor; application
+code, manifests, workflows and other docs were not edited for this report.
 
-This round's mandate: make the public default branch coherent, testable and
-honestly ready for the next release — synchronize the latest implementations,
-close the remaining integration gaps, validate one immutable candidate SHA,
-and leave an unambiguous public merge/release state. Nothing in this report is
-inferred from PR descriptions: every PR head was compared against `main` by
-commit ancestry, and every published release byte was re-downloaded and
-re-verified during this round.
+**Commits under audit vs. publishing commit:** every code claim below is anchored to
+`main = 6cc1d62` (`6cc1d62a1fb5…`, the merge of PR #62 — the v1.0.11-beta release commit).
+This report itself is published by a later docs-only commit on top of it; the two are named in
+the PR that carries this file.
 
 ---
 
-## 1. Exact public-default-branch state (Task 1)
+## 1. Current verdict
 
-Recorded 2026-10-13 UTC, via the GitHub API and local `git merge-base
---is-ancestor` proofs:
+- **Default branch `main` = `6cc1d62a1fb5`**, source version **1.0.11-beta**, tag **`v1.0.11-beta`
+  → the same commit** — the published release was cut from the exact audited tip, with no
+  post-release source delta.
+- **v1.0.11-beta is published** (2026-10-13T00:08:10Z, prerelease, id 411086191, 22 assets) and its
+  release run (38324489730) completed **12/12 jobs SUCCESS**, ending in the final-artifact audit
+  PASS over the exact published bytes (§6).
+- **Verdict: integration-ready.** Every automated gate that exists is green on the audited SHA, the
+  release chain is self-auditing, and the newest functional round (download → open) is proven at the
+  frontend/native boundary by 22 new E2E tests. What keeps this from being an unconditional 10/10 is
+  stated in §8/§9: physical-device validation of the open journey has **NOT RUN** on any platform,
+  the Android installer handoff is intentionally scoped to a future adapter round, and
+  branch-protection enforcement could not be observed (§8).
 
-- **`main` = `7ff5601` (`7ff56013daa65764b47dcaef221e1bbfcac5d944`)** —
-  "Merge PR #46: docs - stop quoting the historical keystore store-password
-  literal". Author-guard compliant.
-- **Tag `v1.0.9-beta` → `20c2259`** (merge of PR #45), proven an **ancestor of
-  `main`**. The tag→main delta is docs-only
-  (`docs/release-readiness.md`, +3/−1, PR #46): no binary-relevant source
-  changed after the release was cut.
+## 2. Default-branch identity
 
-### 1.1 PR disposition table (#38–#47)
-
-Head SHAs recorded from the API; "in main" proven by commit ancestry of the
-exact head SHA, not by PR title.
-
-| PR | Branch | Head SHA | State | In `main`? | Unique content |
-| --- | --- | --- | --- | --- | --- |
-| #38 | quality/final-updater-trust | `2caa0e6` | merged 2026-10-12T12:47Z | **yes (ancestor)** | signature verification wired into the real delivery flow; checksum failures stay retryable |
-| #39 | test/android-linux-round-2026-10-12 | `f3c2021` | merged 2026-10-12T12:48Z | **yes** | Android device contract pinned at the UI seam (Linux+Android round evidence) |
-| #40 | quality/catalog-final-acceptance | `36ae0ff` | merged 2026-10-12T12:47Z | **yes** | catalog final acceptance: fresh live audit, honest failure classification |
-| #41 | quality/native-security-acceptance | `9d0ed1c` | merged 2026-10-12T12:48Z | **yes** | native signature verifier scoped to completed download artifacts |
-| #42 | quality/final-acceptance | `dace7da` | merged 2026-10-12T12:48Z | **yes** | i18n+a11y final acceptance (listbox ownership, landmarks, last untranslated surfaces) |
-| #43 | quality/final-integration-qa | `9188d13` | merged 2026-10-12T12:59Z | **yes** | round-4 release acceptance: final-artifact audit in the pipeline, platform/signature matrix, honest report |
-| #44 | quality/visual-acceptance-26 | `9aa5081` | merged 2026-10-12T13:28Z | **yes** | visual acceptance round 26 (header at 200% zoom, AA warning inks) |
-| #45 | release/v1.0.9-beta | `ca9128d` | merged 2026-10-12T13:50Z | **yes** | v1.0.9-beta verified-delivery release (version bump + E2E fixture derivation fix) |
-| #46 | docs/scrub-keystore-literal | `632f674` | merged 2026-10-12T14:50Z | **yes** | stopped quoting the historical keystore password literal; **maintainer rotation confirmation recorded (see §5)** |
-| #47 | quality/native-security-continuation | `7130a74` | **open** | **no — content exists only on the PR branch** | native verifier record contract completion: checksum status, cross-download isolation, registry immutability (`src-tauri/src/download_finalize.rs` +216/−10, `src-tauri/src/lib.rs` +113/−13; single commit authored `WasewaseX`) |
-
-No unique change of any merged PR #38–#46 is missing from `main`: every head
-SHA is an ancestor. **PR #47 is the only content in the repository that lives
-only on a PR branch.** It is native test/record-contract work owned by Agent
-3; this bot does not merge or approve PRs — it is left open for owner review
-with green CI and a clean mergeable state (see §6). Nothing in it changes
-release bytes: the published v1.0.9-beta is not invalidated by it, and the
-next release should include it.
-
-Notes:
-
-- **PR #38 author-guard provenance** (raised in the round-4 report): the
-  commits that actually merged (#38 head `2caa0e6` and its parent `662c55a`)
-  are authored `WasewaseX <WasewaseX@users.noreply.github.com>` — the owner
-  rewrote the offending `Z User <z@container>` commit before merging, the
-  push-time and PR-time author guards passed, and no falsified authorship
-  exists in `main`'s history.
-- **The round-4 candidate SHA `298a659` no longer exists in the repository**
-  (absent from every ref, the commit list, and all reachable objects). It was
-  cited in the PR #43 body as the re-authored tip of that PR's branch; the PR
-  merged from head `9188d13`, and the orphaned commit was later garbage
-  collected. Its cited check results are therefore **not re-verifiable** and
-  are treated here as historical claims. The equivalent — and stronger —
-  evidence is fresh: full CI green on `main` `7ff5601` (§6) and the audited
-  published release (§4). No current claim in this report rests on
-  `298a659`.
-- **Required status checks**: the branch-protection API returns 404 for this
-  token (fine-grained token without administration read, or no rules
-  configured). What is observable and reported instead: every push to `main`
-  and every PR runs the full CI matrix + Author guard, and all runs on
-  `main`/PR heads referenced in §6 are green. Whether GitHub *enforces* these
-  as protected-branch requirements is not provable from here and is listed as
-  a standing verification item for the owner.
-
-## 2. Version metadata reconciliation (Task 2)
-
-`1.0.9-beta` is the current released version — the "planned unreleased
-candidate" framing from the task snapshot is outdated: **tag `v1.0.9-beta`
-and its release were published 2026-10-12T14:21:05Z** (22 assets, §4). The
-metadata question is therefore settled by coherence between source, tag and
-published manifest:
-
-| Location | Recorded version | Consistent? |
+| Field | Value | Evidence |
 | --- | --- | --- |
-| `package.json` | `1.0.9-beta` | ✅ |
-| `package-lock.json` (`.version` and `.packages[""].version`) | `1.0.9-beta` ×2 | ✅ |
-| `src-tauri/Cargo.toml` | `1.0.9-beta` | ✅ |
-| `src-tauri/Cargo.lock` (`fress` crate) | `1.0.9-beta` | ✅ (now also CI-gated, below) |
-| `src-tauri/tauri.conf.json` | `1.0.9-beta` | ✅ |
-| `CHANGELOG.md` | `1.0.9-beta (2026-10-12): the verified-delivery release` | ✅ |
-| `README.md` current-version example | was `v1.0.8-beta` → **fixed to `v1.0.9-beta`** this round (`fb08a91`) | ✅ |
-| Tag `v1.0.9-beta` / release object | `v1.0.9-beta` | ✅ |
-| Updater manifest on the release (`latest.json` `version`) | `1.0.9-beta` | ✅ (§4.1) |
+| Default branch | `main` (confirmed via GitHub API, not assumed) | `GET /repos/WasewaseX/Fress` → `default_branch: main` |
+| Current tip | `6cc1d62a1fb5` — "Merge PR #62: v1.0.11-beta - the open-contract release" | branch API + local `git fetch` |
+| Source version | 1.0.11-beta in all five authoritative surfaces | `npm run validate:versions` → "6 authoritative field(s) agree on 1.0.11-beta" (run locally on `6cc1d62` and in CI) |
+| Newest published release | v1.0.11-beta, id 411086191, published 2026-10-13T00:08:10Z, prerelease | releases API |
+| Tag → tip relationship | `v1.0.11-beta` target SHA **equals** the tip SHA (`git rev-parse` of both → one object; `merge-base --is-ancestor` trivially true) | local git after fetch |
+| Prior releases | v1.0.10-beta (id 410951185, 2026-10-12T20:09Z, 22 assets, tag → `a176e74`, an ancestor of the tip), v1.0.9-beta (id 410656481, tag → `20c2259`, ancestor) | releases + tags API, ancestry proven locally |
+| Development vs published | The tag `v1.0.11-beta` IS the tip, so there is currently **no unreleased version delta**: `package.json` = published version. This is the normal post-release instant; the next development bump will legitimately run ahead (the validator's documented non-check). | this audit |
 
-Deterministic consistency check: the `version-guard` CI job pinned
-package.json / Cargo.toml / tauri.conf.json / both package-lock fields. This
-round **extends it to `src-tauri/Cargo.lock`** (the `fress` crate block) —
-a release built from a stale lockfile would embed the old version in binary
-metadata (`6ec5fb3`). The check runs on every push and PR; no tag was cut or
-re-published to "make pages match".
+## 3. PR reconciliation (actual state: zero open)
 
-## 3. Release-pipeline audit gates (Task 3 — mechanism)
+Open PRs at audit time: **none** (pulls API `state=open` → empty). Recent-round dispositions, every
+head SHA proven an ancestor of `6cc1d62` by local `git merge-base --is-ancestor` (not by PR title):
 
-The authoritative audit is `scripts/ci/verify-release-artifacts.py`, run by
-the release workflow's `verify-release` job **after the last asset upload,
-on the exact bytes about to be published**. Its contract (unchanged this
-round, re-verified by behavior in §4):
+| PR | Branch | Head SHA | Merged (merge commit) | Content |
+| --- | --- | --- | --- | --- |
+| #55 | docs/release-download-truth | `dc2d8a4` | `91c5e00` | docs truth pass on real release bytes (README + CODE_SIGNING): per-artifact signing matrix, Gatekeeper/Android install notes, honest "Unknown publisher" explanation |
+| #56 | agent2/version-coherence | `7ff0d20` | `6a3aa23` | `validate:versions` — one authoritative version-coherence validator (TS, 698 lines) + 22-test suite; anchored grammar mirrors the updater's parser; `--release-tag` binding mode; documented deliberate non-checks |
+| #57 | quality/ci-release-gates | `65d7214` | `1ccc96e` | pipeline wiring of the validator into `ci.yml` + `release.yml` (flag adapted to `--release-tag`), release-artifact verifier hardening (duplicate-JSON-key refusal, platform→asset shape contract, named-error manifest loading) + 20-test verifier suite, VirusTotal skip labeling, quality-gates runbook rewrite; follow-up commit added the Integration snapshot workflow and publication-boundary contract |
+| #58 | quality/download-open-verification | `c5c4d11` | `4cffefa` | Workflow K: 22 E2E tests proving the download-to-open journey; unified test bridge recording every `(boundary, id, path, with)` tuple; opener-level fault/hold gates; platform smoke matrix doc (`docs/testing/download-open-smoke.md`) |
+| #59 | quality/download-open-flow | `03d7007` | `1f4cde0` | the desktop open contract (rewritten round): uniform `open_path` pass-through with the exact completed path, registry-validated AppImage launcher (`launch_app_image_artifact`), typed failure classification, synchronous single-launch guard |
+| #62 | release/1.0.11-beta | `527e0d8` | `6cc1d62` | version bump (5 surfaces) + CHANGELOG + What's-New entry |
 
-1. `SHA256SUMS.txt` ↔ every asset, both directions; manifest never lists
-   itself; no asset unlisted.
-2. `latest.json` version field, versioned URLs of this tag, no nonexistent
-   assets, embedded signature == sidecar bytes for every platform entry.
-3. Every `.sig` sidecar cryptographically verified over the artifact's exact
-   bytes against the production minisign public key (pure-Python RFC 8032
-   Ed25519 + BLAKE2b-prehash, self-tested against RFC vectors and the app's
-   own signer fixture before every audit).
-4. Required platform matrix present; unsigned classes (dmg/msi/apk/portable)
-   must carry **no** sidecars; orphan sidecars are hard failures.
+Integration notes (recorded because they changed PR content before merge):
 
-Byte-stable regeneration: `latest.json`'s `pub_date` derives from the release
-object's `created_at` (round-4 fix), so re-running the manifest job cannot
-drift the published `SHA256SUMS.txt` entry. Behavioral proof this round: the
-release pipeline ran **twice** for v1.0.9-beta (push run `38258545023`, then
-the full re-run `38263495368` after the audit gate landed) — the second run
-re-uploaded assets and regenerated both manifests, and the final published
-bytes still pass the full two-direction audit (§4.1).
+- **#56/#57 parallel collision**: both rounds shipped a `validate:versions` implementation ~30 minutes
+  apart. Reconciliation kept Agent 2's TS validator (anchored SemVer with leading-zero rejection,
+  table-aware TOML parsing, 22-test suite) as the single rules file and reduced #57 to its genuine
+  contribution — the wiring, the verifier hardening and the runbook. The duplicate `.mjs`
+  implementation and its test were deleted; `--expect-tag` was renamed to the kept implementation's
+  `--release-tag`; `npm ci` was added to the two workflow jobs that invoke the tsx-based validator.
+- **#58/#59 parallel collision, resolved twice**: Agent 6's E2E suite was first aligned to Agent 5's
+  original contract (confirm-dialog two-step), then Agent 5 rewrote their PR to the refined ownership
+  split (Android native adaptation moves to the Android adapter owner; the desktop contract is a
+  uniform `open_path` pass-through with one AppImage fallback). The second reconciliation restored the
+  single-click contract, unpinned K-G1 (the single-launch guard it pinned shipped in the rewrite),
+  reverted the confirm-step flows, and added K-I2 — the AppImage fallback proven end to end. Every
+  resolution is a named commit on the PR branches; nothing was silently rewritten.
+- **#59 Rust CI failures** (fmt drift on linux; `E0283` type-annotation failure in the then-included
+  Tauri plugin crate on win/mac) were fixed on the branch during the first integration pass
+  (`cargo fmt` + explicit `Artifacts::<R>`); the subsequent rewrite deleted that crate entirely and
+  the fmt-canonical layout was re-established and CI-proven (`Rust fmt, clippy, tests` green on
+  linux, windows, macOS for head `03d7007`).
+- **Author identity**: several agent-produced commits originally carried `Z User <z@container>`;
+  the authors-guard workflow failed them until every commit on every merged branch was re-attributed
+  to `WasewaseX <WasewaseX@users.noreply.github.com>` (verified by the green Author guard runs on
+  each merged head).
 
-Tamper invalidation, demonstrated locally this round against the published
-bytes (each tamper in a throwaway copy, pristine set untouched):
+Historical rounds (round 5's full disposition table for #38–#47, the round-6/27 visual-acceptance
+rounds, and the v1.0.9/v1.0.10 release audits) remain available, clearly dated, in this file's git
+history (e.g. at `a176e74` for the round-5/6 text) — they are intentionally not duplicated here and
+are not used to compute this verdict.
 
-| Tamper | Audit result |
-| --- | --- |
-| Flip 1 byte in `Fress_1.0.9-beta_x64.dmg` | HARD FAIL — checksum mismatch vs `SHA256SUMS.txt` |
-| Edit an embedded `signature` in `latest.json` | HARD FAIL — embedded signature ≠ sidecar bytes |
-| Edit the sidecar's non-cryptographic comment region | HARD FAIL ×2 — `SHA256SUMS.txt` mismatch **and** `latest.json` byte-equality |
-| Edit inside the sidecar's signature box | HARD FAIL ×3 — checksum, byte-equality, **and minisign verifier rejection** ("bad signature box") |
+## 4. Version/manifest consistency (the authoritative matrix, executed)
 
-Editing any asset or manifest invalidates the gate; nothing about the audit
-trusts a label.
+`npm run validate:versions` on the audited tree (also green in CI's `version-guard` job on the same SHA):
 
-## 4. Independent audit of the published releases (Task 3 — fresh bytes)
+```
+canonical build version: 1.0.11-beta  (package.json:version)
 
-Both releases were re-downloaded **in full from GitHub during this round**
-(2026-10-12T18:30–18:32Z; sizes verified against the release objects) and the
-unmodified `scripts/ci/verify-release-artifacts.py` was run against the
-downloaded directories. Historical numbers were **not** reused.
+package.json               .version                               1.0.11-beta    source
+package-lock.json          .version                               1.0.11-beta    ok
+package-lock.json          .packages[""].version                  1.0.11-beta    ok
+src-tauri/Cargo.toml       [package] version                      1.0.11-beta    ok
+src-tauri/Cargo.lock       [[package] name="fress"] version       1.0.11-beta    ok
+src-tauri/tauri.conf.json  .version                               1.0.11-beta    ok
 
-### 4.1 v1.0.9-beta — the current published release
+validate:versions PASSED — 6 authoritative field(s) agree on 1.0.11-beta.
+```
 
-Published (not a draft) 2026-10-12T14:21:05Z · 22 assets · built by Release
-run `38263495368` on tag commit `20c2259` · **FINAL ARTIFACT AUDIT PASSED**.
+Release-mode binding was enforced by the pipeline itself: the Release run's `version` job executed
+`npm run validate:versions -- --release-tag v1.0.11-beta` on the tag push and succeeded — the tag,
+the manifests and the lockfiles are one version. The validator's documented non-check (a development
+version may legitimately run ahead of the *published* release) is currently vacuous on `main`
+because the tag and tip coincide (§2).
 
-| Check | Result |
-| --- | --- |
-| `SHA256SUMS.txt` entries ↔ bytes, both directions | **21/21 match**; 0 listed-but-absent, 0 unlisted, manifest not self-listed |
-| `latest.json` `version` | `1.0.9-beta` (this release) |
-| `latest.json` platform entries ↔ assets | 8 entries; every URL is this tag's versioned download URL and resolves to a real asset; every embedded signature equals its `<asset>.sig` sidecar bytes |
-| Sidecars verified over exact published bytes (production key `5638C68123FB633B` from `tauri.conf.json`) | **5/5 PASS** — rpm, AppImage, deb, arm64-setup.exe, x64-setup.exe |
-| Orphan/stray sidecars | none |
-| Unsigned classes (2 dmgs, msi, 2 portable zips, 5 apks) carry sidecars | none — in-app delivery correctly NOT advertised for them |
-| Verifier selftest before audit | RFC 8032 vector + app signer fixture verify; tampered payloads rejected |
+## 5. Required CI gates on the audited SHA
 
-### 4.2 v1.0.8-beta — re-audit of the prior release (same method)
+All runs below executed on `6cc1d62a1fb5` (the release merge) — no gate result is borrowed from an
+older SHA:
 
-**FINAL ARTIFACT AUDIT PASSED**: 22 assets, 21/21 checksum entries both
-directions, `latest.json` version `1.0.8-beta` with 8 consistent platform
-entries, 5/5 sidecars verified, no stray sidecars. The round-4 conclusion
-stands on fresh bytes: the October-12 "manifest drift" and "draft missing
-assets" findings described mid-run states, not final published bytes.
-
-### 4.3 What this proves
-
-The published v1.0.9-beta bytes satisfy every acceptance property: the
-manifest matches the exact published bytes; sidecar associations are correct
-and cryptographically verified; no asset is advertised that does not exist;
-platforms without signed artifacts are honestly described as official-page
-fallbacks. In-app verified updates are offered **only** where §7 says they
-are.
-
-## 5. Android signing gate (Task 4) — CONFIRMED
-
-Round-4 status was "secret not configured; rotation pending". **That state is
-closed**, with evidence from the actual protected run and the owner's
-explicit confirmation:
-
-- **The secret is configured.** Release run `38263495368`'s `build-android`
-  job succeeded end-to-end; its log shows `FRESS_KEYSTORE_CONFIGURED: true`
-  and the password only ever appears masked (`ANDROID_KEYSTORE_PASSWORD:
-  ***`). The workflow fails closed without it (guards before decode, before
-  build, before sign) — it cannot succeed with a missing secret.
-- **The certificate-fingerprint guard ran and passed.** The job compares the
-  keystore's SHA-256 fingerprint against the pinned permanent identity
-  (`b0fd578d…cbdf27`) and exits nonzero on mismatch; it succeeded, so the
-  published v1.0.9 APKs carry the **same signing identity** as the
-  1.0.6-beta baseline — installed devices update in place.
-- **Rotation is confirmed by the owner, in the record** (PR #46 body, merged
-  2026-10-12): the previously exposed store-password was **rotated
-  out-of-band, preserving the same signing certificate and pinned
-  fingerprint, with both Actions secrets replaced via client-side-encrypted
-  API calls** — "the historical value is dead". The literal was also scrubbed
-  from this document (its last remaining disclosure).
-- **Repo-wide sweep (re-run this round on `main`)**: zero `fressandroid`
-  literals; the only remaining `-storepass` text in `release.yml` is the
-  generic rotation-procedure comment with a `<strong-password>` placeholder;
-  no `set -x`, no keystore bytes in logs or artifact paths; debug/PR
-  workflows reference no signing secrets. Secrets are referenced only via
-  `secrets.ANDROID_KEYSTORE_PASSWORD` at step level.
-- **Android assets in v1.0.9-beta**: 5 signed APKs published (arm, arm64,
-  x64, x86, universal) via the protected signing job.
-
-Remaining honest caveat (unchanged): no physical Android device exists in
-this environment — the on-device install/upgrade path (including the
-same-identity upgrade) is contract-tested at the UI seam (PR #39) and
-fingerprint-proven in CI, but not executed on hardware (§8).
-
-## 6. Every gate on one immutable commit (Task 5)
-
-### 6.1 `main` `7ff5601` — the full required suite, one commit
-
-| Run (URL) | Jobs | Result |
-| --- | --- | --- |
-| [CI (push) 38265888769](https://github.com/WasewaseX/Fress/actions/runs/38265888769) | Typecheck, tests, catalog, security, build · Rust fmt/Clippy/tests (linux) · Rust tests (macos-latest) · Rust tests (windows-latest) · E2E + visual (linux) · Perf invariants (linux) · Version consistency | **7/7 success** |
-| [Author guard (push) 38265888781](https://github.com/WasewaseX/Fress/actions/runs/38265888781) | authors | **success** |
-
-The Rust suites (Linux fmt/Clippy `-D warnings`/tests, macOS tests, Windows
-tests) ran in CI on this exact SHA — the local environment has no Rust
-toolchain and no Rust gate is claimed locally.
-
-### 6.2 The release candidate the bytes came from
-
-| Run | SHA | Result |
-| --- | --- | --- |
-| [Release (push) 38258545023](https://github.com/WasewaseX/Fress/actions/runs/38258545023) | `20c2259` (tag) | success (initial publish path) |
-| [Release (dispatch) 38263495368](https://github.com/WasewaseX/Fress/actions/runs/38263495368) | `20c2259` (tag) | **all 12 jobs success** — version · create-release · build-android (signed, fingerprint-guarded) · build-windows · build-windows-arm64 · build-linux · build-macos-intel · build-macos-arm · updater-manifest · checksums · virustotal · **verify-release (final artifact audit on the exact published bytes)** |
-
-Tag→`main` delta is docs-only (§1), so `main`'s green CI covers the released
-source; the release audit covered the released bytes.
-
-### 6.3 This round's branch `quality/public-main-coherence`
-
-| Run | Commit | Result |
-| --- | --- | --- |
-| [CI (PR) 38292601594](https://github.com/WasewaseX/Fress/actions/runs/38292601594) | `267b54b` (this branch's head) | **7/7 success** — incl. the extended version-guard (Cargo.lock) |
-| [Author guard (PR) 38292601754](https://github.com/WasewaseX/Fress/actions/runs/38292601754) | `267b54b` | success |
-| [Author guard (push) 38292494047](https://github.com/WasewaseX/Fress/actions/runs/38292494047) | `267b54b` | success |
-| [Live network smoke (dispatch) 38292160847](https://github.com/WasewaseX/Fress/actions/runs/38292160847) | `e96c24c` | **success — all 4 live probes ran and passed** (the fix proven end-to-end) |
-
-### 6.4 Suppression audit (re-verified this round)
-
-`ci.yml` contains zero `continue-on-error`; no blanket retries (Playwright
-`retries: 1` in CI, 0 locally); visual thresholds unchanged
-(`maxDiffPixelRatio: 0.02`); no active `test.fail`/`skip`/`fixme` outside the
-2 opt-in `FRESS_LIVE_PROBE`-gated live probes; live catalog probes stay in
-`network-smoke.yml` (schedule + manual dispatch), never in PR CI.
-
-### 6.5 The one red run found — root-caused and fixed
-
-The **Live network smoke** scheduled run [38271362011](https://github.com/WasewaseX/Fress/actions/runs/38271362011)
-on `main` `7ff5601` (2026-10-12T15:35Z, its first-ever scheduled execution)
-failed **during test collection**: the spec read
-`new URL('../package.json', import.meta.url)` → `tests/package.json`
-(nonexistent) → ENOENT → "No tests found". No live endpoint was ever
-probed; this was an E2E-infrastructure path bug, not a resolver/catalog
-regression. Fixed at root cause in `e96c24c` (`../../package.json`), proven
-by test collection listing all 4 probes and by the dispatch run in §6.3.
-
-## 7. Platform / signature matrix (v1.0.9-beta actual bytes)
-
-Rule: in-app **verified** update delivery is advertised only where the
-pipeline produces the `.sig` sidecar and the audit verifies it (§4.1).
-Everything else is the official-Releases-page fallback with the reason
-spelled out in the UI.
-
-| Platform / arch | Asset (exact, published) | Sidecar | In-app verified update |
+| Workflow | Run | Result | URL |
 | --- | --- | --- | --- |
-| Windows x86_64 | `Fress_1.0.9-beta_x64-setup.exe` | ✅ verified | **yes** |
-| Windows x86_64 | `Fress_1.0.9-beta_x64_en-US.msi`, `Fress_1.0.9-beta_x64-portable.zip` | none (by design) | no — official page fallback |
-| Windows aarch64 | `Fress_1.0.9-beta_arm64-setup.exe` | ✅ verified | **yes** |
-| Windows aarch64 | `Fress_1.0.9-beta_arm64-portable.zip` | none (by design) | no — official page fallback |
-| Linux x86_64 | `Fress_1.0.9-beta_amd64.AppImage`, `Fress_1.0.9-beta_amd64.deb`, `Fress-1.0.9-beta-1.x86_64.rpm` | ✅ verified ×3 | **yes** |
-| macOS x86_64 | `Fress_1.0.9-beta_x64.dmg` | none (by design) | no — official page fallback |
-| macOS aarch64 | `Fress_1.0.9-beta_aarch64.dmg` | none (by design) | no — official page fallback |
-| Android arm64-v8a / armeabi-v7a / x86_64 / x86 / universal | `Fress_1.0.9-beta_{arm64,arm,x64,x86,universal}.apk` (apksigner-signed with the pinned identity) | no minisign sidecar (by design) | no — official page fallback; APK integrity via Android package signature |
-| Manifests | `latest.json` (deterministic), `SHA256SUMS.txt` | — | audited §4.1 |
+| CI (version-guard, frontend: typecheck+tests+catalog+security+build, Rust fmt/clippy/tests linux, Rust tests windows, Rust tests macOS, E2E+visual linux, perf invariants) | 38324485674 | **success** | https://github.com/WasewaseX/Fress/actions/runs/38324485674 |
+| Author guard | 38324485705 | **success** | https://github.com/WasewaseX/Fress/actions/runs/38324485705 |
+| Security scan | 38324485632 | **success** | https://github.com/WasewaseX/Fress/actions/runs/38324485632 |
+| Integration snapshot | 38324485708 | **success** | https://github.com/WasewaseX/Fress/actions/runs/38324485708 |
 
-`latest.json` advertises exactly the three required platform families
-(windows-x86_64, windows-aarch64, linux-x86_64 incl. rpm entry) — matching
-the sidecar set, no more, no less.
+Counts behind the green CI (executed locally on the same tree during this round, matching CI):
+unit suite **605 passed / 2 skipped** (the two skips are opt-in), full E2E **92/92** across 11 spec
+files, `tsc --noEmit` clean, production build OK, `cargo fmt --check` clean.
 
-## 8. Skipped, simulated, and physically untested — full inventory
+## 6. Latest published asset audit (v1.0.11-beta)
 
-- **Opt-in skips (2, by design)**: live-network catalog probe unit tests,
-  gated behind `FRESS_LIVE_PROBE=1`; never run in PR CI. The scheduled live
-  probe is the separate `network-smoke.yml` (§6.5).
-- **CI-simulated (by design)**: browser E2E runs against loopback fixtures
-  and the Tauri bridge mock; native behavior is covered by the Rust suites on
-  three OSes; real-release-byte verification is covered out-of-band by the
-  §4 audit with an independent pure-Python verifier.
-- **Physically untested (no hardware/OS access here — must stay labeled
-  unverified)**: in-place install/launch on Windows x64/arm64; macOS dmg
-  mount, Gatekeeper/notarization behavior on Intel and Apple silicon; Android
-  on-device install and same-identity upgrade (incl. after password
-  rotation); RPM/DEB package-manager flows; real screen-reader passes
-  (NVDA/VoiceOver) — accessibility is asserted structurally (roles, focus,
-  labels, landmarks) but not with assistive technology; Windows Authenticode
-  signing remains unconfigured ("Unknown publisher" documented in
-  CODE_SIGNING.md).
-- **Not provable from a public repo**: branch-protection enforcement of the
-  required checks (§1 notes); the current Actions secret *values* (only
-  their observable effects are proven — §5).
+From release run **38324489730** (completed success, 12/12 jobs — the run URL is the evidence):
 
-## 9. Verdict and outstanding items
+- **22 release files**; `SHA256SUMS.txt` covers **21 entries**; the audit re-hashed **every asset**
+  and compared against the manifest — zero mismatches.
+- **latest.json**: `version='1.0.11-beta'`, **8 platform entries** (`windows-x86_64`,
+  `windows-x86_64-nsis`, `windows-aarch64`, `windows-aarch64-nsis`, `linux-x86_64`,
+  `linux-x86_64-appimage`, `linux-x86_64-deb`, `linux-x86_64-rpm`), each URL cross-checked against
+  this tag's assets and each embedded signature compared byte-for-byte against the `<asset>.sig`
+  sidecar on the release.
+- **Signatures verified over the exact published bytes** (5 sidecars):
+  `Fress-1.0.11-beta-1.x86_64.rpm`, `Fress_1.0.11-beta_amd64.AppImage`,
+  `Fress_1.0.11-beta_amd64.deb`, `Fress_1.0.11-beta_arm64-setup.exe`,
+  `Fress_1.0.11-beta_x64-setup.exe`.
+- Audit line, verbatim from the job log: **"FINAL ARTIFACT AUDIT PASSED at 2026-10-13T00:08:09Z -
+  manifests match the exact bytes about to be published"** — followed by "Publishing." (the release
+  is built as a private draft and only the audit's success publishes it).
+- Unsigned classes (not advertised as in-app updates, so the audit requires their absence from the
+  manifest): macOS dmgs, Android APKs, the MSI and portable zips. The honest-matrix refusal in the
+  verifier now also rejects a platform key whose asset does not match the key's OS shape, and treats
+  duplicate JSON keys in latest.json as a hard error.
+- build-android succeeded again with the rotated keystore pair; the Android signing certificate
+  fingerprint guard passed (in-place update compatibility preserved — see the rotation record in this
+  file's history at `a176e74`).
 
-**The public default branch is coherent**: every merged PR #38–#46 is fully
-contained in `main` (ancestry-proven), version metadata agrees everywhere
-(now including `Cargo.lock`, CI-enforced), the full required suite is green
-on the single immutable commit `7ff5601`, and the published v1.0.9-beta bytes
-pass the independent final-artifact audit with the Android signing gate
-confirmed. **No hard release blocker remains for the current published
-release.**
+## 7. Download-to-open functionality — implemented contract and evidence classes
 
-Outstanding items, exact and honest:
+Implemented on `6cc1d62` (src/lib/artifactOpen.ts, src/lib/downloads.tsx, src/components/DownloadManager.tsx,
+src-tauri/src/artifact_open.rs):
 
-1. **PR #47 (open)** — Agent 3's native verifier record-contract work exists
-   only on its branch; CI and Author guard are green and the tree is clean.
-   It needs owner review and merge (this bot does not merge). It does not
-   affect the published v1.0.9 bytes; it SHOULD ride into the next release.
-2. **Branch protection visibility** — required-check *enforcement* on `main`
-   could not be read via the API with this token (404). Owner should confirm
-   the CI + Author-guard contexts are set as required status checks.
-3. **The round-4 candidate SHA `298a659` is orphaned** — its cited green
-   checks are historical claims that cannot be re-verified; superseded by the
-   fresh evidence in §6 (recorded here so no future report cites it).
-4. **Physical-device inventory of §8** — unchanged; any release note or
-   document must keep those items labeled unverified.
-5. **Live network smoke** — root-caused fix on this branch; the scheduled
-   Monday probe is expected green hereafter (dispatch proof in §6.3).
+1. **Uniform boundary**: every completed artifact is handed to `plugin:opener|open_path` with the
+   exact completed path and the OS-default handler first. The OS association stays the authority;
+   Gatekeeper/UAC/package-manager checks are never bypassed.
+2. **One fallback, below the boundary**: only when `open_path` rejects, only for a `.AppImage` target,
+   and only where the launcher exists (Linux, non-Android), the frontend retries with
+   `launch_app_image_artifact` — which natively re-validates against the engine's completion record
+   (claimed id binding, exact committed path, canonical location, size; staging `.part`/`.sig` shapes,
+   `..` traversal and symlinks refused by construction), sets the execute bit on that validated file
+   only, and spawns it directly (argv, no shell), reaped in the background.
+3. **Typed failures**: rejections are classified (not-found / not-a-file / symlink / not-registered /
+   id-mismatch / replaced / unsupported / internal), surfaced with a localized reason and a
+   retryable action; nothing launches automatically, and a refused open never mutates the row state.
+4. **Single-launch guard**: a synchronous check-then-set busy store makes a repeat activation while
+   one launch is pending a silent no-op (no second native call, no toast); the row announces
+   `aria-busy` while the control stays interactive.
+
+Evidence classes — kept strictly apart per the audit rules:
+
+- **Mocked E2E (CI, real browsers)**: 22 Workflow-K tests on the unified bridge record every
+  `(boundary, id, path, with)` tuple — per-row exactness across two concurrent downloads, keyboard
+  activation counts, hostile filenames as single values, reveal + containing-folder fallback, honest
+  rejection paths, the AppImage fallback's `(id, path)` fidelity, and the no-stack guard. **These
+  prove the frontend→native request contract, not OS behavior.**
+- **Native unit tests (CI, real Rust on linux/windows/macOS)**: the launcher's validation gates
+  (registry binding, staging shapes, traversal, canonical stability, size) are covered by the in-crate
+  Rust tests executed on all three CI platforms.
+- **Real OS handoff: NOT RUN.** No Windows installer double-click, Linux desktop AppImage launch,
+  macOS Gatekeeper flow, or Android device test was executed in this round. The manual smoke matrix
+  (docs/testing/download-open-smoke.md) exists precisely to record those results when they are run;
+  every row of it should currently be read as "pending".
+- **Android APK opening**: intentionally NOT implemented in this round (the private-storage
+  FileProvider content-URI handoff to the system package installer belongs to the Android adapter's
+  own round, below the same boundary). Until it lands, Android keeps the uniform pass-through and the
+  typed "unsupported/refused" honesty. This is a named limit, not a regression: the previous
+  plugin-based Android attempt was deliberately removed with the rewrite.
+
+## 8. Security, signing and platform limits (observable facts + honest unknowns)
+
+- **Updater signatures**: the five signed classes listed in §6 are minisign-verified over the exact
+  published bytes by the release audit, and the in-app updater verifies against the key embedded in
+  the binary before calling any update "verified".
+- **Windows Authenticode: still absent** (documented in CODE_SIGNING.md with the free routes);
+  Windows shows "Unknown publisher" — the README now says so explicitly instead of hedging.
+- **Android signing**: all releases are signed with the same project key (certificate fingerprint
+  guarded in CI); the keystore-password rotation of round 26-b is historical fact recorded in this
+  file's history — the current run is further CI proof the rotated pair works (12/12).
+- **Branch protection: UNVERIFIED.** The repository's Settings → Branch rules are not observable with
+  the integration token's permission scope; whether the required checks are *enforced* (as opposed to
+  merely existing and passing) cannot be proven from here and is deliberately not claimed.
+- **Signing secrets**: no secret material is quoted in this report or in any repo file (the round-5
+  literal-scrub remains in force; PR #55's docs pass re-verified the user-facing docs against bytes).
+- **Known unknowns**: physical execution of the smoke matrix (§7); VirusTotal scanning (the job runs
+  only when a key is configured; its skip is labeled informational on the release page).
+
+## 9. Owner-only actions and remaining blockers
+
+1. **Android installer handoff round** (Android adapter owner): FileProvider `content://` handoff,
+   `application/vnd.android.package-archive` MIME to the system installer, temporary read grant —
+   then the on-device rows of the smoke matrix. Until then the Android "Open" story is the uniform
+   boundary + honest typed refusal.
+2. **Physical smoke matrix execution** (platform owners): the rows in docs/testing/download-open-smoke.md
+   for Windows (exe/msi/portable), Linux (AppImage launch on stock GNOME/KDE, deb/rpm handlers),
+   macOS (dmg + Gatekeeper first launch). A mock cannot establish these; record each row with the
+   OS version it was run on, or leave it honestly pending.
+3. **Branch-protection verification** (maintainer, one minute): confirm Settings → Branches enforces
+   the required checks on `main`; until observed, this report records it as unverified rather than
+   claiming it.
+4. **PAT rotation** (user browser step, unchanged from round 26-b): download/pat-rotation-steps.txt +
+   scripts/apply_new_pat.sh (verifies the new token before swapping; never prints it).
+5. Nothing else is blocking the next development cycle: the version guard, the artifact audit and the
+   journey suite all gate it automatically.
+
+## 10. Audit method (reproduce these results)
+
+- **State capture**: GitHub REST API v3 (`/repos/WasewaseX/Fress`, `/branches/main`, `/releases`,
+  `/pulls?state=open`, `/pulls?state=closed`, `/actions/runs`, `/actions/runs/{id}/jobs`,
+  `/commits/{sha}/check-runs`) with a read-scoped token; job logs fetched per failing-or-relevant job.
+- **Ancestry proofs**: fresh `git fetch --all --prune --tags`, then
+  `git merge-base --is-ancestor <pr-head-sha> origin/main` per PR (§3 table), and
+  `git rev-parse v1.0.11-beta origin/main` for the tag→tip identity (§2).
+- **Version matrix**: `npm run validate:versions` (and `-- --release-tag v1.0.11-beta` semantics as
+  executed by the Release run's `version` job).
+- **Local pipeline on the audited tree**: `npm run typecheck`; `npm test`; `npm run build`;
+  `npx playwright test` (92/92); `cargo fmt --check` in src-tauri.
+- **Release evidence**: Release run 38324489730 jobs/log (verbatim audit lines in §6) and the
+  releases API for asset counts and timestamps.
+- **What this audit did NOT do**: execute any OS-level open/install on real hardware; observe branch
+  settings; and it treats no CI result as evidence for a SHA other than the one it ran on.

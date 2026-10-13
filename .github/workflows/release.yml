@@ -52,9 +52,10 @@ jobs:
       - name: No-Chinese source gate (single source checker)
         # Agent 2's one no-Chinese checker runs against the release candidate
         # BEFORE anything is built or uploaded. The release fails closed on
-        # any unintended Chinese/CJK hit in the candidate source or packaged
-        # text resources, and equally on a missing checker: a release that
-        # could not be scanned must never publish silently.
+        # any unintended Chinese/CJK hit in the candidate source of the
+        # release commit (the pre-build scan), and equally on a missing
+        # checker: a release that could not be scanned must never publish
+        # silently.
         run: |
           set -euo pipefail
           if [ ! -f scripts/ci/check-no-chinese.mjs ]; then
@@ -104,9 +105,9 @@ jobs:
           else
             {
               echo "channel_note<<FRESS_NOTE_EOF"
-              echo "**Stable release.** The in-app updater on this build only offers stable releases; beta and alpha builds stay on their own channels."
+              echo "**Stable release.** The in-app updater's stable channel only offers stable releases; beta and alpha builds stay on their own channels."
               echo ""
-              echo "**Coming from a 1.0.x-beta build?** Your beta installation is never downgraded automatically. To move to stable deliberately: on Windows run the v1.0.0 setup.exe over the existing install (the MSI requires uninstalling the beta first); on macOS replace the app in /Applications; on Linux install the v1.0.0 bundle (deb/rpm need an explicit downgrade: \`apt install --allow-downgrades\` or \`rpm -U --oldpackage\`); on Android uninstall the beta APK first, which clears the app's private data. Desktop settings live in your user profile, not the install directory, and survive the transition."
+              echo "**Coming from a beta build?** Your beta installation is never downgraded automatically. To move to stable deliberately: on Windows run the v$VERSION setup.exe over the existing install (the MSI requires uninstalling the beta first); on macOS replace the app in /Applications; on Linux install the v$VERSION bundle (deb/rpm need an explicit downgrade: \`apt install --allow-downgrades\` or \`rpm -U --oldpackage\`); on Android uninstall the beta APK first, which clears the app's private data. Desktop settings live in your user profile, not the install directory, and survive the transition."
               echo "FRESS_NOTE_EOF"
             } >> "$GITHUB_OUTPUT"
           fi

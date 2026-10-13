@@ -337,6 +337,25 @@ class TestReleaseWorkflowContract(unittest.TestCase):
             "the stable release notes must contain no contradictory prerelease wording",
         )
 
+    def test_stable_channel_note_interpolates_not_hardcodes_the_version(self):
+        # The stable migration guidance must address THIS release by
+        # interpolating $VERSION, never by hardcoding a version literal:
+        # the next stable (v1.1.0, v2.0.0, ...) is built from this same
+        # workflow, and a baked-in "v1.0.0 setup.exe" would silently ship
+        # wrong instructions to every future stable release.
+        code = _code(self.jobs["version"]["body"])
+        if_at = code.index('if [ "$PRERELEASE" = "true" ]; then')
+        m_else = re.search(r"(?m)^\s*else\s*$", code[if_at:])
+        else_end = if_at + m_else.end()
+        m_fi = re.search(r"(?m)^\s*fi\s*$", code[else_end:])
+        stable_branch = code[else_end:else_end + m_fi.start()]
+        self.assertIn("v$VERSION", stable_branch,
+                      "the stable note must interpolate the release version")
+        self.assertIsNone(
+            re.search(r"(?<![\w.$])v?\d+\.\d+", stable_branch),
+            "the stable note must not hardcode a version literal; use $VERSION",
+        )
+
     def test_static_release_body_carries_no_contradictory_channel_wording(self):
         # The only prerelease mention in create-release must be the flag
         # expression itself; the hand-written body template must be neutral

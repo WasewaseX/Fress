@@ -115,6 +115,30 @@ jobs:
       - name: All manifests and lockfiles must agree (scripts/ci/validate-versions.ts)
         run: npm run validate:versions
 
+  no-chinese:
+    # Zero-Chinese-content gate: the project advertises exactly five UI
+    # languages (en, fa RTL, es, fr, de - src/lib/i18n.tsx). This job makes
+    # "zero Han/CJK Chinese content" an OBSERVED result on every PR: tracked
+    # + untracked files, filenames, PNG/JPEG text metadata and opaque-binary
+    # printable-run payloads are scanned by a dependency-free checker
+    # (scripts/ci/check-no-chinese.mjs) that fails closed on any hit, any
+    # unreadable file and on its own crash. Font binaries are deliberately
+    # skipped: glyph coverage inside a font is not Chinese-language UI copy.
+    # Kana/Hangul (non-Chinese CJK) are reported as exit-neutral warnings
+    # routed to the relevant owner.
+    name: No Chinese content (zero-hit scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native)
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; the checker itself is dependency-free, setup-node only pins the toolchain)
+        with:
+          node-version: 20
+      - name: Zero-hit Chinese-content scan (scripts/ci/check-no-chinese.mjs)
+        run: node scripts/ci/check-no-chinese.mjs
+
   frontend:
     name: Typecheck, tests, catalog, security, build
     runs-on: ubuntu-latest

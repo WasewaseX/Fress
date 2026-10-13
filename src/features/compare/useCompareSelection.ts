@@ -6,7 +6,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { AppItem } from '../../types';
-import { useI18n } from '../../lib/i18n';
+import { useI18n, formatMessage } from '../../lib/i18n';
 
 /**
  * Comparison selection state: which apps sit in the compare matrix.
@@ -61,7 +61,8 @@ export function useCompareSelection(apps: AppItem[]): CompareSelection {
     const app = appsRef.current.find((a) => a.id === appId);
     // Unreachable fallback: toggles always come from rendered cards, so
     // the app exists; the id is language-neutral data if it ever fires.
-    toast.success(tRef.current('compare.addedToMatrix').replace('{name}', app?.name || appId));
+    // formatMessage keeps a "a$&b" app name from corrupting the toast.
+    toast.success(formatMessage(tRef.current('compare.addedToMatrix'), { name: app?.name || appId }));
     setComparedAppIds([...prev, appId]);
   }, []);
 

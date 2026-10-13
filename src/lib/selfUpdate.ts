@@ -23,6 +23,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+import pkg from '../../package.json';
 import { isTauri } from './downloads';
 import { androidAssetAbi, androidAssetFlags, androidDeviceAbi, getHostArch } from './releaseFetch';
 
@@ -77,6 +78,14 @@ export type UpdateState =
   | { kind: 'checking' }
   | { kind: 'latest'; version: string }
   | { kind: 'available'; release: OwnRelease; asset: { name: string; size: number; url: string } | null; expectedSha256: string | null }
+  /** The channel's newest release is OLDER than the running build (a beta
+   * client that selected Stable while the newest stable is 1.0.0, or any
+   * build ahead of its channel's feed). Reporting 'latest' here would be a
+   * lie ("up to date" for a downgrading channel switch) and 'available'
+   * would be a downgrade; this state says plainly that the build is newer
+   * than its channel, that no downgrade is offered, and (in the UI) where
+   * to get the channel's version manually. */
+  | { kind: 'track-migration'; channel: UpdateChannel; channelVersion: string; release: OwnRelease }
   | { kind: 'error' };
 
 /** How rough a build the user wants to hear about. */
@@ -89,14 +98,53 @@ export const UPDATE_CHANNELS: Array<{ id: UpdateChannel; label: string }> = [
 ];
 
 /**
- * Pre-stable Fress treats every published build as news, so the default is
- * the widest channel. When a stable 1.0 lands this flips to 'stable' and
- * normal users stop being offered prerelease builds.
+ * The prerelease-era default: the widest channel. It is also the fallback
+ * for a build whose own version cannot be parsed (never silently narrow the
+ * update feed because of a versioning mistake).
+ *
+ * This is no longer THE default for every build: getUpdateChannel() derives
+ * the default from the running build's version (see
+ * defaultUpdateChannelForBuild) - a stable build defaults to 'stable', a
+ * prerelease build keeps this one.
  */
 export const DEFAULT_UPDATE_CHANNEL: UpdateChannel = 'alpha';
 
 const CHANNEL_KEY = 'fress.updateChannel';
 
+/** The running build's own version - the authoritative build metadata that
+ * Vite bakes in from package.json at build time (the same value
+ * checkForUpdate is called with). Deliberately NOT the WebView user agent
+ * and NOT a release publication date: both are guesses about which build is
+ * running, this is the build stating its own version. */
+export function currentBuildVersion(): string {
+  return pkg.version;
+}
+
+/**
+ * Build-aware default channel:
+ * - A build whose own version is a full SemVer release (no prerelease
+ *   identifiers, e.g. "1.0.0") is a STABLE build. Its users get the Stable
+ *   channel by default and stop being offered prerelease builds - the
+ *   flip this module used to promise for "when a stable 1.0 lands", now
+ *   derived from the build instead of a release-day code change.
+ * - A prerelease build ("1.0.12-beta", "1.0.13-rc.1", any alpha) keeps the
+ *   widest prerelease channel: pre-stable Fress treats every published
+ *   build as news.
+ * - An unparsable version also keeps the widest channel (conservative:
+ *   see DEFAULT_UPDATE_CHANNEL).
+ */
+export function defaultUpdateChannelForBuild(buildVersion: string): UpdateChannel {
+  const p = parseVersion(buildVersion);
+  return p && p.prerelease.length === 0 ? 'stable' : DEFAULT_UPDATE_CHANNEL;
+}
+
+/**
+ * The effective channel: an explicitly saved choice always wins (and must
+ * survive upgrades between build tracks); anything else - no saved value,
+ * an invalid value, or storage being unreadable - falls back to the
+ * build-appropriate default. Storage failures can never crash startup:
+ * both the read and the interpretation are guarded.
+ */
 export function getUpdateChannel(): UpdateChannel {
   try {
     const v = localStorage.getItem(CHANNEL_KEY);
@@ -104,7 +152,7 @@ export function getUpdateChannel(): UpdateChannel {
   } catch {
     // ignore
   }
-  return DEFAULT_UPDATE_CHANNEL;
+  return defaultUpdateChannelForBuild(currentBuildVersion());
 }
 
 export function setUpdateChannel(channel: UpdateChannel): void {
@@ -771,8 +819,14 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateStat
     const release = await fetchOwnLatestRelease(channel);
     if (!release) return { kind: 'error' };
     const cmp = compareVersions(release.version, currentVersion);
-    if (cmp <= 0) {
+    if (cmp === 0) {
       return { kind: 'latest', version: release.version };
+    }
+    if (cmp < 0) {
+      // The channel's newest release is OLDER than the running build. Never
+      // "latest" (the channel switch is not a no-op) and never a downgrade
+      // download: say what the channel offers and that the build is ahead.
+      return { kind: 'track-migration', channel, channelVersion: release.version, release };
     }
     // The Tauri host arch, not the WebView user agent: macOS WebKit claims
     // "Intel" even on Apple Silicon, which handed Intel dmgs to M-series

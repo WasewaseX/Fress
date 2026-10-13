@@ -11,7 +11,7 @@ import { useDownloadActions } from '../lib/downloads';
 import { checkForUpdate, UpdateState } from '../lib/selfUpdate';
 import { startOwnUpdateDelivery, getDeliveryState, subscribeDelivery } from '../features/selfUpdate/updateDelivery';
 import { pillStatusFor } from '../features/selfUpdate/useSelfUpdate';
-import { useI18n } from '../lib/i18n';
+import { useI18n, formatMessage } from '../lib/i18n';
 import pkg from '../../package.json';
 
 interface FooterProps {
@@ -73,6 +73,14 @@ const UpdateButton: React.FC = () => {
         return state.asset
           ? `${t('update.download')} v${state.release.version}`
           : t('update.available');
+      case 'track-migration':
+        // The running build is AHEAD of the selected channel (a beta client
+        // that switched to Stable while the newest stable is older). The
+        // honest button says that instead of "Up to date"; clicking re-runs
+        // the check, the full explanation travels in the toast.
+        return formatMessage(t('update.trackMigrationShort'), {
+          channel: t(`header.channel.${state.channel}`),
+        });
       case 'error':
         return t('update.error');
     }
@@ -85,7 +93,16 @@ const UpdateButton: React.FC = () => {
     return <RefreshCw className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />;
   })();
 
-  const active = state.kind === 'idle' || state.kind === 'error';
+  const tooltip =
+    state.kind === 'track-migration'
+      ? formatMessage(t('update.trackMigration'), {
+          bv: pkg.version,
+          cv: state.channelVersion,
+          channel: t(`header.channel.${state.channel}`),
+        })
+      : t('update.tooltip');
+
+  const active = state.kind === 'idle' || state.kind === 'error' || state.kind === 'track-migration';
   const primary = state.kind === 'available';
 
   return (
@@ -95,7 +112,7 @@ const UpdateButton: React.FC = () => {
       onClick={() => void (state.kind === 'available' ? startUpdate() : run())}
       disabled={(!active && state.kind !== 'available') || delivering}
       aria-busy={delivering || undefined}
-      title={t('update.tooltip')}
+      title={tooltip}
       aria-live="polite"
       className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border transition-colors ${
         primary

@@ -42,7 +42,7 @@ import {
 // what a retry does (including evicting the failed memo entry) is resolver-
 // side code behind this interface. See src/lib/resolveRetry.ts.
 import { resolverRetry } from '../lib/resolveRetry';
-import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
+import { useI18n, formatMessage, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
@@ -128,13 +128,16 @@ function translateDownloadLabel(t: (key: string) => string, label: string): stri
     const template = place === 'App Store' || place === 'Google Play'
       ? t('detail.dl.onStore')
       : t('detail.dl.forPlatform');
-    return template
-      .replace('{product}', product)
-      .replace('{store}', place)
-      .replace('{platform}', place);
+    // formatMessage (split/join): labels can carry app names, and
+    // String.prototype.replace would eat "$&" inside them.
+    return place === 'App Store' || place === 'Google Play'
+      ? formatMessage(template, { product, store: place })
+      : formatMessage(template, { product, platform: place });
   }
   if (label.endsWith(' public instance')) {
-    return t('detail.dl.publicInstance').replace('{product}', label.replace(/ public instance$/, ''));
+    return formatMessage(t('detail.dl.publicInstance'), {
+      product: label.replace(/ public instance$/, ''),
+    });
   }
   return label;
 }

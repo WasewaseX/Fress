@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { INITIAL_APPS } from '../../data/appsData';
 import { AppItem } from '../../types';
 import { sanitizeAppItem } from '../../lib/appValidation';
-import { useI18n } from '../../lib/i18n';
+import { useI18n, formatMessage } from '../../lib/i18n';
 
 /**
  * Catalog state: the built-in entries plus the user's own, and the
@@ -137,10 +137,13 @@ export function useAppCatalog(): AppCatalog {
     if (existingIndex >= 0) {
       updated = [...prev];
       updated[existingIndex] = appToSave;
-      toast.success(tRef.current('catalog.updatedOk').replace('{name}', appToSave.name));
+      // formatMessage (split/join): a custom app name is user input, and
+      // String.prototype.replace would treat "$&" in the name as the whole
+      // match, corrupting the toast (same class as the round-8 palette fix).
+      toast.success(formatMessage(tRef.current('catalog.updatedOk'), { name: appToSave.name }));
     } else {
       updated = [appToSave, ...prev];
-      toast.success(tRef.current('catalog.addedOk').replace('{name}', appToSave.name));
+      toast.success(formatMessage(tRef.current('catalog.addedOk'), { name: appToSave.name }));
     }
 
     appsRef.current = updated;
@@ -169,7 +172,7 @@ export function useAppCatalog(): AppCatalog {
       // ignore
     }
     if (target) {
-      toast.info(tRef.current('catalog.removedOk').replace('{name}', target.name));
+      toast.info(formatMessage(tRef.current('catalog.removedOk'), { name: target.name }));
     }
 
     const favPrev = favoritesRef.current;
@@ -239,7 +242,7 @@ export function useAppCatalog(): AppCatalog {
     if (parsed.meta && typeof parsed.meta === 'object' && typeof parsed.meta.version === 'string') {
       const major = parseInt(parsed.meta.version.split('.')[0] || '0', 10);
       if (major > 1) {
-        toast.error(tRef.current('catalog.importNewerVersion').replace('{version}', parsed.meta.version));
+        toast.error(formatMessage(tRef.current('catalog.importNewerVersion'), { version: parsed.meta.version }));
         return;
       }
     }
@@ -313,18 +316,18 @@ export function useAppCatalog(): AppCatalog {
     // fragments ({count} imported) sidestep noun plurals that no single
     // form survives in all five languages.
     const tt = tRef.current;
-    const bits: string[] = [tt('catalog.importImported').replace('{count}', String(newCustoms.length))];
-    if (skippedCount > 0) bits.push(tt('catalog.importPresent').replace('{count}', String(skippedCount)));
-    if (invalidCount > 0) bits.push(tt('catalog.importInvalid').replace('{count}', String(invalidCount)));
-    if (mergedFavorites > 0) bits.push(tt('catalog.importRestored').replace('{count}', String(mergedFavorites)));
+    const bits: string[] = [formatMessage(tt('catalog.importImported'), { count: newCustoms.length })];
+    if (skippedCount > 0) bits.push(formatMessage(tt('catalog.importPresent'), { count: skippedCount }));
+    if (invalidCount > 0) bits.push(formatMessage(tt('catalog.importInvalid'), { count: invalidCount }));
+    if (mergedFavorites > 0) bits.push(formatMessage(tt('catalog.importRestored'), { count: mergedFavorites }));
     const list = bits.join(', ');
     if (newCustoms.length > 0 || mergedFavorites > 0) {
-      toast.success(tt('catalog.importDone').replace('{list}', list));
+      toast.success(formatMessage(tt('catalog.importDone'), { list }));
     } else {
-      toast.info(tt('catalog.importNothingNew').replace('{list}', list));
+      toast.info(formatMessage(tt('catalog.importNothingNew'), { list }));
     }
     if (strippedCommands > 0) {
-      toast.warning(tt('catalog.importStripped').replace('{count}', String(strippedCommands)));
+      toast.warning(formatMessage(tt('catalog.importStripped'), { count: strippedCommands }));
     }
   };
 
@@ -351,7 +354,7 @@ export function useAppCatalog(): AppCatalog {
           const merged = [...additions, ...prev];
           appsRef.current = merged;
           setApps(merged);
-          toast.success(tRef.current('catalog.trendingSynced').replace('{source}', data.source));
+          toast.success(formatMessage(tRef.current('catalog.trendingSynced'), { source: data.source }));
           return;
         }
       }

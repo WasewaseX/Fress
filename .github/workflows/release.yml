@@ -56,6 +56,7 @@ jobs:
         # text resources, and equally on a missing checker: a release that
         # could not be scanned must never publish silently.
         run: |
+          set -euo pipefail
           if [ ! -f scripts/ci/check-no-chinese.mjs ]; then
             echo "::error::scripts/ci/check-no-chinese.mjs is missing - the no-Chinese gate cannot run. The release fails closed until the single source checker (owned by the CI agent) is present on the release commit."
             exit 1

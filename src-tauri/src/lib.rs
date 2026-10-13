@@ -462,6 +462,14 @@ fn verify_signature_over_open_file(
 const VERIFICATION_SCOPE_REFUSAL: &str =
     "Signature verification refused: this path is not a completed Fress download artifact";
 
+/// Same property, same channel, for the OPEN boundary (see
+/// [`open_downloaded_file`]): every out-of-scope path produces exactly this
+/// typed code - the shared `open-artifact/<code>` namespace the frontend's
+/// `parseOpenError` switches on (the same taxonomy as `artifact_open.rs`) -
+/// so a caller can never distinguish "does not exist" from "exists but is
+/// not a registered download" from "registered but tampered".
+const OPEN_NOT_REGISTERED_REFUSAL: &str = "open-artifact/not-registered";
+
 /// One-line provenance suffix for the boundary's diagnostics about a
 /// REGISTERED artifact: what the engine itself proved about the bytes when
 /// it committed them (the record's checksum status). Only ever attached to
@@ -471,6 +479,187 @@ fn checksum_provenance(checksum_verified: Option<bool>) -> &'static str {
     match checksum_verified {
         Some(true) => "the download had completed checksum-verified",
         _ => "the download had completed without a verified checksum",
+    }
+}
+
+/// Why [`resolve_completed_artifact`] refused a path. The two consumers (the
+/// updater's signature-verification boundary and the open boundary) map these
+/// onto their own uniform wordings - [`verification_boundary_error`] and
+/// [`open_boundary_error`] - so the shared checks can never drift apart while
+/// each command keeps its own, shape-stable refusal language.
+#[derive(Debug)]
+enum ArtifactBoundaryError {
+    /// Empty path, a staging (`.part`) name, or no registry record: the
+    /// uniform refusal. Nothing about the filesystem was ever observed.
+    NotInScope,
+    /// A record exists but the artifact is no longer at its committed path.
+    NotOnDisk {
+        id: u32,
+        url: String,
+        provenance: &'static str,
+    },
+    /// The artifact still exists but no longer resolves to the canonical
+    /// path recorded at completion (moved, renamed or re-homed).
+    MovedOrReplaced { provenance: &'static str },
+    /// Open/metadata I/O failure (message already fully worded - both
+    /// boundaries use the same text for these).
+    Io(String),
+    /// The opened handle is not a regular file.
+    NotARegularFile,
+    /// The file's size no longer matches the committed size.
+    SizeChanged { provenance: &'static str },
+}
+
+/// THE shared completed-artifact resolution used by every boundary that may
+/// hand a download artifact to native code. Accepts ONLY a completed,
+/// registered download: `file_path` must resolve to a record in the download
+/// registry's completed-artifact queue (see `download_finalize.rs`,
+/// "Completed-artifact registry"), which the engine populates exclusively on
+/// a successful, full, hash-checked no-clobber commit. A frontend-provided
+/// arbitrary filesystem path can therefore never reach a native
+/// open/verify interaction: an unregistered path is refused before a single
+/// byte of it is read.
+///
+/// The checks, in order:
+///   1. Registry scope - exact reported-path match first (the frontend
+///      echoes the completion event's `path` verbatim), then a
+///      canonicalized fallback for a normalized variant of the same
+///      location. Miss => [`ArtifactBoundaryError::NotInScope`], nothing
+///      else observable.
+///   2. Staging shapes - a `.part` / `.part.meta` name is refused by
+///      construction (defense in depth; the engine never records one).
+///   3. Canonical stability - the recorded path is re-canonicalized NOW
+///      and must equal the canonical path recorded at completion. A file
+///      swapped for a symlink, moved, or re-homed after completion is
+///      refused even when its bytes would pass.
+///   4. Regular file + committed size - the OPEN HANDLE's metadata must
+///      be a regular file of the recorded size. A deleted, replaced or
+///      truncated artifact is refused here instead of being used.
+///
+/// The returned file handle is the SAME handle the metadata checks passed
+/// on, so each consumer's next read (a streamed signature, or nothing at
+/// all) stays tied to the artifact that was judged. TOCTOU note: between
+/// the checks and a later read the bytes could still be exchanged by
+/// something with local disk access; consumers keep that window harmless
+/// by construction (the signature verdict is computed over whatever the
+/// handle actually yields, and the OS open of the path re-reads bytes that
+/// at worst change which failure the next boundary reports).
+fn resolve_completed_artifact(
+    registry: &DownloadRegistry,
+    file_path: &str,
+) -> Result<
+    (
+        download_finalize::CompletedArtifact,
+        std::path::PathBuf,
+        std::fs::File,
+    ),
+    ArtifactBoundaryError,
+> {
+    let requested = std::path::PathBuf::from(file_path.trim());
+    if requested.as_os_str().is_empty() {
+        return Err(ArtifactBoundaryError::NotInScope);
+    }
+    // Staging files are never boundary candidates. The registry cannot
+    // contain one (only commits are recorded), so this is pure defense in
+    // depth - and it documents the intent for a future caller.
+    let name = requested
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if name.ends_with(".part") || name.ends_with(".part.meta") {
+        return Err(ArtifactBoundaryError::NotInScope);
+    }
+    // 1. Registry scope. Before this line passes, the command has touched
+    //    nothing on disk under the caller's path.
+    let Some(record) = registry.completed_artifact_for_path(&requested) else {
+        return Err(ArtifactBoundaryError::NotInScope);
+    };
+    let provenance = checksum_provenance(record.checksum_verified);
+    // 3. Canonical stability: the artifact must still sit where the engine
+    //    committed it, not behind a symlink, bind mount or rename. The
+    //    download id, source URL and the engine's own checksum verdict
+    //    travel with the refusal: they describe the caller's own download
+    //    (the frontend correlates id -> url before it calls), so they aid
+    //    diagnosis without leaking anything.
+    let current =
+        std::fs::canonicalize(&record.path).map_err(|_| ArtifactBoundaryError::NotOnDisk {
+            id: record.id,
+            url: record.url.clone(),
+            provenance,
+        })?;
+    if current != record.canonical {
+        return Err(ArtifactBoundaryError::MovedOrReplaced { provenance });
+    }
+    // 4. Regular file of the committed size, judged through the SAME
+    //    handle the consumer is then handed.
+    let file = std::fs::File::open(&current)
+        .map_err(|e| ArtifactBoundaryError::Io(format!("Cannot open the downloaded file: {e}")))?;
+    let meta = file.metadata().map_err(|e| {
+        ArtifactBoundaryError::Io(format!("Cannot inspect the downloaded file: {e}"))
+    })?;
+    if !meta.is_file() {
+        return Err(ArtifactBoundaryError::NotARegularFile);
+    }
+    if meta.len() != record.size {
+        return Err(ArtifactBoundaryError::SizeChanged { provenance });
+    }
+    Ok((record, current, file))
+}
+
+/// Maps the shared resolver's verdicts onto the verification boundary's
+/// wordings. Byte-identical to the messages this command produced before the
+/// resolver was extracted - the boundary's observable behavior is unchanged.
+fn verification_boundary_error(err: ArtifactBoundaryError) -> String {
+    match err {
+        ArtifactBoundaryError::NotInScope => VERIFICATION_SCOPE_REFUSAL.to_string(),
+        ArtifactBoundaryError::NotOnDisk { id, url, provenance } => format!(
+            "Signature verification refused: the completed download artifact is no longer on disk (download #{}, originally from {}; {})",
+            id, url, provenance
+        ),
+        ArtifactBoundaryError::MovedOrReplaced { provenance } => format!(
+            "Signature verification refused: the completed download artifact was moved or replaced on disk ({})",
+            provenance
+        ),
+        ArtifactBoundaryError::Io(message) => message,
+        ArtifactBoundaryError::NotARegularFile => "Signature verification refused: the completed download artifact is not a regular file".to_string(),
+        ArtifactBoundaryError::SizeChanged { provenance } => format!(
+            "Signature verification refused: the file at the completed download's path has changed since completion ({})",
+            provenance
+        ),
+    }
+}
+
+/// Maps the shared resolver's verdicts onto the open boundary's wordings:
+/// the typed `open-artifact/<code>` namespace shared with the AppImage
+/// launcher (`artifact_open.rs`), which the frontend's `parseOpenError`
+/// classifies into the localized reasons. The failure SHAPES are the
+/// verification boundary's, so an error can never become a filesystem
+/// oracle: the three scope failures collapse into the one
+/// [`OPEN_NOT_REGISTERED_REFUSAL`], and the registered-artifact diagnostics
+/// carry the same provenance discipline in the code's DETAIL half (which
+/// the UI logs to the console and never renders verbatim).
+fn open_boundary_error(err: ArtifactBoundaryError) -> String {
+    match err {
+        ArtifactBoundaryError::NotInScope => OPEN_NOT_REGISTERED_REFUSAL.to_string(),
+        ArtifactBoundaryError::NotOnDisk { id, url, provenance } => format!(
+            "open-artifact/not-found: download #{}, originally from {}; {}",
+            id, url, provenance
+        ),
+        ArtifactBoundaryError::MovedOrReplaced { provenance } => format!(
+            "open-artifact/replaced: the completed download was moved or replaced on disk ({})",
+            provenance
+        ),
+        // Plain OS-shaped text on purpose: parseOpenError classifies these
+        // by the platform wordings (ENOENT -> missing, EACCES -> permission,
+        // ...), the same path an opener-plugin failure takes.
+        ArtifactBoundaryError::Io(message) => message,
+        ArtifactBoundaryError::NotARegularFile => {
+            "open-artifact/not-a-file".to_string()
+        }
+        ArtifactBoundaryError::SizeChanged { provenance } => format!(
+            "open-artifact/replaced: the file at the completed download's path has changed since completion ({})",
+            provenance
+        ),
     }
 }
 
@@ -485,22 +674,12 @@ fn checksum_provenance(checksum_verified: Option<bool>) -> &'static str {
 /// an unregistered path is refused before a single byte of it is read,
 /// with the same generic refusal regardless of what exists on disk.
 ///
-/// The checks, in order:
-///   1. Registry scope - exact reported-path match first (the frontend
-///      echoes the completion event's `path` verbatim), then a
-///      canonicalized fallback for a normalized variant of the same
-///      location. Miss => the uniform refusal, nothing else observable.
-///   2. Staging shapes - a `.part` / `.part.meta` name is refused by
-///      construction (defense in depth; the engine never records one).
-///   3. Canonical stability - the recorded path is re-canonicalized NOW
-///      and must equal the canonical path recorded at completion. A file
-///      swapped for a symlink, moved, or re-homed after completion is
-///      refused even when its bytes would verify.
-///   4. Regular file + committed size - the OPEN HANDLE's metadata must
-///      be a regular file of the recorded size. A deleted, replaced or
-///      truncated artifact is refused here instead of verified.
-///   5. Byte verdict - the signature is streamed over the bytes of that
-///      same open handle. Whatever is on disk at verification time is
+/// Checks 1-4 (registry scope, staging shapes, canonical stability,
+/// regular file + committed size) run in [`resolve_completed_artifact`],
+/// shared with the open boundary so the two boundaries can never drift.
+/// What remains here is:
+///   5. Byte verdict - the signature is streamed over the bytes of the
+///      resolved handle. Whatever is on disk at verification time is
 ///      exactly what is judged: a same-size in-place edit is invisible to
 ///      metadata but always fails the signature, so any post-completion
 ///      modification can only produce a refusal, never a false "verified".
@@ -532,64 +711,8 @@ fn verify_completed_self_update_signature_with_key(
     file_path: &str,
     signature_base64: &str,
 ) -> Result<(), String> {
-    let requested = std::path::PathBuf::from(file_path.trim());
-    if requested.as_os_str().is_empty() {
-        return Err(VERIFICATION_SCOPE_REFUSAL.to_string());
-    }
-    // Staging files are never verification candidates. The registry cannot
-    // contain one (only commits are recorded), so this is pure defense in
-    // depth - and it documents the intent for a future caller.
-    let name = requested
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    if name.ends_with(".part") || name.ends_with(".part.meta") {
-        return Err(VERIFICATION_SCOPE_REFUSAL.to_string());
-    }
-    // 1. Registry scope. Before this line passes, the command has touched
-    //    nothing on disk under the caller's path.
-    let Some(record) = registry.completed_artifact_for_path(&requested) else {
-        return Err(VERIFICATION_SCOPE_REFUSAL.to_string());
-    };
-    // 3. Canonical stability: the artifact must still sit where the engine
-    //    committed it, not behind a symlink, bind mount or rename. The
-    //    download id, source URL and the engine's own checksum verdict
-    //    travel with the refusal: they describe the caller's own download
-    //    (the frontend correlates id -> url before it calls), so they aid
-    //    diagnosis without leaking anything.
-    let current = std::fs::canonicalize(&record.path).map_err(|_| {
-        format!(
-            "Signature verification refused: the completed download artifact is no longer on disk (download #{}, originally from {}; {})",
-            record.id,
-            record.url,
-            checksum_provenance(record.checksum_verified)
-        )
-    })?;
-    if current != record.canonical {
-        return Err(format!(
-            "Signature verification refused: the completed download artifact was moved or replaced on disk ({})",
-            checksum_provenance(record.checksum_verified)
-        ));
-    }
-    // 4. Regular file of the committed size, judged through the SAME
-    //    handle the bytes are then read from.
-    let mut file = std::fs::File::open(&current)
-        .map_err(|e| format!("Cannot open the downloaded file: {e}"))?;
-    let meta = file
-        .metadata()
-        .map_err(|e| format!("Cannot inspect the downloaded file: {e}"))?;
-    if !meta.is_file() {
-        return Err(
-            "Signature verification refused: the completed download artifact is not a regular file"
-                .to_string(),
-        );
-    }
-    if meta.len() != record.size {
-        return Err(format!(
-            "Signature verification refused: the file at the completed download's path has changed since completion ({})",
-            checksum_provenance(record.checksum_verified)
-        ));
-    }
+    let (_record, _canonical, mut file) =
+        resolve_completed_artifact(registry, file_path).map_err(verification_boundary_error)?;
     // 5. The actual bytes.
     verify_signature_over_open_file(key_file_b64, signature_base64, &mut file)
 }
@@ -631,6 +754,105 @@ async fn verify_self_update_signature(
     })
     .await
     .map_err(|e| format!("Signature verification task failed: {e}"))?
+}
+
+/// What the open boundary does with a validated artifact. The disposition
+/// reads ONLY the extension of the registry-recorded path - never the file's
+/// contents, which the boundary does not interpret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+enum OpenDisposition {
+    /// Hand the APK to Android's normal package installer (via the
+    /// fress-open plugin's FileProvider intent).
+    ApkInstaller,
+    /// Open with a capable viewer, or offer the share sheet.
+    OpenOrShare,
+}
+
+/// Classifies a validated artifact path by its recorded extension. Pure and
+/// case-insensitive ("APK", "Apk", "apk" are all install requests); anything
+/// without an explicit apk extension is treated as a regular open - a
+/// mislabeled file can only end up in the MORE conservative branch.
+#[cfg(any(target_os = "android", test))]
+fn open_disposition(path: &std::path::Path) -> OpenDisposition {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("apk") => OpenDisposition::ApkInstaller,
+        _ => OpenDisposition::OpenOrShare,
+    }
+}
+
+/// THE open boundary: opens (or, on Android, installs) a COMPLETED download
+/// artifact.
+///
+/// This is the Android adapter of the download-to-open contract
+/// (docs/download-open-contract.md): the frontend's `openCompletedArtifact`
+/// policy binds this command as its `openPath` dep on Android (the opener
+/// plugin cannot hand out app-private files there); desktop keeps the
+/// opener plugin. `path` must be the exact `path` a download-complete event
+/// reported; it is resolved through the same completed-artifact registry
+/// discipline as the updater's signature verification
+/// ([`resolve_completed_artifact`]): session-scoped registry match, no
+/// staging names, canonical stability, regular file, committed size.
+/// Everything else gets the one uniform [`OPEN_NOT_REGISTERED_REFUSAL`]
+/// typed code, so the command is not a filesystem probe and cannot be
+/// pointed at arbitrary paths by a compromised webview.
+///
+/// Per-platform dispatch of a VALIDATED path (Android is the only native
+/// dispatch; desktop never reaches this command):
+///   - Android: `.apk` artifacts are handed to the system package installer
+///     through a FileProvider `content://` URI scoped to this app's
+///     `files/Download` directory (`tauri-plugin-fress-open`, Kotlin side
+///     `FressOpenPlugin`), with a temporary READ grant only. That intent is
+///     Android's standard user-consented install flow - the installer, not
+///     Fress, presents the package and enforces the unknown-sources
+///     restrictions; nothing here bypasses them. Every other artifact goes
+///     to the safe open/share fallback (viewer when one exists, share sheet
+///     otherwise), also read-grant only.
+///
+/// The registry is intentionally in-memory and session-scoped: a panel row
+/// restored after an app restart has no record here and is refused with the
+/// typed `not-registered` code - persisted (webview-writable) state must
+/// never feed a native open. The refusal is the same honest, retryable
+/// failure the contract prescribes for every rejected open.
+#[tauri::command]
+async fn open_downloaded_file(
+    app: AppHandle,
+    path: String,
+    registry: State<'_, Arc<DownloadRegistry>>,
+) -> Result<(), String> {
+    let registry = Arc::clone(registry.inner());
+    let (record, canonical, artifact_file) = tokio::task::spawn_blocking(move || {
+        resolve_completed_artifact(&registry, &path).map_err(open_boundary_error)
+    })
+    .await
+    .map_err(|e| format!("Open task failed: {e}"))??;
+    // The handle proved regular-file + committed-size; the OS interaction
+    // below re-reads the path itself, so the handle is released here.
+    drop(artifact_file);
+
+    #[cfg(target_os = "android")]
+    {
+        let disposition = open_disposition(&record.path);
+        let target = canonical.to_string_lossy().into_owned();
+        match disposition {
+            OpenDisposition::ApkInstaller => {
+                tauri_plugin_fress_open::FressOpenExt::fress_open(&app).open_apk(&target)
+            }
+            OpenDisposition::OpenOrShare => {
+                tauri_plugin_fress_open::FressOpenExt::fress_open(&app).open_file(&target)
+            }
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        // Desktop has no installer flow; an .apk still just opens (the OS
+        // will report "no handler" honestly) - the disposition exists for
+        // Android, so it is deliberately not consulted here.
+        let _ = record;
+        let _ = &app;
+        tauri_plugin_opener::open_path(&canonical, None::<&str>)
+            .map_err(|e| format!("Cannot open the file: {e}"))
+    }
 }
 
 /// Resolves the suggested stable package version from the F-Droid index.
@@ -925,15 +1147,24 @@ fn default_download_dir(app: AppHandle) -> String {
 // redirection, macOS ~/Downloads, Linux XDG download dir). Android does not
 // let apps write a shared Downloads folder without storage permissions, so
 // the app's private directory is used instead; the UI explains this.
+// On Android the engine commits downloads to `filesDir/Download` - the
+// app_data_dir's `files` subtree - because that is exactly the root the
+// fress-open plugin's FileProvider scopes (`<files-path path="Download/">`),
+// so a completed download can be handed to the installer/share sheet through
+// a content:// URI. The `files/` hop matters: app_data_dir itself resolves
+// to the app's dataDir root, which the FileProvider deliberately does NOT
+// expose.
 fn platform_download_dir(app: &AppHandle) -> PathBuf {
     #[cfg(target_os = "android")]
     {
         if let Ok(dir) = app.path().app_data_dir() {
-            let downloads = dir.join("Download");
+            let downloads = dir.join("files").join("Download");
             if std::fs::create_dir_all(&downloads).is_ok() {
                 return downloads;
             }
-            return dir;
+            // Download/ could not be created - fall back to the filesDir
+            // root rather than leaving the app sandbox entirely.
+            return dir.join("files");
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -950,6 +1181,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_fress_open::init())
         .manage(Arc::new(DownloadRegistry::default()))
         .invoke_handler(tauri::generate_handler![
             start_download,
@@ -961,8 +1193,9 @@ pub fn run() {
             fetch_text,
             fetch_self_update_text,
             verify_self_update_signature,
+            open_downloaded_file,
             host_arch,
-            artifact_open::launch_app_image_artifact,
+            artifact_open::launch_app_image_artifact
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1535,5 +1768,218 @@ mod verification_boundary_tests {
         assert_eq!(err_a, err_b);
         assert_eq!(err_b, err_c);
         assert!(err_a.contains(super::VERIFICATION_SCOPE_REFUSAL));
+    }
+}
+
+#[cfg(test)]
+mod open_boundary_tests {
+    // The open boundary shares [`resolve_completed_artifact`] with the
+    // signature-verification boundary (whose accept/refuse matrix lives in
+    // the self-update and integration tests). These tests pin what the OPEN
+    // side adds on top: its own uniform refusal language, the artifact
+    // conditions it must refuse before any OS interaction, and the APK
+    // disposition classification that decides installer vs open/share.
+
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn next_tmp(tag: &str) -> PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "fress-open-boundary-{}-{}-{}",
+            tag,
+            std::process::id(),
+            n
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir created");
+        dir
+    }
+
+    /// Commits `bytes` under `name` and records it in a fresh registry, the
+    /// same way the engine does at the end of a successful download.
+    fn registered_artifact(
+        tag: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> (DownloadRegistry, PathBuf, PathBuf) {
+        let dir = next_tmp(tag);
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).expect("artifact written");
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(7, &path, "https://example.com/app.apk", Some(true));
+        (registry, path, dir)
+    }
+
+    #[test]
+    fn out_of_scope_paths_get_the_one_uniform_refusal() {
+        // The three NotInScope shapes - empty, never-registered (missing or
+        // present on disk), and staging names - must all render the SAME
+        // string, so the refusal can never probe the filesystem for the
+        // webview.
+        let dir = next_tmp("out-of-scope");
+        let unregistered_on_disk = dir.join("innocent.txt");
+        std::fs::write(&unregistered_on_disk, b"hello").unwrap();
+        let staging = dir.join("innocent.txt.part");
+        std::fs::write(&staging, b"hello").unwrap();
+
+        for path in [
+            "",
+            "/definitely/not/a/download.exe",
+            staging.to_str().unwrap(),
+            unregistered_on_disk.to_str().unwrap(),
+        ] {
+            let err = resolve_completed_artifact(&DownloadRegistry::default(), path)
+                .expect_err("must refuse");
+            assert_eq!(
+                open_boundary_error(err),
+                OPEN_NOT_REGISTERED_REFUSAL,
+                "path: {path}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn registered_artifact_resolves_by_exact_and_folded_path() {
+        let (registry, path, dir) =
+            registered_artifact("resolve", "tool.apk", b"PK\x03\x04artifact");
+        // Exact reported path...
+        let (record, canonical, file) =
+            resolve_completed_artifact(&registry, path.to_str().unwrap())
+                .expect("exact path resolves");
+        assert_eq!(record.id, 7);
+        assert_eq!(record.url, "https://example.com/app.apk");
+        assert_eq!(canonical, record.canonical);
+        assert_eq!(file.metadata().unwrap().len(), record.size);
+        // ...and the canonical fallback for a `..`-folded variant.
+        let folded = dir.join(".").join("tool.apk");
+        resolve_completed_artifact(&registry, folded.to_str().unwrap())
+            .expect("folded path resolves");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn artifact_gone_from_disk_is_refused() {
+        let (registry, path, dir) = registered_artifact("gone", "tool.apk", b"data");
+        std::fs::remove_file(&path).unwrap();
+        let err = open_boundary_error(
+            resolve_completed_artifact(&registry, path.to_str().unwrap()).expect_err("must refuse"),
+        );
+        assert!(err.starts_with("open-artifact/not-found:"), "{err}");
+        assert!(err.contains("download #7"), "{err}");
+        assert!(
+            err.contains("the download had completed checksum-verified"),
+            "{err}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn artifact_swapped_for_symlink_is_refused() {
+        let (registry, path, dir) = registered_artifact("symlink", "tool.apk", b"data");
+        // Re-home the bytes and put a symlink at the committed path: same
+        // size, same content, different location - refused. Unix-only
+        // because Windows symlinks need a privileged developer mode; the
+        // canonical-stability arm is enforced on every platform through
+        // resolve_completed_artifact itself, and the gone/replaced/size
+        // refusals above carry the cross-platform matrix.
+        #[cfg(unix)]
+        {
+            let elsewhere = dir.join("elsewhere.bin");
+            std::fs::write(&elsewhere, b"data").unwrap();
+            std::fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
+            let err = open_boundary_error(
+                resolve_completed_artifact(&registry, path.to_str().unwrap())
+                    .expect_err("must refuse"),
+            );
+            assert!(err.starts_with("open-artifact/replaced:"), "{err}");
+        }
+        #[cfg(not(unix))]
+        let _ = (registry, path);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn size_change_after_completion_is_refused() {
+        let (registry, path, dir) = registered_artifact("size", "tool.apk", b"data");
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes.extend_from_slice(b"-tampered");
+        std::fs::write(&path, bytes).unwrap();
+        let err = open_boundary_error(
+            resolve_completed_artifact(&registry, path.to_str().unwrap()).expect_err("must refuse"),
+        );
+        assert!(err.starts_with("open-artifact/replaced:"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn non_regular_file_target_is_refused() {
+        // A directory can be recorded (the registry stores what the caller
+        // reported) but a directory is never an openable artifact. The
+        // refusal shape is platform-honest: unix opens the directory and
+        // refuses on the metadata (not-a-file); Windows refuses at the open
+        // itself (access denied) - both fail closed before any OS
+        // interaction, neither is the uniform scope refusal.
+        let dir = next_tmp("not-regular");
+        let target = dir.join("folder");
+        std::fs::create_dir_all(&target).unwrap();
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(3, &target, "https://example.com/x", None);
+        let err = open_boundary_error(
+            resolve_completed_artifact(&registry, target.to_str().unwrap())
+                .expect_err("must refuse"),
+        );
+        #[cfg(unix)]
+        assert_eq!(err, "open-artifact/not-a-file");
+        #[cfg(windows)]
+        assert!(err.starts_with("Cannot open the downloaded file:"), "{err}");
+        #[cfg(not(any(unix, windows)))]
+        let _ = err;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn apk_extension_selects_the_installer_disposition() {
+        for name in ["app.apk", "APP.APK", "App.Apk"] {
+            assert_eq!(
+                open_disposition(Path::new(name)),
+                OpenDisposition::ApkInstaller,
+                "{name}"
+            );
+        }
+        for name in [
+            "app.apk.sig",
+            "app.zip",
+            "app.tar.gz",
+            "app",
+            "app.exe",
+            "backup.apks",
+        ] {
+            assert_eq!(
+                open_disposition(Path::new(name)),
+                OpenDisposition::OpenOrShare,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn verification_boundary_wording_is_unchanged_through_the_shared_resolver() {
+        // The extraction must not have moved the verification boundary's
+        // observable behavior: an unregistered path still yields exactly
+        // VERIFICATION_SCOPE_REFUSAL through the shared resolver.
+        let dir = next_tmp("verify-wording");
+        let unregistered = dir.join("tool.exe");
+        std::fs::write(&unregistered, b"x").unwrap();
+        for path in ["", unregistered.to_str().unwrap()] {
+            let err = resolve_completed_artifact(&DownloadRegistry::default(), path)
+                .expect_err("must refuse");
+            assert_eq!(verification_boundary_error(err), VERIFICATION_SCOPE_REFUSAL);
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

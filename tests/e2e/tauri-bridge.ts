@@ -427,6 +427,18 @@ const BRIDGE_BODY = String.raw`
         if (bridge.failLaunchAppImage) throw bridge.failLaunchAppImage;
         return null;
       }
+      case 'open_downloaded_file': {
+        // The Android adapter of the same boundary (the registry-validated
+        // command the provider's openPath dep binds to on Android webviews):
+        // recorded into the SAME openedPaths array so D2's Android journey
+        // asserts one uniform open stream. The native half behind this
+        // command (FileProvider handoff, system installer) is the real
+        // binary's business and is deliberately NOT mocked here.
+        var od = args || {};
+        bridge.recordOpen('open_downloaded_file', Number(od.id) || 0, String(od.path || ''), null);
+        if (bridge.failOpenPath) throw bridge.failOpenPath;
+        return null;
+      }
       case 'plugin:dialog|open': {
         if (bridge.failDialog) throw bridge.failDialog;
         return bridge.dialogDir;

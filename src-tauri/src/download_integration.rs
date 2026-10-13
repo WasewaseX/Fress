@@ -468,7 +468,7 @@ async fn api_get(url: &str) -> reqwest::Response {
 
 #[tokio::test]
 async fn api_text_reads_accept_a_body_under_the_cap() {
-    let mut reply = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n".to_vec();
+    let mut reply = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n".to_vec();
     reply.extend_from_slice(b"[1,2]");
     let (url, _join) = spawn_raw_http(reply);
     let body = super::read_capped_api_text_with_cap(api_get(&url).await, 16)

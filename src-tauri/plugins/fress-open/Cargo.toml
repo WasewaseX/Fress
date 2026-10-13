@@ -1,0 +1,18 @@
+[package]
+name = "tauri-plugin-fress-open"
+version = "1.0.10-beta"
+description = "Fress's validated native open boundary: installs completed APK downloads through Android's package installer and opens/shares other completed downloads, never touching anything outside the download registry."
+edition = "2021"
+authors = ["Fress"]
+license = "MIT"
+repository = "https://github.com/WasewaseX/Fress"
+links = "tauri-plugin-fress-open"
+publish = false
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

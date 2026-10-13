@@ -56,7 +56,7 @@
 //                   (the human summary goes to stderr)
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, lstatSync, readlinkSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { join, resolve, sep, basename, extname } from 'node:path';
 
@@ -149,13 +149,20 @@ function printableRuns(buf, minLen = 6) {
   for (let i = 0; i < buf.length; ) {
     const b = buf[i];
     if ((b >= 0x20 && b <= 0x7e) || b === 0x09) { cur.push(b); i += 1; continue; }
-    // Admit a well-formed 2-4 byte UTF-8 sequence into the run; a lead byte
-    // without valid continuation bytes (or any other high byte) breaks it.
-    const extra = b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : b >= 0xc0 ? 1 : -1;
-    if (extra > 0 && i + extra < buf.length) {
-      let ok = true;
-      for (let k = 1; k <= extra; k += 1) if (buf[i + k] < 0x80 || buf[i + k] > 0xbf) { ok = false; break; }
-      if (ok) { for (let k = 0; k <= extra; k += 1) cur.push(buf[i + k]); i += extra + 1; continue; }
+    // Admit a WELL-FORMED 2-4 byte UTF-8 sequence into the run; any other
+    // byte (bad lead, bad continuation) breaks it. Lead and first-continuation
+    // ranges follow Unicode Table 3-7, so overlong (C0/C1), surrogate (ED A0)
+    // and >U+10FFFF (F5+) forms cannot bridge otherwise-isolated runs.
+    let need = -1;
+    let c1min = 0x80;
+    let c1max = 0xbf;
+    if (b >= 0xc2 && b <= 0xdf) need = 1;
+    else if (b >= 0xe0 && b <= 0xef) { need = 2; if (b === 0xe0) c1min = 0xa0; else if (b === 0xed) c1max = 0x9f; }
+    else if (b >= 0xf0 && b <= 0xf4) { need = 3; if (b === 0xf0) c1min = 0x90; else if (b === 0xf4) c1max = 0x8f; }
+    if (need > 0 && i + need < buf.length) {
+      let ok = buf[i + 1] >= c1min && buf[i + 1] <= c1max;
+      for (let k = 2; ok && k <= need; k += 1) if (buf[i + k] < 0x80 || buf[i + k] > 0xbf) ok = false;
+      if (ok) { for (let k = 0; k <= need; k += 1) cur.push(buf[i + k]); i += need + 1; continue; }
     }
     push();
     i += 1;
@@ -296,8 +303,9 @@ function roleHint(relPath) {
 }
 
 // Scan one decoded text payload; returns array of findings with severity.
-// Kana/Hangul are NON-Chinese CJK script: reported as warnings (owner-routed),
-// never silently dropped, but they do not gate the zero-CHINESE requirement.
+// Kana/Hangul are NON-Chinese CJK script: reported as warnings (owner-routed)
+// and never silently dropped from DECLARED-TEXT content; inside printable-run
+// scans the declared RUN_CJK_MIN evidence bar applies to warnings too.
 function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allowLocale = true } = {}) {
   const found = [];
   const lines = text.split('\n');
@@ -343,18 +351,49 @@ function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allow
 }
 
 function scanTextFile(kind, scope, absPath, relPath) {
-  // A symlinked DIRECTORY (e.g. a worktree's node_modules link, which the
-  // "node_modules/" ignore rule does not match because git sees a symlink,
-  // not a directory) is not a file: git stores the link, not its contents.
-  // Skip it with a declared warning instead of misreporting EISDIR as an
-  // unreadable file. Broken symlinks still fall through to the read-error
-  // path and fail closed.
-  try {
-    if (statSync(absPath).isDirectory()) {
+  // Symlinks need lstat-first handling: git stores a symlink's LINK TEXT as
+  // the blob content, not the target's content. A symlinked DIRECTORY (e.g.
+  // a worktree's node_modules link, which the "node_modules/" ignore rule
+  // does not match because git sees a symlink, not a directory) has no
+  // scannable committed payload: skip it with a declared warning. Every
+  // other symlink is scanned as its LINK TEXT (the committed content). A
+  // NON-symlink directory entry (a submodule gitlink checkout) is NOT caught
+  // here: it falls through to readFileSync and fails closed like any
+  // unreadable file - the gate must never fail open on tracked content.
+  let lst = null;
+  try { lst = lstatSync(absPath); } catch { /* let readFileSync fail closed */ }
+  if (lst && lst.isSymbolicLink()) {
+    let targetIsDir = false;
+    try { targetIsDir = statSync(absPath).isDirectory(); } catch { /* broken link: scan the link text */ }
+    if (targetIsDir) {
       process.stderr.write(`::warning::check-no-chinese: skipping directory entry ${relPath} (symlinked directory; git stores the link, not its contents)\n`);
       return;
     }
-  } catch { /* stat failed: let readFileSync produce the fail-closed hit */ }
+    let link;
+    try {
+      link = readlinkSync(absPath, 'buffer');
+    } catch (err) {
+      pushHit('unreadable-file', scope, relPath, { line: null, col: null, codepoint: null,
+        category: `symlink target could not be read: ${err.message}`, family: 'fail-closed',
+        match_escaped: '', context_escaped: '', role_hint: roleHint(relPath),
+        owner_action: 'make the symlink readable or remove it; a scan that cannot read committed content must not pass silently' });
+      return;
+    }
+    let text;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(link);
+    } catch {
+      pushHit('unreadable-file', scope, relPath, { line: null, col: null, codepoint: null,
+        category: 'symlink target path is neither valid UTF-8 text nor recognizable content', family: 'fail-closed',
+        match_escaped: '', context_escaped: '', role_hint: roleHint(relPath),
+        owner_action: 're-create the symlink with a UTF-8 target path; undecodable committed content fails the scan' });
+      return;
+    }
+    SUMMARY.textScanned += 1;
+    for (const hit of scanTextPayload(kind, scope, relPath, text)) pushHit2(hit, kind, scope, relPath);
+    scanFilename(kind, scope, relPath);
+    return;
+  }
   let buf;
   try {
     buf = readFileSync(absPath);
@@ -546,9 +585,16 @@ if (historyMode) {
     let text = null;
     if (trackedSet.has(relPath)) {
       try {
-        const buf = readFileSync(join(repoTop, relPath));
-        if (!isProbablyBinary(buf)) {
-          try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { text = null; }
+        const abs = join(repoTop, relPath);
+        const lst = lstatSync(abs);
+        if (lst.isSymbolicLink()) {
+          // The committed blob of a symlink is its link text.
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(readlinkSync(abs, 'buffer')); } catch { text = null; }
+        } else {
+          const buf = readFileSync(abs);
+          if (!isProbablyBinary(buf)) {
+            try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { text = null; }
+          }
         }
       } catch { text = null; }
     }
@@ -559,14 +605,16 @@ if (historyMode) {
     const text = currentTreeText(relPath);
     if (text === null) return false;
     for (const f of findings) {
+      // Filename findings: the offending NAME is the content - check path
+      // existence first, always (the codepoint branch below would compare
+      // the name's characters against file CONTENT instead).
+      if (f.kind === 'filename') return trackedSet.has(relPath);
       if (f.codepoint) {
         const cp = parseInt(f.codepoint.slice(2), 16);
         if (Number.isFinite(cp) && text.includes(String.fromCodePoint(cp))) return true;
       } else if (f.kind === 'locale-identifier') {
         const m = /"([^"]+)"/.exec(f.category || '');
         if (m && text.includes(m[1])) return true;
-      } else if (f.kind === 'filename') {
-        return trackedSet.has(relPath); // the offending NAME itself still exists
       }
     }
     return false;

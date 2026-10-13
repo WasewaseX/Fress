@@ -15,9 +15,9 @@
  *
  * Coverage map onto the 14-case adversarial matrix:
  *   1 -> test 1    2 -> test 2    3 -> test 3     4 -> tests 4, 4b, 4c
- *   5 -> test 5    6 -> test 6    7 -> test 7b    8 -> tests 10b, 8b, 8c
- *   9 -> test 9b  10 -> test 10  11 -> test 7    12 -> tests 8, 9
- *  13 -> tests 11, 12, 12c       14 -> test 9 (self-scan) + 12b (kana)
+ *   5 -> test 5    6 -> test 6    7 -> test 7b    8 -> tests 10b, 8b, 8c, 8d
+ *   9 -> test 9b  10 -> test 10  11 -> tests 7, 13b  12 -> tests 8, 9
+ *  13 -> tests 11, 12, 12c, 12d  14 -> test 9 (12b proves kana warning routing)
  */
 
 import { spawnSync } from 'node:child_process';
@@ -67,7 +67,7 @@ function commitAll(root: string): void {
 
 interface Report {
   summary: { total_hits: number; warnings_count: number; result: string; exit_code: number };
-  hits: Array<{ kind: string; path: string; line: number | null; col: number | null; codepoint: string | null; category: string; family: string; context_escaped: string; owner_action: string }>;
+  hits: Array<{ kind: string; path: string; line: number | null; col: number | null; codepoint: string | null; category: string; family: string; context_escaped: string; owner_action: string; role_hint?: string }>;
   warnings: Array<{ path: string; codepoint: string | null; category: string }>;
   scope: Record<string, number | null>;
   commit: string | null;
@@ -110,6 +110,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     const rep = r.report();
     expect(rep.summary.total_hits).toBe(0);
     expect(rep.summary.result).toContain('PASS');
+    expect(rep.scope.text_files_scanned).toBe(1); // the scan must cover the fixture, not scan nothing
   });
 
   it('2. a Han character in a source comment fails with codepoint and context', () => {
@@ -140,8 +141,10 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     commitAll(root);
     const r = runChecker(root);
     expect(r.status).toBe(1);
-    expect(r.report().hits[0].path).toBe('catalog.json');
-    expect(r.report().hits[0].family).toContain('Han');
+    const rep = r.report();
+    expect(rep.hits[0].path).toBe('catalog.json');
+    expect(rep.hits[0].family).toContain('Han');
+    expect(rep.hits[0].role_hint).toContain('catalog'); // owner routing must name the data class
   });
 
   it('4. a Chinese locale identifier fails (registry form and bare form)', () => {
@@ -153,7 +156,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(r.status).toBe(1);
     const rep = r.report();
     const localeHits = rep.hits.filter((h) => h.kind === 'locale-identifier');
-    expect(localeHits.length).toBeGreaterThanOrEqual(2);
+    expect(localeHits.length).toBe(2); // exactly the two fixture lines
     expect(localeHits[0].category).toContain('locale identifier');
     // Hex strings and words containing the root as a substring must NOT match.
     writeFileSync(join(root, 'clean-ids.ts'), 'const a = 0xzh_no;\n// "zhSize" and "hz" and "zhx" are not locale ids\nconst zhSize = 1;\n');
@@ -188,7 +191,9 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     const r = runChecker(root);
     expect(r.status).toBe(1);
     const rep = r.report();
-    expect(rep.hits.some((h) => h.kind === 'filename' && h.path.includes(HANChar))).toBe(true);
+    const nameHit = rep.hits.find((h) => h.kind === 'filename' && h.path.includes(HANChar));
+    expect(nameHit).toBeTruthy();
+    expect(nameHit?.line).toBeNull(); // a name finding has no line
   });
 
   it('7. a malformed (invalid UTF-8, non-binary) file does not silently pass', () => {
@@ -341,6 +346,9 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
       `lang=${ZH_PLAIN}-TW`,
       `lang=${ZH_PLAIN}-Hans`,
       `lang=${ZH_PLAIN}-Hant`,
+      `lang=${ZH_PLAIN}-HK`,
+      `lang=${ZH_PLAIN}-SG`,
+      `lang=${ZH_PLAIN}_Hans`, // underscore filesystem form
       `lang=${YUE_ROOT}`,
       `lang=${YUE_ROOT}-Hant`,
       '',
@@ -349,9 +357,9 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     const r = runChecker(root);
     expect(r.status).toBe(1);
     const localeHits = r.report().hits.filter((h) => h.kind === 'locale-identifier');
-    expect(localeHits.length).toBe(5);
+    expect(localeHits.length).toBe(8);
     const categories = localeHits.map((h) => h.category);
-    for (const form of [`${ZH_PLAIN}-TW`, `${ZH_PLAIN}-Hans`, `${ZH_PLAIN}-Hant`, YUE_ROOT, `${YUE_ROOT}-Hant`]) {
+    for (const form of [`${ZH_PLAIN}-TW`, `${ZH_PLAIN}-Hans`, `${ZH_PLAIN}-Hant`, `${ZH_PLAIN}-HK`, `${ZH_PLAIN}-SG`, `${ZH_PLAIN}_Hans`, YUE_ROOT, `${YUE_ROOT}-Hant`]) {
       expect(categories).toContain(`Chinese locale identifier "${form}"`);
     }
     // Negatives: uppercase roots, near-miss roots and substring noise are
@@ -527,5 +535,66 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(rep.scope.dist_files).toBe(2);
     expect(rep.summary.exit_code).toBe(0);
     expect(r.stderr).toContain('generated dist/ files');
+    expect(rep.scope.text_files_scanned).toBe(4); // .gitignore + src.ts + both dist files actually scanned
+  });
+
+  it('12d. untracked release-intended files are scanned (both directions)', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'committed.ts'), 'export const ok = 1;\n');
+    commitAll(root);
+    // Untracked clean candidate file: scanned, counted, passes.
+    writeFileSync(join(root, 'candidate.ts'), 'export const alsoOk = 2;\n');
+    const r1 = runChecker(root);
+    expect(r1.status).toBe(0);
+    expect(r1.report().scope.untracked_files_included).toBe(1);
+    // Untracked dirty candidate file: a real finding without any commit.
+    writeFileSync(join(root, 'candidate.ts'), `export const s = '${HANChar}';\n`);
+    const r2 = runChecker(root);
+    expect(r2.status).toBe(1);
+    const rep = r2.report();
+    expect(rep.scope.untracked_files_included).toBe(1);
+    expect(rep.hits.some((h) => h.path === 'candidate.ts' && h.codepoint === `U+${0x62a5.toString(16).toUpperCase()}`)).toBe(true);
+  });
+
+  it('13b. a scan outside a git repository fails closed with exit 2', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'no-chinese-bare-'));
+    roots.push(bare);
+    const r = runChecker(bare);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('::error::');
+    expect(r.stdout).toBe('');
+  });
+
+  it('8d. JPEG APPn payloads use the printable-run path with the declared evidence bar', () => {
+    const root = makeRepo();
+    const jpegWith = (marker: number, payload: Buffer): Buffer => Buffer.concat([
+      Buffer.from([0xff, 0xd8]),
+      Buffer.from([0xff, marker]),
+      (() => { const l = Buffer.alloc(2); l.writeUInt16BE(payload.length + 2); return l; })(),
+      payload,
+      Buffer.from([0xff, 0xd9]),
+    ]);
+    // APP1 (EXIF-shaped) with a 3-CJK printable run: a real finding.
+    const app1 = Buffer.concat([
+      Buffer.from('EXIF\0', 'latin1'),
+      Buffer.from('x', 'latin1'),
+      Buffer.from(`${HANChar}${HANChar}${HANChar}`, 'utf8'),
+      Buffer.from('y', 'latin1'),
+    ]);
+    writeFileSync(join(root, 'app-han.jpg'), jpegWith(0xe1, app1));
+    // APP1 with one isolated CJK triplet: below the declared bar, silent.
+    const app1b = Buffer.concat([
+      Buffer.from('EXIF\0', 'latin1'),
+      Buffer.from('x', 'latin1'),
+      Buffer.from(HANChar, 'utf8'),
+      Buffer.from('y', 'latin1'),
+    ]);
+    writeFileSync(join(root, 'app-noise.jpg'), jpegWith(0xe1, app1b));
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const rep = r.report();
+    expect(rep.hits.filter((h) => h.path === 'app-han.jpg').length).toBe(3);
+    expect(rep.hits.some((h) => h.path === 'app-noise.jpg')).toBe(false);
   });
 });

@@ -198,6 +198,14 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         failures = self._failures()
         self.assertTrue(any("lists itself" in f for f in failures), failures)
 
+    def test_missing_checksum_manifest_fails(self):
+        # "Wrong or missing SHA-256 entry" in its absolute form: with no
+        # SHA256SUMS.txt at all nobody could verify any download, so the
+        # audit must fail by NAME (not merely by count mismatch).
+        os.remove(os.path.join(self.dir, "SHA256SUMS.txt"))
+        failures = self._failures()
+        self.assertTrue(any("SHA256SUMS.txt is missing" in f for f in failures), failures)
+
     def test_duplicated_checksum_mapping_fails(self):
         path = os.path.join(self.dir, "SHA256SUMS.txt")
         body = open(path).read()
@@ -348,18 +356,27 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         blob[3] ^= 0xFF
         open(path, "wb").write(bytes(blob))
         script = os.path.join(_HERE, "verify-release-artifacts.py")
-        proc = subprocess.run(
-            [sys.executable, script, self.dir, TAG, VERSION, REPO],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        self.assertNotEqual(proc.returncode, 0, "corrupted set must exit non-zero")
-        combined = proc.stdout + proc.stderr
-        self.assertIn("::error::final artifact audit FAILED", combined)
-        self.assertIn(target, combined, "the failing asset must be named")
-        # And the success-adjacent marker must be absent.
-        self.assertNotIn("FINAL ARTIFACT AUDIT PASSED", combined)
+        # Repeated evaluations of the SAME corrupted bytes (a failed verify
+        # job re-run) must stay non-zero and name the same target every
+        # time: the CLI verdict is stateless, so no retry can escalate it.
+        first_combined = None
+        for attempt in (1, 2):
+            proc = subprocess.run(
+                [sys.executable, script, self.dir, TAG, VERSION, REPO],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(proc.returncode, 0, f"corrupted set must exit non-zero (run {attempt})")
+            combined = proc.stdout + proc.stderr
+            self.assertIn("::error::final artifact audit FAILED", combined)
+            self.assertIn(target, combined, f"the failing asset must be named (run {attempt})")
+            # And the success-adjacent marker must be absent.
+            self.assertNotIn("FINAL ARTIFACT AUDIT PASSED", combined)
+            if first_combined is None:
+                first_combined = combined
+            else:
+                self.assertEqual(combined, first_combined, "the CLI verdict must be deterministic across runs")
 
     def test_orphan_sidecar_fails(self):
         with open(os.path.join(self.dir, "Ghost_1.0.0.AppImage.sig"), "w") as f:

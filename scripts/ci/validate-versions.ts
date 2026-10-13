@@ -67,15 +67,14 @@
  * Do not mass-replace version strings in those files; only the six fields
  * above are build inputs.
  *
- * Existing guards this supersedes (kept until Agent 4 rewires CI):
- *   - .github/workflows/ci.yml "version-guard" inline bash (same field set,
- *     regex parsing, no tag mode, no tests)
- *   - .github/workflows/release.yml "version" job (three manifests + tag)
- *   - scripts/validate-security-config.mjs [4/5] (three manifests only)
- * Agent 4 owns the workflow files; the handoff plan is to replace the
- * inline logic with `npm run validate:versions` (default-branch mode) in
- * ci.yml and with `npm run validate:versions -- --release-tag
- * ${GITHUB_REF_NAME}` in release.yml so the logic lives in ONE place.
+ * Workflow wiring (complete): `ci.yml` → `version-guard` and the `frontend`
+ * job run `npm run validate:versions` (development mode); `release.yml` →
+ * `version` runs it with `--release-tag "${GITHUB_REF_NAME}"` on tag pushes.
+ * The old inline shell copies (ci.yml version-guard bash, the release job's
+ * three-manifest check) are retired; scripts/ci/test_workflow_contract.py
+ * pins that wiring so it cannot silently regress. validate-security-config.mjs
+ * retains a coarser three-manifest agreement check as part of its security
+ * report; it is a subset of this validator and not a competing rule source.
  *
  * Failure policy: fail closed. A required file that is missing, unreadable,
  * unparsable, or whose required field is absent or not a valid project

@@ -30,6 +30,37 @@ jobs:
       - name: Install dependencies from the lockfile
         # tsx (the validator's TypeScript loader) comes from devDependencies.
         run: npm ci
+      - name: Refuse a tag that exists in a conflicting state
+        # The unique v1.0.0 stable tag (and every future tag) must point at
+        # EXACTLY the commit this workflow is building. A tag that was
+        # re-pointed after the run started, or that resolves to some other
+        # commit than the checked-out release candidate, is a conflicting
+        # state: building it would put bytes on a release whose tag proves
+        # nothing about the source. Fail closed instead; never move or
+        # re-point an existing tag.
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          TAGGED=$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "$TAGGED" != "$HEAD_SHA" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} points at ${TAGGED} but this workflow is building ${HEAD_SHA}. The tag is in a conflicting state; never move or re-point an existing tag - delete the run, restore the tag to the intended release commit and re-tag only from the validated candidate."
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} resolves to the exact release commit ${HEAD_SHA}"
+      - name: No-Chinese source gate (single source checker)
+        # Agent 2's one no-Chinese checker runs against the release candidate
+        # BEFORE anything is built or uploaded. The release fails closed on
+        # any unintended Chinese/CJK hit in the candidate source or packaged
+        # text resources, and equally on a missing checker: a release that
+        # could not be scanned must never publish silently.
+        run: |
+          if [ ! -f scripts/ci/check-no-chinese.mjs ]; then
+            echo "::error::scripts/ci/check-no-chinese.mjs is missing - the no-Chinese gate cannot run. The release fails closed until the single source checker (owned by the CI agent) is present on the release commit."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs
       - id: v
         run: |
           set -euo pipefail
@@ -53,10 +84,30 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          # Prerelease classification via THE authoritative grammar
+          # (validate-versions.ts --is-prerelease), not a second suffix list:
+          # plain 1.0.0 classifies as a STABLE GitHub release, any version
+          # carrying a SemVer prerelease segment (beta, rc, next, ...) stays a
+          # prerelease, and an unparsable version fails the run instead of
+          # being published as stable.
+          PRERELEASE=$(npx tsx scripts/ci/validate-versions.ts --is-prerelease "$VERSION")
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          # Channel-conditional release-notes line: a stable release must not
+          # carry prerelease wording and a prerelease must not pose as stable.
+          if [ "$PRERELEASE" = "true" ]; then
+            {
+              echo "channel_note<<FRESS_NOTE_EOF"
+              echo "Pre-release: features may change between releases."
+              echo "FRESS_NOTE_EOF"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "channel_note<<FRESS_NOTE_EOF"
+              echo "**Stable release.** The in-app updater on this build only offers stable releases; beta and alpha builds stay on their own channels."
+              echo ""
+              echo "**Coming from a 1.0.x-beta build?** Your beta installation is never downgraded automatically. To move to stable deliberately: on Windows run the v1.0.0 setup.exe over the existing install (the MSI requires uninstalling the beta first); on macOS replace the app in /Applications; on Linux install the v1.0.0 bundle (deb/rpm need an explicit downgrade: \`apt install --allow-downgrades\` or \`rpm -U --oldpackage\`); on Android uninstall the beta APK first, which clears the app's private data. Desktop settings live in your user profile, not the install directory, and survive the transition."
+              echo "FRESS_NOTE_EOF"
+            } >> "$GITHUB_OUTPUT"
           fi
 
   create-release:
@@ -110,7 +161,7 @@ jobs:
 
             Verify any download against `SHA256SUMS.txt`.
 
-            Pre-release: features may change between releases.
+            ${{ needs.version.outputs.channel_note }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           # Draft until the verify-release job proves every required artifact
           # is present and hashes match. A failed build then leaves nothing

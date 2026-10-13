@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  isPrereleaseVersion,
   loadVersionFiles,
   parseCargoLockFressVersion,
   parseCargoTomlVersion,
@@ -699,6 +700,79 @@ describe('validateVersions: release-tag semantics', () => {
   });
 });
 
+// -- the stable release track (v1.0.0) -----------------------------------------
+//
+// The first stable release is tagged v1.0.0 while the beta sequence has
+// reached 1.0.12-beta. The validator must bind tag <-> fields on the stable
+// track exactly like on the beta track, WITHOUT claiming 1.0.0 is numerically
+// newer than 1.0.12-beta (that comparison belongs to the updater's channel
+// policy, not here), and without ever consulting the published-release
+// history in development mode.
+
+describe('validateVersions: the stable release track (v1.0.0)', () => {
+  it('tag v1.0.0 with every authoritative field at 1.0.0 passes release mode', () => {
+    const report = validate(coherentFiles('1.0.0'), { releaseTag: 'v1.0.0' });
+    expect(report.ok).toBe(true);
+    expect(report.canonical).toBe('1.0.0');
+    expect(report.releaseTag).toEqual({ input: 'v1.0.0', normalized: '1.0.0' });
+    // Every row agrees; the tag row is marked, not failed.
+    expect(report.checks.filter((c) => c.status === 'fail')).toHaveLength(0);
+    expect(report.checks.filter((c) => c.status === 'tag')).toHaveLength(1);
+  });
+
+  it('tag v1.0.0 against fields still carrying the beta version fails, naming both sides', () => {
+    const report = validate(coherentFiles('1.0.12-beta'), { releaseTag: 'v1.0.0' });
+    expect(report.ok).toBe(false);
+    const text = failureText(report);
+    expect(text).toContain('v1.0.0');
+    expect(text).toContain('1.0.12-beta');
+    expect(text).toContain('disagrees with the build version');
+  });
+
+  it('a stable candidate at 1.0.0 is legitimate in development mode while v1.0.12-beta is the newest published release', () => {
+    // No releaseTag => development validation. The validator is offline and
+    // never compares against published release history: a tree carrying the
+    // stable candidate version is the intended pre-tag state, and no
+    // "1.0.0 is older than 1.0.12-beta" numeric claim may reject it.
+    const report = validate(coherentFiles('1.0.0'));
+    expect(report.ok).toBe(true);
+    expect(report.canonical).toBe('1.0.0');
+    expect(report.releaseTag).toBeNull();
+  });
+
+  it('a partial bump anywhere fails identically on the stable track (one field left at 1.0.12-beta)', () => {
+    const files = coherentFiles('1.0.0');
+    files['src-tauri/tauri.conf.json'] = JSON.stringify(
+      { $schema: 'https://schema.tauri.app/config/2', productName: 'Fress', version: '1.0.12-beta' },
+      null,
+      2
+    );
+    const report = validate(files, { releaseTag: 'v1.0.0' });
+    expect(report.ok).toBe(false);
+    const text = failureText(report);
+    expect(text).toContain('src-tauri/tauri.conf.json .version is "1.0.12-beta"');
+    expect(text).toContain('expected "1.0.0"');
+  });
+
+  it('isPrereleaseVersion: the one authoritative stable/prerelease classification', () => {
+    // Plain stable version.
+    expect(isPrereleaseVersion('1.0.0')).toBe(false);
+    expect(isPrereleaseVersion('v1.0.0')).toBe(false);
+    // Every prerelease suffix form, including suffixes the retired suffix
+    // grep (beta|rc|alpha|dev) would have missed.
+    expect(isPrereleaseVersion('1.0.12-beta')).toBe(true);
+    expect(isPrereleaseVersion('1.0.0-rc.1')).toBe(true);
+    expect(isPrereleaseVersion('1.0.0-next')).toBe(true);
+    expect(isPrereleaseVersion('1.0.0-nightly.7')).toBe(true);
+    // Build metadata is NOT a prerelease (semver.org: it does not affect
+    // precedence or stability class).
+    expect(isPrereleaseVersion('1.0.0+build.1')).toBe(false);
+    // Unparsable input fails SAFE toward prerelease: it is never classified
+    // as a stable version.
+    expect(isPrereleaseVersion('junk')).toBe(true);
+  });
+});
+
 // -- disk loading + the real npm script -----------------------------------------
 
 describe('loadVersionFiles + the real npm script', () => {
@@ -833,6 +907,35 @@ describe('loadVersionFiles + the real npm script', () => {
     });
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('unknown argument');
+  });
+
+  it('--is-prerelease classifies versions for the release workflow without loading files', () => {
+    // The exact query release.yml runs: plain 1.0.0 must classify as a
+    // STABLE release (prerelease=false) and the beta sequence as prerelease.
+    const classify = (version: string) =>
+      spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--is-prerelease', version], {
+        cwd: resolve(process.cwd()),
+        encoding: 'utf8',
+        timeout: 120_000,
+      });
+    const stable = classify('1.0.0');
+    expect(stable.status).toBe(0);
+    expect(stable.stdout.trim()).toBe('false');
+
+    const beta = classify('1.0.12-beta');
+    expect(beta.status).toBe(0);
+    expect(beta.stdout.trim()).toBe('true');
+
+    // The gap the retired suffix grep could not cover: an unrecognized
+    // prerelease suffix is still a prerelease, never "stable".
+    const next = classify('1.0.0-next');
+    expect(next.status).toBe(0);
+    expect(next.stdout.trim()).toBe('true');
+
+    // An unparsable version is a usage error, never a stable classification.
+    const junk = classify('not-a-version');
+    expect(junk.status).toBe(2);
+    expect(junk.stderr).toContain('is not a valid project version');
   });
 
   it('inside GitHub Actions a failure emits ::error:: annotations for every violation', () => {

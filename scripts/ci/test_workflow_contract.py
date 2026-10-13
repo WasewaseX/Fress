@@ -187,6 +187,57 @@ class TestReleaseWorkflowContract(unittest.TestCase):
             for legacy in ("validate-versions.mjs", "expect-tag"):
                 self.assertNotIn(legacy, body, f"{path} must not reference the retired duplicate")
 
+    def test_no_chinese_gate_runs_in_the_version_job_before_anything_is_built(self):
+        # The no-Chinese gate is Agent 2's single source checker, invoked -
+        # never re-implemented - by the release workflow, inside the FIRST
+        # job so every build job (which all need the version job) runs after
+        # the scan. The gate must fail closed when the checker is missing: a
+        # release that could not be scanned must never publish silently.
+        job = self.jobs.get("version")
+        self.assertIsNotNone(job)
+        code = _code(job["body"])
+        self.assertIn("check-no-chinese.mjs", code)
+        self.assertIn("node scripts/ci/check-no-chinese.mjs", code)
+        missing_at = code.find("check-no-chinese.mjs is missing")
+        self.assertGreater(missing_at, -1, "the gate must fail closed when the checker is absent")
+
+    def test_prerelease_inference_uses_the_one_classifier_not_a_suffix_grep(self):
+        # The GitHub prerelease flag decides whether a release is stable or
+        # prerelease and which release-notes wording it gets. That decision
+        # must come from the authoritative version grammar
+        # (validate-versions.ts --is-prerelease), never from a second
+        # hardcoded suffix list that can drift from the app's own parser.
+        code = _code(self.jobs["version"]["body"])
+        self.assertIn("--is-prerelease", code)
+        self.assertNotIn(
+            "grep -qiE 'beta|rc|alpha|dev'",
+            code,
+            "a suffix grep is a second grammar and must not decide release stability",
+        )
+
+    def test_tag_conflicting_state_is_refused_on_tag_pushes(self):
+        # A tag that does not resolve to the exact commit being built is a
+        # conflicting state (re-pointed tag, stale ref); the version job must
+        # refuse it before anything is built, and only on tag pushes - a
+        # workflow_dispatch run has no tag to compare.
+        code = _code(self.jobs["version"]["body"])
+        self.assertIn("github.ref_type == 'tag'", code)
+        self.assertIn('refs/tags/${GITHUB_REF_NAME}^{commit}', code)
+        self.assertIn("conflicting state", code)
+
+    def test_release_notes_wording_is_channel_conditional(self):
+        # A stable release must never carry prerelease wording and a
+        # prerelease must never pose as stable: the notes line is an output
+        # of the version job (channel_note), interpolated into the release
+        # body - not a static line that contradicts one of the tracks.
+        create_body = self.jobs["create-release"]["body"]
+        self.assertIn("${{ needs.version.outputs.channel_note }}", create_body)
+        self.assertNotIn(
+            "Pre-release: features may change between releases.",
+            create_body,
+            "the static prerelease line must not be an unconditional release-notes literal",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

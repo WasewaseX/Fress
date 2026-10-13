@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.0 (2026-10-14): the first stable release
+
+Fress's first stable release. The application ships the complete, fully verified 1.0.x-beta line — the catalog, the verified in-app updater, the download → open boundary and the whole frontend quality pass from 1.0.12-beta — hardened with every regression fix that landed on the default branch after v1.0.12-beta. Version-wise this is a deliberate new beginning, not a regression: `1.0.0` is the **stable track**, tagged exactly as it reads, while beta development continues on its own prerelease sequence (the next one being 1.0.13-beta). SemVer ordering and the channel policy keep the two tracks apart; nothing in the release pipeline pretends that `1.0.0` is numerically newer than `1.0.12-beta`.
+
+### The last round of frontend hardening (everything that landed after v1.0.12-beta)
+- **A white-screen crash is gone.** Manually adding an app with an empty repository URL could save `githubUrl: undefined`, and the next card render called `.includes` on it and blanked the whole page; the save path now stores an empty string and both consumers guard legacy data.
+- **Keyboard and dialog stack repaired across the whole app.** Single-letter shortcuts no longer fire behind open dialogs, Escape in the export modal no longer tears down the entire stacked dialog set, palette arrow keys can no longer leave focus, highlight and Enter pointing at three different rows, More-menu items no longer strand focus on `<body>` after close, and the table view now confirms before deleting a custom app instead of doing it in one click.
+- **Accessibility follow-through on the quality pass**: tab roles without the tab contract removed, five keyboard-unreachable scrollable regions made focusable, per-manager copy-chip names, `aria-controls` on What's-new disclosures, per-item Add button names, 24px touch targets, debounced result-count announcements, a persistent update-announcement region, and forced-colors (Windows High Contrast) support. The RTL flash on load is fixed via a pre-paint `lang`/`dir` bootstrap.
+- **Download panel polish**: toast strings that could render their placeholders literally now interpolate, the live speed label reflects the actual transfer, and icon margins are RTL-safe.
+
+### A stable release you can pin
+- The release workflow refuses a tag that does not point at the exact commit being built, so a re-pointed or stale tag can never put bytes on a release.
+- The stable/prerelease classification of a release now comes from the one authoritative version grammar the app itself accepts (`validate-versions.ts --is-prerelease`): plain `1.0.0` publishes as a stable GitHub release with stable-release notes, and any prerelease suffix keeps prerelease wording. The old hardcoded suffix list is gone.
+- The no-Chinese source gate runs against the release candidate before anything is built or published; the release fails closed if the scan cannot run.
+- The version-coherence validator pins every authoritative version field to `1.0.0` for this tag — package.json, both package-lock roots, Cargo.toml, the `fress` Cargo.lock entry and tauri.conf.json — and refuses any partial bump before the pipeline starts.
+
+### Update channels: stable and beta stay separate
+- This build defaults to the **Stable** update channel and is only ever offered stable releases: `v1.0.12-beta` (a higher prerelease number on the other track) is never offered to stable clients.
+- Beta clients are not silently downgraded to 1.0.0 by the updater; the beta sequence continues with newer prereleases on its own channel.
+- **Coming from a 1.0.x-beta build?** Move deliberately, not automatically: run the v1.0.0 installer over your existing install on Windows (the MSI requires uninstalling the beta first) or replace the app on macOS; on Linux install the v1.0.0 bundle (deb/rpm need an explicit downgrade flag: `apt install --allow-downgrades` or `rpm -U --oldpackage`); on Android uninstall the beta APK first, which clears the app's private data. Desktop settings live in your user profile, not the install directory, and survive the transition.
+
 ## 1.0.12-beta (2026-10-13): the frontend-quality release
 
 A full-frontend quality pass landed as one integrated candidate and was re-verified on the merged tree: typecheck clean, 650 unit tests passed (2 environment-skipped), the full E2E suite green in CI, and the production build clean — all proven on the exact tagged commit (CI run on v1.0.12-beta, 2026-10-13). Every change below was held inside the frontend; the download engine, the open contract and the release pipeline were untouched.

@@ -60,6 +60,28 @@
  * lockfile ships an old `npm view` version and embeds the old crate version
  * in the binary metadata even though every manifest was bumped.
  *
+ * STABLE RELEASE TRACK: Fress ships two independent release tracks from the
+ * same pipeline. The beta sequence (1.0.1-beta ... 1.0.12-beta ...) continues
+ * as development prereleases; the first stable release is tagged v1.0.0 even
+ * though 1.0.12-beta has a higher patch number. The validator never compares
+ * numeric "newness" across tracks: SemVer ordering stays with the updater
+ * (src/lib/selfUpdate.ts), and the channel policy — not this script — keeps
+ * the tracks apart. What the validator guarantees for the stable track is
+ * exactly what it guarantees for a beta: the tag, every authoritative field
+ * and the release-derived filenames are ONE version (tag v1.0.0 <-> 1.0.0),
+ * a partial bump fails, and prior history is never rewritten. A development
+ * tree carrying 1.0.0 while v1.0.12-beta is the newest published release is
+ * the legitimate stable-candidate state, and a tree carrying 1.0.13-beta
+ * after the stable publication is the legitimate post-release state.
+ *
+ * PRERELEASE CLASSIFICATION (--is-prerelease): release.yml derives the
+ * GitHub "prerelease" flag from the canonical version. That classification
+ * is authoritative here too, not a second grammar: `--is-prerelease <v>`
+ * reports whether <v> carries a SemVer prerelease segment (anything after
+ * the patch, like -beta, -rc.1, -next), so plain `1.0.0` classifies as a
+ * STABLE GitHub release and no suffix list can silently drift from the
+ * version grammar the app itself accepts.
+ *
  * RELEASE MODE (--release-tag vX.Y.Z[-suffix]): when a release is built
  * from a tag, the tag and every authoritative field must be one version.
  * Outside release mode the tag is NOT consulted.
@@ -132,6 +154,22 @@ export function stripVPrefix(v: string): string {
 /** True for anything the app itself would accept as a version string. */
 export function isProjectVersion(v: string): boolean {
   return SEMVER_RE.test(stripVPrefix(v));
+}
+
+/** True when the version carries a SemVer prerelease segment ("1.0.12-beta",
+ * "1.0.0-rc.1", "1.0.0-next"), false for a bare stable version ("1.0.0")
+ * and for build-metadata-only versions ("1.0.0+build": semver.org says the
+ * build metadata does not affect precedence or stability class). This is
+ * THE authoritative prerelease classification: release.yml consumes it via
+ * `--is-prerelease` to decide the GitHub release's prerelease flag and the
+ * release-notes wording, so a stable tag can never ship with prerelease
+ * wording and a prerelease tag can never ship as a stable GitHub release.
+ * Unknown suffixes fail SAFE toward prerelease: an unrecognized suffix means
+ * "not yet a reviewed stable version", never "publish it as stable". */
+export function isPrereleaseVersion(v: string): boolean {
+  const m = SEMVER_RE.exec(stripVPrefix(v));
+  if (!m) return true; // unparsable input is not a stable version
+  return m[4] !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,6 +1051,11 @@ Options:
   --release-tag <tag>   Release context: the tag (e.g. v1.0.10-beta) must equal
                         the build version in every authoritative field.
   --expect-tag <tag>    Exact alias of --release-tag (wiring compatibility).
+  --is-prerelease <v>   Print "true" when <v> carries a SemVer prerelease
+                        segment, "false" when it is a stable version (the
+                        authoritative classification release.yml uses for the
+                        GitHub prerelease flag and the release-notes wording).
+                        Exit 2 for an unparsable version; never loads files.
   --root <dir>          Checkout root (default: the repo root this file lives in).
   -h, --help            Show this help.
 
@@ -1052,6 +1095,19 @@ export function runCli(argv: string[]): number {
     if (tag !== null) {
       releaseTag = tag;
       continue;
+    }
+    const prereleaseQuery = inline('--is-prerelease');
+    if (prereleaseQuery !== null) {
+      // Pure classification query (release.yml): no files are loaded and no
+      // coherence rules run — the only contract is the version grammar.
+      if (!isProjectVersion(prereleaseQuery)) {
+        console.error(
+          `validate:versions: "${prereleaseQuery}" is not a valid project version (expected vX.Y.Z or vX.Y.Z-suffix). An unparsable version is never classified as stable.`
+        );
+        return 2;
+      }
+      console.log(isPrereleaseVersion(prereleaseQuery) ? 'true' : 'false');
+      return 0;
     }
     const r = inline('--root');
     if (r !== null) {

@@ -92,10 +92,7 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
     if !status.is_success() {
         return Err(format!("GitHub returned HTTP {}", status));
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("Bad response: {}", e))?;
+    let text = read_capped_api_text(resp).await?;
     let body: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
     parse_gh_release(&body, &repo).ok_or_else(|| "Unexpected GitHub response".to_string())
@@ -141,10 +138,7 @@ async fn fetch_recent_releases(
     if !status.is_success() {
         return Err(format!("GitHub returned HTTP {}", status));
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("Bad response: {}", e))?;
+    let text = read_capped_api_text(resp).await?;
     let body: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
     let list = body
@@ -239,6 +233,50 @@ struct TextFetch {
 }
 
 const FETCH_TEXT_BODY_CAP: u64 = 2 * 1024 * 1024;
+
+/// Whole-body cap for the JSON API commands (`fetch_latest_release`,
+/// `fetch_recent_releases`, `fetch_fdroid_package`). Generous by design: a
+/// `per_page=30` release list is order-of-megabytes, so the cap can only be
+/// hit by a hostile or broken pinned host. Unlike the text commands (which
+/// truncate and report), these bodies are parsed as JSON, so a truncation
+/// could never be interpreted - past the cap the response is refused with a
+/// named error instead of being read into memory without bound (an unbounded
+/// `resp.text()` on a pinned host would let a multi-gigabyte body balloon
+/// the app's RSS until the process dies).
+const API_BODY_CAP: u64 = 10 * 1024 * 1024;
+
+/// Streams a JSON API response body under `cap`. An oversized advertised
+/// content-length refuses the body outright; a body that grows past the cap
+/// mid-stream is refused the moment it crosses the line. Named so callers
+/// can surface the reason instead of a confusing JSON parse failure.
+async fn read_capped_api_text_with_cap(
+    mut resp: reqwest::Response,
+    cap: u64,
+) -> Result<String, String> {
+    if resp.content_length().is_some_and(|n| n > cap) {
+        return Err("Response body too large".to_string());
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("Bad response: {}", e))?
+    {
+        if buf.len() as u64 + chunk.len() as u64 > cap {
+            return Err("Response body too large".to_string());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    // API JSON is UTF-8 by RFC 8259; a body that is not is a broken answer
+    // (reqwest's text() would silently replace invalid bytes, moving the
+    // failure into a less explicable JSON parse error).
+    String::from_utf8(buf).map_err(|_| "Response body is not UTF-8".to_string())
+}
+
+/// Production cap for [`read_capped_api_text_with_cap`].
+async fn read_capped_api_text(resp: reqwest::Response) -> Result<String, String> {
+    read_capped_api_text_with_cap(resp, API_BODY_CAP).await
+}
 
 /// Streams a response body into a `TextFetch` under the shared 2 MiB cap:
 /// an oversized content-length refuses the body outright, and a body that
@@ -877,10 +915,7 @@ async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
     if !resp.status().is_success() {
         return Err(format!("F-Droid returned HTTP {}", resp.status()));
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("Bad response: {}", e))?;
+    let text = read_capped_api_text(resp).await?;
     let body: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
 

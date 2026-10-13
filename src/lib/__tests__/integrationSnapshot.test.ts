@@ -527,4 +527,45 @@ describe('integration-snapshot.mjs (spawned against fixtures + a mock GitHub API
     expect(fields).toContain('open_pull_requests');
     expect(snap.unavailable_observations[0].reason).toContain('no read token');
   });
+
+  // Brief case 14: a RED run must still publish its evidence. The workflow
+  // attaches the JSON artifact with `if: always()` (pinned by the contract
+  // test), and the script writes the step summary BEFORE it exits non-zero —
+  // so the diagnosing reader gets the full picture even when the check fails.
+  it('14a. a gate-failed run (exit 4) still writes the step summary AND the JSON artifact', async () => {
+    const { root } = makeFixture(1);
+    freshHandlers(root);
+    const summaryPath = join(root, 'step-summary.md');
+    const r = await runSnapshot(root, {
+      args: ['--version-coherence', 'fail', '--version-coherence-rc', '1'],
+      env: { GITHUB_STEP_SUMMARY: summaryPath },
+    });
+    expect(r.status).toBe(4);
+    // The JSON artifact exists and is parseable even though the run is red.
+    const snap = r.json();
+    expect(snap.version_coherence.result).toBe('fail');
+    // The step summary was written to $GITHUB_STEP_SUMMARY (append mode) and
+    // carries the sections a diagnostic reader needs.
+    const summary = readFileSync(summaryPath, 'utf8');
+    expect(summary).toContain('# Fress integration snapshot');
+    expect(summary).toContain('| Version coherence');
+    expect(summary).toContain('| FAIL');
+    expect(summary).toContain('## Known unavailable observations');
+  });
+
+  it('14b. an unavailable-observations run (exit 3) also retains its step summary', async () => {
+    const { root } = makeFixture(1);
+    freshHandlers(root, { fail: { match: '/pulls', status: 500 } });
+    const summaryPath = join(root, 'step-summary-3.md');
+    const r = await runSnapshot(root, {
+      args: ['--version-coherence', 'pass', '--version-coherence-rc', '0', '--artifact-audit', JSON.stringify({ verdict: 'pass', verifier_exit_code: 0, hard_failures: 0, release_tag: TAG })],
+      env: { GITHUB_STEP_SUMMARY: summaryPath },
+    });
+    expect(r.status).toBe(3);
+    const summary = readFileSync(summaryPath, 'utf8');
+    expect(summary).toContain('**unavailable:');
+    expect(summary).toContain('### Observations that could not be made this run');
+    // The artifact is still there for the diagnosing reader.
+    expect(r.json().open_pull_requests.status).toBe('unavailable');
+  });
 });

@@ -24,6 +24,27 @@ name: CI
 #   - The E2E/perf suites run against untrusted PR code too: they hold no
 #     secrets and their network layer is fixture-backed and deny-all by
 #     default (tests/e2e/netpolicy.ts aborts every non-loopback request).
+#
+# Runner + action maintenance (docs/quality-gates.md, section 2.4):
+#   - Actions are kept on maintained releases that run on Node 24 natively
+#     (checkout v7, setup-node v7, upload-artifact v7): the previous v4 pins
+#     triggered a real "Node.js 20 is deprecated" warning on every job
+#     because the runner force-upgraded them. Pins stay full commit SHAs -
+#     never loosened to silence a warning.
+#   - Rendering-sensitive jobs are PINNED, not floating: e2e + perf compare
+#     pixels/font rasterization, and ubuntu-latest migrates to Ubuntu 26
+#     (2026-10-19, runner-images#14748). They run ubuntu-24.04 - the image
+#     the visual baselines are green on - so no platform change can arrive
+#     as a surprise red. Moving to a newer image is a deliberate PR that
+#     regenerates the baselines on that image and proves the suite green.
+#   - `rust` moves deliberately from ubuntu-22.04 to ubuntu-24.04: 22.04 is
+#     an aging image, and the release path (release.yml, not this file)
+#     builds the Linux bundle on ubuntu-latest = 24.04, so CI now tests on
+#     the same Linux the installers are produced on. This PR's own CI run
+#     is the test of that migration.
+#   - Distro-insensitive jobs (version-guard, frontend, artifact-audit-tests)
+#     stay on ubuntu-latest: their toolchains are pinned by setup-node and
+#     the lockfiles, and nothing they measure depends on the distro.
 
 on:
   push:
@@ -52,10 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
       - name: Install dependencies from the lockfile
@@ -70,10 +91,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
           cache: npm
@@ -106,19 +127,23 @@ jobs:
 
   rust:
     name: Rust fmt, clippy, tests (linux)
-    runs-on: ubuntu-22.04
+    # Deliberate 22.04 -> 24.04 migration (see the header note): parity with
+    # the Linux image the release bundles are built on, before the 22.04
+    # image ages out from under us. Proven by this repo's own CI on the
+    # branch that introduced it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: rustfmt, clippy
-      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
           cache: npm
@@ -159,14 +184,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-      - uses: swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
           cache: npm
@@ -189,7 +214,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
       - name: Run the verifier test suite (stdlib unittest)
@@ -205,13 +230,17 @@ jobs:
     # Windows rasterize text differently and are NOT part of this gate (see
     # docs/quality-gates.md, "What still requires manual device testing").
     name: E2E + visual (linux)
-    runs-on: ubuntu-latest
+    # Pinned (NOT ubuntu-latest): visual baselines are pixel comparisons and
+    # ubuntu-latest migrates to Ubuntu 26 on 2026-10-19 (runner-images#14748).
+    # 24.04 is the image the baselines are green on; a move to 26 must be a
+    # deliberate PR that regenerates them on that image (docs 2.4).
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
           cache: npm
@@ -225,7 +254,7 @@ jobs:
         run: npm run test:e2e
       - name: Upload Playwright artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24 native since v6)
         with:
           name: playwright-report
           path: |
@@ -247,13 +276,15 @@ jobs:
     # a 10% machine delta must never fail a PR, a rendering-contract
     # regression must always.
     name: Perf invariants (linux)
-    runs-on: ubuntu-latest
+    # Same pin rationale as e2e: headless-Chromium rendering must not drift
+    # with the ubuntu-latest image migration (docs 2.4).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
         with:
           node-version: 20
           cache: npm
@@ -267,7 +298,7 @@ jobs:
         run: npm run test:perf
       - name: Attach the measurement record
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24 native since v6)
         with:
           name: perf-results
           path: scripts/perf/results/

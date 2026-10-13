@@ -352,23 +352,19 @@ function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allow
 
 function scanTextFile(kind, scope, absPath, relPath) {
   // Symlinks need lstat-first handling: git stores a symlink's LINK TEXT as
-  // the blob content, not the target's content. A symlinked DIRECTORY (e.g.
-  // a worktree's node_modules link, which the "node_modules/" ignore rule
-  // does not match because git sees a symlink, not a directory) has no
-  // scannable committed payload: skip it with a declared warning. Every
-  // other symlink is scanned as its LINK TEXT (the committed content). A
-  // NON-symlink directory entry (a submodule gitlink checkout) is NOT caught
-  // here: it falls through to readFileSync and fails closed like any
-  // unreadable file - the gate must never fail open on tracked content.
+  // the blob content, not the target's content. Every symlink is scanned as
+  // its LINK TEXT (file links and directory links alike; a directory link
+  // additionally gets a declared warning that the linked contents are not
+  // part of the commit). A NON-symlink directory entry (a submodule gitlink
+  // checkout) is NOT caught here: it falls through to readFileSync and fails
+  // closed like any unreadable file - the gate must never fail open on
+  // tracked content.
   let lst = null;
   try { lst = lstatSync(absPath); } catch { /* let readFileSync fail closed */ }
   if (lst && lst.isSymbolicLink()) {
-    let targetIsDir = false;
-    try { targetIsDir = statSync(absPath).isDirectory(); } catch { /* broken link: scan the link text */ }
-    if (targetIsDir) {
-      process.stderr.write(`::warning::check-no-chinese: skipping directory entry ${relPath} (symlinked directory; git stores the link, not its contents)\n`);
-      return;
-    }
+    // git stores a symlink's LINK TEXT as the blob content - scan it, for
+    // file links AND directory links alike (a Han-bearing link target path
+    // is committed content even when the linked directory itself is not).
     let link;
     try {
       link = readlinkSync(absPath, 'buffer');
@@ -388,6 +384,11 @@ function scanTextFile(kind, scope, absPath, relPath) {
         match_escaped: '', context_escaped: '', role_hint: roleHint(relPath),
         owner_action: 're-create the symlink with a UTF-8 target path; undecodable committed content fails the scan' });
       return;
+    }
+    let targetIsDir = false;
+    try { targetIsDir = statSync(absPath).isDirectory(); } catch { /* broken link: link text already scanned */ }
+    if (targetIsDir) {
+      process.stderr.write(`::warning::check-no-chinese: symlinked directory ${relPath} - its link text is scanned; the linked directory's contents are not part of the commit\n`);
     }
     SUMMARY.textScanned += 1;
     for (const hit of scanTextPayload(kind, scope, relPath, text)) pushHit2(hit, kind, scope, relPath);
@@ -514,7 +515,7 @@ function walkFiles(root, base, acc = []) {
     const full = join(root, entry.name);
     const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) walkFiles(full, rel, acc);
-    else if (entry.isFile()) acc.push([full, rel]);
+    else if (entry.isFile() || entry.isSymbolicLink()) acc.push([full, rel]);
   }
   return acc;
 }

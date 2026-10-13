@@ -27,6 +27,19 @@ export const TauriModal: React.FC<TauriModalProps> = ({ isOpen, onClose }) => {
   const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (isOpen) {
+      // Same reopen contract as Batch/Export/palette: a "Copied" chip from
+      // the previous session must not resurrect when the dialog reopens
+      // inside the 2s timer window.
+      setCopiedCmd(null);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     return () => {
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
@@ -67,6 +80,7 @@ npx @tauri-apps/cli build`;
       role="dialog"
       aria-modal="true"
       aria-labelledby="tauri-modal-title"
+      aria-describedby="tauri-modal-desc"
     >
       <div
         id="tauri-modal-container"

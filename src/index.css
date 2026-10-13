@@ -326,6 +326,30 @@ body {
   outline-offset: 2px;
 }
 
+/* Windows High Contrast / forced-colors mode: the tokenized slate/sky
+   surfaces are stripped by the UA, so restore system colors for the
+   primitives that carry meaning and keep the focus outline visible.
+   Without this the UI degrades to UA heuristics on pressed/disabled
+   states (WCAG 1.4.11-adjacent). */
+@media (forced-colors: active) {
+  :root {
+    --fr-focus: Highlight;
+  }
+  [aria-pressed="true"],
+  .fr-chip-active {
+    border: 2px solid Highlight;
+  }
+  [disabled],
+  [aria-disabled="true"] {
+    color: GrayText;
+    border-color: GrayText;
+  }
+  ::selection {
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+
 /* Sonner toasts: theme aware instead of hardcoded dark styles */
 [data-sonner-toast] {
   background: var(--color-slate-800) !important;

@@ -69,8 +69,13 @@ export const LegalModals: React.FC<LegalModalsProps> = ({
 
         {/* Tab Navigation: plain buttons (no tab roles) so keyboard users get
             real buttons in the tab order; the selection state is exposed via
-            aria-pressed on each. */}
-        <div className="flex border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950 px-4 text-xs overflow-x-auto">
+            aria-pressed on each. Keyboard-scrollable when the long localized
+            labels overflow the strip. */}
+        <div
+          className="flex border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950 px-4 text-xs overflow-x-auto"
+          tabIndex={0}
+          aria-label={t('legal.title')}
+        >
           <button
             type="button"
             onClick={() => setActiveTab('privacy')}

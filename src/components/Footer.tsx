@@ -2,14 +2,15 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import React, { useState } from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import { RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { LegalTab } from './LegalModals';
 import { openExternal } from '../lib/external';
 import { useDownloadActions } from '../lib/downloads';
 import { checkForUpdate, UpdateState } from '../lib/selfUpdate';
-import { startOwnUpdateDelivery } from '../features/selfUpdate/updateDelivery';
+import { startOwnUpdateDelivery, getDeliveryState, subscribeDelivery } from '../features/selfUpdate/updateDelivery';
+import { pillStatusFor } from '../features/selfUpdate/useSelfUpdate';
 import { useI18n } from '../lib/i18n';
 import pkg from '../../package.json';
 
@@ -24,6 +25,16 @@ const UpdateButton: React.FC = () => {
   const [state, setState] = useState<UpdateState>({ kind: 'idle' });
   const { startDownload } = useDownloadActions();
   const { t } = useI18n();
+  // Same live delivery store the header pill subscribes to: the footer used
+  // to keep its "Download vX" label through fetching/downloading/verifying
+  // with no feedback that the click registered (only the module guard's
+  // "already in progress" toast answered repeated clicks).
+  const delivery = useSyncExternalStore(subscribeDelivery, getDeliveryState);
+  const pillStatus =
+    state.kind === 'available' && state.asset
+      ? pillStatusFor(delivery, state.release.version, t)
+      : null;
+  const delivering = Boolean(pillStatus?.busy);
 
   const run = async () => {
     if (state.kind === 'checking') return;
@@ -50,6 +61,7 @@ const UpdateButton: React.FC = () => {
   };
 
   const label = (() => {
+    if (delivering && pillStatus) return pillStatus.label;
     switch (state.kind) {
       case 'idle':
         return t('update.check');
@@ -81,7 +93,8 @@ const UpdateButton: React.FC = () => {
       id="footer-update-btn"
       type="button"
       onClick={() => void (state.kind === 'available' ? startUpdate() : run())}
-      disabled={!active && state.kind !== 'available'}
+      disabled={(!active && state.kind !== 'available') || delivering}
+      aria-busy={delivering || undefined}
       title={t('update.tooltip')}
       aria-live="polite"
       className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border transition-colors ${

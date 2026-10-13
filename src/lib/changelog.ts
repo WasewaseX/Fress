@@ -44,9 +44,13 @@ export function parseChangelog(md: string): ChangelogEntry[] {
     const line = lineRaw.trim();
 
     if (line.startsWith('## ')) {
-      // "## 1.0.1-beta (2026-09-21)" -> version + optional date
+      // "## 1.0.1-beta (2026-09-21)" -> version + optional date.
+      // A trailing release title ("## 1.0.12-beta (2026-10-13): the
+      // frontend-quality release") used to break the $-anchored match, so
+      // THAT release's own detailed changelog silently never rendered -
+      // version matched nothing and changelogForVersion returned null.
       const head = line.slice(3).trim();
-      const m = head.match(/^(.*?)\s*\((\d{4}-\d{2}-\d{2})\)$/);
+      const m = head.match(/^(.*?)\s*\((\d{4}-\d{2}-\d{2})\)(?::\s*.*)?$/);
       current = {
         version: m ? m[1].trim() : head,
         date: m ? m[2] : null,

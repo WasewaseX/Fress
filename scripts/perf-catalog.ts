@@ -9,9 +9,9 @@
  * What it measures
  * - The filter/sort pipeline that re-runs on EVERY keystroke in the search
  *   box (filterAndSortApps, the exact predicate chain App.tsx uses).
- * - The per-app favorite/selection membership lookups the grid does per
- *   render (Array.includes over the id lists, as the composition layer
- *   calls them).
+ * - The per-app membership lookups the grid does per render, as the
+ *   composition layer actually calls them since the Set migration
+ *   (memoized Set.has over the id Sets - see App.tsx).
  *
  * What it deliberately does NOT claim
  * - It cannot measure WebView paint/layout or React reconciliation from
@@ -63,17 +63,17 @@ function benchFilter(label: string, apps: AppItem[], query: string, iterations: 
   );
 }
 
-function benchIncludes(label: string, listSize: number, iterations: number): void {
-  const ids = Array.from({ length: listSize }, (_, i) => `id-${i}`);
+function benchSetHas(label: string, listSize: number, iterations: number): void {
+  const set = new Set(Array.from({ length: listSize }, (_, i) => `id-${i}`));
   // Warmup
-  for (let i = 0; i < 100; i++) ids.includes('id-nope');
+  for (let i = 0; i < 100; i++) set.has('id-nope');
   const start = performance.now();
   let sink = 0;
   for (let i = 0; i < iterations; i++) {
-    sink += ids.includes(`id-${i % listSize}`) ? 1 : 0;
+    sink += set.has(`id-${i % listSize}`) ? 1 : 0;
   }
   const ms = (performance.now() - start) / iterations;
-  console.log(`${label.padEnd(46)} ${ms.toFixed(5)} ms/call (list=${listSize}, sink=${sink % 2})`);
+  console.log(`${label.padEnd(46)} ${ms.toFixed(5)} ms/call (set=${listSize}, sink=${sink % 2})`);
 }
 
 console.log(`Catalog baseline: ${INITIAL_APPS.length} apps shipped.\n`);
@@ -88,8 +88,8 @@ benchFilter('stress 5000 apps, empty query', syntheticCopy(5000, INITIAL_APPS), 
 benchFilter('stress 5000 apps, 8-char query', syntheticCopy(5000, INITIAL_APPS), 'free and', 50);
 
 console.log('\n--- per-card membership lookups (grid render, per card) ---');
-benchIncludes('favorites.includes per card (25 favs)', 25, 200_000);
-benchIncludes('selectedIds.includes per card (50 sel)', 50, 200_000);
+benchSetHas('favoriteSet.has per card (25 favs)', 25, 200_000);
+benchSetHas('selectedSet.has per card (50 sel)', 50, 200_000);
 
 console.log(
   '\nReading: the per-keystroke pipeline is sub-millisecond even at 1000 apps and a few ms at 5000 -' +

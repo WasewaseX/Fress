@@ -85,6 +85,12 @@ export function BatchActionBar(props: {
           <X className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
+
+      {/* Announce the resolving phase: the label swap + spinner were the only
+          signals, and this bar has no modal-level status strip. */}
+      <span className="sr-only" role="status">
+        {resolving ? t('bar.downloading') : ''}
+      </span>
     </aside>
   );
 }

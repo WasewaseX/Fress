@@ -32,12 +32,9 @@ import {
 import { useTheme } from './ThemeProvider';
 import { useDownloadState, useDownloadActions, isAndroidWebview } from '../lib/downloads';
 import { LANGUAGES, useI18n } from '../lib/i18n';
+import { PALETTE_KEY } from '../lib/utils';
 import { toast } from 'sonner';
 import pkg from '../../package.json';
-
-/** macOS uses ⌘K; every other platform prints the literal key combo. */
-const IS_MAC = typeof navigator !== 'undefined' && /mac/i.test(`${navigator.platform || ''} ${navigator.userAgent}`);
-const PALETTE_KEY = IS_MAC ? '⌘K' : 'Ctrl+K';
 
 interface HeaderProps {
   searchQuery: string;
@@ -195,6 +192,18 @@ export const Header: React.FC<HeaderProps> = ({
     setShowMoreMenu(false);
   };
 
+  // For menu items that open a DIALOG (or a native picker / toast-only
+  // action): the item unmounts with the menu, so the dialog's focus restore
+  // would otherwise see <body> as the opener and drop the keyboard user at
+  // the top of the document when the dialog closes. Focus the always-mounted
+  // More button FIRST: the dialog then captures it as the opener and hands
+  // focus back to it on close.
+  const closeMenuAndOpen = (open: () => void) => {
+    moreBtnRef.current?.focus();
+    setShowMoreMenu(false);
+    open();
+  };
+
   // Close the More menu on Escape and hand focus back to its button, so
   // keyboard users do not fall back to the top of the page.
   useEffect(() => {
@@ -319,18 +328,23 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* ---- Secondary group: tabs + view toggle (desktop) and the More menu (every size) ---- */}
             <div id="header-secondary-group" className="order-3 md:order-5 flex items-center gap-2 shrink-0">
+              {/* Page switch: two states over the whole main content. Plain
+                pressed-buttons (not tab roles): the swapped-in page is the
+                entire document body, not a panel beside these controls, and
+                the mobile More-menu equivalents use aria-pressed too - a
+                role=tablist without arrow-key handling or tabpanels promised
+                behavior that was never implemented. */}
               {onPageChange && (
                 <div
                   id="page-tabs"
-                  role="tablist"
+                  role="group"
                   aria-label={t('header.sectionsAria')}
                   className="hidden lg:flex items-center bg-fr-bg border border-fr-border p-0.5 rounded-lg"
                 >
                   <button
                     id="page-catalog-btn"
                     type="button"
-                    role="tab"
-                    aria-selected={page === 'catalog'}
+                    aria-pressed={page === 'catalog'}
                     onClick={() => onPageChange('catalog')}
                     className={`h-[var(--fr-h-secondary)] px-2.5 rounded-md text-xs font-medium transition-colors ${
                       page === 'catalog' ? 'fr-chip-active shadow-xs' : 'text-fr-text-muted hover:text-fr-text'
@@ -342,8 +356,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     id="page-replace-btn"
                     type="button"
-                    role="tab"
-                    aria-selected={page === 'replace'}
+                    aria-pressed={page === 'replace'}
                     onClick={() => onPageChange('replace')}
                     className={`inline-flex items-center gap-1 h-[var(--fr-h-secondary)] px-2.5 rounded-md text-xs font-medium transition-colors ${
                       page === 'replace' ? 'fr-chip-active shadow-xs' : 'text-fr-text-muted hover:text-fr-text'
@@ -494,10 +507,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onExportCatalog();
-                          }}
+                          onClick={() => closeMenuAndOpen(onExportCatalog)}
                           className={MORE_ITEM}
                         >
                           <FileDown className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
@@ -506,10 +516,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            fileInputRef.current?.click();
-                          }}
+                          onClick={() => closeMenuAndOpen(() => fileInputRef.current?.click())}
                           className={MORE_ITEM}
                         >
                           <Upload className="w-3.5 h-3.5 text-fr-success shrink-0" aria-hidden="true" />
@@ -519,10 +526,7 @@ export const Header: React.FC<HeaderProps> = ({
                         {onOpenExportModal && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setShowMoreMenu(false);
-                              onOpenExportModal();
-                            }}
+                            onClick={() => closeMenuAndOpen(onOpenExportModal)}
                             className={MORE_ITEM}
                           >
                             <Share2 className="w-3.5 h-3.5 text-fr-success shrink-0" aria-hidden="true" />
@@ -533,10 +537,7 @@ export const Header: React.FC<HeaderProps> = ({
                         {onOpenBatchInstall && batchCount === 0 && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setShowMoreMenu(false);
-                              onOpenBatchInstall();
-                            }}
+                            onClick={() => closeMenuAndOpen(onOpenBatchInstall)}
                             className={MORE_ITEM}
                           >
                             <Terminal className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
@@ -554,10 +555,7 @@ export const Header: React.FC<HeaderProps> = ({
                         {onOpenWhatsNew && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setShowMoreMenu(false);
-                              onOpenWhatsNew();
-                            }}
+                            onClick={() => closeMenuAndOpen(onOpenWhatsNew)}
                             className={MORE_ITEM}
                           >
                             <Sparkles className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
@@ -568,10 +566,7 @@ export const Header: React.FC<HeaderProps> = ({
                         {onCheckForUpdates && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setShowMoreMenu(false);
-                              onCheckForUpdates();
-                            }}
+                            onClick={() => closeMenuAndOpen(onCheckForUpdates)}
                             className={MORE_ITEM}
                           >
                             <RefreshCw className="w-3.5 h-3.5 text-fr-primary shrink-0" aria-hidden="true" />
@@ -708,10 +703,7 @@ export const Header: React.FC<HeaderProps> = ({
                         </p>
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onOpenTauriModal();
-                          }}
+                          onClick={() => closeMenuAndOpen(onOpenTauriModal)}
                           className={MORE_ITEM}
                         >
                           <Download className="w-3.5 h-3.5 text-fr-warning shrink-0" aria-hidden="true" />
@@ -720,10 +712,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowMoreMenu(false);
-                            onOpenShortcutsModal();
-                          }}
+                          onClick={() => closeMenuAndOpen(onOpenShortcutsModal)}
                           className={MORE_ITEM}
                         >
                           <Keyboard className="w-3.5 h-3.5 text-fr-text-muted shrink-0" aria-hidden="true" />
@@ -737,6 +726,15 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* ---- Update pill: own line on phones, inline after the brand on desktop ---- */}
+            {/* Persistent live region for the FIRST appearance of an update:
+                the pill's own aria-live span mounts together with its first
+                message, and a region that appears with its content is not
+                announced - startup detections were silent to screen readers.
+                This region always exists, so the '' -> label transition is
+                announced; later phase flips are announced by the pill. */}
+            <span role="status" className="sr-only">
+              {updateVersion ? t('header.updatePill').replace('{v}', updateVersion) : ''}
+            </span>
             {updateVersion && (
               <button
                 id="header-update-pill"
@@ -799,7 +797,10 @@ export const Header: React.FC<HeaderProps> = ({
                       type="button"
                       onClick={() => onSearchChange('')}
                       aria-label={t('header.clearSearch')}
-                      className="text-fr-text-muted hover:text-fr-text p-0.5"
+                      // 24px hit area minimum (WCAG 2.5.8): an 18px target
+                      // sat directly next to the palette chip, easy to
+                      // mistap on the Android webview's touch keyboard bar.
+                      className="flex items-center justify-center min-w-6 min-h-6 text-fr-text-muted hover:text-fr-text"
                     >
                       <X className="w-3.5 h-3.5" aria-hidden="true" />
                     </button>
@@ -808,7 +809,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       type="button"
                       onClick={onOpenCommandPalette}
-                      className="text-[11px] font-mono bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong text-fr-text px-1.5 py-0.5 rounded transition-colors"
+                      className="inline-flex items-center min-h-6 text-[11px] font-mono bg-fr-bg hover:bg-fr-bg border border-fr-border hover:border-fr-border-strong text-fr-text px-1.5 rounded transition-colors"
                       // Name-from-content used to be just "Ctrl+K" (and
                       // stayed "Ctrl+K" on macOS where the real combo is
                       // ⌘K). The accessible name must convey purpose AND

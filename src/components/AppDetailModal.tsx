@@ -623,6 +623,11 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
       <button
         type="button"
         onClick={() => void handleCopy(cmd, label)}
+        // Three identical "Copy" chips were indistinguishable to AT. The
+        // name is composed WITH the visible state text so it always
+        // contains it (axe label-content-name-mismatch): Copy / Copied /
+        // Copy failed each stay recognizable.
+        aria-label={`${label} — ${state ? (state.ok ? t('common.copied') : t('common.copyFailed')) : t('common.copy')}`}
         className="inline-flex items-center gap-1 bg-slate-950/[0.05] dark:bg-white/[0.06] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 text-xs px-2.5 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.1] shrink-0 transition-colors"
       >
         {state ? (
@@ -650,11 +655,15 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
   const hasAndroid = app.platforms.includes('android');
   const FOSS_LICENSES = ['GPL-2.0+', 'GPL-3.0', 'GPL-2.0', 'MIT', 'Apache-2.0', 'MPL-2.0', 'LGPL-2.1', 'GNU LGPL', 'LGPL-3.0', 'AGPL-3.0', 'EUPL-1.2', 'BSD', 'ISC'];
   const licenseClass = FOSS_LICENSES.includes(app.license) ? 'foss' : 'notfoss';
-  const repoHost = app.githubUrl.includes('github.com')
+  // Optional-chained: a custom entry saved by an older build can carry
+  // githubUrl === undefined (pre-fix AddAppModal save path); the storage
+  // loader sanitizes it on the NEXT launch, but this session must not
+  // white-screen before that.
+  const repoHost = (app.githubUrl || '').includes('github.com')
     ? 'github'
-    : app.githubUrl.includes('gitlab.com')
+    : (app.githubUrl || '').includes('gitlab.com')
       ? 'gitlab.com'
-      : app.githubUrl.includes('gitlab')
+      : (app.githubUrl || '').includes('gitlab')
         ? 'selfgitlab'
         : 'none';
   // One button per official home: GitHub next to GitLab when a project
@@ -708,7 +717,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
               )}
             </div>
             <h2 id="app-detail-title" className="text-lg font-bold text-slate-100 tracking-tight flex items-center gap-2.5">
-              <AppIcon appId={app.id} name={app.name} size={34} />
+              {/* key: the modal instance stays mounted across app switches;
+                  without it, a failed icon fetch for app A kept the letter
+                  fallback for app B even when B's real icon existed. */}
+              <AppIcon key={app.id} appId={app.id} name={app.name} size={34} />
               {app.name}
             </h2>
             <p id="app-detail-tagline" className="text-xs text-slate-400 mt-0.5">

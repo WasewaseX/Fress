@@ -408,7 +408,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           <span
             id={`app-stars-count-${app.id}`}
             className={`inline-flex items-center gap-1 font-mono text-xs text-slate-400 ${shownStars === 0 ? 'hidden' : ''}`}
-            title={app.githubUrl.includes('github.com') ? t('card.stars.tipGithub').replace('{count}', formatStarCount(shownStars)) : t('card.stars.tipForge').replace('{count}', formatStarCount(shownStars))}
+            title={(app.githubUrl || '').includes('github.com') ? t('card.stars.tipGithub').replace('{count}', formatStarCount(shownStars)) : t('card.stars.tipForge').replace('{count}', formatStarCount(shownStars))}
           >
             <Star className="w-3 h-3 fill-slate-400 text-slate-400" aria-hidden="true" />
             <span>{formatStarCount(shownStars)}</span>

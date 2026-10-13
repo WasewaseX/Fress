@@ -5,7 +5,14 @@
 /**
  * Small pure formatting helpers, kept dependency-free so they can be unit
  * tested (and reused) without pulling the Tauri download stack along.
+ *
+ * The one piece of copy produced here - the ETA suffix - is localized via
+ * the currentLang leaf (fed by the i18n provider from 'downloads.eta');
+ * previously the English word "left" was hardcoded and shipped to every
+ * non-English download panel.
  */
+
+import { getEtaSuffix } from './currentLang';
 
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
@@ -20,10 +27,11 @@ export function formatSpeed(bps: number): string {
 
 export function formatEta(secs: number): string {
   if (!secs || !isFinite(secs) || secs <= 0) return '';
-  if (secs < 60) return `${Math.ceil(secs)}s left`;
+  const suffix = getEtaSuffix();
+  if (secs < 60) return `${Math.ceil(secs)}s ${suffix}`;
   const m = Math.floor(secs / 60);
   const s = Math.ceil(secs % 60);
-  if (m < 60) return `${m}m ${s}s left`;
+  if (m < 60) return `${m}m ${s}s ${suffix}`;
   const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m left`;
+  return `${h}h ${m % 60}m ${suffix}`;
 }

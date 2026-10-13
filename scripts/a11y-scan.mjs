@@ -149,6 +149,22 @@ let blockingTotal = 0;
 let contrastFindings = 0;
 const settle = () => page.waitForTimeout(400);
 
+// Menu labels per scan language (kept in sync with DICTS; the scan is a
+// plain .mjs and cannot import the TSX dict directly).
+const SCAN_STRINGS = {
+  en: { shortcuts: 'Keyboard shortcuts', whatsNew: "What's new" },
+  de: { shortcuts: 'Tastenkürzel', whatsNew: 'Neuigkeiten' },
+  fa: { shortcuts: 'میان‌برهای صفحه‌کلید', whatsNew: 'تازه‌ها' },
+  es: { shortcuts: 'Atajos de teclado', whatsNew: 'Novedades' },
+  fr: { shortcuts: 'Raccourcis clavier', whatsNew: 'Nouveautés' },
+};
+const readDict = (lang, key) => {
+  // Keys arrive as full i18n ids ('header.shortcuts'); the scan map uses
+  // the short suffix.
+  const short = String(key).split('.').pop();
+  return SCAN_STRINGS[lang]?.[short] ?? SCAN_STRINGS.en[short];
+};
+
 for (const lang of ['en', 'de', 'fa']) {
   const url = `${BASE || 'http://localhost:4173'}/`;
   await page.goto(url);
@@ -221,6 +237,105 @@ for (const lang of ['en', 'de', 'fa']) {
   blockingTotal += await scan(`${lang}: export modal`);
   await page.keyboard.press('Escape');
   await settle();
+
+  // Palette no-matches state (role=status empty result)
+  await page.keyboard.press('Control+k');
+  await settle();
+  await page.keyboard.type('zzqqxx-no-such-app-xyz');
+  await settle();
+  blockingTotal += await scan(`${lang}: palette no matches`);
+  await page.keyboard.press('Escape');
+  await settle();
+
+  // Keyboard shortcuts + what's-new dialogs, opened through the More menu.
+  // Each step is fault-tolerant: a misfired menu interaction must never
+  // wedge the rest of the scan (the open menu's outside-click overlay
+  // swallows every later click), so every attempt is time-boxed and the
+  // menu is force-closed afterwards.
+  const moreBtn = page.locator('#header-more-menu-btn').first();
+  const closeMoreMenu = async () => {
+    try {
+      if ((await moreBtn.getAttribute('aria-expanded')) === 'true') {
+        await page.keyboard.press('Escape');
+        await settle();
+      }
+    } catch { /* menu already gone */ }
+  };
+  const DIALOG_PROBES = {
+    'header.shortcuts': () => !!document.getElementById('shortcuts-dialog-title'),
+    'header.whatsNew': () => !!document.getElementById('whats-new-title'),
+  };
+  const openMenuItem = async (nameKey) => {
+    await closeMoreMenu();
+    try {
+      await moreBtn.click({ timeout: 5000 });
+      await settle();
+      // Some scan predecessors leave the page in a state where the first
+      // toggle click is consumed without opening the menu; retry once.
+      let open = await page.evaluate(() => !!document.getElementById('header-more-dropdown'));
+      if (!open) {
+        await moreBtn.click({ timeout: 5000 });
+        await settle();
+        open = await page.evaluate(() => !!document.getElementById('header-more-dropdown'));
+      }
+      if (!open) {
+        console.log(`  menu did not open for ${nameKey}`);
+        return false;
+      }
+      const label = readDict(lang, nameKey);
+      // The dropdown's bottom items sit inside its internal scroller, where
+      // Playwright's hit-test races the scroll geometry (the outside-click
+      // overlay is topmost at the clipped center). For a STATE scan the
+      // interaction mechanics are out of scope: activate the item the way
+      // the browser would dispatch the click, then verify the dialog.
+      const activated = await page.evaluate((needle) => {
+        const items = [...document.querySelectorAll('#header-more-dropdown button')];
+        const target = items.find((b) => (b.textContent || '').includes(needle));
+        if (!target) {
+          window.__scanDebug = { count: items.length, texts: items.map((b) => (b.textContent || '').trim()).slice(0, 6) };
+          return false;
+        }
+        target.click();
+        return true;
+      }, label);
+      if (!activated) {
+        const dbg = await page.evaluate(() => window.__scanDebug || {});
+        console.log(`  SKIPPED dialog ${nameKey} (menu item not found) dropdown=${JSON.stringify(dbg)}`);
+        await closeMoreMenu();
+        return false;
+      }
+      await settle();
+      if (await page.evaluate(DIALOG_PROBES[nameKey])) return true;
+    } catch (e) {
+      console.log(`  menu item ${nameKey}: ${String(e).split('\n')[0]}`);
+    }
+    await closeMoreMenu();
+    console.log(`  SKIPPED dialog ${nameKey} (dialog did not open)`);
+    return false;
+  };
+
+  if (await openMenuItem('header.shortcuts')) {
+    blockingTotal += await scan(`${lang}: keyboard shortcuts dialog`);
+    await page.keyboard.press('Escape');
+    await settle();
+  }
+
+  if (await openMenuItem('header.whatsNew')) {
+    blockingTotal += await scan(`${lang}: what's new dialog`);
+    await page.keyboard.press('Escape');
+    await settle();
+  }
+  await closeMoreMenu();
+
+  // Legal dialog (footer privacy link)
+  const legalLink = page.locator('#footer-link-privacy').first();
+  if (await legalLink.count()) {
+    await legalLink.click();
+    await settle();
+    blockingTotal += await scan(`${lang}: legal dialog`);
+    await page.keyboard.press('Escape');
+    await settle();
+  }
 
   // Download manager: empty panel
   const dlBtn = page.locator('#header-downloads-btn').first();

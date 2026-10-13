@@ -127,6 +127,8 @@ function AppShell() {
   useGlobalShortcuts({
     toggleCommandPalette: () => dialogs.setIsCommandPaletteOpen((prev) => !prev),
     closeAllDialogs: dialogs.closeAllDialogs,
+    // '/' must not yank focus out of an open dialog to the search field.
+    hasOpenOverlay: () => dialogs.anyOverlayOpen || showWhatsNew,
     openAddFlowSearch,
     toggleBatchInstallModal: () => dialogs.setIsBatchInstallModalOpen((prev) => !prev),
     toggleCompareModal: () => dialogs.setIsCompareModalOpen((prev) => !prev),
@@ -223,7 +225,7 @@ function AppShell() {
         {page === 'replace' ? (
           <ReplaceTab
             apps={catalog.apps}
-            onOpenDetail={(item) => dialogs.openDetail(item)}
+            onOpenDetail={dialogs.openDetail}
             onAddToBatch={batch.addIds}
             onRemoveFromBatch={batch.removeIds}
           />
@@ -254,7 +256,10 @@ function AppShell() {
               apps={filteredApps}
               favorites={catalog.favorites}
               onToggleFavorite={catalog.toggleFavorite}
-              onOpenDetail={(item) => dialogs.openDetail(item)}
+              // dialogs.openDetail is identity-stable (ref pattern in
+              // useAppDialogs); a fresh inline arrow here would defeat the
+              // table's memo on every shell render.
+              onOpenDetail={dialogs.openDetail}
               onEditApp={handleEditApp}
               onDeleteApp={handleDeleteApp}
               selectedAppIds={batch.selectedIds}
@@ -371,6 +376,8 @@ function AppShell() {
         }}
         onSaveApp={handleSaveApp}
         initialApp={dialogs.editingApp}
+        // Catalog snapshot for the manual-add duplicate guard.
+        existingApps={catalog.apps}
         showTabs={!dialogs.isAddModalOpen}
         onSwitchTab={(tab) => dialogs.setAddFlow(tab)}
       />

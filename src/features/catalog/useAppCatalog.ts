@@ -93,6 +93,17 @@ export function useAppCatalog(): AppCatalog {
   const tRef = useRef(t);
   tRef.current = t;
 
+  // Latest-value mirrors for the catalog/favorites state. The card-facing
+  // callbacks below stay identity-stable (memoized cards rely on it) while
+  // computing against current data. Side effects (toasts, localStorage)
+  // must live OUTSIDE state updater functions: updaters are re-run by
+  // StrictMode and can re-run on discarded concurrent renders, which
+  // duplicated toasts and executed the storage writes twice.
+  const appsRef = useRef(apps);
+  appsRef.current = apps;
+  const favoritesRef = useRef(favorites);
+  favoritesRef.current = favorites;
+
   const trendingApps = useMemo(() => apps.filter((a) => a.isTrendingToday), [apps]);
   const ownerPicks = useMemo(() => apps.filter((a) => a.isOwnerPick), [apps]);
   const customCount = useMemo(() => apps.filter((a) => a.isCustom).length, [apps]);
@@ -100,76 +111,76 @@ export function useAppCatalog(): AppCatalog {
 
   // Persist favorites. Wrapped in useCallback with empty deps: this is a
   // card-facing prop, and memoized cards rely on its identity never
-  // changing (it only touches the state setter).
+  // changing.
   const toggleFavorite = useCallback((appId: string) => {
-    setFavorites((prev) => {
-      const next = prev.includes(appId)
-        ? prev.filter((id) => id !== appId)
-        : [...prev, appId];
-      try {
-        localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    const prev = favoritesRef.current;
+    const next = prev.includes(appId)
+      ? prev.filter((id) => id !== appId)
+      : [...prev, appId];
+    favoritesRef.current = next;
+    setFavorites(next);
+    try {
+      localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
   }, []);
 
   // Add or update application. Dialog state is deliberately NOT touched
   // here: the composition layer closes the editor when it calls this.
-  // Stable identity (only the setter is used) - see toggleFavorite.
+  // Stable identity - see toggleFavorite.
   const saveApp = useCallback((appToSave: AppItem) => {
-    setApps((prev) => {
-      const existingIndex = prev.findIndex((item) => item.id === appToSave.id);
-      let updated: AppItem[];
+    const prev = appsRef.current;
+    const existingIndex = prev.findIndex((item) => item.id === appToSave.id);
+    let updated: AppItem[];
 
-      if (existingIndex >= 0) {
-        updated = [...prev];
-        updated[existingIndex] = appToSave;
-        toast.success(tRef.current('catalog.updatedOk').replace('{name}', appToSave.name));
-      } else {
-        updated = [appToSave, ...prev];
-        toast.success(tRef.current('catalog.addedOk').replace('{name}', appToSave.name));
-      }
+    if (existingIndex >= 0) {
+      updated = [...prev];
+      updated[existingIndex] = appToSave;
+      toast.success(tRef.current('catalog.updatedOk').replace('{name}', appToSave.name));
+    } else {
+      updated = [appToSave, ...prev];
+      toast.success(tRef.current('catalog.addedOk').replace('{name}', appToSave.name));
+    }
 
-      try {
-        const customOnly = updated.filter((item) => item.isCustom);
-        localStorage.setItem(STORAGE_KEY_CUSTOM_APPS, JSON.stringify(customOnly));
-      } catch {
-        // ignore
-      }
-      return updated;
-    });
+    appsRef.current = updated;
+    setApps(updated);
+    try {
+      const customOnly = updated.filter((item) => item.isCustom);
+      localStorage.setItem(STORAGE_KEY_CUSTOM_APPS, JSON.stringify(customOnly));
+    } catch {
+      // ignore
+    }
   }, []);
 
   // Delete a custom application from the catalog and the favorites store.
   // Selection/compare/detail cleanup stays with the composition layer,
   // which owns those states. Stable identity - see toggleFavorite.
   const deleteApp = useCallback((appId: string) => {
-    setApps((prev) => {
-      const target = prev.find((a) => a.id === appId);
-      const updated = prev.filter((item) => item.id !== appId);
-      try {
-        const customOnly = updated.filter((item) => item.isCustom);
-        localStorage.setItem(STORAGE_KEY_CUSTOM_APPS, JSON.stringify(customOnly));
-      } catch {
-        // ignore
-      }
-      if (target) {
-        toast.info(tRef.current('catalog.removedOk').replace('{name}', target.name));
-      }
-      return updated;
-    });
+    const prev = appsRef.current;
+    const target = prev.find((a) => a.id === appId);
+    const updated = prev.filter((item) => item.id !== appId);
+    appsRef.current = updated;
+    setApps(updated);
+    try {
+      const customOnly = updated.filter((item) => item.isCustom);
+      localStorage.setItem(STORAGE_KEY_CUSTOM_APPS, JSON.stringify(customOnly));
+    } catch {
+      // ignore
+    }
+    if (target) {
+      toast.info(tRef.current('catalog.removedOk').replace('{name}', target.name));
+    }
 
-    setFavorites((prev) => {
-      const next = prev.filter((id) => id !== appId);
-      try {
-        localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    const favPrev = favoritesRef.current;
+    const nextFavs = favPrev.filter((id) => id !== appId);
+    favoritesRef.current = nextFavs;
+    setFavorites(nextFavs);
+    try {
+      localStorage.setItem(STORAGE_KEY_FAVORITES, JSON.stringify(nextFavs));
+    } catch {
+      // ignore
+    }
   }, []);
 
   // Export catalog
@@ -324,17 +335,25 @@ export function useAppCatalog(): AppCatalog {
       if (!res.ok) throw new Error('API query failed');
       const data = await res.json();
       if (data.apps && data.apps.length > 0) {
-        setApps((prev) => {
-          const existingIds = new Set(prev.map((a) => a.id));
-          const additions: AppItem[] = [];
-          for (const item of data.apps) {
-            if (!existingIds.has(item.id)) {
-              additions.push(item);
-            }
-          }
-          return [...additions, ...prev];
-        });
-        toast.success(tRef.current('catalog.trendingSynced').replace('{source}', data.source));
+        // Same sanitizer as every other ingestion path (storage load,
+        // import): server data is still untrusted input, and a malformed
+        // entry used to be able to crash rendering/filtering downstream.
+        const prev = appsRef.current;
+        const existingIds = new Set(prev.map((a) => a.id));
+        const additions: AppItem[] = [];
+        for (const item of data.apps as unknown[]) {
+          const { app: clean } = sanitizeAppItem(item);
+          if (!clean || existingIds.has(clean.id)) continue;
+          additions.push(clean);
+          existingIds.add(clean.id);
+        }
+        if (additions.length > 0) {
+          const merged = [...additions, ...prev];
+          appsRef.current = merged;
+          setApps(merged);
+          toast.success(tRef.current('catalog.trendingSynced').replace('{source}', data.source));
+          return;
+        }
       }
     } catch {
       toast.info(tRef.current('catalog.trendingOffline'));

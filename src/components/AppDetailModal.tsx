@@ -49,7 +49,12 @@ import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
 import { toast } from 'sonner';
 
-/** Device-aware download section: pick your platform, get real targets. */
+/** Forge icon for source links. A module-level component: the previous
+ *  inline definition was re-created per render, remounting every rendered
+ *  icon (the file's own rule for renderCopyChip applies here too). */
+const SourceIcon = ({ kind }: { kind: SourceLink['kind'] }) =>
+  kind === 'github' ? <Github className="w-3.5 h-3.5" aria-hidden="true" /> : kind === 'gitlab' ? <Gitlab className="w-3.5 h-3.5" aria-hidden="true" /> : <Code2 className="w-3.5 h-3.5" aria-hidden="true" />;
+
 function detectUserPlatform(): Platform {
   if (typeof navigator === 'undefined') return 'windows';
   const ua = navigator.userAgent.toLowerCase();
@@ -139,6 +144,17 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { t } = useI18n();
   const tx = useAppText(app);
   const inApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  // Re-entry guard for the transfer start itself: startDownload has no
+  // per-URL dedupe, so a rapid double-click used to enqueue the SAME file
+  // twice. Repeat clicks of the same URL inside a short window are
+  // ignored; different targets stay independently clickable.
+  const lastLaunchRef = useRef<{ url: string; at: number } | null>(null);
+  const launchDownload = (url: string, name: string, opts?: { expectedSha256?: string; expectedSha512?: string }) => {
+    const now = Date.now();
+    if (lastLaunchRef.current && lastLaunchRef.current.url === url && now - lastLaunchRef.current.at < 1500) return;
+    lastLaunchRef.current = { url, at: now };
+    void startDownload(url, name, opts);
+  };
   const preferred = (() => {
     const guess = detectUserPlatform();
     return app.platforms.includes(guess) ? guess : (app.platforms[0] || 'windows');
@@ -269,7 +285,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
     // the download list names the entry exactly as the button the user read.
     const label = translateDownloadLabel(t, option.label);
     if (option.kind === 'direct') {
-      void startDownload(option.url, label);
+      launchDownload(option.url, label);
     } else {
       recordExternalOpen(`${app.name}: ${label}`, option.url);
       void openExternal(option.url);
@@ -363,22 +379,25 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             <button
               type="button"
               onClick={() =>
-                void startDownload(gh.url, gh.filename, {
+                launchDownload(gh.url, gh.filename, {
                   expectedSha256: gh.expectedSha256,
                   expectedSha512: gh.expectedSha512,
                 })
               }
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-start text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Download className="w-3.5 h-3.5 shrink-0 text-sky-100" aria-hidden="true" />
                 <span className="min-w-0">
-                  <span className="block truncate">
+                  {/* dir=ltr: the resolver returns underscore+digit asset
+                      names whose bidi resolution scrambles inside an RTL
+                      dialog (e.g. Fress_1.0.0_x64-setup.exe). */}
+                  <span dir="ltr" className="block truncate text-left">
                     {gh.filename}
-                    {gh.size > 0 && <span className="ml-1.5 opacity-80 font-normal">{formatBytes(gh.size)}</span>}
+                    {gh.size > 0 && <span className="ms-1.5 opacity-80 font-normal">{formatBytes(gh.size)}</span>}
                   </span>
                   <span className="block text-[11px] font-normal opacity-80 truncate">
-                    v{gh.version} · {t('detail.latestStableGithub')}
+                    <span dir="ltr">v{gh.version}</span> · {t('detail.latestStableGithub')}
                     {published ? ` · ${t('detail.published')} ${published}` : ''}
                   </span>
                 </span>
@@ -414,22 +433,22 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             <button
               type="button"
               onClick={() =>
-                void startDownload(official.url, official.filename, {
+                launchDownload(official.url, official.filename, {
                   expectedSha256: official.expectedSha256,
                   expectedSha512: official.expectedSha512,
                 })
               }
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-start text-xs px-3 py-2.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Download className="w-3.5 h-3.5 shrink-0 text-sky-100" aria-hidden="true" />
                 <span className="min-w-0">
-                  <span className="block truncate">
+                  <span dir="ltr" className="block truncate text-left">
                     {official.filename}
-                    {official.size > 0 && <span className="ml-1.5 opacity-80 font-normal">{formatBytes(official.size)}</span>}
+                    {official.size > 0 && <span className="ms-1.5 opacity-80 font-normal">{formatBytes(official.size)}</span>}
                   </span>
                   <span className="block text-[11px] font-normal opacity-80 truncate">
-                    {official.version ? `v${official.version} · ` : ''}{t('detail.latestStableOfficial')}
+                    {official.version ? <span dir="ltr">v{official.version}</span> : null}{official.version ? ' · ' : ''}{t('detail.latestStableOfficial')}
                   </span>
                 </span>
               </span>
@@ -450,18 +469,18 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
             <button
               type="button"
               onClick={() =>
-                void startDownload(fd.url, fd.filename, {
+                launchDownload(fd.url, fd.filename, {
                   expectedSha256: fd.expectedSha256,
                   expectedSha512: fd.expectedSha512,
                 })
               }
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-semibold transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-start text-xs px-3 py-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-semibold transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Smartphone className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                 <span className="truncate">
-                  {t('detail.fdroid')} (v{fd.version})
-                  <span className="ml-1.5 text-[11px] font-normal opacity-80">{t('detail.latestStableFdroid')}</span>
+                  {t('detail.fdroid')} (<span dir="ltr">v{fd.version}</span>)
+                  <span className="ms-1.5 text-[11px] font-normal opacity-80">{t('detail.latestStableFdroid')}</span>
                 </span>
               </span>
               <Download className="w-3 h-3 shrink-0" aria-hidden="true" />
@@ -481,7 +500,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                 recordExternalOpen(`${app.name}: F-Droid`, fdroidPageUrl(app.fdroidId!));
                 void openExternal(fdroidPageUrl(app.fdroidId!));
               }}
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-start text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Smartphone className="w-3.5 h-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
@@ -499,7 +518,7 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                 recordExternalOpen(`${app.name}: ${t('detail.googlePlay')}`, playStoreUrl(app.playStoreId!));
                 void openExternal(playStoreUrl(app.playStoreId!));
               }}
-              className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 transition-colors"
+              className="w-full flex items-center justify-between gap-2 text-start text-xs px-3 py-2 rounded-md border border-slate-950/10 dark:border-white/[0.08] bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 transition-colors"
             >
               <span className="flex items-center gap-2 min-w-0">
                 <Play className="w-3.5 h-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
@@ -519,13 +538,13 @@ const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
                   key={option.label}
                   type="button"
                   onClick={() => handleOption(option)}
-                  className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 rounded-md border transition-colors text-slate-200 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border-slate-950/10 dark:border-white/[0.08]"
+                  className="w-full flex items-center justify-between gap-2 text-start text-xs px-3 py-2 rounded-md border transition-colors text-slate-200 hover:text-slate-100 bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] border-slate-950/10 dark:border-white/[0.08]"
                 >
                   <span className="flex items-center gap-2 min-w-0">
                     <Download className="w-3.5 h-3.5 shrink-0 text-sky-400" aria-hidden="true" />
                     <span className="truncate">
                       {option.label === 'GitHub Releases' ? t('detail.allReleases') : translateDownloadLabel(t, option.label)}
-                      {option.kind === 'store' && <span className="ml-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">{t('detail.resolver.storeBadge')}</span>}
+                      {option.kind === 'store' && <span className="ms-1.5 text-[11px] font-mono font-normal uppercase tracking-wide opacity-70">{t('detail.resolver.storeBadge')}</span>}
                     </span>
                   </span>
                   <ExternalLink className="w-3 h-3 shrink-0 text-slate-400" aria-hidden="true" />
@@ -566,6 +585,14 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
   }, []);
+
+  // The modal instance stays mounted across app switches (app -> null ->
+  // app), so copy feedback keyed by command label survived into the NEXT
+  // app's dialog: app B rendered a stale "Copied" chip for a copy that
+  // happened in app A. Reset per app.
+  useEffect(() => {
+    setCopiedCmd(null);
+  }, [app?.id]);
 
   if (!app) return null;
 
@@ -621,7 +648,7 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
   };
 
   const hasAndroid = app.platforms.includes('android');
-  const FOSS_LICENSES = ['GPL-2.0+', 'GPL-3.0', 'GPL-2.0', 'MIT', 'Apache-2.0', 'MPL-2.0', 'LGPL-2.1', 'GNU LGPL', 'LGPL-3.0', 'GPL-2.0+', 'AGPL-3.0', 'EUPL-1.2', 'BSD', 'ISC'];
+  const FOSS_LICENSES = ['GPL-2.0+', 'GPL-3.0', 'GPL-2.0', 'MIT', 'Apache-2.0', 'MPL-2.0', 'LGPL-2.1', 'GNU LGPL', 'LGPL-3.0', 'AGPL-3.0', 'EUPL-1.2', 'BSD', 'ISC'];
   const licenseClass = FOSS_LICENSES.includes(app.license) ? 'foss' : 'notfoss';
   const repoHost = app.githubUrl.includes('github.com')
     ? 'github'
@@ -633,18 +660,16 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
   // One button per official home: GitHub next to GitLab when a project
   // publishes on both, a single button when it does not.
   const sourceLinks = sourceLinksFor(app);
-  const SourceIcon = ({ kind }: { kind: SourceLink['kind'] }) =>
-    kind === 'github' ? <Github className="w-3.5 h-3.5" aria-hidden="true" /> : kind === 'gitlab' ? <Gitlab className="w-3.5 h-3.5" aria-hidden="true" /> : <Code2 className="w-3.5 h-3.5" aria-hidden="true" />;
-
 
   return (
     <div
       ref={panelRef}
       id="app-detail-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="app-detail-title"
+      onClick={onClose}
     >
       <div 
         id="app-detail-modal-container"
@@ -722,8 +747,16 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           </div>
         </div>
 
-        {/* Content body */}
-        <div id="app-detail-modal-body" className="p-4 sm:p-6 space-y-4 overflow-y-auto text-[13px] leading-relaxed text-slate-300">
+        {/* Content body. Keyboard-scrollable region: the focus trap makes
+            wheel-only scrolling unreachable for keyboard users once the
+            content overflows (long guides, small viewport heights). */}
+        <div
+          id="app-detail-modal-body"
+          className="p-4 sm:p-6 space-y-4 overflow-y-auto text-[13px] leading-relaxed text-slate-300"
+          tabIndex={0}
+          role="region"
+          aria-label={app.name}
+        >
           {/* Downloads by device: the primary action, above the fold */}
           <DownloadSection key={app.id} app={app} />
 
@@ -772,10 +805,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
 
               <div className="space-y-2">
                 {app.wingetCommand && (
-                  <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
+                  <div className="flex items-center justify-between gap-2 fr-code-well p-2 rounded-lg">
                     <div className="min-w-0">
                       <span className="text-[11px] uppercase font-mono text-slate-400 block">{t('detail.resolver.wingetLabel')}</span>
-                      <code className="font-mono text-xs text-sky-300 select-all truncate block">
+                      <code dir="ltr" className="text-left font-mono text-xs text-sky-300 select-all truncate block">
                         {app.wingetCommand}
                       </code>
                     </div>
@@ -784,10 +817,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 )}
 
                 {app.brewCommand && (
-                  <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
+                  <div className="flex items-center justify-between gap-2 fr-code-well p-2 rounded-lg">
                     <div className="min-w-0">
                       <span className="text-[11px] uppercase font-mono text-slate-400 block">{t('detail.resolver.brewLabel')}</span>
-                      <code className="font-mono text-xs text-amber-300 select-all truncate block">
+                      <code dir="ltr" className="text-left font-mono text-xs text-amber-300 select-all truncate block">
                         {app.brewCommand}
                       </code>
                     </div>
@@ -796,10 +829,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
                 )}
 
                 {app.flatpakCommand && (
-                  <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-950/10 dark:border-white/[0.08] p-2 rounded-lg">
+                  <div className="flex items-center justify-between gap-2 fr-code-well p-2 rounded-lg">
                     <div className="min-w-0">
                       <span className="text-[11px] uppercase font-mono text-slate-400 block">{t('detail.resolver.flatpakLabel')}</span>
-                      <code className="font-mono text-xs text-emerald-300 select-all truncate block">
+                      <code dir="ltr" className="text-left font-mono text-xs text-emerald-300 select-all truncate block">
                         {app.flatpakCommand}
                       </code>
                     </div>
@@ -879,8 +912,10 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
           </div>
         </div>
 
-        {/* Footer actions */}
-        <div id="app-detail-modal-footer" className="p-3 sm:p-4 border-t border-slate-950/10 dark:border-white/[0.08] bg-slate-950 flex items-center justify-between gap-3">
+        {/* Footer actions. flex-wrap: at the 320px floor the close button
+            plus the forge/website links exceed the panel and the website
+            link was unreachable, clipped by the panel's overflow-hidden. */}
+        <div id="app-detail-modal-footer" className="p-3 sm:p-4 border-t border-slate-950/10 dark:border-white/[0.08] bg-slate-950 flex flex-wrap items-center justify-between gap-3">
           <button
             id="close-detail-modal-footer-btn"
             type="button"
@@ -890,23 +925,28 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({ app, onClose, on
             {t('common.close')}
           </button>
 
-          <div className="flex items-center gap-2">
-            {sourceLinks.map((link, i) => (
-              <a
-                key={link.url}
-                id={link.kind === 'gitlab' ? 'detail-gitlab-link' : i === 0 ? 'detail-github-link' : `detail-source-link-${i}`}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
-                title={link.url}
-                className="inline-flex items-center gap-1 text-xs bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 border border-slate-950/10 dark:border-white/[0.1] px-3 py-1.5 rounded-lg transition-colors"
-              >
-                <SourceIcon kind={link.kind} />
-                <span>{link.label}</span>
-                <ExternalLink className="w-3 h-3 text-slate-400" aria-hidden="true" />
-              </a>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            {sourceLinks.map((link, i) => {
+              // The self-hosted-forge fallback label ('Source') is a real
+              // English word; the forges' own names are proper nouns.
+              const hostLabel = link.kind === 'forge' ? t('card.source.forge') : link.label;
+              return (
+                <a
+                  key={link.url}
+                  id={link.kind === 'gitlab' ? 'detail-gitlab-link' : i === 0 ? 'detail-github-link' : `detail-source-link-${i}`}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
+                  title={link.url}
+                  className="inline-flex items-center gap-1 text-xs bg-slate-950/[0.04] dark:bg-white/[0.04] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.08] text-slate-200 border border-slate-950/10 dark:border-white/[0.1] px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  <SourceIcon kind={link.kind} />
+                  <span>{hostLabel}</span>
+                  <ExternalLink className="w-3 h-3 text-slate-400" aria-hidden="true" />
+                </a>
+              );
+            })}
 
             {app.websiteUrl && (
               <a

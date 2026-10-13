@@ -2,10 +2,10 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
-import { useLiveStars } from '../lib/starFetch';
+import { useLiveStars, formatStarCount } from '../lib/starFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
 import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
@@ -21,6 +21,7 @@ import {
   Award,
   Columns,
   Check,
+  X,
   Github,
   Gitlab,
   Code2
@@ -52,7 +53,10 @@ const StarCell: React.FC<{ app: AppItem }> = ({ app }) => {
   return (
     <div className="inline-flex items-center gap-1">
       <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-hidden="true" />
-      <span>{shown.toLocaleString()}</span>
+      {/* formatStarCount: the same "19.6k" rendering the card, palette and
+          detail views use - the table used to be the one surface showing a
+          different formatting for the same number. */}
+      <span>{formatStarCount(shown)}</span>
     </div>
   );
 };
@@ -68,7 +72,7 @@ const TaglineCell: React.FC<{ app: AppItem }> = ({ app }) => {
   );
 };
 
-export const TableView: React.FC<TableViewProps> = ({
+const TableViewImpl: React.FC<TableViewProps> = ({
   apps,
   favorites,
   onToggleFavorite,
@@ -81,44 +85,71 @@ export const TableView: React.FC<TableViewProps> = ({
   onToggleCompare
 }) => {
   const { t } = useI18n();
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Clipboard feedback for the Quick-install column: a rejected clipboard
+  // used to be swallowed silently (the button kept saying "Copy command"
+  // while nothing was copied) and success was visible-only. Now both
+  // outcomes render on the button AND in a persistent status region.
+  const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, []);
 
   const handleCopyCmd = async (e: React.MouseEvent, cmd: string, id: string) => {
     e.stopPropagation();
     try {
       await navigator.clipboard.writeText(cmd);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+      setCopyState({ id, ok: true });
     } catch {
-      // ignore
+      setCopyState({ id, ok: false });
+    } finally {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopyState(null), 2000);
     }
   };
 
+  // O(1) membership per row: the arrays arrive from the composition layer;
+  // rescanning them with .includes inside the row map made every shell
+  // render O(rows x selections) - the grid fixed this with Sets long ago.
+  const favSet = useMemo(() => new Set(favorites), [favorites]);
+  const batchSet = useMemo(() => new Set(selectedAppIds), [selectedAppIds]);
+  const compSet = useMemo(() => new Set(comparedAppIds), [comparedAppIds]);
+
   return (
-    <div id="apps-table-container" className="overflow-x-auto rounded-lg border border-fr-border bg-fr-surface">
-      <table id="apps-data-table" className="w-full text-left border-collapse text-xs">
+    <div
+      id="apps-table-container"
+      className="overflow-x-auto rounded-lg border border-fr-border bg-fr-surface"
+      tabIndex={0}
+      role="region"
+      aria-label={t('table.captionAria')}
+    >
+      <table id="apps-data-table" className="w-full text-start border-collapse text-xs">
         <thead>
           <tr className="border-b border-fr-border bg-fr-bg/[0.03] dark:bg-white/[0.02] text-fr-text-muted font-mono text-[11px]">
-            <th className="py-2.5 px-3 font-medium w-8"></th>
+            <th scope="col" className="py-2.5 px-3 font-medium w-8">
+              <span className="sr-only">{t('table.head.fav')}</span>
+            </th>
             {onToggleBatchSelect && (
-              <th className="py-2.5 px-2 font-medium w-8 text-center">
+              <th scope="col" className="py-2.5 px-2 font-medium w-8 text-center">
                 <span className="sr-only">{t('table.batchSelect')}</span>
               </th>
             )}
-            <th className="py-2.5 px-3 font-medium">{t('table.head.app')}</th>
-            <th className="py-2.5 px-3 font-medium">{t('table.head.category')}</th>
-            <th className="py-2.5 px-3 font-medium">{t('table.head.platforms')}</th>
-            <th className="py-2.5 px-3 font-medium text-right">{t('table.head.stars')}</th>
-            <th className="py-2.5 px-3 font-medium">{t('table.head.license')}</th>
-            <th className="py-2.5 px-3 font-medium text-right">{t('table.head.install')}</th>
-            <th className="py-2.5 px-3 font-medium text-right">{t('table.head.actions')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium">{t('table.head.app')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium">{t('table.head.category')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium">{t('table.head.platforms')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium text-end">{t('table.head.stars')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium">{t('table.head.license')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium text-end">{t('table.head.install')}</th>
+            <th scope="col" className="py-2.5 px-3 font-medium text-end">{t('table.head.actions')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-fr-border">
           {apps.map((app) => {
-            const isFav = favorites.includes(app.id);
-            const isBatch = selectedAppIds.includes(app.id);
-            const isComp = comparedAppIds.includes(app.id);
+            const isFav = favSet.has(app.id);
+            const isBatch = batchSet.has(app.id);
+            const isComp = compSet.has(app.id);
             const primaryCmd = app.wingetCommand || app.brewCommand || app.flatpakCommand;
 
             return (
@@ -168,7 +199,7 @@ export const TableView: React.FC<TableViewProps> = ({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); onOpenDetail(app); }}
-                      className="text-left font-semibold text-slate-100 group-hover:text-sky-400 hover:text-sky-400 transition-colors text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer"
+                      className="text-start font-semibold text-slate-100 group-hover:text-sky-400 hover:text-sky-400 transition-colors text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer"
                     >
                       {app.name}
                     </button>
@@ -221,7 +252,7 @@ export const TableView: React.FC<TableViewProps> = ({
                 </td>
 
                 {/* GitHub Stars */}
-                <td className="py-2.5 px-3 text-right font-mono text-amber-900 dark:text-amber-300">
+                <td className="py-2.5 px-3 text-end font-mono text-amber-900 dark:text-amber-300">
                   <StarCell app={app} />
                 </td>
 
@@ -231,7 +262,7 @@ export const TableView: React.FC<TableViewProps> = ({
                 </td>
 
                 {/* Quick Install Command */}
-                <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                <td className="py-2.5 px-3 text-end" onClick={(e) => e.stopPropagation()}>
                   {primaryCmd ? (
                     <button
                       type="button"
@@ -240,11 +271,18 @@ export const TableView: React.FC<TableViewProps> = ({
                       title={primaryCmd}
                       aria-label={`${t('table.copyCmd')} (${app.name})`}
                     >
-                      {copiedId === app.id ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                          <span className="text-emerald-400">{t('card.copied')}</span>
-                        </>
+                      {copyState?.id === app.id ? (
+                        copyState.ok ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+                            <span className="text-emerald-400">{t('card.copied')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <X className="w-3 h-3 text-rose-400" aria-hidden="true" />
+                            <span className="text-rose-400">{t('common.copyFailed')}</span>
+                          </>
+                        )
                       ) : (
                         <>
                           <Terminal className="w-3 h-3 text-sky-400" aria-hidden="true" />
@@ -258,7 +296,7 @@ export const TableView: React.FC<TableViewProps> = ({
                 </td>
 
                 {/* Actions */}
-                <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                <td className="py-2.5 px-3 text-end" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1.5">
                     {onToggleCompare && (
                       <button
@@ -277,6 +315,7 @@ export const TableView: React.FC<TableViewProps> = ({
 
                     {sourceLinksFor(app).map((link, i) => {
                       const Icon = link.kind === 'github' ? Github : link.kind === 'gitlab' ? Gitlab : Code2;
+                      const hostLabel = link.kind === 'forge' ? t('card.source.forge') : link.label;
                       return (
                         <a
                           key={link.url}
@@ -285,8 +324,8 @@ export const TableView: React.FC<TableViewProps> = ({
                           rel="noopener noreferrer"
                           onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
                           className="p-1 fr-touch-target text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
-                          title={t('card.source.tip').replace('{host}', link.label)}
-                          aria-label={t('card.source.aria').replace('{name}', app.name).replace('{host}', link.label)}
+                          title={t('card.source.tip').replace('{host}', hostLabel)}
+                          aria-label={t('card.source.aria').replace('{name}', app.name).replace('{host}', hostLabel)}
                         >
                           <Icon className="w-3.5 h-3.5" aria-hidden="true" />
                         </a>
@@ -337,6 +376,15 @@ export const TableView: React.FC<TableViewProps> = ({
           })}
         </tbody>
       </table>
+      {/* Clipboard outcome for the Quick-install column, announced to AT. */}
+      <span className="sr-only" role="status">
+        {copyState ? (copyState.ok ? t('card.copied') : t('common.copyFailed')) : ''}
+      </span>
     </div>
   );
 };
+
+/** Memoized like AppCard: all props are primitives, stable catalog arrays
+ *  or stable callbacks from the composition layer, so shell rerenders
+ *  (search keystrokes, download updates) skip unchanged table rows. */
+export const TableView = React.memo(TableViewImpl);

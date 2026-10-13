@@ -21,9 +21,9 @@ export function CompareDock(props: {
     <aside
       id="floating-compare-action-bar"
       aria-label={t('compare.dockAria')}
-      className="fixed bottom-5 right-6 z-40 bg-slate-900/95 border border-indigo-500/40 rounded-xl shadow-2xl px-3.5 py-2 flex items-center gap-2.5 backdrop-blur-md"
+      className="fixed bottom-5 end-6 z-40 bg-slate-900/95 border border-indigo-500/40 rounded-xl shadow-2xl px-3.5 py-2 flex items-center gap-2.5 backdrop-blur-md"
     >
-      <Columns className="w-4 h-4 text-indigo-400" />
+      <Columns className="w-4 h-4 text-indigo-400" aria-hidden="true" />
       {/* Count only, no noun: app/app{s} has no plural form that works in
           all five languages, and the dock sits next to the matrix button. */}
       <span className="text-xs text-slate-200 font-medium">
@@ -32,7 +32,7 @@ export function CompareDock(props: {
       <button
         type="button"
         onClick={onOpenMatrix}
-        className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-md transition-colors ml-1"
+        className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-md transition-colors ms-1"
       >
         {t('compare.viewMatrix')}
       </button>
@@ -43,7 +43,7 @@ export function CompareDock(props: {
         title={t('compare.clearHint')}
         aria-label={t('compare.clearHint')}
       >
-        <X className="w-3.5 h-3.5" />
+        <X className="w-3.5 h-3.5" aria-hidden="true" />
       </button>
     </aside>
   );

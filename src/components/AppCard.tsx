@@ -120,12 +120,10 @@ const AppCardImpl: React.FC<AppCardProps> = ({
   }, []);
 
   const renderPlatformBadge = (platform: Platform) => {
-    const label =
-      platform === 'windows' ? 'Windows' :
-      platform === 'mac' ? 'macOS' :
-      platform === 'linux' ? 'Linux' :
-      platform === 'android' ? 'Android' :
-      platform === 'web' ? 'Web' : 'iOS';
+    // The shared localized platform label (same mapping the table, detail
+    // modal and filters use): the card used to be the one surface showing
+    // raw English literals in every locale.
+    const label = t(`common.platform.${platform}`);
 
     return (
       <span
@@ -140,6 +138,12 @@ const AppCardImpl: React.FC<AppCardProps> = ({
   };
 
   const handleDownload = () => {
+    // Re-entry guard: every click while a resolve/download is already in
+    // flight used to start ANOTHER resolver run (and could enqueue a second
+    // transfer of the same file). The pending state already communicates
+    // itself - the button text and icon pulse - so repeat clicks are
+    // silently ignored, exactly like the provider-level guards.
+    if (resolving || isDownloading) return;
     const platform = guessUserPlatform(app);
     void (async () => {
       setResolving(true);
@@ -194,8 +198,13 @@ const AppCardImpl: React.FC<AppCardProps> = ({
       }`}
     >
       <div>
-        {/* ---- Top: icon, name, and at most the two curation badges ---- */}
-        <div id={`app-header-bar-${app.id}`} className="flex items-start justify-between gap-2 mb-1">
+        {/* ---- Top: icon, name, and at most the two curation badges ----
+            flex-wrap lets the quiet action cluster drop to a second row at
+            the 320px floor on coarse pointers: four 44px touch targets plus
+            the checkbox, icon and name cannot fit 256px of content width,
+            and the shrink-0 cluster used to overhang the card border while
+            the name collapsed toward zero width. */}
+        <div id={`app-header-bar-${app.id}`} className="flex flex-wrap items-start justify-between gap-2 mb-1">
           <div className="flex items-start gap-2.5 min-w-0">
             {onToggleBatchSelect && (
               <input
@@ -231,7 +240,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                     type="button"
                     onClick={() => onOpenDetail(app)}
                     title={app.name}
-                    className="text-left text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer line-clamp-2 break-words"
+                    className="text-start text-inherit [font:inherit] bg-transparent border-0 p-0 m-0 cursor-pointer line-clamp-2 break-words"
                   >
                     {app.name}
                   </button>
@@ -272,8 +281,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           </div>
 
           {/* Secondary operations: visually quiet icon buttons, always
-              reachable (keyboard focusable, labeled). */}
-          <div className="flex items-center gap-0.5 shrink-0">
+              reachable (keyboard focusable, labeled). ms-auto keeps the
+              cluster on the inline end of its line when it wraps. */}
+          <div className="flex items-center gap-0.5 shrink-0 ms-auto">
             {onToggleCompare && (
               <button
                 type="button"
@@ -355,6 +365,14 @@ const AppCardImpl: React.FC<AppCardProps> = ({
                 onClick={() => {
                   onDeleteApp?.(app.id);
                   setShowDeleteConfirm(false);
+                  // The removal unmounts this card and dropped keyboard
+                  // focus onto <body>. Park it on the next focusable title
+                  // in the grid (or the main landmark when the catalog is
+                  // now empty) so keyboard users keep their place.
+                  requestAnimationFrame(() => {
+                    const next = document.querySelector<HTMLElement>('#apps-catalog-grid h2 button');
+                    (next ?? document.getElementById('main-content'))?.focus();
+                  });
                 }}
                 className="bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
               >
@@ -390,7 +408,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
           <span
             id={`app-stars-count-${app.id}`}
             className={`inline-flex items-center gap-1 font-mono text-xs text-slate-400 ${shownStars === 0 ? 'hidden' : ''}`}
-            title={app.githubUrl.includes('github.com') ? t('card.stars.tipGithub').replace('{count}', shownStars.toLocaleString()) : t('card.stars.tipForge').replace('{count}', shownStars.toLocaleString())}
+            title={app.githubUrl.includes('github.com') ? t('card.stars.tipGithub').replace('{count}', formatStarCount(shownStars)) : t('card.stars.tipForge').replace('{count}', formatStarCount(shownStars))}
           >
             <Star className="w-3 h-3 fill-slate-400 text-slate-400" aria-hidden="true" />
             <span>{formatStarCount(shownStars)}</span>
@@ -433,7 +451,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
             </span>
           )}
 
-          <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1.5 ml-auto flex-wrap" title={t('card.platforms.tip')}>
+          <div id={`app-platforms-list-${app.id}`} className="flex items-center gap-1.5 ms-auto flex-wrap" title={t('card.platforms.tip')}>
             {app.platforms.map((p, i) => (
               <React.Fragment key={p}>
                 {i > 0 && <span className="text-slate-500 text-[11px]" aria-hidden="true">·</span>}
@@ -476,6 +494,9 @@ const AppCardImpl: React.FC<AppCardProps> = ({
 
         {sourceLinksFor(app).map((link, i) => {
           const Icon = link.kind === 'github' ? Github : link.kind === 'gitlab' ? Gitlab : Code2;
+          // The forge fallback label ('Source') is a real English word -
+          // translate it; the forge proper nouns pass through.
+          const hostLabel = link.kind === 'forge' ? t('card.source.forge') : link.label;
           return (
             <a
               key={link.url}
@@ -485,8 +506,8 @@ const AppCardImpl: React.FC<AppCardProps> = ({
               rel="noopener noreferrer"
               onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
               className="p-1.5 fr-touch-target shrink-0 text-slate-500 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] border border-transparent hover:border-slate-950/20 dark:hover:border-white/[0.08] rounded-md transition-colors"
-              aria-label={t('card.source.aria').replace('{name}', app.name).replace('{host}', link.label)}
-              title={t('card.source.tip').replace('{host}', link.label)}
+              aria-label={t('card.source.aria').replace('{name}', app.name).replace('{host}', hostLabel)}
+              title={t('card.source.tip').replace('{host}', hostLabel)}
             >
               <Icon className="w-3.5 h-3.5" aria-hidden="true" />
             </a>

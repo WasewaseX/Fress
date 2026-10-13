@@ -251,8 +251,10 @@ test.describe('Workflow I: wrong-channel fixtures', () => {
     await drainToasts(page);
 
     // Switch to the Beta channel through the menu (aria-pressed toggle).
+    // The channel buttons carry localized labels (header.channel.*) - the
+    // accessible name follows the dictionary, not the raw channel id.
     await openMoreMenu(page);
-    await page.getByRole('button', { name: 'beta', exact: true }).first().click();
+    await page.getByRole('button', { name: d['header.channel.beta'], exact: true }).first().click();
     const channelToast = page.locator('[data-sonner-toast]').first();
     await expect(channelToast).toBeVisible();
     await expect(channelToast).toContainText(d['update.channelSet'].replace('{channel}', 'beta'));

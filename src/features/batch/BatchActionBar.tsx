@@ -21,19 +21,25 @@ export function BatchActionBar(props: {
   const { selectedCount, resolving, onDownload, onOpenScriptModal, onCompareSelected, onClear } = props;
 
   return (
+    // flex-wrap keeps the bar inside its pill at the 320px floor and in
+    // long-label locales (de): the four controls' min-content exceeds
+    // the bar width and used to spill past the rounded edge.
     <aside
       id="floating-batch-action-bar"
       aria-label={t('batch.barAria')}
-      className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border border-slate-950/[0.14] dark:border-white/[0.14] rounded-xl shadow-2xl px-4 py-2.5 flex items-center gap-3 backdrop-blur-md max-w-xl w-[92%]"
+      className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border border-slate-950/[0.14] dark:border-white/[0.14] rounded-xl shadow-2xl px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 backdrop-blur-md max-w-xl w-[92%]"
     >
-      <div className="flex items-center gap-2 mr-auto">
+      <div className="flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
         <span className="text-xs font-semibold text-slate-100">
           {t('bar.selected').replace('{n}', String(selectedCount))}
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* The actions group needs its own wrap: an unbreakable row of four
+          controls exceeds the pill's content width at the floor even when
+          the outer flex wraps between the count and this group. */}
+      <div className="flex flex-wrap items-center justify-center gap-2 min-w-0">
         {/* Primary action: real downloads for the whole selection. */}
         <button
           type="button"
@@ -43,7 +49,7 @@ export function BatchActionBar(props: {
           className="inline-flex items-center gap-1.5 text-xs font-semibold bg-fr-success-strong hover:bg-fr-success-strong-hover disabled:opacity-60 text-white px-3 py-1.5 rounded-md transition-colors shadow-xs"
           title={t('bar.downloadHint')}
         >
-          <Download className={`w-3.5 h-3.5 ${resolving ? 'animate-pulse' : ''}`} />
+          <Download aria-hidden="true" className={`w-3.5 h-3.5 ${resolving ? 'animate-pulse' : ''}`} />
           <span>{resolving ? t('bar.downloading') : t('bar.download')}</span>
         </button>
 
@@ -55,7 +61,7 @@ export function BatchActionBar(props: {
           className="inline-flex items-center gap-1.5 text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1.5 rounded-md transition-colors shadow-xs"
           title={t('bar.scriptHint')}
         >
-          <Terminal className="w-3.5 h-3.5" />
+          <Terminal className="w-3.5 h-3.5" aria-hidden="true" />
           <span>{t('bar.script')}</span>
         </button>
 
@@ -65,7 +71,7 @@ export function BatchActionBar(props: {
           className="inline-flex items-center gap-1.5 text-xs font-medium bg-slate-950/[0.06] dark:bg-white/[0.08] hover:bg-slate-950/[0.1] dark:hover:bg-white/[0.14] text-slate-200 px-2.5 py-1.5 rounded-md transition-colors"
           title={t('batch.compareHint')}
         >
-          <Columns className="w-3.5 h-3.5 text-indigo-400" />
+          <Columns className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
           <span>{t('bar.compare')}</span>
         </button>
 
@@ -76,7 +82,7 @@ export function BatchActionBar(props: {
           title={t('batch.clearSelection')}
           aria-label={t('batch.clearSelectionAria')}
         >
-          <X className="w-4 h-4" />
+          <X className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
     </aside>

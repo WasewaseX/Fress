@@ -63,6 +63,26 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  // Closing resets the session: the component stays mounted, so an
+  // in-flight response used to land in the closed dialog and silently
+  // shape the NEXT open (stale results, stale "added" state keeping
+  // buttons disabled for apps since deleted from the catalog).
+  useEffect(() => {
+    if (!isOpen) {
+      if (debounceTimer.current !== null) {
+        clearTimeout(debounceTimer.current);
+        debounceTimer.current = null;
+      }
+      searchReqId.current += 1; // in-flight responses can no longer land
+      setQuery('');
+      setResults([]);
+      setAddedIds(new Set());
+      setErrorMsg(null);
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
   // Focus, Escape and the shared stack: keepFocusInside moves focus to the
   // search input synchronously on open (no setTimeout that could leak past
   // close), restores focus to the opener on close, and answers Escape only
@@ -265,7 +285,7 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         {/* Search Input Bar */}
         <div className="p-4 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950">
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
+            <Search className="w-4 h-4 text-slate-400 absolute start-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
             <input
               ref={inputRef}
               id="live-search-query-input"
@@ -273,10 +293,12 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
               value={query}
               onChange={handleInputChange}
               placeholder={t('ls.placeholder')}
-              className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/[0.12] dark:border-white/[0.12] text-slate-100 placeholder-slate-400 text-sm rounded-lg pl-9 pr-10 py-2.5 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition-colors"
+              aria-label={t('ls.searchAria')}
+              dir="auto"
+              className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/[0.12] dark:border-white/[0.12] text-slate-100 placeholder-slate-400 text-sm rounded-lg ps-9 pe-10 py-2.5 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition-colors"
             />
             {loading && (
-              <Loader2 className="w-4 h-4 text-sky-400 absolute right-3 top-1/2 -translate-y-1/2 animate-spin" aria-hidden="true" />
+              <Loader2 className="w-4 h-4 text-sky-400 absolute end-3 top-1/2 -translate-y-1/2 animate-spin" aria-hidden="true" />
             )}
           </div>
 
@@ -299,8 +321,10 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
           </div>
         </div>
 
-        {/* Results List */}
-        <div id="live-search-results-list" className="flex-1 overflow-y-auto p-4 space-y-2.5">
+        {/* Results List. aria-busy announces the in-flight search to AT:
+            the spinner is decorative, so a sighted and a non-sighted user
+            previously got different information about the same wait. */}
+        <div id="live-search-results-list" className="flex-1 overflow-y-auto p-4 space-y-2.5" aria-busy={loading}>
           {errorMsg && (
             <div role="alert" className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs rounded-lg">
               {errorMsg}

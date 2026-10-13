@@ -63,7 +63,7 @@ npx @tauri-apps/cli build`;
     <div
       ref={panelRef}
       id="tauri-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="tauri-modal-title"
@@ -103,7 +103,7 @@ npx @tauri-apps/cli build`;
         </div>
 
         {/* Tab selector */}
-        <div id="tauri-tabs-row" className="flex border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950 px-4 text-xs">
+        <div id="tauri-tabs-row" className="flex flex-wrap border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950 px-4 text-xs">
           <button
             id="tab-btn-compile"
             type="button"
@@ -219,10 +219,10 @@ npx @tauri-apps/cli build`;
                 </p>
                 <ul className="space-y-1 font-mono text-[11px] text-slate-300">
                   <li className="bg-slate-950 p-2 rounded border border-slate-950/10 dark:border-white/[0.06]">
-                    {t('tauri.nsisLine')} <span className="text-emerald-300">src-tauri/target/release/bundle/nsis/Fress_1.0.0_x64-setup.exe</span>
+                    {t('tauri.nsisLine')} <span dir="ltr" className="text-emerald-300 break-all">src-tauri/target/release/bundle/nsis/Fress_1.0.0_x64-setup.exe</span>
                   </li>
                   <li className="bg-slate-950 p-2 rounded border border-slate-950/10 dark:border-white/[0.06]">
-                    {t('tauri.msiLine')} <span className="text-emerald-300">src-tauri/target/release/bundle/msi/Fress_1.0.0_x64_en-US.msi</span>
+                    {t('tauri.msiLine')} <span dir="ltr" className="text-emerald-300 break-all">src-tauri/target/release/bundle/msi/Fress_1.0.0_x64_en-US.msi</span>
                   </li>
                 </ul>
               </div>
@@ -237,7 +237,7 @@ npx @tauri-apps/cli build`;
                 </h3>
                 <p className="text-slate-400 leading-relaxed text-xs">
                   {ciBodyParts[0]}
-                  <code className="text-sky-300 font-mono">.github/workflows/build-windows-exe.yml</code>
+                  <code dir="ltr" className="text-sky-300 font-mono">.github/workflows/build-windows-exe.yml</code>
                   {ciBodyTail[0]}
                   <code className="text-sky-300 font-mono">.exe</code>
                   {ciBodyTail[1] || ''}
@@ -267,7 +267,7 @@ npx @tauri-apps/cli build`;
                   </li>
                   <li>
                     {t('tauri.ciStep5').split('{artifact}')[0]}
-                    <code className="font-mono text-sky-300">Fress_setup.exe</code>
+                    <code dir="ltr" className="font-mono text-sky-300">Fress_setup.exe</code>
                     {t('tauri.ciStep5').split('{artifact}')[1] || ''}
                   </li>
                 </ol>
@@ -285,11 +285,11 @@ npx @tauri-apps/cli build`;
                   {t('tauri.configBody')}
                 </p>
                 <ul className="mt-2 space-y-1 text-slate-300 font-mono text-[11px]">
-                  <li>• <strong className="text-sky-300">src-tauri/tauri.conf.json</strong> {t('tauri.confItem1')}</li>
-                  <li>• <strong className="text-sky-300">src-tauri/Cargo.toml</strong> {t('tauri.confItem2')}</li>
-                  <li>• <strong className="text-sky-300">src-tauri/src/main.rs</strong> {t('tauri.confItem3')}</li>
-                  <li>• <strong className="text-sky-300">src-tauri/build.rs</strong> {t('tauri.confItem4')}</li>
-                  <li>• <strong className="text-sky-300">.github/workflows/build-windows-exe.yml</strong> {t('tauri.confItem5')}</li>
+                  <li>• <strong dir="ltr" className="text-sky-300">src-tauri/tauri.conf.json</strong> {t('tauri.confItem1')}</li>
+                  <li>• <strong dir="ltr" className="text-sky-300">src-tauri/Cargo.toml</strong> {t('tauri.confItem2')}</li>
+                  <li>• <strong dir="ltr" className="text-sky-300">src-tauri/src/main.rs</strong> {t('tauri.confItem3')}</li>
+                  <li>• <strong dir="ltr" className="text-sky-300">src-tauri/build.rs</strong> {t('tauri.confItem4')}</li>
+                  <li>• <strong dir="ltr" className="text-sky-300">.github/workflows/build-windows-exe.yml</strong> {t('tauri.confItem5')}</li>
                 </ul>
               </div>
             </div>

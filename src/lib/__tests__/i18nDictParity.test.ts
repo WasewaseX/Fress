@@ -68,7 +68,9 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     'pp.cat.twofa',
     'pp.cat.vpn',
     'pp.cat.dns',
-  ]),
+      // Update-channel name: 'Beta' is the Spanish word.
+    'header.channel.beta',
+]),
   fr: new Set([
     'card.guide',
     'card.portable',
@@ -114,7 +116,12 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     // "Open Source" is the standard French term for the license class
     // (used as-is in French software writing, e.g. Wikipedia FR).
     'license.openSource',
-  ]),
+      // 'Source' is the French word for the forge fallback label.
+    'card.source.forge',
+    // Update-channel names: 'Stable' and 'Alpha' are the French words.
+    'header.channel.stable',
+    'header.channel.alpha',
+]),
   de: new Set([
     'header.downloads',
     'filter.sortName',
@@ -164,7 +171,10 @@ const IDENTICAL_TO_EN_ALLOWLIST: Record<(typeof LANGS)[number], ReadonlySet<stri
     // "Open Source" is the standard German loanword for the license class
     // (Duden lists it; used as-is in German software writing).
     'license.openSource',
-  ]),
+      // Update-channel names: 'Beta' and 'Alpha' are the German words.
+    'header.channel.beta',
+    'header.channel.alpha',
+]),
 };
 
 describe('i18n dictionary parity', () => {

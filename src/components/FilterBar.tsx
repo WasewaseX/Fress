@@ -106,7 +106,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     // RTL scrollLeft runs 0 -> negative away from the start (right) edge, so
     // the same signed delta applies but clamps at 0 from below, not above.
     const next = sc.scrollLeft + delta;
-    sc.scrollTo({ left: rtl ? Math.min(0, next) : Math.max(0, next), behavior: 'smooth' });
+    // Honor prefers-reduced-motion: the codebase's own policy (see
+    // useViewPreferences' scroll reset) - programmatic scrolls jump
+    // instantly instead of animating for users who asked for less motion.
+    const reduceMotion = typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    sc.scrollTo({ left: rtl ? Math.min(0, next) : Math.max(0, next), behavior: reduceMotion ? 'auto' : 'smooth' });
   }, [filters.platform, rtl]);
 
   // Phones get a ~40px minimum touch target; desktop keeps its compact density.
@@ -260,8 +265,16 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       style={{ top: 'var(--fress-header-h, 0px)' }}
     >
       <div className="fr-shell space-y-2">
-        {/* Categories Bar */}
-        <div id="categories-scroll-row" className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs scrollbar-none">
+        {/* Categories Bar. The row is a keyboard-scrollable region (WCAG
+            2.1.1): the chip row overflows horizontally at narrow widths and
+            keyboard users must be able to scroll it intentionally. */}
+        <div
+          id="categories-scroll-row"
+          className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs scrollbar-none"
+          tabIndex={0}
+          role="group"
+          aria-label={t('filter.categories')}
+        >
           <span className="text-slate-400 font-semibold text-[11px] uppercase tracking-wider me-1 shrink-0">
             {t('filter.categories')}
           </span>
@@ -302,6 +315,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             id="platform-bar-mobile-scroll"
             role="group"
             aria-label={t('filter.platforms')}
+            tabIndex={0}
             className="flex items-center gap-1.5 overflow-x-auto scrollbar-none text-xs"
           >
             {platformChips('mobile')}

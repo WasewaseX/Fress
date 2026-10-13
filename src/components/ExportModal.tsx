@@ -169,7 +169,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     <div 
       ref={panelRef}
       id="export-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 fr-backdrop flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="export-modal-title"
@@ -205,42 +205,49 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </button>
         </div>
 
-        {/* Format Selector */}
-        <div className="px-5 py-3 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950/50 flex items-center gap-2">
+        {/* Format Selector. A named group whose buttons expose their
+            selected state: three visually-identical toggle buttons with
+            selection shown only by background color gave a screen reader
+            three same-named controls and no state (aria-pressed is the
+            same exclusive-chip contract the FilterBar uses). */}
+        <div className="px-5 py-3 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950/50 flex flex-wrap items-center gap-2" role="group" aria-label={t('export.formatGroupAria')}>
           <button
             type="button"
             onClick={() => setFormat('markdown')}
+            aria-pressed={format === 'markdown'}
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
               format === 'markdown'
                 ? 'bg-sky-500 text-white border-sky-400 font-semibold'
                 : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
             }`}
           >
-            <FileCode className="w-3.5 h-3.5" />
+            <FileCode className="w-3.5 h-3.5" aria-hidden="true" />
             <span>{t('export.formatReadme')}</span>
           </button>
           <button
             type="button"
             onClick={() => setFormat('csv')}
+            aria-pressed={format === 'csv'}
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
               format === 'csv'
                 ? 'bg-sky-500 text-white border-sky-400 font-semibold'
                 : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
             }`}
           >
-            <Table className="w-3.5 h-3.5" />
+            <Table className="w-3.5 h-3.5" aria-hidden="true" />
             <span>{t('export.formatCsv')}</span>
           </button>
           <button
             type="button"
             onClick={() => setFormat('json')}
+            aria-pressed={format === 'json'}
             className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
               format === 'json'
                 ? 'bg-sky-500 text-white border-sky-400 font-semibold'
                 : 'bg-slate-950/[0.04] dark:bg-white/[0.03] text-slate-300 border-slate-950/10 dark:border-white/[0.08] hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
             }`}
           >
-            <FileText className="w-3.5 h-3.5" />
+            <FileText className="w-3.5 h-3.5" aria-hidden="true" />
             <span>{t('export.formatJson')}</span>
           </button>
         </div>
@@ -257,17 +264,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           role="region"
           aria-label={t('export.title')}
         >
-          <pre className="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
+          <pre dir="ltr" className="text-left font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed fr-code-well border border-slate-950/10 dark:border-white/[0.08] p-4 rounded-lg select-all">
             {content}
           </pre>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between">
+        {/* Footer. Wraps at the 320px floor: Copy + Download + count exceed
+            the card width in several locales and the Download button was
+            clipped by the panel's overflow-hidden. */}
+        <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <span className="text-xs text-slate-400 font-mono">
             {t('export.readyCount').replace('{n}', String(apps.length))}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleCopy}
@@ -305,6 +314,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </button>
           </div>
         </div>
+        {/* Localized clipboard completion feedback for screen readers -
+            the visual button swap alone is silent to assistive tech. */}
+        <span className="sr-only" role="status">
+          {copyState === 'ok' ? t('common.copied') : copyState === 'failed' ? t('common.copyFailed') : ''}
+        </span>
       </div>
     </div>
   );

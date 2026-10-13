@@ -519,10 +519,10 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               rel="noreferrer noopener"
               className="text-sky-400 hover:text-sky-300 underline decoration-dotted underline-offset-2"
             >
-              ente's PrivacyPack
-              <ExternalLink className="inline w-3 h-3 ml-0.5 mb-0.5" aria-hidden="true" />
+              {t('pp.sourceLink')}
+              <ExternalLink className="inline w-3 h-3 ms-0.5 mb-0.5" aria-hidden="true" />
             </a>
-            {`, ${PRIVACY_PACK.length} ${t('pp.categories')}.`}
+            {t('pp.sourceGlue').replace('{n}', String(PRIVACY_PACK.length))}
           </p>
 
           {/* Grade legend */}
@@ -575,7 +575,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                   type="button"
                   id={`max-privacy-app-${id}`}
                   onClick={() => onOpenDetail(app)}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-medium bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 pl-1 pr-2 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.08] transition-colors"
+                  className="inline-flex items-center gap-1.5 text-[11px] font-medium bg-slate-950/[0.04] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-slate-200 ps-1 pe-2 py-1 rounded-md border border-slate-950/10 dark:border-white/[0.08] transition-colors"
                   title={`${t('pp.openApp')}: ${app.name}`}
                 >
                   <AppIcon appId={app.id} name={app.name} size={16} />
@@ -616,7 +616,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               aria-label={ppCategoryName(cat.name)}
             >
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-slate-100 tracking-tight mr-auto">{ppCategoryName(cat.name)}</h2>
+                <h2 className="text-sm font-bold text-slate-100 tracking-tight me-auto">{ppCategoryName(cat.name)}</h2>
                 <span
                   id={`pp-counter-${cat.id}`}
                   className={`text-[10px] font-bold rounded-full px-2 py-0.5 border ${
@@ -689,7 +689,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
               </div>
 
               <div className="flex justify-center my-2" aria-hidden="true">
-                <ArrowRight className="w-4 h-4 text-slate-400 rotate-90 md:rotate-0" />
+                <ArrowRight className="w-4 h-4 text-slate-400 rotate-90 md:rotate-0 rtl-flip" />
               </div>
 
               {/* Private side */}
@@ -766,7 +766,7 @@ export const ReplaceTab: React.FC<ReplaceTabProps> = ({ apps, onOpenDetail, onAd
                       <li
                         key={alt.id}
                         id={`pp-picked-${cat.id}-${alt.id}`}
-                        className="flex items-center gap-2 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.06] rounded-md pl-1.5 pr-1 py-1"
+                        className="flex items-center gap-2 bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.06] rounded-md ps-1.5 pe-1 py-1"
                       >
                         <AltLogo alt={alt} name={alt.name} size={18} />
                         <span className="text-xs font-medium text-slate-200 truncate flex-1">{alt.name}</span>

@@ -15,6 +15,10 @@ interface AddAppModalProps {
   onClose: () => void;
   onSaveApp: (app: AppItem) => void;
   initialApp?: AppItem | null;
+  /** Catalog snapshot: powers the duplicate-entry guard (the search flow
+   *  has this check via its own existingApps; manual add used to create
+   *  silent duplicates). */
+  existingApps?: AppItem[];
   /** Shows the Search/Manual tabs when the modal is opened from the shared Add flow. */
   showTabs?: boolean;
   onSwitchTab?: (tab: 'search' | 'manual') => void;
@@ -34,6 +38,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   onClose,
   onSaveApp,
   initialApp,
+  existingApps = [],
   showTabs = false,
   onSwitchTab
 }) => {
@@ -60,6 +65,12 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   const [tags, setTags] = useState('');
   
   const [errorMsg, setErrorMsg] = useState('');
+  // Which field the current error refers to: the alert names the problem,
+  // aria-invalid + aria-describedby tie it to the exact input for AT.
+  const [errorField, setErrorField] = useState<'name' | 'description' | 'form' | null>(null);
+  // Set once the user edits the stars field by hand: the URL auto-fill must
+  // never clobber a manual entry when its (debounced) fetch lands late.
+  const starsTouchedRef = useRef(false);
   const [isInspecting, setIsInspecting] = useState(false);
   const [inspectSuccessMsg, setInspectSuccessMsg] = useState('');
 
@@ -107,7 +118,9 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       setTags('');
     }
     setErrorMsg('');
+    setErrorField(null);
     setInspectSuccessMsg('');
+    starsTouchedRef.current = false;
   }, [initialApp, isOpen]);
 
   // Stars are never guessed: once a GitHub/GitLab URL is pasted, the live
@@ -115,6 +128,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
   // still possible for repos the forge APIs don't cover.
   useEffect(() => {
     if (!isOpen) return;
+    // The user typed a star count by hand: never overwrite it with the
+    // fetch result that was still in flight (the flag used to be set but
+    // never consulted, so a manual value was clobbered ~600ms later).
+    if (starsTouchedRef.current) return;
     const url = githubUrl.trim();
     if (!url) return;
     let alive = true;
@@ -188,21 +205,46 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
       setInspectSuccessMsg(t('add.inspectSuccess').replace('{name}', data.name || cleanRepo));
     } catch (err: any) {
-      setErrorMsg(err.message || t('add.inspectFailed'));
+      // Only our own validation throws carry translated messages; a raw
+      // network failure (TypeError) leaked browser-locale English like
+      // "Failed to fetch" - fall back to the translated generic instead.
+      setErrorMsg(err instanceof TypeError ? t('add.inspectFailed') : (err.message || t('add.inspectFailed')));
     } finally {
       setIsInspecting(false);
     }
   };
 
+  const fail = (msg: string, field: 'name' | 'description' | 'form') => {
+    setErrorMsg(msg);
+    setErrorField(field);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setErrorMsg(t('add.nameRequired'));
+      fail(t('add.nameRequired'), 'name');
       return;
     }
     if (!description.trim()) {
-      setErrorMsg(t('add.descriptionRequired'));
+      fail(t('add.descriptionRequired'), 'description');
       return;
+    }
+
+    // Duplicate-entry guard (edit path exempt - it updates its own entry):
+    // adding "VLC" twice used to create two catalog entries with two
+    // success toasts and no hint of the conflict.
+    if (!initialApp) {
+      const nameKey = name.trim().toLowerCase();
+      const repoKey = githubUrl.trim().toLowerCase().replace(/\/$/, '');
+      const duplicate = existingApps.some((a) => {
+        if (a.id === initialApp?.id) return false;
+        if (a.name.trim().toLowerCase() === nameKey) return true;
+        return !!repoKey && (a.githubUrl || '').trim().toLowerCase().replace(/\/$/, '') === repoKey;
+      });
+      if (duplicate) {
+        fail(t('add.duplicate'), 'name');
+        return;
+      }
     }
 
     const tagArray = tags
@@ -213,23 +255,23 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     // Install commands end up in generated batch scripts, so anything that
     // is not a plain single install invocation is refused here, at the door.
     if (wingetCommand.trim() && !sanitizeInstallCommand('winget', wingetCommand)) {
-      setErrorMsg(t('add.cmdUnsafeWinget'));
+      fail(t('add.cmdUnsafeWinget'), 'form');
       return;
     }
     if (brewCommand.trim() && !sanitizeInstallCommand('brew', brewCommand)) {
-      setErrorMsg(t('add.cmdUnsafeBrew'));
+      fail(t('add.cmdUnsafeBrew'), 'form');
       return;
     }
     if (flatpakCommand.trim() && !sanitizeInstallCommand('flatpak', flatpakCommand)) {
-      setErrorMsg(t('add.cmdUnsafeFlatpak'));
+      fail(t('add.cmdUnsafeFlatpak'), 'form');
       return;
     }
     if (scoopCommand.trim() && !sanitizeInstallCommand('scoop', scoopCommand)) {
-      setErrorMsg(t('add.cmdUnsafeScoop'));
+      fail(t('add.cmdUnsafeScoop'), 'form');
       return;
     }
     if (aptCommand.trim() && !sanitizeInstallCommand('apt', aptCommand)) {
-      setErrorMsg(t('add.cmdUnsafeApt'));
+      fail(t('add.cmdUnsafeApt'), 'form');
       return;
     }
 
@@ -275,7 +317,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
     <div 
       ref={panelRef}
       id="add-app-modal-backdrop" 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 fr-backdrop"
       role="dialog"
       aria-modal="true"
       aria-labelledby="add-modal-title"
@@ -329,7 +371,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
           {errorMsg && (
-            <div role="alert" className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-lg flex items-center gap-2">
+            <div id="add-form-error" role="alert" className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-lg flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{errorMsg}</span>
             </div>
@@ -352,6 +394,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 id="input-github-url"
                 ref={firstFieldRef}
                 type="url"
+                dir="ltr"
                 value={githubUrl}
                 onChange={(e) => setGithubUrl(e.target.value)}
                 placeholder="https://github.com/owner/repository"
@@ -376,6 +419,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
             <input
               id="input-gitlab-url"
               type="url"
+              dir="ltr"
               value={gitlabUrl}
               onChange={(e) => setGitlabUrl(e.target.value)}
               placeholder="https://gitlab.com/owner/repository"
@@ -391,10 +435,11 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-app-name"
                 type="text"
-                required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('add.namePlaceholder')}
+                aria-invalid={errorField === 'name' || undefined}
+                aria-describedby={errorMsg ? 'add-form-error' : undefined}
                 className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>
@@ -422,6 +467,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-website-url"
                 type="url"
+                dir="ltr"
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
                 placeholder="https://syncthing.net"
@@ -485,6 +531,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
                 min="0"
                 value={stars}
                 onChange={(e) => {
+                  starsTouchedRef.current = true;
                   setStars(Number(e.target.value));
                   setStarsAutoFilled(false);
                 }}
@@ -500,10 +547,10 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
           {/* Operating Systems */}
           <div>
-            <span className="block text-slate-300 font-medium mb-1.5">
+            <span id="add-platforms-label" className="block text-slate-300 font-medium mb-1.5">
               {t('add.platformsLabel')}
             </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-labelledby="add-platforms-label">
               {(['windows', 'mac', 'linux', 'android', 'web'] as Platform[]).map((p) => {
                 const isSelected = platforms.includes(p);
                 return (
@@ -532,11 +579,12 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
             </label>
             <textarea
               id="input-description"
-              required
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('add.descriptionPlaceholder')}
+              aria-invalid={errorField === 'description' || undefined}
+              aria-describedby={errorMsg ? 'add-form-error' : undefined}
               className="w-full bg-slate-950/[0.04] dark:bg-white/[0.04] border border-slate-950/10 dark:border-white/[0.1] rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
             />
           </div>
@@ -565,6 +613,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-winget"
                 type="text"
+                dir="ltr"
                 value={wingetCommand}
                 onChange={(e) => setWingetCommand(e.target.value)}
                 placeholder="winget install syncthing"
@@ -579,6 +628,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-brew"
                 type="text"
+                dir="ltr"
                 value={brewCommand}
                 onChange={(e) => setBrewCommand(e.target.value)}
                 placeholder="brew install --cask syncthing"
@@ -593,6 +643,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-flatpak"
                 type="text"
+                dir="ltr"
                 value={flatpakCommand}
                 onChange={(e) => setFlatpakCommand(e.target.value)}
                 placeholder="flatpak install flathub ..."
@@ -609,6 +660,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-scoop"
                 type="text"
+                dir="ltr"
                 value={scoopCommand}
                 onChange={(e) => setScoopCommand(e.target.value)}
                 placeholder="scoop install syncthing"
@@ -623,6 +675,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
               <input
                 id="input-apt"
                 type="text"
+                dir="ltr"
                 value={aptCommand}
                 onChange={(e) => setAptCommand(e.target.value)}
                 placeholder="apt install syncthing"

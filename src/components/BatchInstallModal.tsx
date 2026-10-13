@@ -43,10 +43,24 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
 }) => {
   const { t } = useI18n();
   const [scriptType, setScriptType] = useState<ScriptType>('winget-ps');
-  const [copied, setCopied] = useState(false);
+  // Three states: a denied clipboard must say so ("Copy failed"), not
+  // silently keep claiming "Copy" while nothing was copied.
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'failed'>('idle');
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  keepFocusInside(panelRef, isOpen);
+  // onEscape is REQUIRED here: without it Escape fell through to the
+  // shell-wide closeAllDialogs, so one press closed this modal AND every
+  // dialog stacked underneath it, dropping keyboard focus to <body>.
+  keepFocusInside(panelRef, isOpen, { onEscape: onClose });
+  // Reopening starts from a clean slate (never a stale "Copied"), and the
+  // reset timer never fires after the dialog is gone.
+  React.useEffect(() => {
+    if (isOpen) setCopyState('idle');
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, [isOpen]);
   if (!isOpen) return null;
 
   // Which package manager the active tab generates for.
@@ -151,10 +165,12 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(scriptOutput);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopyState('ok');
     } catch {
-      // ignore
+      setCopyState('failed');
+    } finally {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopyState('idle'), 2000);
     }
   };
 
@@ -186,7 +202,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
     <div 
       ref={panelRef}
       id="batch-install-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 fr-backdrop flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="batch-install-title"
@@ -222,12 +238,14 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
           </button>
         </div>
 
-        {/* Script Format Tabs */}
-        <div className="px-5 pt-3 pb-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950/50 flex items-center justify-between flex-wrap gap-2">
+        {/* Script Format Tabs. aria-pressed exposes which format is active
+            (selection was conveyed only by background color). */}
+        <div className="px-5 pt-3 pb-2 border-b border-slate-950/10 dark:border-white/[0.06] bg-slate-950/50 flex items-center justify-between flex-wrap gap-2" role="group" aria-label={t('bs.title')}>
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
               onClick={() => setScriptType('winget-ps')}
+              aria-pressed={scriptType === 'winget-ps'}
               className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
                 scriptType === 'winget-ps'
                   ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
@@ -239,6 +257,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             <button
               type="button"
               onClick={() => setScriptType('brew')}
+              aria-pressed={scriptType === 'brew'}
               className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
                 scriptType === 'brew'
                   ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
@@ -250,6 +269,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             <button
               type="button"
               onClick={() => setScriptType('brewfile')}
+              aria-pressed={scriptType === 'brewfile'}
               className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
                 scriptType === 'brewfile'
                   ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
@@ -261,6 +281,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             <button
               type="button"
               onClick={() => setScriptType('flatpak')}
+              aria-pressed={scriptType === 'flatpak'}
               className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
                 scriptType === 'flatpak'
                   ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
@@ -272,6 +293,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             <button
               type="button"
               onClick={() => setScriptType('scoop')}
+              aria-pressed={scriptType === 'scoop'}
               className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
                 scriptType === 'scoop'
                   ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
@@ -283,6 +305,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             <button
               type="button"
               onClick={() => setScriptType('apt')}
+              aria-pressed={scriptType === 'apt'}
               className={`px-3 py-1 rounded-md text-xs font-medium border transition-colors ${
                 scriptType === 'apt'
                   ? 'bg-sky-500 text-white border-sky-400 font-semibold shadow-xs'
@@ -314,7 +337,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
 
         {/* Selected Apps Chip Bar */}
         <div className="px-5 py-2.5 bg-slate-900 border-b border-slate-950/10 dark:border-white/[0.04] flex items-center gap-1.5 overflow-x-auto text-xs">
-          <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider mr-1 shrink-0">
+          <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider me-1 shrink-0">
             {t('bs.selected')} ({selectedApps.length}):
           </span>
           {selectedApps.length > 0 ? (
@@ -327,11 +350,11 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                 <button
                   type="button"
                   onClick={() => onToggleAppSelection(app.id)}
-                  className="text-slate-400 hover:text-rose-400 ml-0.5"
+                  className="text-slate-400 hover:text-rose-400 ms-0.5"
                   title={`${t('bs.removeApp')}: ${app.name}`}
                   aria-label={`${t('bs.removeApp')}: ${app.name}`}
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3 h-3" aria-hidden="true" />
                 </button>
               </span>
             ))
@@ -349,8 +372,9 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
           </pre>
         </div>
 
-        {/* Footer Actions */}
-        <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between gap-3">
+        {/* Footer Actions. flex-wrap: safe-note + two buttons exceed the
+            320px panel. */}
+        <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1.5 min-w-0">
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
@@ -383,10 +407,15 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
               disabled={!hasCommands}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white border border-sky-400 transition-colors disabled:opacity-50"
             >
-              {copied ? (
+              {copyState === 'ok' ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
                   <span>{t('bs.copied')}</span>
+                </>
+              ) : copyState === 'failed' ? (
+                <>
+                  <X className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
+                  <span>{t('common.copyFailed')}</span>
                 </>
               ) : (
                 <>
@@ -397,6 +426,10 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
             </button>
           </div>
         </div>
+        {/* Clipboard outcome for the script copy, announced to AT. */}
+        <span className="sr-only" role="status">
+          {copyState === 'ok' ? t('bs.copied') : copyState === 'failed' ? t('common.copyFailed') : ''}
+        </span>
       </div>
     </div>
   );

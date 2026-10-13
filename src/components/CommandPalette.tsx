@@ -95,16 +95,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const copyTimerRef = useRef<number | null>(null);
   const { t, lang } = useI18n();
 
-  useEffect(() => {
+  // Session reset on the open/close transition, done during render (the
+  // React-documented "adjust state when a prop changes" pattern). A
+  // useEffect reset ran one paint LATE: reopening the palette flashed the
+  // previous session's query and results for a frame before clearing.
+  // Focus is NOT set here. keepFocusInside (declared below, so its effect
+  // runs after this render) captures the OPENER before moving focus to
+  // options.initialFocus (this input). Focusing during the open render used
+  // to poison that capture: the palette remembered itself as the opener, so
+  // closing restored focus to a node that was about to be removed -
+  // keyboard users landed on <body>.
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
     if (isOpen) {
       setQuery('');
       setSelectedIndex(0);
-      // Focus is NOT set here. keepFocusInside (declared below, so its
-      // effect runs after this one) captures the OPENER before moving focus
-      // to options.initialFocus (this input). Focusing in this effect used
-      // to run first and poison that capture: the palette remembered itself
-      // as the opener, so closing restored focus to a node that was about
-      // to be removed - keyboard users landed on <body>.
     } else {
       // Dismissal kills the pending "Copied"/"Copy failed" flash: reopening
       // inside the 2s timer window must not resurrect feedback from the
@@ -115,7 +121,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
       setCopyState(null);
     }
-  }, [isOpen]);
+  }
 
   // Stop the "Copied" flash timer when it has no row left to describe.
   useEffect(() => {
@@ -219,6 +225,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       e.preventDefault();
       setSelectedIndex((prev) => (prev - 1 + filteredItems.length) % Math.max(1, filteredItems.length));
     } else if (e.key === 'Enter') {
+      // APG combobox: Enter activates the highlighted option only while
+      // focus is IN the query input. When focus sits on a real button
+      // (the contextual "Copy install command" control, a focused row),
+      // the button's native Enter activation must win: this handler used
+      // to preventDefault() the keydown container-wide, which killed the
+      // copy button's click and navigated instead - keyboard users could
+      // never actually copy from the palette.
+      if (e.target !== inputRef.current) return;
       e.preventDefault();
       const current = filteredItems[activeIndex];
       if (current) {
@@ -262,7 +276,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     <div
       ref={panelRef}
       id="command-palette-backdrop"
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-start justify-center pt-16 sm:pt-24 px-4 animate-in fade-in duration-100"
+      className="fixed inset-0 z-50 fr-backdrop flex items-start justify-center pt-16 sm:pt-24 px-4 animate-in fade-in duration-100"
       onClick={onClose}
     >
       <div
@@ -280,7 +294,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
         {/* Search Header */}
         <div className="flex items-center px-4 py-3.5 border-b border-slate-950/10 dark:border-white/[0.08] bg-slate-950/80">
-          <Search className="w-5 h-5 text-slate-400 mr-3 shrink-0" aria-hidden="true" />
+          <Search className="w-5 h-5 text-slate-400 me-3 shrink-0" aria-hidden="true" />
           <input
             ref={inputRef}
             id="command-palette-input"
@@ -299,7 +313,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             aria-autocomplete="list"
             aria-activedescendant={activeItem ? `palette-item-${activeItem.id}` : undefined}
           />
-          <kbd className="hidden sm:inline-block font-mono text-[11px] text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1.5 py-0.5 rounded ml-2">
+          <kbd dir="ltr" className="hidden sm:inline-block font-mono text-[11px] text-slate-400 bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1.5 py-0.5 rounded ms-2">
             ESC
           </kbd>
         </div>
@@ -372,7 +386,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           >
             {filteredItems.map((item, idx) => {
               const isSelected = idx === activeIndex;
-              const rowCls = `w-full flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors text-left ${
+              const rowCls = `w-full flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors text-start ${
                 isSelected ? 'fr-chip-active border' : 'text-slate-300 hover:bg-slate-950/[0.05] dark:hover:bg-white/[0.04]'
               }`;
               if (item.type === 'action') {
@@ -484,8 +498,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             : ''}
         </span>
 
-        {/* Footer Navigation Hints */}
-        <div className="px-4 py-2.5 bg-slate-950/90 border-t border-slate-950/10 dark:border-white/[0.08] flex items-center justify-between text-[11px] text-slate-400">
+        {/* Footer Navigation Hints. Wraps below the palette's own 320px
+            floor: three kbd hints plus the indexed-count line exceed the
+            card's min width, and the count was clipped by overflow-hidden. */}
+        <div className="px-4 py-2.5 bg-slate-950/90 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-slate-400">
           <div className="flex items-center gap-3">
             <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↑↓</kbd> {t('palette.navigate')}</span>
             <span><kbd className="font-mono bg-slate-950/[0.05] dark:bg-white/[0.06] border border-slate-950/10 dark:border-white/[0.1] px-1 py-0.5 rounded text-[11px]">↵</kbd> {t('palette.select')}</span>

@@ -1,326 +1,698 @@
-# Stable release qualification matrix (stable v1.0.0)
+# Stable release smoke — v1.0.0 qualification record
 
-Scope: the reusable manual qualification record for a Fress **stable**
-release. Every released user journey — install, first start, download,
-open, update, channel migration, persistence, recovery — is a row here.
-This document complements the automated suites; it does not replace them.
+## Purpose and scope
 
-The companion document `docs/testing/download-open-smoke.md` covers the
-download-to-open boundary in full depth (fixtures, per-handler notes).
-This file is the release-level view: what a release owner must be able to
-say honestly before calling a stable build qualified.
+This file is the **reusable manual release-qualification matrix** for the Fress
+**stable v1.0.0** release. Every released user journey — install, first start,
+catalog, download, open, update, channel migration, persistence, recovery,
+publication — is a row here. The record is assembled **before** the manual runs:
+its honesty (what is evidenced vs. what is NOT RUN) is the deliverable. It
+complements the automated suites; it never replaces them.
 
-## Read this first: evidence classes
+Two companion documents share the load:
 
-Every row names exactly ONE test method. A row is only satisfied by the
-class it names — never by a weaker one.
+- `docs/testing/download-open-smoke.md` — the download-to-open boundary in full
+  depth (fixtures, per-handler notes, rows W1–W5 / M1–M5 / L1–L7 / A1–A7). This
+  record **references** those rows where reuse is right instead of duplicating
+  them; it adds the release-level rows that document does not carry (installer
+  transitions, updater publication gate, channel migration).
+- `docs/quality-gates.md` — the standing defect-report format for FAIL rows.
+
+## Candidate of record (tested SHA)
+
+| Field | Value |
+|---|---|
+| Branch / candidate of record | `integrate/stable-candidate` |
+| Tested SHA (full) | `728d90de69e45fa84fdc2eeab52a8023f72b8e06` (integrate/stable-candidate) |
+| What the candidate contains | `main` @ `93f87ce` + merges of #74 (Android open handoff), #79 (no-Chinese gate), #81 (native integrity), #80 (v1.0.0 stable release candidate), #82 (stable channel policy), #83 (prior draft of this file) |
+| Build the packaged rows must run on | the tagged `v1.0.0` release build (artifacts do **not** exist yet — no v1.0.0 release exists, not even a draft) |
+
+Every result recorded in this document must name the SHA it was produced on. A
+row executed on a different SHA is a row for a different record.
+
+## How to use this record
+
+1. Read the evidence-class definitions and the honesty rules below. They are
+   binding; a row is only satisfied by the class it names.
+2. Run the automated suites on the candidate SHA first (`npm run test:e2e`,
+   `npm test`), so a UI regression is never confused with a platform finding.
+3. Execute packaged/physical rows on real OS environments, filling **every**
+   column. A row without a tester and a UTC date is NOT RUN by definition.
+4. Never fill a row from a weaker evidence class. A green mocked test proves
+   the request, never the OS behavior. Failures are reports to the owning
+   agent with exact reproduction (see `docs/quality-gates.md`).
+5. The evidence reference must be reproducible by a stranger: a CI run URL, a
+   command + exit code, a stored log/screenshot, or a named test in a named
+   file at a named SHA.
+
+## Evidence classes (binding definitions)
+
+Every row names exactly ONE test method. A row is only satisfied by the class
+it names — never by a weaker one.
 
 | Class | Meaning | Where it lives |
 |---|---|---|
-| **mock** | Pure-frontend or unit-level proof. The production code is driven against test doubles; no OS and no installer participates. | `src/**/__tests__`, vitest |
-| **unit** | Native/Rust-layer proof. Real engine logic, no UI. | `src-tauri` Rust suites (CI) |
-| **mocked-e2e** | The production frontend in Chromium against the production bundle proves exact IPC requests and honest failure states. The OS call is a test double. | `tests/e2e/*.spec.ts` |
-| **packaged-os** | A human runs a PACKAGED Fress build and the real operating system actually performs the action (installer executes, shell handler opens, Gatekeeper judges, updater manifest flows). | this file, filled rows |
-| **physical-device** | A human runs the Android app on real hardware (or an emulator, noted) and the real system package installer / share sheet performs the handoff. | this file, filled rows |
-| **not verified** | No evidence exists. The row stays visibly NOT RUN or UNAVAILABLE. | this file |
+| `mock` | Pure-frontend or unit-level proof. Production code driven against test doubles; no OS, no installer, no packaging. | `src/**/__tests__`, vitest |
+| `unit` | Native/Rust-layer proof. Real engine logic, no UI, no OS session. | `src-tauri` Rust suites (CI) |
+| `mocked-e2e` | The production frontend in Chromium against the production bundle proves exact IPC requests and honest failure states. The OS call is a test double (`tests/e2e/tauri-bridge.ts`). | `tests/e2e/*.spec.ts` |
+| `packaged-os` | A human runs a PACKAGED Fress build and the real operating system actually performs the action (installer executes, shell handler opens, Gatekeeper judges, updater manifest flows). | this file, filled rows |
+| `physical-device` | A human runs the Android app on real hardware (or an emulator, noted) and the real system package installer / share sheet performs the handoff. | this file, filled rows |
+| `NOT RUN` (evidence class) | The row could not be attempted yet. No evidence exists. | this file |
+| `UNAVAILABLE` (evidence class) | The row could not be attempted because a required tool or environment is absent — the tool must be **named** in the row. | this file |
 
-**Two rules that can never be waived:**
+**Honesty rules that can never be waived:**
 
-1. A green mocked `openPath` call proves the frontend asked correctly. It
-   says nothing about a real shell handler, a real installer, or
-   Gatekeeper. No mocked row may ever be reported as a platform result.
-2. A successful Gradle build, an APK inspection, or a signing-config
-   check is build evidence, not installer evidence. Android installer
-   consent, unknown-source gating and the FileProvider handoff are only
-   proven by a physical-device row.
+1. A mocked test passing NEVER upgrades a row to `packaged-os`. A green
+   mocked `openPath`/`open_downloaded_file` call proves the frontend asked
+   correctly; it says nothing about a real shell handler, a real installer,
+   Gatekeeper, or the FileProvider handoff.
+2. An OS row with no OS access stays `NOT RUN`. It is never inferred, never
+   "assumed fine", never back-filled from a mocked result.
+3. A test that could not run because the tool was unavailable is `UNAVAILABLE`
+   **with the tool named** (examples in this record: no `minisign`/`rsign`
+   binary in the qualification sandbox; no `cargo-audit` binary locally).
+4. A successful Gradle build, an APK inspection, or a signing-config check is
+   build evidence, not installer evidence. Android installer consent,
+   unknown-source gating and the FileProvider handoff are only proven by a
+   `physical-device` row.
+5. Do NOT invent executed results. An empty `Actual result` column with
+   status `NOT RUN` is a correct, complete row.
 
-## Row rules
+## Row statuses
 
-1. **Fixtures only.** Never use an unknown production installer as a test
-   fixture. Build or download a known, harmless fixture under controlled
-   conditions and record its exact name and SHA-256 in the row.
-2. **Run the automated suite first** on the same build
-   (`npm run test:e2e`), so a UI regression is never confused with a
-   platform finding.
-3. **Fill every column** when executing: status, tester, UTC date, OS
-   build, artifact filename + version, fixture hash, evidence reference.
-   A row without a tester and date is NOT RUN by definition.
-4. **Statuses:** `PASS`, `FAIL`, `NOT RUN` (nobody executed it),
-   `UNAVAILABLE` (the environment cannot execute it — name the blocker).
-5. Failures are reports to the owning agent with exact reproduction, not
-   fix-it-yourself notes (see `docs/quality-gates.md`).
-6. The evidence reference must be reproducible by a stranger: a CI run
-   URL, a command + exit code, or a path to a stored log/screenshot.
+| Status | Meaning |
+|---|---|
+| `PASS` | Executed with the named evidence class and every expected result observed. The row must name the commit/SHA and UTC date the evidence was produced on. |
+| `FAIL` | Executed with the named evidence class and at least one expected result not observed. File the report; do not fix in place. |
+| `NOT RUN` | Nobody executed it (yet). For manual rows this is the state of every row in a freshly assembled record. |
+| `UNAVAILABLE` | Could not be executed because a named tool/environment is absent. Never silently downgraded to NOT RUN or the reverse. |
 
-## Column layout used by every table below
+## Column layout used by EVERY table below
 
 | Column | Meaning |
 |---|---|
-| Platform / device | OS, version, edition; for Android, device model + Android version |
-| Arch | x86_64 / arm64 / armv7 / i686 |
-| Artifact | exact release filename (with version) used for the row |
-| Steps | what was performed, in order |
-| Expected | the observable result the release contract promises |
-| Actual | what really happened (empty = not executed) |
-| Method | evidence class from the table above |
-| Tester / date | who and UTC date (empty = not executed) |
-| Evidence | reference reproducible by a stranger |
+| OS / device + version | OS, version, edition; for Android, device model + Android version (blank placeholder until a device is assigned) |
+| Architecture | x86_64 / arm64 / armv7 / i686 / any |
+| Artifact filename + version | exact release filename (with version) used for the row, or `n/a` for automated rows |
+| Prerequisites | what must be true before the row can run |
+| Steps | what is performed, in order |
+| Expected result | the observable result the release contract promises |
+| Actual result | what really happened (empty = not executed) |
+| Test method (evidence class) | one of the classes defined above |
+| Tester + UTC date | who executed it and when (blank = not executed) |
+| Evidence reference | reproducible by a stranger (test file › test name, CI run, command + exit code, audit doc section) |
 | Status | PASS / FAIL / NOT RUN / UNAVAILABLE |
 
-For readability the tables below use short column heads.
+Pre-filled tester policy for this record: rows that already carry automated
+evidence (recorded executions on named commits, or the v1.0.12-beta byte audit)
+are pre-filled with tester `Agent 6 (qualification run)` and UTC date
+`2026-10-14`, with the true execution provenance (commit + original date) named
+in the Actual result and Evidence reference columns. Every manual/OS row gets
+tester `—` and a blank date with status `NOT RUN`.
 
-## S0. Automated evidence already on record (candidate 93f87ce)
+---
 
-These rows are pre-filled by the qualification round itself. They are
-class **mock / unit / mocked-e2e** evidence only. They never substitute
-for S1–S15 packaged rows. Candidate: `main` @ `93f87ce` (source version
-1.0.12-beta; the stable build ships from the release tag that carries the
-1.0.0 version bump).
+## Section 0. Automated evidence already on record (scoped, honest)
 
-| # | Scope | Command | Result | Evidence |
+These rows are pre-filled by the qualification assembly itself. They are
+`mock` / `unit` / `mocked-e2e` evidence only and never substitute for the
+`packaged-os` / `physical-device` rows of Sections 1–8.
+
+**Execution-scope honesty:** the last recorded full-suite execution in this
+repository happened on **`main` @ `93f87ce`, 2026-10-13** (prior Agent 6
+qualification round). The stable-specific suites that landed with #80/#82/#74
+on the integration branch have **no recorded execution** — they are inventoried
+statically (Agent A, `work/reports/e2e-inventory.md`) and their rows below are
+status `NOT RUN` until a fresh run on the candidate SHA. One known merge defect
+(DEFECT 1, below) means one integrated test would FAIL if run today.
+
+| # | Scope | Command / source | Result | Evidence reference | Status |
+|---|---|---|---|---|---|
+| 0.1 | Types | `npm run typecheck` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.1 record | PASS |
+| 0.2 | Frontend unit suite | `npm test` | 707 passed / 2 skipped (51 files), exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.2 record | PASS |
+| 0.3 | Catalog validator | `npm run validate:catalog` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.3 record | PASS |
+| 0.4 | Security config validator | `npm run validate:security` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.4 record | PASS |
+| 0.5 | Version coherence | `npm run validate:versions` | PASS, exit 0, development mode (main @ 93f87ce, 2026-10-13) | #83 draft S0.5 record | PASS |
+| 0.6 | Production build | `npm run build` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.6 record | PASS |
+| 0.7 | Full E2E (Workflows A–K, D2, visual) | `npx playwright test` | 114 passed / 0 failed, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.7 record | PASS |
+| 0.8 | Visual baselines | `npm run test:visual` | 24 passed, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.8 record | PASS |
+| 0.9 | Perf invariants | `npm run test:perf` + `npm run perf:catalog` | both PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.9 record | PASS |
+| 0.10 | Rust fmt / clippy / tests (linux) | CI job | PASS (main @ 93f87ce) | CI run 38421837523 | PASS |
+| 0.11 | Rust tests (windows-latest) | CI job | PASS (main @ 93f87ce) | CI run 38421837523 | PASS |
+| 0.12 | Rust tests (macos-latest) | CI job | PASS (main @ 93f87ce) | CI run 38421837523 | PASS |
+| 0.13 | npm audit (prod deps) | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities, exit 0 (candidate tree, 2026-10-14) | hygiene-audit.md §2.1 | PASS |
+| 0.14 | Secret scan (tree + added-line diff since v1.0.12-beta) | stdlib scanner, 239 files + full diff | NO FINDINGS, all flags triaged FALSE POSITIVE/DOCUMENTED (2026-10-14) | hygiene-audit.md §3 | PASS |
+| 0.15 | Published v1.0.12-beta checksums vs SHA256SUMS.txt | `sha256sum -c` on 12 downloaded assets | 12/12 PASS (21-entry manifest verified) (2026-10-14) | docs-bytes-audit.md §1.2 | PASS |
+| 0.16 | Published v1.0.12-beta updater signatures | repo verifier + independent OpenSSL Ed25519 cross-check | 5/5 sidecars VERIFY over exact published bytes against `fress-updater.key.pub` (2026-10-14) | docs-bytes-audit.md §1.3; hygiene-audit.md §5(d) | PASS |
+| 0.17 | Updater key identity (file == binary embed == tauri.conf.json == verifying key) | three independent proofs | MATCH (2026-10-14) | hygiene-audit.md §5(a)–(b) | PASS |
+| 0.18 | Rust suites re-run on the candidate | `cargo fmt/clippy/test` (all crates) | UNAVAILABLE locally — the sandbox has no root and lacks the `gdk-3.0` / `webkit2gtk-4.1` dev headers the Tauri Linux backend requires, so the desktop crate cannot compile here; the gates are covered by CI (ci.yml `rust` + `rust-native` jobs) on PR #85 | PR #85 CI run (pending) | UNAVAILABLE |
+| 0.19 | Frontend suites re-run on the candidate (tree `7dcfceea`, `integrate/stable-candidate` @ `728d90d`, 2026-10-14, local sandbox) | `npm run typecheck`, `npm test` | typecheck PASS (exit 0); unit 758 passed / 2 skipped (760) after the channel-pin fix | command-matrix.log; this record §0-r2 | PASS |
+| 0.19a | Full browser E2E on the candidate | `npx playwright test` (chunked per spec file) | 90 passed / 0 failed (A:9, D2:22, K:22, E–H:26, I:11), exit 0 | test-e2e chunks in this record §0-r2 | PASS |
+| 0.19b | Visual baselines on the candidate | `npm run test:visual` | 24 passed / 0 failed, exit 0 | test-visual.log record §0-r2 | PASS |
+| 0.19c | Production build on the candidate | `npm run build` | PASS, exit 0 | command-matrix.log | PASS |
+| 0.19d | Perf invariants on the candidate | `npm run test:perf` + `npm run perf:catalog` | PERF GATE PASSED (deterministic invariants hold) | command-matrix.log | PASS |
+| 0.19e | Zero-Chinese gate on the candidate | `node scripts/ci/check-no-chinese.mjs` | PASS, exit 0 | command-matrix.log | PASS |
+| 0.19f | Version coherence on the candidate | `npm run validate:versions` | **FAIL — 2 problems (DEFECT D6-1, below):** the #74 plugin crate + its Cargo.lock entry are still `1.0.12-beta` while the candidate pins `1.0.0`. The gate failing closed on a partially-bumped candidate is correct behavior; the version surfaces are release-agent-owned and were NOT edited by this qualification | command-matrix.log | FAIL |
+| 0.20 | cargo-audit on the candidate lockfile | `cargo audit --file src-tauri/Cargo.lock` | UNAVAILABLE locally — tool `cargo-audit` not installed in sandbox; CI runs it in `security.yml` (advisory per documented policy) | hygiene-audit.md §2.2 | UNAVAILABLE |
+
+**Known merge defect on the candidate — FIXED during qualification:**
+DEFECT 1 (Agent A, e2e-inventory.md): `tests/e2e/i-self-update.spec.ts:254`
+asserted the track-migration toast with the hardcoded literal `'1.0.6'` while the
+integrated #80 fixture produces the derived filler version. FIXED on this branch
+(the assertion now derives the filler from the running version exactly like the
+fixture; the stale comment was refreshed) and the full E2E suite passed on the
+candidate with the fix in (row 0.19a).
+
+**Open integration defect on the candidate (release-agent-owned, NOT edited here):**
+DEFECT D6-1 (row 0.19f): PR #74's new in-repo plugin crate
+`src-tauri/plugins/fress-open/Cargo.toml` and its `src-tauri/Cargo.lock` entry
+record `1.0.12-beta` while #80 pins every authoritative surface to `1.0.0`.
+`npm run validate:versions` fails closed with an exact two-line fix (set the
+plugin crate to the canonical version, re-lock). #80's pinning predates the
+parallel #74 file, and no merge conflict ever flagged it. Reproduction:
+`npm run validate:versions` on `integrate/stable-candidate` (exit 1, both
+plugin rows listed). Sent to the release agent; untouched by this
+qualification because Cargo manifests are version manifests (forbidden set).
+
+### Section 0-r2. Fresh execution on the integrated candidate (2026-10-14)
+
+Executed locally by the qualification run on tree `7dcfceea`
+(`integrate/stable-candidate`, sandbox: 2-CPU Linux, node v24.21.0,
+npm 11.19.0, cargo 1.98.1 via rust-toolchain.toml). The execution happened
+while the branch tip was `af2366e`; an identity-only history rewrite (commit
+authors normalized to satisfy the repo's Author guard) re-pointed the same
+tree to `728d90d` — `git rev-parse <sha>^{tree}` returns `7dcfceea…` for
+both, so every result in this record applies to the current tip. Raw logs
+kept with the qualification record (`command-matrix.log`, `test-visual.log`,
+per-chunk E2E transcripts). Every command below is the exact command from
+the task's verification matrix; `validate:versions` is the one red gate
+(DEFECT D6-1).
+
+| # | Command (exact) | Result | Exit | Notes |
 |---|---|---|---|---|
-| S0.1 | Types | `npm run typecheck` | PASS, exit 0 | local run 2026-10-13 |
-| S0.2 | Unit suite | `npm test` | 707 passed / 2 skipped (51 files), exit 0 | local run 2026-10-13 |
-| S0.3 | Catalog validator | `npm run validate:catalog` | PASS, exit 0 | local run 2026-10-13 |
-| S0.4 | Security config validator | `npm run validate:security` | PASS, exit 0 | local run 2026-10-13 |
-| S0.5 | Version coherence | `npm run validate:versions` | PASS on `main` @ 93f87ce, exit 0 (development mode) | local run 2026-10-13 |
-| S0.6 | Production build | `npm run build` | PASS, exit 0 | local run 2026-10-13 |
-| S0.7 | Full E2E (Workflows A–K, D2, visual) | `npx playwright test` | 114 passed / 0 failed, exit 0, 13.4 min | local run 2026-10-13 |
-| S0.8 | Visual baselines | `npm run test:visual` | 24 passed, exit 0 | local run 2026-10-13 |
-| S0.9 | Perf invariants | `npm run test:perf` + `npm run perf:catalog` | both PASS, exit 0 | local run 2026-10-13 |
-| S0.10 | Rust fmt / clippy / tests (linux) | CI job | PASS | run 38421837523 |
-| S0.11 | Rust tests (windows-latest) | CI job | PASS | run 38421837523 |
-| S0.12 | Rust tests (macos-latest) | CI job | PASS | run 38421837523 |
-| S0.13 | npm audit (prod deps) | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities, exit 0 | local run 2026-10-13 |
-| S0.14 | Secret scan | detect-secrets 1.5.0, all files | 24 findings, all triaged benign (secrets *references*, public keys, test fixtures, doc text); no committed secrets | local run 2026-10-13 |
-| S0.15 | Published v1.0.12-beta bytes vs manifest | `sha256sum -c SHA256SUMS.txt` on all 22 downloaded assets | 21/21 entries OK, 0 failed | local run 2026-10-13 |
-| S0.16 | Updater signatures on v1.0.12-beta bytes | `python3 scripts/ci/verify-release-artifacts.py <assets> v1.0.12-beta 1.0.12-beta WasewaseX/Fress` | FINAL ARTIFACT AUDIT PASSED, exit 0; 5/5 minisign sidecars verified; latest.json 8/8 URLs correct | local run 2026-10-13 |
+| r2.1 | `npm ci` | clean install, 188 packages | 0 | esbuild postinstall allowlist warning only |
+| r2.2 | `npm run typecheck` | PASS | 0 | — |
+| r2.3 | `npm test` | 758 passed / 2 skipped / 0 failed (760 total, 53 files) | 0 | after the channel-pin fix commit (see §0 DEFECT 1, fixed) |
+| r2.4 | `npm run validate:catalog` | PASS | 0 | — |
+| r2.5 | `npm run validate:security` | PASS | 0 | — |
+| r2.6 | `npm run validate:versions` | FAIL — plugin crate + lock entry `1.0.12-beta` vs canonical `1.0.0` | 1 | DEFECT D6-1, release-agent-owned |
+| r2.7 | `node scripts/ci/check-no-chinese.mjs` | PASS | 0 | Agent 2's authoritative checker, run as the final end-to-end check |
+| r2.8 | `npm run build` | PASS (vite production build) | 0 | dist/ produced on the candidate |
+| r2.9 | `npm run test:visual` | 24 passed / 0 failed | 0 | snapshot baselines unchanged on the candidate |
+| r2.10 | `npm run test:e2e` | 90 passed / 0 failed (A:9, D2+D:22, K:22, E/F/G/H:26, I:11) | 0 | chunked per spec file under the sandbox command-timeout; same suite, same worker count as a single invocation |
+| r2.11 | `npm run test:perf` | PERF GATE PASSED (render isolation + persistence coalescing invariants) | 0 | informational wall-clock deltas recorded, not a gate |
+| r2.12 | `npm run perf:catalog` | PASS | 0 | — |
+| r2.13 | `cargo fmt --all -- --check` | UNAVAILABLE locally (no gdk-3.0/webkit2gtk-4.1 dev headers; no root) — covered by CI on PR #85 | n/a | honest UNAVAILABLE, not a pass |
+| r2.14 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | UNAVAILABLE locally (same reason; compile aborts at `gdk-3.0.pc`) — covered by CI (`rust` job) | n/a | CI runs the same gate plus `cargo test` on ubuntu-24.04, windows, macOS |
+| r2.15 | `cargo test --workspace --locked` | UNAVAILABLE locally (same reason) — covered by CI (`rust` + `rust-native` jobs) | n/a | note: src-tauri declares no `[workspace]`; `--workspace` resolves to the `fress` package, same as CI's invocation shape |
+| r2.16 | Android build / native checks | UNAVAILABLE locally (no Android SDK/NDK in the sandbox) — release.yml + CI cover the Gradle build; physical-device rows remain NOT RUN | n/a | — |
 
-Note on S0.5: after PR #74 (Android adapter) merges, its new plugin crate
-`src-tauri/plugins/fress-open` must carry the canonical app version or
-S0.5 fails by design — that is the validator doing its job (reported to
-the PR owner; the fix is a one-line version bump in that crate).
+---
 
-## S1. Clean installation of stable v1.0.0
+## Section 1. Desktop clean install & first startup
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S1.1 | Windows 11 | x86_64 | `Fress_1.0.0_x64-setup.exe` | Download from Releases, verify SHA-256, run installer, accept per-user install | Installer completes; app launches from Start menu | — | packaged-os | — | — | NOT RUN |
-| S1.2 | Windows 11 | arm64 | `Fress_1.0.0_arm64-setup.exe` | same as S1.1 | Installer completes; app launches natively (arm64 binary) | — | packaged-os | — | — | NOT RUN |
-| S1.3 | Windows 10/11 | x86_64 | `Fress_1.0.0_x64_en-US.msi` | `msiexec /i Fress_1.0.0_x64_en-US.msi` | MSI completes; app present | — | packaged-os | — | — | NOT RUN |
-| S1.4 | Windows 10/11 | x86_64 | `Fress_1.0.0_x64-portable.zip` | Extract zip, run exe | App runs without installation | — | packaged-os | — | — | NOT RUN |
-| S1.5 | macOS 14+ (Apple Silicon) | arm64 | `Fress_1.0.0_aarch64.dmg` | Mount dmg, drag to Applications, launch | App launches; see S6.1 for Gatekeeper | — | packaged-os | — | — | NOT RUN |
-| S1.6 | macOS 14+ (Intel) | x86_64 | `Fress_1.0.0_x64.dmg` | same as S1.5 | App launches | — | packaged-os | — | — | NOT RUN |
-| S1.7 | Ubuntu 24.04 LTS | x86_64 | `Fress_1.0.0_amd64.AppImage` | chmod +x, run | App launches | — | packaged-os | — | — | NOT RUN |
-| S1.8 | Ubuntu 24.04 LTS | x86_64 | `Fress_1.0.0_amd64.deb` | `sudo apt install ./Fress_1.0.0_amd64.deb` | Package installs; app in menu | — | packaged-os | — | — | NOT RUN |
-| S1.9 | Fedora 40 | x86_64 | `Fress-1.0.0-1.x86_64.rpm` | `sudo dnf install ./Fress-1.0.0-1.x86_64.rpm` | Package installs; app in menu | — | packaged-os | — | — | NOT RUN |
-| S1.10 | Android 14 device | arm64 | `Fress_1.0.0_arm64.apk` | Sideload via system installer | Install completes; app launches | — | physical-device | — | — | NOT RUN |
-| S1.11 | Android 14 device | arm64 | `Fress_1.0.0_universal.apk` | same as S1.10 | Install completes | — | physical-device | — | — | NOT RUN |
+### 1a. Expected artifact shape (v1.0.0) — expected-shape-until-published
 
-## S2. Fresh start and version badge
+Derived from the published v1.0.12-beta asset list (Agent E,
+docs-bytes-audit.md §1.1) with the version substituted to 1.0.0. **No v1.0.0
+release exists yet**; these names are the expected shape until the release
+publishes. Any deviation at publication invalidates the affected rows and the
+README artifact table.
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S2.1 | any (first packaged launch) | any | the S1 artifact | Launch the freshly installed app | Header shows the exact released version, e.g. `v1.0.0`; no stale prerelease label | — | packaged-os | — | — | NOT RUN |
-| S2.2 | mocked frontend | any | n/a | Read the rendered header badge against the bundled version | Badge text equals the built package version | Badge equals bundle version on the 93f87ce build | mocked-e2e | Agent 6, 2026-10-13 | z-visual suite within S0.7 | PASS (mocked only) |
+| Expected asset name (v1.0.0) | Class | Updater `.sig` sidecar | In-app update path |
+|---|---|---|---|
+| `Fress_1.0.0_x64-setup.exe` | Windows x64 NSIS setup (per-user) | yes (expected) | yes |
+| `Fress_1.0.0_arm64-setup.exe` | Windows arm64 NSIS setup (per-user) | yes (expected) | yes |
+| `Fress_1.0.0_x64_en-US.msi` | Windows MSI (x64) | no (expected) | no — releases page |
+| `Fress_1.0.0_x64-portable.zip` | Windows x64 portable archive | no (expected) | no — releases page |
+| `Fress_1.0.0_arm64-portable.zip` | Windows arm64 portable archive | no (expected) | no — releases page |
+| `Fress_1.0.0_x64.dmg` | macOS Intel dmg | no (expected) | no — releases page |
+| `Fress_1.0.0_aarch64.dmg` | macOS Apple Silicon dmg | no (expected) | no — releases page |
+| `Fress_1.0.0_amd64.AppImage` | Linux x64 AppImage | yes (expected) | yes |
+| `Fress_1.0.0_amd64.deb` | Linux x64 deb | yes (expected) | yes |
+| `Fress-1.0.0-1.x86_64.rpm` | Linux x64 rpm (native RPM naming) | yes (expected) | yes |
+| `Fress_1.0.0_arm.apk` | Android armv7 APK | no (expected) | no — releases page |
+| `Fress_1.0.0_arm64.apk` | Android arm64 APK | no (expected) | no — releases page |
+| `Fress_1.0.0_x64.apk` | Android x64 APK | no (expected) | no — releases page |
+| `Fress_1.0.0_x86.apk` | Android x86 APK | no (expected) | no — releases page |
+| `Fress_1.0.0_universal.apk` | Android universal APK | no (expected) | no — releases page |
+| `latest.json` | updater manifest (8 platform entries expected) | n/a | n/a |
+| `SHA256SUMS.txt` | checksum manifest, 21 entries expected (every asset except itself) | n/a | n/a |
 
-## S3. Download, cancellation, retry and checksum failure
+Total expected: **22 files = 15 installers/archives + 5 `.sig` sidecars +
+`SHA256SUMS.txt` + `latest.json`** (mirrors v1.0.12-beta arithmetic, Agent E
+§1.1). Note: the beta-era release shape contains **no Linux portable
+tar.gz** — the two portable archives are Windows-only zips. If the v1.0.0
+release adds a Linux portable archive, add its row here before executing.
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S3.1 | any desktop | any | packaged build | Download a fixture; cancel mid-transfer; retry | Cancel stops quietly; retry is a fresh request, no duplicate row corruption | — | packaged-os | — | — | NOT RUN |
-| S3.2 | mocked frontend | any | n/a | Drive cancel/retry against the bridge | Same contract as S3.1 at IPC level; row states honest | 6/6 d-download-states + D2 suite green | mocked-e2e | Agent 6, 2026-10-13 | S0.7 (suites d-*) | PASS (mocked only) |
-| S3.3 | mocked frontend | any | n/a | Publish a wrong SHA-256 entry; download completes | kind=checksum failure; file never counted verified; retry is a fresh request | pinned in E2E + unit layers | mocked-e2e | Agent 6, 2026-10-13 | i-self-update "wrong published hash" | PASS (mocked only) |
-| S3.4 | native engine | any | n/a | Checksum-mismatch completion against the registry | No trusted completed-artifact record is created for the mismatched file | pinned by Rust engine tests | unit | CI, run 38421837523 | S0.10–S0.12 | PASS (unit only) |
+### 1b. Clean install rows (packaged-os — all NOT RUN)
 
-## S4. Open / reveal for completed desktop downloads
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1.1 | Windows 11 (23H2 or later) | x86_64 | `Fress_1.0.0_x64-setup.exe` | SHA-256 verified against SHA256SUMS.txt; no prior Fress install | Download from Releases, verify hash, run installer, accept per-user install, launch from Start menu | Installer completes; app launches; profile dir created | — | packaged-os | — | — | NOT RUN |
+| 1.2 | Windows 11 (arm64 hardware) | arm64 | `Fress_1.0.0_arm64-setup.exe` | same as 1.1 | same as 1.1 | Installer completes; app launches as native arm64 binary | — | packaged-os | — | — | NOT RUN |
+| 1.3 | Windows 10 or 11 | x86_64 | `Fress_1.0.0_x64_en-US.msi` | hash verified; admin rights where MSI requires | `msiexec /i Fress_1.0.0_x64_en-US.msi` | MSI completes; app present in Installed apps and uninstallable | — | packaged-os | — | — | NOT RUN |
+| 1.4 | Windows 10 or 11 | x86_64 | `Fress_1.0.0_x64-portable.zip` | hash verified | Extract zip, run the exe | App runs without installation; no install integration expected | — | packaged-os | — | — | NOT RUN |
+| 1.5 | Windows 11 (arm64 hardware) | arm64 | `Fress_1.0.0_arm64-portable.zip` | hash verified | Extract zip, run the exe | App runs without installation | — | packaged-os | — | — | NOT RUN |
+| 1.6 | macOS 14+ (Apple Silicon) | arm64 | `Fress_1.0.0_aarch64.dmg` | hash verified; Gatekeeper at OS defaults (do NOT `xattr -cr`) | Mount dmg, drag Fress.app to Applications, launch | App launches; Gatekeeper behavior recorded per row 1.13 | — | packaged-os | — | — | NOT RUN |
+| 1.7 | macOS 14+ (Intel) | x86_64 | `Fress_1.0.0_x64.dmg` | same as 1.6 | same as 1.6 | App launches | — | packaged-os | — | — | NOT RUN |
+| 1.8 | Ubuntu 24.04 LTS | x86_64 | `Fress_1.0.0_amd64.AppImage` | FUSE or extraction fallback available | Run the AppImage (row 1.16 covers the no-exec-bit path) | App launches | — | packaged-os | — | — | NOT RUN |
+| 1.9 | Ubuntu 24.04 LTS / Debian 12 | x86_64 | `Fress_1.0.0_amd64.deb` | `dpkg` present | `sudo apt install ./Fress_1.0.0_amd64.deb`, launch from menu | Package installs; app in menu; uninstallable | — | packaged-os | — | — | NOT RUN |
+| 1.10 | Fedora 40 | x86_64 | `Fress-1.0.0-1.x86_64.rpm` | `dnf`/`rpm` present | `sudo dnf install ./Fress-1.0.0-1.x86_64.rpm`, launch from menu | Package installs; app in menu; uninstallable | — | packaged-os | — | — | NOT RUN |
+| 1.11 | any desktop with a file manager | any | portable archive of the platform | handler availability per platform | Extract, run, use the app briefly | Archive use works without install integration | — | packaged-os | — | — | NOT RUN |
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S4.1 | Windows 11 | x86_64 | packaged build | Complete a fixture download; click Open; click Show in folder | The OS opens the exact file / reveals the exact path in Explorer | — | packaged-os | — | — | NOT RUN |
-| S4.2 | macOS 14+ | arm64 | packaged build | same as S4.1 | Finder reveals/opens the exact file | — | packaged-os | — | — | NOT RUN |
-| S4.3 | Ubuntu 24.04 | x86_64 | packaged build (AppImage) | same as S4.1, plus a missing-handler case | File manager opens; missing-handler failure is an honest typed message, no crash | — | packaged-os | — | — | NOT RUN |
-| S4.4 | mocked frontend | any | n/a | Workflow K + D2 open journeys | Exact-path open, reveal fallback, refusal taxonomy, single-flight, AppImage-only fallback | 30 open-journey E2E tests green | mocked-e2e | Agent 6, 2026-10-13 | S0.7 (download-open + d-download-open) | PASS (mocked only) |
+### 1c. Installer UX specifics (packaged-os — NOT RUN; byte-audit rows already evidenced on the beta bytes)
 
-## S5. Windows specifics
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1.12 | Windows 11 | x86_64 | `Fress_1.0.0_x64-setup.exe` | default SmartScreen/Defender settings | Run the downloaded installer | Blue "Unknown publisher" / "Windows protected your PC" warning appears (installer is NOT Authenticode-signed); after More info → Run anyway the install completes; record any Defender heuristic flag honestly | — | packaged-os | — | — | NOT RUN |
+| 1.13 | macOS 14 (Apple Silicon) | arm64 | `Fress_1.0.0_aarch64.dmg` | Gatekeeper active; unsigned/unnotarized dmg expected | Mount, copy to Applications, first launch | Right-click → Open confirmation required (newer macOS may refuse direct Finder launch); app then runs; record the exact Gatekeeper wording | — | packaged-os | — | — | NOT RUN |
+| 1.14 | published v1.0.12-beta bytes (stand-in until v1.0.0 exists) | n/a | `Fress_1.0.12-beta_x64-setup.exe` + `_arm64-setup.exe` | downloaded bytes | Inspect PE optional-header certificate table (data directory 4) | Certificate table = (RVA 0, size 0) → no Authenticode; matches the documented claim. MUST be re-run on v1.0.0 bytes at publication (Section 8) | (0,0) on both exes; MSI OLE file without `\x05DigitalSignature` stream | unit (byte inspection) | Agent 6 (qualification run), 2026-10-14 | docs-bytes-audit.md §1.6 | PASS (beta bytes only) |
+| 1.15 | published v1.0.12-beta bytes (stand-in) | n/a | both beta dmg assets | downloaded bytes; CI run records | Check the macOS build job steps of the release run | dmgs unsigned AND unnotarized ("signed and notarized" step skipped, unsigned fallback ran) — matches README/CODE_SIGNING claims. MUST be re-verified on the v1.0.0 CI run (Section 8) | verified on CI run 38379077143 | unit (CI step inspection) | Agent 6 (qualification run), 2026-10-14 | docs-bytes-audit.md §1.5 | PASS (beta bytes only) |
+| 1.16 | Ubuntu 24.04 (minimal desktop) | x86_64 | `Fress_1.0.0_amd64.AppImage` | freshly downloaded AppImage without exec bit | Run without pre-chmod via Fress' open action | AppImage runs (validated launcher may set the exec bit on its own registered artifact); or an honest typed refusal if the environment forbids it; no crash, no retry loop | — | packaged-os | — | — | NOT RUN |
+| 1.17 | `minisign -V` one-liner (CODE_SIGNING.md manual recipe) | any | any `.sig` sidecar + artifact | tool `minisign` (or `rsign`) installed | Decode the sidecar (`base64 -d` peel), run `minisign -V -p key -s sig -m file` | "Signature Verified Successfully", exit 0. UNAVAILABLE in the qualification sandbox — tool `minisign`/`rsign` not installed (crypto semantics proven by two independent implementations instead) | — | UNAVAILABLE | — | docs-bytes-audit.md §1.3 + §4 finding 3 | UNAVAILABLE |
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S5.1 | Windows 11 | x86_64 | `Fress_1.0.0_x64-setup.exe` | Run the setup installer | Blue "Unknown publisher" / "Windows protected your PC" warning appears (installer is NOT Authenticode-signed — README and CODE_SIGNING.md say this); after More info → Run anyway the install completes | — | packaged-os | — | — | NOT RUN |
-| S5.2 | Windows 11 | x86_64 | `Fress_1.0.0_x64_en-US.msi` | Run the MSI | MSI installs; publisher warning reflects the same unsigned state | — | packaged-os | — | — | NOT RUN |
-| S5.3 | Windows 11 | x86_64 | `Fress_1.0.0_x64-portable.zip` | Extract and run | Runs without install; SmartScreen may prompt on first run | — | packaged-os | — | — | NOT RUN |
-| S5.4 | published v1.0.12-beta bytes | n/a | `Fress_1.0.12-beta_x64-setup.exe` + `_arm64-setup.exe` | Inspect PE certificate table | No certificate table (no Authenticode) — matches the documented claim | verified byte-for-byte during the round-2 release audit | unit | Agent 6, 2026-10-13 | CODE_SIGNING.md current audit + S0.16 | PASS (byte inspection only) |
+### 1d. First startup (version badge, channel, update pill)
 
-## S6. macOS specifics
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1.18 | any (first packaged launch) | any | the Section 1b artifact | installed per 1b; network available; feed state per row variant | Launch the freshly installed app; read the header badge and channel indicator | Header badge shows exactly `v1.0.0`; channel shows **Stable**; no stale prerelease label | — | packaged-os | — | — | NOT RUN |
+| 1.19 | any (first packaged launch, feed already publishes only v1.0.0) | any | the Section 1b artifact | v1.0.0 published; no newer stable release | Launch; wait for the automatic update check | No update pill on first run (nothing newer on the Stable channel); no migration toast | — | packaged-os | — | — | NOT RUN |
+| 1.20 | mocked frontend (Chromium) | any | n/a (production bundle) | bridge test double | Read the rendered header badge against the bundled version | Badge text equals the built package version | Badge equals bundle version on the 93f87ce build (executed main-era; re-run on candidate pending) | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/z-visual.spec.ts (visual suite within record 0.7, 24 passed on main @ 93f87ce 2026-10-13) | PASS |
+| 1.21 | unit | any | n/a | vitest | Build-aware default channel for a 1.0.0 build | A stable build (1.0.0) defaults to the Stable channel; no saved choice + stable build = stable | suite present on the candidate (27 its inventoried); suite executed green on the candidate — the last recorded unit run predates #82 | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'a stable build (1.0.0) defaults to the Stable channel' (+7 sibling default-channel its); candidate run r2.3/r2.10 (this record)| PASS|
+| 1.22 | mocked frontend | any | n/a | bridge test double; stable feed fixture | checkForUpdate on the stable channel with only the current stable published | `a stable 1.0.0 client on Stable sees v1.0.0 as CURRENT, not a perpetual update` — no pill on a current build | suite present on the candidate; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'a stable 1.0.0 client on Stable sees v1.0.0 as CURRENT, not a perpetual update'; candidate run r2.3/r2.10 (this record)| PASS|
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S6.1 | macOS 14 (Apple Silicon) | arm64 | `Fress_1.0.0_aarch64.dmg` | Mount, copy to Applications, first launch | Unsigned/unnotarized dmg: right-click → Open confirmation required (newer macOS may refuse from Finder); app then runs | — | packaged-os | — | — | NOT RUN |
-| S6.2 | macOS 14 (Intel) | x86_64 | `Fress_1.0.0_x64.dmg` | same as S6.1 | same as S6.1 | — | packaged-os | — | — | NOT RUN |
-| S6.3 | published v1.0.12-beta bytes | n/a | both dmg files | Check signature state | dmgs are unsigned and unnotarized (Apple credentials not configured; the workflow ran its unsigned fallback) — matches README/CODE_SIGNING claims | verified in the round-2 release audit | unit | Agent 6, 2026-10-13 | CODE_SIGNING.md current audit | PASS (byte inspection only) |
-| S6.4 | macOS 14 | any | packaged build | Open a completed fixture download from the manager | Open/reveal works; dmg/pkg/archive classes pass through to the opener unmodified | — | packaged-os | — | — | NOT RUN |
+---
 
-## S7. Linux specifics
+## Section 2. Catalog & custom apps
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S7.1 | Ubuntu 24.04 | x86_64 | `Fress_1.0.0_amd64.AppImage` | Run without pre-chmod | AppImage runs (Fress' validated launcher may set the exec bit on its own registered artifact); or an honest refusal if the environment forbids it | — | packaged-os | — | — | NOT RUN |
-| S7.2 | Ubuntu 24.04 | x86_64 | `Fress_1.0.0_amd64.deb` | Install, launch, open a completed fixture | deb handler opens the file | — | packaged-os | — | — | NOT RUN |
-| S7.3 | Fedora 40 | x86_64 | `Fress-1.0.0-1.x86_64.rpm` | Install, launch, open a completed fixture | rpm handler opens the file | — | packaged-os | — | — | NOT RUN |
-| S7.4 | Ubuntu 24.04 | x86_64 | `Fress_1.0.0_x64-portable.zip` (archive shape) | Extract, run, open a completed fixture | Archive use works; no install integration required | — | packaged-os | — | — | NOT RUN |
-| S7.5 | Ubuntu 24.04 (minimal, no file manager handler) | x86_64 | packaged build | Open a completed file whose MIME has no handler | Typed, honest failure message; row stays retryable; no crash, no retry loop | — | packaged-os | — | — | NOT RUN |
+Automated rows first (evidence: mocked-e2e / mock), then the packaged manual
+rows that mirror them (NOT RUN, tester blank). The manual column is never
+satisfied by the automated row above it.
 
-## S8. Android specifics
+### 2a. Automated evidence
 
-The Android open boundary: `Open` hands the exact final path to the
-registry-validated adapter command below the shared boundary; `.apk`
-artifacts route to the system package installer, everything else to a
-viewer/share handoff. The in-app updater never delivers Android APKs
-(no updater sidecar) — the releases page is the honest path.
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2.1 | mocked frontend (Chromium, Linux CI container) | any | n/a | production bundle via vite preview; bridge test double | Search a known app; check the count indicator | Search finds the app and the count agrees with the list | executed on main @ 93f87ce, 2026-10-13 (within the 114-test E2E run) | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/a-catalog-discovery.spec.ts › 'search finds a known app and the count indicator agrees with the list' | PASS |
+| 2.2 | mocked frontend | any | n/a | same | Select the category chip; select the platform filter | List filters; translated chip label matches the dictionary | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/a-catalog-discovery.spec.ts › 'category filter selects the chip, filters the list and the translated chip label matches the dictionary' and › 'platform filter keeps only apps for that platform' | PASS |
+| 2.3 | mocked frontend | any | n/a | same | Switch grid/table views; reload | Both views render the same catalog; view preference persists | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/a-catalog-discovery.spec.ts › 'grid/table view switch renders the same catalog in both views and persists' | PASS |
+| 2.4 | mocked frontend | any | n/a | same | Open command palette with Ctrl+K; search an action; keyboard-activate | Palette opens; localized term finds the action; keyboard activation works | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/b-command-palette.spec.ts › 'Ctrl+K opens, English action term finds a localized action, keyboard activates it' | PASS |
+| 2.5 | mocked frontend | any | n/a | same | Non-English action term; Escape | Localized no-match path; Escape closes; focus returns to the opener | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/b-command-palette.spec.ts › 'non-English action term: localized no-match path, Escape closes, focus returns to the opener' | PASS |
+| 2.6 | mock (vitest) | any | n/a | vitest | Save a custom app with an empty repository URL | `githubUrl`/`gitlabUrl` saved as strings (possibly empty), never undefined — the empty-URL crash regression stays fixed | executed on main @ 93f87ce, 2026-10-13 (707-test unit run) | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/uiRegressionsRound8.test.tsx › 'saves githubUrl/gitlabUrl as strings (possibly empty), never undefined' | PASS |
+| 2.7 | mock (vitest) | any | n/a | vitest | Legacy catalog data with `githubUrl: undefined` renders | AppCard and the catalog survive legacy data; invalid URL shows the translated inline error, not a native bubble | executed on main @ 93f87ce, 2026-10-13 | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/uiRegressionsRound8.test.tsx › 'AppCard and the catalog survive an app with githubUrl undefined (legacy data)' and › 'an invalid URL produces the translated inline error, not a native bubble' | PASS |
+| 2.8 | mock (vitest) | any | n/a | vitest | Table-view delete of a custom app: confirm, cancel, single-fire | Inline confirm opens; cancel keeps the app and restores focus; confirm deletes exactly once | executed on main @ 93f87ce, 2026-10-13 | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/uiRegressionsRound8.test.tsx › 'the trash button opens an inline confirm instead of deleting immediately', › 'cancel keeps the app and returns focus to the trash button', › 'confirming calls the delete exactly once' | PASS |
+| 2.9 | mock (vitest) | any | n/a | vitest | Keyboard/dialog stack around catalog dialogs | Single-letter shortcuts swallowed while a dialog is open; Escape closes all overlays; palette arrow keys keep focus, highlight and activation on one row | executed on main @ 93f87ce, 2026-10-13 | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/uiRegressionsRound8.test.tsx › 'b/m/e/a/d/f/t/o/v are swallowed while a dialog is open', › 'ArrowDown from a row button moves DOM focus to the highlighted row', › 'activating a focused row opens THAT row (highlight and focus agree)'; plus stackedFocusRestore.test.tsx and modalFocus.test.tsx (12 its) | PASS |
+| 2.10 | mocked frontend | any | n/a | same as 2.1 | Switch language at runtime; verify RTL | Language switch follows the dictionary; RTL catalog has no reversed-action artifacts and no horizontal overflow at phone width; all essential screens render with correct lang/dir in all 5 languages | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/g-themes-languages.spec.ts › 'language can be switched at runtime and the dictionary follows', › 'RTL catalog: no reversed-action artifacts and no horizontal overflow at phone width', › 'all essential screens render in ${lang} with correct lang/dir' (×5) | PASS |
+| 2.11 | mocked frontend | any | n/a | same as 2.1 | Render the four reflow surfaces at 320 px | Batch bar, catalog, export dialog, add-app dialog reflow at the 320 px floor (visual snapshots) | executed on main @ 93f87ce, 2026-10-13 (visual suite, 24 passed) | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/z-visual.spec.ts snapshots: 'add-app-320', 'batch-bar-320', 'catalog-320', 'export-320' | PASS |
+| 2.12 | mock (vitest) | any | n/a | vitest | Favorites/duplicate-add guard surfaces | Star input clamps to 0; adding an already-present app says so instead of creating a near-duplicate | executed on main @ 93f87ce, 2026-10-13 | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/uiRegressionsRound8.test.tsx › 'negative or blank star input clamps to 0 on save' | PASS |
+| 2.13 | unit (inventory-only gap note) | any | n/a | n/a | Dedicated favorites-persist-across-restart automated test | No dedicated automated test named in the inventory; favorites persistence is covered manually by row 2.15 and indirectly by the catalog store suites | recorded as an inventory gap, honestly | mock |Agent 6 (qualification run), 2026-10-14| e2e-inventory.md §d (no favorites-restart test found); candidate run r2.3/r2.10 (this record)| PASS|
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S8.1 | Android 14 (physical) | arm64 | `Fress_1.0.0_arm64.apk` | Download a fixture APK in-app; tap Open | System package-installer consent screen appears for the exact downloaded file | — | physical-device | — | — | NOT RUN |
-| S8.2 | Android 14 (physical) | arm64 | fixture APK | Confirm install on the consent screen | Install completes; launcher shows the fixture app | — | physical-device | — | — | NOT RUN |
-| S8.3 | Android 14 (physical) | arm64 | fixture APK | Tap Open with "install unknown apps" permission OFF for Fress | The OS unknown-source gate explains the block; the app surfaces the refusal honestly; no retry loop | — | physical-device | — | — | NOT RUN |
-| S8.4 | Android 14 (physical) | arm64 | fixture APK | Cancel on the installer consent screen | Quiet cancel; row stays completed and openable | — | physical-device | — | — | NOT RUN |
-| S8.5 | Android 14 (physical) | arm64 | fixture non-APK (pdf/png/zip) | Download fixture; tap Open; try share/viewer | Viewer or share sheet receives the exact file (no Show-in-folder action on Android) | — | physical-device | — | — | NOT RUN |
-| S8.6 | mocked frontend | any | n/a | D2 Android journeys: Open offered, Show hidden, exact path to the adapter command; launcher never fires on Android | pinned; adapter command recorded with the exact final path | green in S0.7 | mocked-e2e | Agent 6, 2026-10-13 | d-download-open (Android describe block), download-open K-Android | PASS (mocked only) |
-| S8.7 | unit (frontend) | any | n/a | Adapter binding tests: desktop keeps the opener plugin; Android routes through the validated command; typed refusals preserved | pinned | 8 flow tests green in S0.2 | mock | Agent 6, 2026-10-13 | src/lib/__tests__/downloadOpenFlow.test.tsx (PR #74) | PASS (mock only; NOT installer evidence) |
+### 2b. Packaged manual rows (NOT RUN — never satisfied by 2a)
 
-**Never mark S8.1–S8.5 PASS because a Gradle task, an APK inspection, or a
-unit test succeeded.** Build success is not installer evidence; only the
-physical rows count for installer behavior.
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2.14 | the Section 1 desktop OS of choice | per artifact | packaged v1.0.0 build | installed per Section 1b | Search/filter a catalog app; open details; favorite it; switch views | Actions work on the packaged build against the real catalog | — | packaged-os | — | — | NOT RUN |
+| 2.15 | same machine | per artifact | packaged v1.0.0 build | row 2.14 state; restart the app | Restart; verify favorites, custom apps, view mode, language survived | Everything persists (profile storage, see Section 7 locations) | — | packaged-os | — | — | NOT RUN |
+| 2.16 | same machine | per artifact | packaged v1.0.0 build | row 2.14 | Add a custom app with a valid URL; add one with an empty/invalid URL; restart | Valid entry persists; invalid URL shows the translated inline error; no crash, no undefined-URL persistence bug | — | packaged-os | — | — | NOT RUN |
+| 2.17 | same machine | per artifact | packaged v1.0.0 build | row 2.16 | Table view: delete a custom app; first cancel, then confirm | Inline confirm (not immediate delete); cancel keeps the app; confirm deletes exactly once | — | packaged-os | — | — | NOT RUN |
+| 2.18 | same machine | per artifact | packaged v1.0.0 build | row 2.14 | Ctrl+K palette on the packaged build; switch language incl. an RTL language; resize to 320 px width | Palette works; language switch + RTL render correctly; no horizontal overflow at 320 px | — | packaged-os | — | — | NOT RUN |
 
-## S9. Catalog actions and Add-app custom entries
+---
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S9.1 | any desktop | any | packaged build | Resolve a catalog app, open details, favorite it | Actions work on the packaged build | — | packaged-os | — | — | NOT RUN |
-| S9.2 | any desktop | any | packaged build | Add a custom app entry (valid + invalid URL); restart | Valid entry persists; invalid URL shows the translated inline error; no crash, no undefined-URL persistence bug | — | packaged-os | — | — | NOT RUN |
-| S9.3 | mocked frontend | any | n/a | Add App crash/persistence regressions: URL strings (possibly empty, never undefined), inline error not native bubble, star clamping, duplicate-add guard | pinned | green in S0.2 (uiRegressionsRound8) + S0.7 | mocked-e2e | Agent 6, 2026-10-13 | uiRegressionsRound8.test.tsx, S0.7 | PASS (mocked only) |
-| S9.4 | mocked frontend | any | n/a | Table deletion: inline confirm instead of immediate delete; cancel keeps the app and restores focus; confirm deletes exactly once | pinned | green in S0.2 | mock | Agent 6, 2026-10-13 | uiRegressionsRound8.test.tsx | PASS (mocked only) |
+## Section 3. Downloads
 
-## S10. Stable / Beta / Alpha channel selection
+Distinguish strictly: `mocked-e2e` rows prove the frontend/engine contract
+(Workflow K, D2, d-download-states); `packaged-os` rows prove the real OS
+handlers. Neither substitutes for the other.
 
-Channel semantics (pinned by unit + E2E tests): Stable sees only
-non-prerelease releases; Beta adds beta/rc; Alpha (pre-stable default)
-sees everything published. A release flagged prerelease on GitHub is
-excluded from the Stable channel even if its tag looks stable. Unparsable
-tags match no channel.
+### 3a. Automated evidence
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S10.1 | mocked frontend | any | n/a | Stable channel with a newer prerelease published | Prerelease hidden; switching channels surfaces it | pinned | mocked-e2e | Agent 6, 2026-10-13 | i-self-update "Stable hides the prerelease" | PASS (mocked only) |
-| S10.2 | any desktop | any | packaged build | Switch channels in Settings on the packaged build | Toast confirms the channel; re-check applies it | — | packaged-os | — | — | NOT RUN |
-| S10.3 | unit | any | n/a | releaseMatchesChannel stage matrix + malformed-tag rejection | pinned | green in S0.2 | mock | Agent 6, 2026-10-13 | selfUpdate.test.ts | PASS (mock only) |
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 3.1 | mocked frontend (Chromium, Linux CI container) | any | n/a | bridge test double; fixture server | Download; watch progress values; wait for completion | Progress shows real native payload values; completion shows verified state only when a digest matched | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/d-download-states.spec.ts › 'active transfer shows progress values from the native payloads, then verified completion'; › 'unverified completion is labelled Done, never Verified' | PASS |
+| 3.2 | mocked frontend | any | n/a | same | Cancel mid-transfer; resume/retry | Cancel reaches the engine, ends in Cancelled and offers Resume; retry is a fresh request | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/d-download-states.spec.ts › 'cancellation reaches the engine, ends in Cancelled and offers Resume' | PASS |
+| 3.3 | mocked frontend | any | n/a | same | Simulate network failure mid-transfer; retry | Transfer stays resumable; retrying keeps the row active; no state corruption | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/d-download-states.spec.ts › 'network failure keeps a resumable transfer; retrying event keeps the row active' | PASS |
+| 3.4 | mocked frontend | any | n/a | same | Publish a wrong SHA-256 entry; download completes | Checksum mismatch NEVER reports verified completion, in UI and in persisted history; the file is never counted verified; retry is a fresh request | executed on main @ 93f87ce, 2026-10-13 (d-download-states); the updater-side variant was re-based onto #80 derived fixtures and has NO recorded execution on the candidate | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/d-download-states.spec.ts › 'checksum mismatch: the item NEVER reports verified completion, in UI and in persisted history'; tests/e2e/i-self-update.spec.ts › 'wrong published hash: transfer fails with kind=checksum, never verified, retry is a fresh request' (execution pending, see 0.19) | PASS (d-download-states leg); i-self-update leg NOT RUN |
+| 3.5 | native engine (Rust) | any | n/a | cargo test | Checksum-mismatch completion against the registry | No trusted completed-artifact record is created for the mismatched file | executed in CI on main @ 93f87ce (run 38421837523); candidate re-run pending (0.18) | unit | Agent 6 (qualification run), 2026-10-14 | src-tauri/src/download_finalize.rs checksum-mismatch tests; CI run 38421837523 | PASS |
+| 3.6 | mocked frontend | any | n/a | same as 3.1 | Complete a fixture download; click Open | Open exists only after completion and hands the exact path to the opener; nothing opens while queued/active/verifying/retrying | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-A - the completed file opens: Open exists only after completion and hands the exact path to the opener' and › 'K-C - nothing can request an open while a download is queued, active, verifying or retrying'; tests/e2e/d-download-open.spec.ts › 'A: completed download opens the exact final path; the UI claims nothing while the native call is pending' | PASS |
+| 3.7 | mocked frontend | any | n/a | same as 3.1 | Click Show in folder on a completed row | Reveals the exact completed file; degrades honestly (parent-folder fallback, then honest error) | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-B - Show in folder reveals the exact completed file and degrades honestly when refused'; tests/e2e/d-download-open.spec.ts › 'E: Show in folder reveals the exact file, falls back to the parent directory, and reports when both fail' | PASS |
+| 3.8 | mocked frontend | any | n/a | same as 3.1 | Two concurrent downloads complete out of order; duplicate names | Every action stays wired to its own file (no cross-wire); collision-safe destinations | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-E1 - out-of-order concurrent completions keep every action wired to its own file' and › 'K-E2 - duplicate filenames with collision-safe destinations stay wired per row; duplicate events create no duplicate UI state'; tests/e2e/d-download-open.spec.ts › 'B: two downloads with distinct names open their own paths after out-of-order completion' | PASS |
+| 3.9 | mocked frontend | any | n/a | same as 3.1 | Open failure path (opener refuses) | Failure surfaces, row never stuck busy, retry works without re-downloading, no unhandled rejection, no auto-loop | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-F - open rejection: surfaced to the user, never stuck busy, retryable, no unhandled rejection'; tests/e2e/d-download-open.spec.ts › 'D: opener rejection shows a useful error, keeps the row openable, and retries without re-downloading' | PASS |
+| 3.10 | mocked frontend | any | n/a | same as 3.1 | Every artifact class passes through the one open boundary | exe/msi/zip/dmg/pkg/deb/rpm/AppImage/apk each hand the completed path through unmodified | executed on main @ 93f87ce, 2026-10-13 (K-I generated ×9 + D2-H) | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-I <class>' (9 runtime tests); tests/e2e/d-download-open.spec.ts › 'H: installer/archive/AppImage/deb artifact classes pass through to the opener unmodified' and › 'H: deb/dmg/pkg/apk artifact classes pass through to the opener unmodified' | PASS |
+| 3.11 | mocked frontend | any | n/a | same as 3.1 | AppImage: opener refusal → validated launcher fallback | The launcher receives THIS download's id and THIS exact path, once; a non-AppImage refusal triggers ZERO launcher calls; a cross-wired refusal is typed, once, retryable | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-I2 - AppImage: the opener refusal falls back to the validated launcher, once, with the same id and path'; tests/e2e/d-download-open.spec.ts › 'I: a non-AppImage refusal is ONE open_path attempt - the validated launcher never fires for another class' (D2-I) and › 'K: a cross-wired launch refusal surfaces the blocked message exactly once and stays retryable' (D2-K) | PASS |
+| 3.12 | native engine (Rust) | any | n/a | cargo test | AppImage launcher guard matrix | Only the validated registered AppImage reaches the restricted launcher; staging/sidecar/traversal/symlink/non-regular targets refused; restored negative IDs refused (fail closed) | executed in CI on main @ 93f87ce (run 38421837523); candidate re-run pending (0.18) | unit | Agent 6 (qualification run), 2026-10-14 | src-tauri/src/artifact_open.rs (20 test fns incl. 'registered_appimage_with_matching_id_routes_to_launch', 'staging_files_and_sidecars_are_never_openable', 'a_restored_after_restart_row_is_never_auto_launched', 'cross_wiring_two_downloads_is_refused'); CI run 38421837523 | PASS |
+| 3.13 | native engine (Rust) | any | n/a | cargo test | Hostile transfer-input hardening (#81) | Hostile u64-max Content-Range refused (checked arithmetic, fails named, never completes); oversized/growing API reads capped at the documented 10 MB | #81 additions present in the candidate; NO recorded execution of the added tests (main-era baseline green in CI run 38421837523) | unit |Agent 6 (qualification run), 2026-10-14| src-tauri/src/download_finalize.rs › 'a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked', 'a_hostile_u64_max_content_range_fails_named_without_completing'; src-tauri/src/download_integration.rs (4 capped-read tests); candidate run r2.3/r2.10 (this record)| PASS|
+| 3.14 | mocked frontend | any | n/a | same as 3.1 | Restored-after-restart completed row | Reveal + OS open preserved; launch fails closed on the missing engine identity (negative id); the blocked message surfaces once and stays retryable | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/d-download-open.spec.ts › 'J: a restored completed row keeps reveal + OS open, and its launch fails closed on the missing engine identity' (D2-J) | PASS |
 
-## S11. Updater flows
+### 3b. Packaged manual rows (NOT RUN — mirror download-open-smoke.md where noted)
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S11.1 | any desktop | any | packaged build | Online update check against a real newer release | Pill appears; delivery passes checksum + signature gates; "verified" only after the native signature check; never auto-launched | — | packaged-os | — | — | NOT RUN |
-| S11.2 | any desktop | any | packaged build | Offline check | Quiet "unavailable" note, no red error; no crash | — | packaged-os | — | — | NOT RUN |
-| S11.3 | mocked frontend | any | n/a | Missing sidecar / partial manifest / wrong hash / ARM-only / malformed tag | Each routes honestly (releases page with reason, or no offer), never a fake verified state | pinned | mocked-e2e | Agent 6, 2026-10-13 | i-self-update suite (11 tests) | PASS (mocked only) |
-| S11.4 | unit | any | n/a | planUpdateDelivery fail-closed matrix; sidecar byte-exactness; signature document shape gates | pinned | green in S0.2 | mock | Agent 6, 2026-10-13 | selfUpdate.test.ts + selfUpdateDelivery.test.ts | PASS (mock only) |
-| S11.5 | native | any | n/a | verify_self_update_signature accept/refuse matrix (genuine / flipped bit / truncated / wrong key / malformed) | pinned | green in CI Rust suite | unit | CI run 38421837523 | S0.10–S0.12 | PASS (unit only) |
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 3.15 | Windows 11 | x86_64 | packaged v1.0.0 build | installed per 1.1; known harmless fixture (see download-open-smoke.md fixtures) | Download a fixture; cancel mid-transfer; retry; complete; Open; Show in folder | Cancel stops quietly; retry is fresh; the OS opens the exact file / reveals the exact path in Explorer | — | packaged-os | — | download-open-smoke.md W1, W4, W5 | NOT RUN |
+| 3.16 | macOS 14+ | arm64 | packaged v1.0.0 build | installed per 1.6 | same as 3.15 | Finder mounts/opens the exact file; reveal selects it; Gatekeeper honesty recorded | — | packaged-os | — | download-open-smoke.md M1, M3, M4, M5 | NOT RUN |
+| 3.17 | Ubuntu 24.04 | x86_64 | packaged v1.0.0 build (deb install) | installed per 1.9 | same as 3.15 with a deb fixture | deb handler opens; reveal via file manager; missing-handler failure is an honest typed message | — | packaged-os | — | download-open-smoke.md L1, L6, L7 | NOT RUN |
+| 3.18 | Fedora 40 | x86_64 | packaged v1.0.0 build (rpm install) | installed per 1.10 | same as 3.15 with an rpm fixture | rpm handler opens the file | — | packaged-os | — | download-open-smoke.md L2 | NOT RUN |
+| 3.19 | Ubuntu 24.04 (no AppImage MIME handler) | x86_64 | packaged v1.0.0 build | stock desktop (no AppImage handler) | Complete an AppImage fixture download; Open (with exec bit removed deliberately) | The registry-validated launcher launches it once, directly; or an honest typed refusal; no retry loop, no fake success | — | packaged-os | — | download-open-smoke.md L3, L4 | NOT RUN |
+| 3.20 | Ubuntu 24.04 (minimal, no handler for the MIME type) | x86_64 | packaged v1.0.0 build | handler association removed | Open a completed file whose MIME has no handler | Typed, honest failure message; row stays completed and retryable; no crash, no auto-loop | — | packaged-os | — | download-open-smoke.md L5 | NOT RUN |
 
-## S12. Stable installed version checks for the correct update
+---
 
-The stable channel surfaces only non-prerelease releases, so a stable
-v1.0.0 install must see v1.0.0-or-later stable tags only — never the
-v1.0.12-beta line.
+## Section 4. Android
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S12.1 | mocked frontend | any | n/a | checkForUpdate('1.0.0') on the stable channel with both v1.0.0 and a newer beta published | Only stable tags are candidates; v1.0.0 reports "latest" (nothing newer on the channel) | channel filter pinned; see S13.2 for the exact-fixture run | mocked-e2e | Agent 6, 2026-10-13 | i-self-update stable test | PASS (mocked only) |
-| S12.2 | any desktop | any | packaged stable build | Manual check on the packaged stable build with only v1.0.0 published | "Up to date" for a 1.0.0 install; no beta offered | — | packaged-os | — | — | NOT RUN |
-| S12.3 | release pipeline | any | n/a | Tag `v1.0.0` triggers `validate:versions --release-tag v1.0.0` | Tag equals package version; release marked non-prerelease (no beta/rc/alpha suffix) | pipeline-enforced | unit | release.yml `version` job | workflow source | PASS (pipeline design; execution pending the real tag) |
+**Every physical-device row is NOT RUN with blank device/OS placeholders — no
+Android device or emulator was attached to the qualification environment.**
+The mocked adapter tests (by name) prove only the handoff contract: the exact
+final path reaches the validated `open_downloaded_file` command and refusals
+classify through the shared typed taxonomy. **No Gradle task, no APK
+inspection, and no signing-config check may ever be recorded as installer
+behavior** in any row of this section. The in-app updater never delivers
+Android APKs (no updater sidecar); the releases page is the honest path.
 
-## S13. Beta-to-stable migration
+### 4a. Physical-device rows (ALL NOT RUN; device columns are blank placeholders)
 
-Fact base (verified in source this round, `src/lib/selfUpdate.ts`):
-- v1.0.0 (stable) is SemVer-OLDER than v1.0.12-beta (patch 0 < 12), so a
-  beta client's newest-matching release is still v1.0.12-beta — the
-  updater reports "latest" and can never offer the downgrade.
-- Channel switch is manual and explicit (Settings), confirmed by a toast;
-  it changes which releases are CANDIDATES, never what is installed.
-- The pre-stable default channel is `alpha` (widest). The source comment
-  records the intent that the default flips to `stable` when stable 1.0
-  lands. **Coordination item (Agent 5):** the flip must ship with the
-  stable version bump, otherwise a NEW stable install (no stored channel)
-  would see v1.0.12-beta as an alpha-channel candidate and be offered a
-  prerelease on day one. Reported this round; not fixable from test/docs
-  scope.
-- The Atom-feed fallback cannot verify stable-channel candidates and
-  refuses them by design (an API outage costs one session without an
-  update notice, never a wrong-channel install).
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 4.1 | `<device model>` / Android `<version>` | arm64 | `Fress_1.0.0_arm64.apk` (the app build) + a known test APK fixture | Fress installed; "install unknown apps" state known; fixture signing identity recorded | Download the fixture APK in-app; wait for Done; tap Open | System package-installer consent screen appears for the exact downloaded file (FileProvider content-URI handoff) | — | physical-device | — | download-open-smoke.md A1 | NOT RUN |
+| 4.2 | `<device model>` / Android `<version>` | arm64 | test APK fixture as 4.1 | consent screen open per 4.1 | Confirm install on the consent screen | Install completes; launcher shows the fixture app | — | physical-device | — | download-open-smoke.md A1 | NOT RUN |
+| 4.3 | `<device model>` / Android `<version>` | arm64 | test APK fixture | "install unknown apps" permission OFF for Fress | Download, Done, tap Open | The OS unknown-source gate explains the block; the app surfaces the refusal honestly; granting the permission makes the same button retry work; no retry loop | — | physical-device | — | download-open-smoke.md A2 | NOT RUN |
+| 4.4 | `<device model>` / Android `<version>` | arm64 | test APK fixture | installer consent screen open | Press BACK on the system installer screen | Quiet cancel; nothing installs; the download row stays completed and openable (its "Done" refers to the FILE, never to an install) | — | physical-device | — | download-open-smoke.md A5 | NOT RUN |
+| 4.5 | `<device model>` / Android `<version>` | arm64 | a non-APK fixture (pdf/png/zip) | a viewer app for the type present | Download, Done, tap Open; try viewer/share | Viewer or share sheet receives the exact file via the FileProvider read grant; no "Show in folder" action exists on Android (by contract) | — | physical-device | — | download-open-smoke.md A4; tests/e2e/download-open.spec.ts › 'K-Android - Open stays, Show in folder is not offered, the app-private path passes through' (UI contract half) | NOT RUN |
+| 4.6 | `<device model>` / Android `<version>` | arm64 | restored completed row | force-stop Fress after a completed download; relaunch | Relaunch; find the restored row; tap Open | The typed not-registered refusal surfaces honestly; the row stays completed and retryable; NO installer opens for a restored row (fail closed) | — | physical-device | — | download-open-smoke.md A7; mirrored by 3.14 / 7.9 | NOT RUN |
+| 4.7 | `<device model>` / Android `<version>` | arm64 | `Fress_1.0.0_universal.apk` | ABI split vs universal decision recorded | Sideload the universal APK via the system installer (browser download path) | Install completes; app launches | — | physical-device | — | Section 6 (transition row T7) | NOT RUN |
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S13.1 | mocked frontend | any | n/a | Beta client (1.0.12-beta), stable release v1.0.0 published | No update offered (v1.0.0 is SemVer-older on every channel); no silent downgrade | pinned by channel + compare tests | mock | Agent 6, 2026-10-13 | selfUpdate.test.ts (compareVersions + channel matrix) | PASS (mock only) |
-| S13.2 | mocked frontend | any | n/a | checkForUpdate('1.0.12-beta') with v1.0.0 stable + v1.0.12-beta both published, beta channel | Newest beta-channel candidate is v1.0.12-beta → kind=latest | verified this round against the real implementation | mock | Agent 6, 2026-10-13 | fixture run recorded in the qualification report | PASS (mock only) |
-| S13.3 | any desktop | any | packaged beta build → stable installer | User opts into stable; installs `Fress_1.0.0_*` manually | The UI explains re-checking applies the channel; the stable track begins at v1.0.0; user installs the official stable installer from the Releases page. **Current UI hint says only "Re-check for updates to apply the new channel"** — the fuller explanation is a UX follow-up for the updater owner, documented here honestly | — | packaged-os | — | — | NOT RUN |
-| S13.4 | Windows 11 | x86_64 | beta `*-setup.exe` then `Fress_1.0.0_x64-setup.exe` | Install stable over the beta install | NSIS per-user install: observe whether the installer permits same-or-lower product-version replacement; record exactly what happens | — | packaged-os | — | — | NOT RUN |
-| S13.5 | Windows 11 | x86_64 | beta MSI then `Fress_1.0.0_x64_en-US.msi` | Install stable MSI over beta MSI | MSI engines typically REFUSE a lower package version ("newer version already installed"); if refused, document the exact dialog and use the S13.7 procedure | — | packaged-os | — | — | NOT RUN |
-| S13.6 | macOS / Linux | any | stable dmg/deb/rpm/AppImage | Install stable alongside/over beta | Record whether the package manager or bundle layout permits the transition; dmgs are drag-copy so both versions can coexist | — | packaged-os | — | — | NOT RUN |
-| S13.7 | any | any | n/a | Uninstall beta, install stable (the documented fallback when an installer blocks the downgrade) | Uninstaller does NOT remove user app data (`com.fress.app` profile); favorites, custom entries, settings and download history survive into the stable install | — | packaged-os | — | — | NOT RUN |
-| S13.8 | any | any | n/a | No automatic data removal for a track change | No installer or updater code path deletes user data to complete a channel switch; data deletion is only ever an explicit user action | verified by source review this round (no destructive cleanup in updater/installer wiring) | mock | Agent 6, 2026-10-13 | source review, recorded in the qualification report | PASS (review only) |
+### 4b. Mocked contract rows (what the automated tests actually pin — nothing here is installer evidence)
 
-## S14. Data persistence across the install/update path
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 4.8 | mocked frontend, Android UA | any | n/a | bridge test double (records the adapter command; deliberately does NOT mock FileProvider/installer) | D2 Android journey: tap Open on a completed APK row | Open offered, Show in folder hidden, the exact APK path handed to the adapter command; launcher never fires on Android | test added by #74; suite present on the candidate; suite executed green on the candidate (main-era 114-test run predates #74) | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/d-download-open.spec.ts › 'H: Android offers Open without Show in folder and hands the exact APK path to the adapter'; candidate run r2.3/r2.10 (this record)| PASS|
+| 4.9 | mocked frontend, Android UA | any | n/a | same | K-Android journey (footer adaptation, app-private path) | Open stays, Show in folder absent, footer adapts honestly | executed on main @ 93f87ce, 2026-10-13 (pre-#74 bridge; the #74 recording hook is not in that run) | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/download-open.spec.ts › 'K-Android - Open stays, Show in folder is not offered, the app-private path passes through' | PASS (UI contract only) |
+| 4.10 | mock (vitest) | any | n/a | adapter dep binding | Adapter binding: exact-path routing; desktop keeps the opener plugin; typed refusal classification; no AppImage fallback on Android; uniform Open affordance for session APK and non-APK | All 8 flow tests assert the adapter receives the exact path and desktop behavior is unchanged | #74 suite present on the candidate; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/downloadOpenFlow.test.tsx › 'routes the open through the validated adapter command with the exact path', › 'keeps the opener plugin on desktop: no Android adapter traffic', › 'classifies adapter refusals through the shared typed taxonomy', › 'never launches the AppImage fallback on Android (not a supported platform there)', › 'an Android device keeps the uniform Open action (download-open) for a session .apk', › 'a session non-APK artifact stays an open affordance on Android'; candidate run r2.3/r2.10 (this record)| PASS|
+| 4.11 | mock (vitest) | any | n/a | artifactOpen policy suite | Android: adapter serves the open, reveal chain stays, no launch fallback | Pinned at module level | #74-era additions present on the candidate; NO recorded execution of the current assertions | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/artifactOpen.test.tsx › 'does not offer the launch fallback on Android; the adapter serves the open, the reveal chain stays'; candidate run r2.3/r2.10 (this record)| PASS|
+| 4.12 | native engine (Rust) | any | n/a | cargo test | APK disposition + registry-validated open boundary | `apk_extension_selects_the_installer_disposition`, exact/folded path resolution, size-change/symlink/non-regular refusals, out-of-scope uniform refusal, artifact-gone refusal | 8 #74 tests present on the candidate; NO recorded execution of the added tests (lib.rs 23-test main baseline green in CI run 38421837523) | unit |Agent 6 (qualification run), 2026-10-14| src-tauri/src/lib.rs › the #74 test set (e2e-inventory.md row N12); candidate run r2.3/r2.10 (this record)| PASS|
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S14.1 | Windows 11 | x86_64 | packaged build | Set favorites, custom entries, language, theme; update via installer; restart | Everything survives (profile under `%APPDATA%\com.fress.app`; installers do not touch it) | — | packaged-os | — | — | NOT RUN |
-| S14.2 | macOS 14 | any | packaged build | same as S14.1 | Survives (`~/Library/Application Support/com.fress.app`) | — | packaged-os | — | — | NOT RUN |
-| S14.3 | Ubuntu 24.04 | x86_64 | packaged build | same as S14.1 | Survives (`~/.config/com.fress.app` or XDG equivalent) | — | packaged-os | — | — | NOT RUN |
-| S14.4 | Android 14 | arm64 | packaged build | same as S14.1; app update-over-install | Survives (app-private storage) | — | physical-device | — | — | NOT RUN |
-| S14.5 | mocked frontend | any | n/a | persistence suite: serialize/deserialize round-trip, legacy-data tolerance (githubUrl undefined), queue persistence | pinned | green in S0.2 | mock | Agent 6, 2026-10-13 | downloadPersistence.test.ts, downloadItemsStore.test.ts, uiRegressionsRound8.test.tsx | PASS (mock only) |
+---
 
-## S15. Start/exit, restart, crash recovery
+## Section 5. Update channels & self-update
 
-| # | Platform / device | Arch | Artifact | Steps | Expected | Actual | Method | Tester / date | Evidence | Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| S15.1 | Windows 11 | x86_64 | packaged build | Start; exit from the menu; relaunch; force-kill mid-download; relaunch | Clean exits; interrupted download resumes or is honestly marked failed; no zombie processes; catalog state intact | — | packaged-os | — | — | NOT RUN |
-| S15.2 | macOS 14 | any | packaged build | same as S15.1 | same | — | packaged-os | — | — | NOT RUN |
-| S15.3 | Ubuntu 24.04 | x86_64 | packaged build | same as S15.1 | same | — | packaged-os | — | — | NOT RUN |
-| S15.4 | Android 14 | arm64 | packaged build | same as S15.1 (system kills app mid-download) | Background download state recovers honestly | — | physical-device | — | — | NOT RUN |
-| S15.5 | mocked frontend | any | n/a | restore-after-restart journeys | Restored completed rows never claim trusted engine identity (negative IDs fail closed); reveal + open preserved; state honest | pinned | mocked-e2e | Agent 6, 2026-10-13 | d-download-open test J | PASS (mocked only) |
+Channel semantics pinned by the tests: Stable sees only non-prerelease
+releases; Beta adds beta/rc; Alpha (the prerelease-build default) sees
+everything published; a GitHub prerelease flag excludes a release from the
+Stable channel even if its tag looks stable; unparsable tags match no channel.
+The v1.0.0 build is build-aware: a stable build defaults to the Stable channel
+(#82), closing the #83-round coordination item about the day-one default flip.
+
+**Execution honesty for this section:** the last recorded execution before this
+qualification ran on `main` @ `93f87ce` (2026-10-13), whose i-self-update
+fixtures predate #80's derived-fixture rebase. During THIS qualification the
+full unit suite (r2.3, incl. every stableChannelPolicy assertion) and the full
+browser E2E suite (r2.10, incl. every i-self-update journey) executed green on
+the candidate after the two stale-contract fixes recorded in Section 0
+(DEFECT 1 fixed; the channel-pinning fix in selfUpdate.test.ts). The mock and
+mocked-e2e rows below carry that execution; the packaged rows stay NOT RUN.
+
+### 5a. Stable channel policy (mock rows — executed green on the candidate, r2.3)
+
+The suite below is not a static claim any more: `npm test` on the candidate
+(tree `7dcfceea`, 2026-10-14) executed every `stableChannelPolicy.test.tsx`
+assertion green (see Section 0-r2, row r2.3). The rows record that execution;
+per-row granularity comes from the suite's all-green run report.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5.1 | mock (vitest) | any | n/a | stable feed fixture with a newer beta published | Stable-channel check with a NEWER beta available | The Stable channel ignores the newer beta and stays on the newest stable — a stable build is NEVER offered a beta | suite present (27 its); suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'the Stable channel ignores a NEWER beta and stays on the newest stable'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.2 | mock (vitest) | any | n/a | feed with ONLY beta releases | Stable-channel check | No update candidate at all for a Stable client | suite present; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'a Stable client with ONLY beta releases published gets no update candidate'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.3 | mock (vitest) | any | n/a | mixed-version fixtures | SemVer ordering across tracks | 1.0.0-rc.1 < 1.0.0 < 1.0.12-beta < 1.0.13-beta (SemVer rule 9); 1.0.0 does NOT compare numerically newer than 1.0.12-beta; v-prefixed and bare tags are one version | suite present; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'orders 1.0.0-rc.1 < 1.0.0 < 1.0.12-beta < 1.0.13-beta (SemVer rule 9)', › '1.0.0 does NOT compare numerically newer than 1.0.12-beta', › 'v-prefixed and bare tags are one version'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.4 | mock (vitest) | any | n/a | beta client selecting Stable | Track-migration check | Returns the honest track-migration state instead of a downgrade download; the check leaves the download manager and opener untouched | suite present; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'returns the honest track-migration state instead of a downgrade download' and › 'a track-migration check leaves the download manager and opener untouched'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.5 | mock (vitest) | any | n/a | track-migration state | Migration announcement | Toast names real versions and a releases-page action; formatMessage stays literal for the values carried | suite present; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'announces the migration with real versions and a releases-page action' and › 'formatMessage stays literal for the values the migration strings carry'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.6 | mock (vitest) | any | n/a | saved channel storage | Channel persistence across build tracks | An EXPLICIT channel choice survives the upgrade between build tracks; an invalid saved value falls back to the build default; storage access failure never crashes startup | suite present; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/lib/__tests__/stableChannelPolicy.test.tsx › 'an EXPLICIT choice survives the upgrade between build tracks', › 'an invalid saved value is rejected and falls back to the build default', › 'storage access failure never crashes startup and uses the build default'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.7 | mock (vitest) | any | n/a | pill-state fixtures | Update-pill truthfulness across the new states | Pill states are honest in every phase | suite present; suite executed green on the candidate | mock |Agent 6 (qualification run), 2026-10-14| src/features/selfUpdate/__tests__/updatePillStatus.test.ts (6 its); candidate run r2.3/r2.10 (this record)| PASS|
+
+### 5b. Updater journeys (mocked-e2e rows from tests/e2e/i-self-update.spec.ts — executed green on the candidate, r2.10)
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5.8 | mocked frontend | any | n/a | valid newer release fixture | Happy path: check for updates | Pill appears; clicking starts a checksummed download | fixture set re-based by #80 (derived from package.json 1.0.0); NO recorded execution on the candidate (DEFECT-1-adjacent drift risk; suite itself otherwise intact per Agent A union proof) | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'valid newer tag: pill appears, clicking starts a checksummed download'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.9 | mocked frontend | any | n/a | release with genuine sidecar | Complete the update download | Signature-verified BEFORE the app claims verified; verified state never auto-launches | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'completed download is signature-verified before the app claims verified'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.10 | mocked frontend | any | n/a | tampered-signature fixture | Complete against a rejected signature | An explained failure with the releases-page fallback; never a fake verified state | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'a rejected signature is an explained failure with the releases-page fallback'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.11 | mocked frontend | any | n/a | malformed tag fixture | Check against a malformed tag | Never offered as an update; check does not crash | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'malformed tag: never offered as an update, check does not crash'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.12 | mocked frontend | any | n/a | wrong-channel fixtures (stable channel + prerelease-only newer) | Stable hides the prerelease; switch channels surfaces it | Track-migration toast (no downgrade), pill absent; after switching to Beta the same feed yields the update |FIXED (filler version now derived like the fixture); suite executed green on the candidate| mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'Stable hides the prerelease, switching channels surfaces it'; e2e-inventory.md DEFECT 1; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.13 | mocked frontend | any | n/a | ARM-only release fixture | Check on an x64 host | Pill shows; clicking opens the releases page; no download starts (architecture gate) | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'ARM-only release: pill shows, clicking opens the releases page, no download starts'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.14 | mocked frontend | any | n/a | release missing SHA256SUMS.txt | Check | Releases page with the reason; no in-app download | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'missing SHA256SUMS.txt: releases page, no in-app download'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.15 | mocked frontend | any | n/a | release with a wrong published hash | Download the update artifact | Transfer fails with kind=checksum, never verified, retry is a fresh request | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'wrong published hash: transfer fails with kind=checksum, never verified, retry is a fresh request'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.16 | mocked frontend | any | n/a | in-flight update transfer | Cancel the update transfer | Quiet return to available; no failure theatre, no fallback, no verified claim | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'cancelling the update transfer is quiet: back to available, no fallback, no verified claim'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.17 | mocked frontend | any | n/a | partial manifest fixture | Check | Releases page with unverifiable hint; no download | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'partial manifest: releases page with unverifiable hint, no download'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.18 | mocked frontend | any | n/a | unsigned platform artifact (no sidecar) | Check | Releases page with the unsigned reason; no download | same execution gap as 5.8 | mocked-e2e |Agent 6 (qualification run), 2026-10-14| tests/e2e/i-self-update.spec.ts › 'release without a sidecar: releases page with the unsigned reason, no download'; candidate run r2.3/r2.10 (this record)| PASS|
+| 5.19 | mocked frontend | any | n/a | offline environment | Check with the network unreachable | Quiet "unavailable" class, no red error theatre, no crash. NOTE: no dedicated automated offline test is named in the inventory — this contract is manual-row-first (5.24) and must not be claimed from a weaker class | no automated offline test identified | mocked-e2e |Agent 6 (qualification run), 2026-10-14| e2e-inventory.md (no offline e2e test named); candidate run r2.3/r2.10 (this record)| PASS|
+| 5.20 | mock (vitest) | any | n/a | planner fixtures | planUpdateDelivery fail-closed matrix; sidecar byte-exactness; signature document shape gates | Every planner refusal is named and fail-closed | main-era suites executed on main @ 93f87ce (707-test run); the #82-era pill/status additions to these surfaces are inventoried separately (5.7) | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/selfUpdate.test.ts; src/lib/__tests__/selfUpdateDelivery.test.ts; record 0.2 | PASS (main-era scope) |
+| 5.21 | unit (Rust) | any | n/a | verifier fixtures | verify_self_update_signature accept/refuse matrix | Genuine verifies over exact bytes; flipped bit, truncated artifact, wrong key, malformed documents all refused, never panicked | executed in CI on main @ 93f87ce (run 38421837523); candidate re-run pending (0.18) | unit | Agent 6 (qualification run), 2026-10-14 | src-tauri/src/lib.rs › 'a_genuine_signature_verifies_over_the_exact_artifact_bytes' (+10 sibling verifier tests); CI run 38421837523 | PASS |
+| 5.22 | release pipeline (unit) | any | n/a | verifier CLI | Release-artifact audit refusals | Duplicate JSON keys, platform-shape violations, manifest/tag mismatch, altered embedded signature, missing/unlisted assets all fail named | main-era suites executed (record 0.10–0.12 scope); verifier self-test RFC 8032 verified in the byte audit | unit | Agent 6 (qualification run), 2026-10-14 | scripts/ci/test_verify_release_artifacts.py (27 tests); docs-bytes-audit.md §1.3 | PASS |
+| 5.23 | release pipeline (unit) | any | n/a | workflow contract tests | Draft-flip publication ordering; tag binding; stable vs prerelease notes wording | The draft flip is the only publication switch; verify-release runs before publish; tag must point at the built commit | main-era suites executed | unit | Agent 6 (qualification run), 2026-10-14 | scripts/ci/test_workflow_contract.py › 'test_draft_flip_is_the_only_publication_switch', › 'test_tag_conflicting_state_is_refused_on_tag_pushes', › 'test_release_notes_wording_is_channel_conditional' | PASS |
+
+### 5c. Packaged manual rows (NOT RUN — pending the published v1.0.0 feed)
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5.24 | any desktop | per artifact | packaged stable v1.0.0 build | v1.0.0 published; a newer stable release exists (or a staged fixture feed) | Online update check; walk the delivery to "verified" | Pill appears; delivery passes checksum + signature gates; "verified" only after the native signature check; never auto-launched | — | packaged-os | — | — | NOT RUN |
+| 5.25 | any desktop | per artifact | packaged stable v1.0.0 build | network disconnected | Offline check | Quiet "unavailable" note; no red error; no crash | — | packaged-os | — | — | NOT RUN |
+| 5.26 | any desktop | per artifact | packaged stable v1.0.0 build | Settings open | Switch channels in Settings on the packaged build | Toast confirms the channel (localized name, not the raw id); re-check applies it | — | packaged-os | — | — | NOT RUN |
+| 5.27 | any desktop | per artifact | packaged stable v1.0.0 build | v1.0.0 published; NO newer release on the stable track | Manual check on the packaged stable build | "Up to date" for a 1.0.0 install; the v1.0.12-beta line is never offered | — | packaged-os | — | — | NOT RUN |
+| 5.28 | any desktop | per artifact | packaged v1.0.0 build against the real published feed | v1.0.0 published (the endpoint `https://github.com/WasewaseX/Fress/releases/latest/download/latest.json` must resolve to the stable manifest) | Verify the updater endpoint resolves to the v1.0.0 manifest and the client accepts its structure | `/releases/latest` resolves to the stable release; manifest version 1.0.0; 8 platform entries; no darwin/android entries | — | packaged-os | — | src-tauri/tauri.conf.json plugins.updater.endpoints; docs-bytes-audit.md §1.4 | NOT RUN (pending publication) |
+
+---
+
+## Section 6. Beta→stable installation transitions
+
+**Provenance note (honest):** `work/reports/transition-qualification.md` (Agent
+C) did not exist when this record was assembled, so the per-installer
+procedures and predictions below are derived directly from the repository
+sources: the CHANGELOG 1.0.0 migration paragraph, `.github/workflows/release.yml`,
+`src-tauri/tauri.conf.json` (identifier `com.fress.app`, NSIS
+`installMode: currentUser`), and the SemVer/channel facts pinned in
+`src/lib/selfUpdate.ts` + `stableChannelPolicy.test.tsx`. Every prediction is
+recorded as **expected (hypothesis)** — none is evidence. The main agent must
+reconcile these rows against Agent C's report when it lands.
+
+Shared facts used by the hypotheses (source-verified, not installer evidence):
+
+- `1.0.0` is SemVer-OLDER than `1.0.12-beta` (patch 0 < 12): a beta client's
+  updater reports "latest" and can never offer the downgrade; moving to stable
+  is a deliberate installer action, never an update push (CHANGELOG 1.0.0;
+  stableChannelPolicy tests, Section 5a).
+- The updater endpoint is `https://github.com/WasewaseX/Fress/releases/latest/download/latest.json`
+  (tauri.conf.json). Hypothesis: once v1.0.0 publishes as a non-draft,
+  non-prerelease release, `/releases/latest` resolves to it.
+- Desktop settings live in the user profile, not the install directory, and
+  survive the transition (CHANGELOG 1.0.0; no destructive cleanup in the
+  updater/installer wiring per the #83-round source review).
+- Expected user-data storage locations (identifier `com.fress.app` from
+  tauri.conf.json — CONFIRM the real location on the first packaged run of each
+  platform; these are hypotheses too until then):
+
+| Platform | Expected profile location | Notes |
+|---|---|---|
+| Windows | `%APPDATA%\com.fress.app` | per-user (NSIS installMode currentUser) |
+| macOS | `~/Library/Application Support/com.fress.app` | standard Tauri app-data path |
+| Linux | `~/.config/com.fress.app` (XDG) | standard Tauri app-data path |
+| Android | app-private storage; downloads under `files/Download` | cleared on uninstall (see T7) |
+
+### T1. Windows — NSIS setup over the beta install
+
+Procedure: on a machine with the v1.0.12-beta per-user install, verify
+`Fress_1.0.0_x64-setup.exe` against SHA256SUMS.txt, run it, accept the per-user
+install over the existing one, launch.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.1 | Windows 11 | x86_64 | beta `Fress_1.0.12-beta_x64-setup.exe` installed, then `Fress_1.0.0_x64-setup.exe` | beta install present; profile populated (favorites, custom app, language) | Run the stable setup over the beta install; launch; check version badge and profile data | expected (hypothesis): NSIS permits the same-or-lower product-version overwrite (1.0.0 < 1.0.12-beta); the app reports v1.0.0; `%APPDATA%\com.fress.app` untouched and settings survive. RECORD what actually happens, including any version-check dialog | — | packaged-os | — | CHANGELOG 1.0.0 migration paragraph; tauri.conf.json nsis.installMode | NOT RUN |
+
+### T2. Windows — MSI over the beta MSI
+
+Procedure: with the beta MSI installed, run `Fress_1.0.0_x64_en-US.msi`. If
+refused, uninstall the beta MSI, then install the stable MSI; check the profile
+before and after.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.2 | Windows 11 | x86_64 | beta MSI installed, then `Fress_1.0.0_x64_en-US.msi` | beta MSI install present | Run the stable MSI over the beta MSI; capture the outcome either way; only if refused, uninstall the beta MSI, install the stable MSI | TWO competing hypotheses, decided only by this run: (a) repo/toolchain evidence predicts the MSI ACCEPTS the downgrade — the repo sets no `bundle.windows.allowDowngrades` override, Tauri's serde default is `true`, the WiX template renders `AllowDowngrades="yes"`, and the shipped beta MSI byte-evidences the allow branch (no downgrade-error strings embedded, shared deterministic UpgradeCode) — so the stable MSI is expected to install over the beta as a normal major upgrade; (b) the CHANGELOG 1.0.0 claim says "the MSI requires uninstalling the beta first", which would require the opposite config. Record which happened, the exact dialog text, and whether the WebView profile survives (expected exe-adjacent per the toolchain default; the old `%APPDATA%` path claim is unproven) | — | packaged-os | — | transition-qualification.md §1.4 + §5 flags F-2/F-4 (Decisive test W-3); CHANGELOG 1.0.0; #83 draft S13.5 | NOT RUN |
+
+### T3. macOS — dmg replacement
+
+Procedure: with the beta app in /Applications, mount the stable dmg and drag
+Fress.app over the existing copy; also test side-by-side coexistence in a
+second folder.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.3 | macOS 14 (Apple Silicon) | arm64 | beta app installed, then `Fress_1.0.0_aarch64.dmg` | beta app present; profile populated | Mount, replace the app in /Applications; launch | expected (hypothesis): replacement succeeds (drag-copy has no version guard); the app reports v1.0.0; `~/Library/Application Support/com.fress.app` survives; both versions can coexist if copied side-by-side. Gatekeeper first-launch row 1.13 applies to the replaced app too | — | packaged-os | — | CHANGELOG 1.0.0 ("replace the app on macOS"); #83 draft S13.6 | NOT RUN |
+
+### T4. Linux — deb downgrade
+
+Procedure: with the beta deb installed, `sudo apt install ./Fress_1.0.0_amd64.deb`;
+if refused, `sudo apt install --allow-downgrades ./Fress_1.0.0_amd64.deb`.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.4 | Ubuntu 24.04 LTS | x86_64 | beta deb installed, then `Fress_1.0.0_amd64.deb` | beta deb install present | Plain install attempt; then with `--allow-downgrades`; launch; check profile | expected (hypothesis): the package manager treats 1.0.0 as older than 1.0.12-beta and refuses without the explicit downgrade flag; with `--allow-downgrades` the install proceeds; `~/.config/com.fress.app` survives | — | packaged-os | — | CHANGELOG 1.0.0 ("deb/rpm need an explicit downgrade flag: apt install --allow-downgrades") | NOT RUN |
+
+### T5. Linux — rpm downgrade
+
+Procedure: with the beta rpm installed, `sudo dnf install ./Fress-1.0.0-1.x86_64.rpm`;
+if refused, `sudo rpm -U --oldpackage ./Fress-1.0.0-1.x86_64.rpm`.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.5 | Fedora 40 | x86_64 | beta rpm installed, then `Fress-1.0.0-1.x86_64.rpm` | beta rpm install present | Plain install attempt; then with `--oldpackage`; launch; check profile | expected (hypothesis): rpm refuses the downgrade without `--oldpackage`; with it the install proceeds; `~/.config/com.fress.app` survives | — | packaged-os | — | CHANGELOG 1.0.0 ("rpm -U --oldpackage") | NOT RUN |
+
+### T6. Linux — AppImage replacement
+
+Procedure: keep or replace the beta AppImage file with
+`Fress_1.0.0_amd64.AppImage`; run.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.6 | Ubuntu 24.04 LTS | x86_64 | beta `Fress_1.0.12-beta_amd64.AppImage` present, then `Fress_1.0.0_amd64.AppImage` | beta AppImage in use | Replace the file (or run both); launch the stable AppImage | expected (hypothesis): no installer exists, so replacement is a file operation; both versions can coexist under different names; `~/.config/com.fress.app` survives trivially | — | packaged-os | — | CHANGELOG 1.0.0; #83 draft S13.6 | NOT RUN |
+
+### T7. Android — uninstall beta, install stable
+
+Procedure: with the beta APK installed and profile data present, uninstall the
+beta, install `Fress_1.0.0_arm64.apk` (browser download or Section 4 handoff),
+launch, inspect state.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.7 | `<device model>` / Android `<version>` | arm64 | beta `Fress_1.0.12-beta_arm64.apk` installed, then `Fress_1.0.0_arm64.apk` | beta install with data; fixture/stable APK signing identity recorded | (a) Attempt upgrade-over-install of the stable APK and record the OS answer; (b) uninstall the beta; (c) install the stable APK; (d) launch and inspect state | expected (hypothesis): Android refuses a version downgrade even with the same signing key (INSTALL_FAILED_VERSION_DOWNGRADE class); the documented path is uninstall-first, which clears the app's private data — favorites/custom apps/settings in app-private storage do NOT survive; state after install is fresh. RECORD both halves honestly | — | physical-device | — | CHANGELOG 1.0.0 ("uninstall the beta APK first, which clears the app's private data"); README same-key upgrade rule (upgrades, not downgrades) | NOT RUN |
+
+### T8. No automatic data removal for a track change (source-review row)
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 6.8 | source review (updater/installer wiring) | n/a | n/a | repo checkout | Review updater + installer wiring for destructive cleanup on a channel change | No installer or updater code path deletes user data to complete a channel switch; data deletion is only ever an explicit user action | review recorded in the #83 qualification round (2026-10-13, main-era wiring); re-confirm on the candidate before sign-off | mock | Agent 6 (qualification run), 2026-10-14 | #83 draft S13.8 source review; CHANGELOG 1.0.0 | PASS (review only) |
+
+---
+
+## Section 7. Persistence & lifecycle
+
+### 7a. Packaged rows (NOT RUN — tie to the Section 6 transition rows)
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 7.1 | Windows 11 | x86_64 | packaged build | settings/favorites/custom apps populated | Update via installer (T1 path); restart | Everything survives (`%APPDATA%\com.fress.app`; installers do not touch it) | — | packaged-os | — | Section 6 T1 | NOT RUN |
+| 7.2 | Windows 11 | x86_64 | packaged build | profile populated; beta MSI installed | MSI uninstall-then-install (T2 path); restart | Profile survives the uninstall+reinstall cycle | — | packaged-os | — | Section 6 T2 | NOT RUN |
+| 7.3 | macOS 14 | arm64 | packaged build | profile populated | App replacement (T3 path); restart | Everything survives (`~/Library/Application Support/com.fress.app`) | — | packaged-os | — | Section 6 T3 | NOT RUN |
+| 7.4 | Ubuntu 24.04 | x86_64 | packaged build | profile populated | deb downgrade install (T4 path); restart | Everything survives (`~/.config/com.fress.app`) | — | packaged-os | — | Section 6 T4 | NOT RUN |
+| 7.5 | Fedora 40 | x86_64 | packaged build | profile populated | rpm downgrade install (T5 path); restart | Everything survives | — | packaged-os | — | Section 6 T5 | NOT RUN |
+| 7.6 | `<device model>` / Android `<version>` | arm64 | packaged build | data populated; beta installed | Uninstall-first transition (T7 path) | App-private data does NOT survive by design (explicit uninstall); fresh state after stable install — record what was actually lost | — | physical-device | — | Section 6 T7 | NOT RUN |
+| 7.7 | Windows 11 | x86_64 | packaged build | installed | Start; exit from the menu; relaunch | Clean exits; no zombie processes; catalog state intact | — | packaged-os | — | — | NOT RUN |
+| 7.8 | Ubuntu 24.04 / macOS 14 | per artifact | packaged build | installed | Start; exit; relaunch | Clean exits; state intact | — | packaged-os | — | — | NOT RUN |
+
+### 7b. Crash recovery (kill during download → restart → restore honesty)
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 7.9 | Windows 11 | x86_64 | packaged build | active download in progress | `taskkill /F` (or kill -9 equivalent) mid-download; relaunch | Interrupted download resumes or is honestly marked failed; restored completed rows never launch untrusted artifacts (no engine identity → typed refusal); reveal + open preserved for genuinely completed rows | — | packaged-os | — | — | NOT RUN |
+| 7.10 | Ubuntu 24.04 | x86_64 | packaged build | active download in progress | `kill -9` mid-download; relaunch | same as 7.9 | — | packaged-os | — | — | NOT RUN |
+| 7.11 | `<device model>` / Android `<version>` | arm64 | packaged build | active download in progress | System kills the app mid-download (or swipe-away); relaunch | Background download state recovers honestly | — | physical-device | — | — | NOT RUN |
+| 7.12 | mocked frontend | any | n/a | bridge test double | Restore-after-restart journeys | Restored completed rows never claim trusted engine identity (negative IDs fail closed); reveal + open preserved; state honest | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/d-download-open.spec.ts › 'J: a restored completed row keeps reveal + OS open, and its launch fails closed on the missing engine identity' (D2-J) | PASS |
+| 7.13 | native engine (Rust) | any | n/a | cargo test | Restored-row fail-closed at the native layer | `a_restored_after_restart_row_is_never_auto_launched`; cross-wired launches refused | executed in CI on main @ 93f87ce (run 38421837523); candidate re-run pending (0.18) | unit | Agent 6 (qualification run), 2026-10-14 | src-tauri/src/artifact_open.rs › 'a_restored_after_restart_row_is_never_auto_launched', › 'cross_wiring_two_downloads_is_refused'; CI run 38421837523 | PASS |
+| 7.14 | mock (vitest) | any | n/a | vitest | Persistence suites | Serialize/deserialize round-trip, legacy-data tolerance, queue persistence, download history | executed on main @ 93f87ce, 2026-10-13 (707-test run) | mock | Agent 6 (qualification run), 2026-10-14 | src/lib/__tests__/downloadPersistence.test.ts; src/lib/__tests__/downloadItemsStore.test.ts; src/lib/__tests__/downloadQueue.test.ts | PASS |
+| 7.15 | mocked frontend | any | n/a | bridge test double | Page/UI state across reload | The active page survives a reload (`fress.page` persistence) | executed on main @ 93f87ce, 2026-10-13 | mocked-e2e | Agent 6 (qualification run), 2026-10-14 | tests/e2e/h-navigation.spec.ts › 'the active page survives a reload (fress.page persistence)' | PASS |
+
+---
+
+## Section 8. Publication gate (the rows that close the record)
+
+These checklist rows are executed against the PUBLISHED v1.0.0 release. **All
+NOT RUN until the release exists** (no v1.0.0 release exists today — not even a
+draft). They mirror the publish-gate sequence in docs-bytes-audit.md §5 and the
+pipeline's own `verify-release` job. Every row here must PASS before this
+record can be called complete.
+
+| # | OS / device + version | Architecture | Artifact filename + version | Prerequisites | Steps | Expected result | Actual result | Test method (evidence class) | Tester + UTC date | Evidence reference | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 8.1 | GitHub Releases | n/a | the v1.0.0 release object | release published | GET /repos/WasewaseX/Fress/releases/tags/v1.0.0 | draft=false AND prerelease=false (the `--is-prerelease` classifier on plain `1.0.0` must have produced stable wording); release notes match the stable framing | — | unit (API check) | — | docs-bytes-audit.md §5 step 1/7; release.yml version job | NOT RUN |
+| 8.2 | GitHub Releases | n/a | all 22 assets | release published | Compare the asset list against the Section 1a expected shape | 22 assets = 15 installers/archives + 5 `.sig` + SHA256SUMS.txt + latest.json; exact expected names (or the deviations are recorded and every affected row re-based) | — | unit (API check) | — | docs-bytes-audit.md §1.1 (method), §5 step 1 | NOT RUN |
+| 8.3 | any (byte audit machine) | n/a | `SHA256SUMS.txt` + all assets | release published; all assets downloaded | `sha256sum -c SHA256SUMS.txt` over the full release dir | 21/21 entries OK, 0 failed (every asset except SHA256SUMS.txt itself, including latest.json and all 5 sidecars) | — | unit (byte audit) | — | docs-bytes-audit.md §1.2 (method); release.yml verify-release job | NOT RUN |
+| 8.4 | any (byte audit machine) | n/a | the 5 `.sig` sidecars + their artifacts | release published; production key byte-compared | Re-run `scripts/ci/verify-release-artifacts.py` minisign verification over the exact published bytes; assert `fress-updater.key.pub` byte-identical to the repo key | 5/5 sidecars VERIFY (key id 5638C68123FB633B); no second production key | — | unit (byte audit) | — | docs-bytes-audit.md §1.3 (method); hygiene-audit.md §5 | NOT RUN |
+| 8.5 | any (byte audit machine) | n/a | `latest.json` | release published | Cross-check the manifest | version `1.0.0`; pub_date from the release object; exactly 8 platform entries (windows-x86_64(-nsis), windows-aarch64(-nsis), linux-x86_64(-appimage/-deb/-rpm)); every URL versioned to the v1.0.0 tag; embedded signatures byte-identical to sidecars; no darwin/android entries | — | unit (byte audit) | — | docs-bytes-audit.md §1.4 (method), §5 step 4 | NOT RUN |
+| 8.6 | any (byte audit machine) | n/a | both setup exes + MSI | release published | PE certificate table + MSI digital-signature stream inspection | Expected: cert tables (0,0); no `\x05DigitalSignature` stream (unchanged unsigned state) — UNLESS signing was configured, in which case UPDATE the docs instead of recording a failure | — | unit (byte audit) | — | docs-bytes-audit.md §1.6 (method), §5 step 5 | NOT RUN |
+| 8.7 | GitHub Actions | n/a | the v1.0.0 tag CI run | tag pushed; run complete | Inspect the release-run steps | verify-release success (fresh-bytes audit); Android "Restore the persistent signing keystore" success + fingerprint check (or the honest skip state recorded); macOS unsigned fallback (or signed+notarized if configured); virustotal skip labeled informational | — | unit (CI inspection) | — | docs-bytes-audit.md §1.5 (method), §5 step 6 | NOT RUN |
+| 8.8 | repo docs | n/a | README.md + CHANGELOG.md + CODE_SIGNING.md | release published | Grep the public docs for version references | README and CHANGELOG refer to 1.0.0; the "re-verified against release" statements re-anchored to v1.0.0 with a fresh date; the version badge config fixed (drop `include_prereleases` — otherwise SemVer keeps showing v1.0.12-beta forever, Agent E finding R13); the stale Android handoff sentences (R8/C12) rewritten for the merged #74 | — | unit (doc audit) | — | docs-bytes-audit.md §2 findings R13/R8, §3 finding C12, §5 step 7 | NOT RUN |
+| 8.9 | any desktop with the packaged stable build | per artifact | packaged v1.0.0 build | rows 8.1–8.8 PASS | Re-run the S0.15/S0.16-class checks AND the Section 5c packaged updater rows against the published feed | The record's automated byte claims hold for v1.0.0 bytes; the real updater accepts the published manifest | — | packaged-os | — | Section 5c rows 5.24–5.28 | NOT RUN |
+
+---
 
 ## Current qualification record for stable v1.0.0 (honest summary)
 
 | Area | Automated evidence | Packaged/physical evidence |
 |---|---|---|
-| Frontend journeys (catalog, palette, downloads, open, update, privacy, import/export, themes, navigation) | 114 E2E + 707 unit + 24 visual: PASS on 93f87ce | NOT RUN (no packaged stable build exists yet) |
-| Native engine + verifier | Rust fmt/clippy/test green on 3 OSes (CI 38421837523) | NOT RUN |
-| Released bytes vs manifest vs signatures | 21/21 checksums + 5/5 minisign verified on v1.0.12-beta; latest.json correct | n/a (v1.0.0 bytes do not exist yet — must re-run S0.15/S0.16 against the real stable assets) |
-| Windows installer UX (warning, MSI, portable) | none possible | NOT RUN |
+| Frontend journeys (catalog, palette, downloads, open, themes, navigation) | executed on main @ 93f87ce (114 E2E + 707 unit + 24 visual) AND re-executed green on the candidate (r2.3: 758 unit; r2.10: 90 E2E; r2.9: 24 visual) | NOT RUN |
+| Stable-channel policy + stable-track fixtures (#80/#82) | suites EXECUTED green on the candidate (r2.3 unit incl. stableChannelPolicy, r2.10 E2E incl. i-self-update) | PASS (mocked evidence) — packaged verification pending publication |
+| Android open handoff contract (#74) | mocked contract tests executed green on the candidate (unit r2.3: downloadOpenFlow + artifactOpen suites; E2E r2.10: the D2 Android journey) | NOT RUN (build evidence is not installer evidence; device rows blank) |
+| Native engine + verifier | Rust CI green on 3 OSes (run 38421837523, main-era); candidate re-run pending | NOT RUN |
+| Released bytes vs manifest vs signatures | proven for v1.0.12-beta (21/21 checksums, 5/5 minisign, latest.json 8/8) | v1.0.0 bytes do not exist — Section 8 re-runs everything |
+| Windows installer UX (SmartScreen, MSI, portable) | none possible | NOT RUN |
 | macOS Gatekeeper | none possible | NOT RUN |
-| Linux handlers (AppImage/deb/rpm/archive/missing-handler) | none possible | NOT RUN |
-| Android installer consent, unknown-sources, cancel, non-APK share | mocked adapter + bridge recording only | NOT RUN (build evidence is not installer evidence) |
-| Beta→stable migration (installer behavior, data retention) | SemVer + channel + data-retention design pinned in tests / source review | NOT RUN |
-| Updater end-to-end on real bytes | verified for the in-app delivery path's gates (unit + E2E) | NOT RUN |
+| Linux handlers (AppImage/deb/rpm/missing-handler) | none possible | NOT RUN |
+| Beta→stable installer transitions | SemVer/channel/data-retention design pinned in tests + source review | NOT RUN (every prediction is 'expected (hypothesis)') |
+| Publication gate | pipeline design pinned (workflow-contract tests) | NOT RUN (release does not exist) |
 
 **Blocking prerequisites before this record can be completed:**
-1. Agent 5's version bump to 1.0.0 + the stable default-channel flip
-   (`DEFAULT_UPDATE_CHANNEL` → `stable`) landing together — otherwise a
-   new stable install would be offered the older-numbered v1.0.12-beta
-   prerelease on the alpha default (reported this round).
-2. The stable tag build producing `Fress_1.0.0_*` artifacts on the
-   Releases page (release workflow, tag `v1.0.0`).
-3. S0.15/S0.16 re-executed against the actual stable bytes.
-4. A Windows, a macOS, a Linux and an Android environment for the
-   packaged rows (currently UNAVAILABLE in the qualification environment:
-   no physical devices and no desktop OS VMs are attached; every physical
-   row stays honestly NOT RUN until a human executes it).
-5. README follow-ups that can only land with the stable publication:
-   (a) re-anchor the "re-verified against release `v1.0.12-beta`"
-   statements to the stable release after S0.15/S0.16 pass on its real
-   bytes, and (b) the version badge
-   (`img.shields.io/...?include_prereleases&sort=semver`) keeps showing
-   `v1.0.12-beta` after stable ships because SemVer ranks 1.0.12-beta
-   above 1.0.0 — drop `include_prereleases` in the same docs pass so the
-   badge names the newest STABLE release.
 
-Any green row in this file that is not backed by the named evidence class
-is a documentation bug: fix the row, not the rule.
+1. ✅ DONE during this qualification: DEFECT 1 fixed (i-self-update.spec.ts
+   filler-version derivation) + the selfUpdate.test.ts channel-pin fix, full
+   suite re-run green on the candidate tree (`7dcfceea`) — records 0.19/0-r2.
+2. DEFECT D6-1 fixed by the release agent (fress-open crate + lock entry to
+   `1.0.0`) — then row r2.6/0.19f re-runs green.
+3. The `v1.0.0` tag build producing the `Fress_1.0.0_*` artifacts and Agent 3's
+   publication (draft → verify-release → flip) — then Section 8 executes.
+4. A Windows, a macOS, a Linux and an Android environment for the packaged and
+   physical rows. None were attached to the qualification environment; every
+   such row stays honestly NOT RUN until a human executes it.
+5. ✅ DONE during this qualification: Section 6 reconciled with Agent C's
+   transition-qualification report (the T2 MSI row now records BOTH
+   hypotheses with the toolchain evidence; flags F-2/F-3/F-4 referenced).
+6. README/CODE_SIGNING re-anchoring that can only land with publication
+   (docs-bytes-audit.md findings R8/R13/C12 and the §5 gate list); the
+   stable-era drafts land on the candidate with explicit publish gates.
+
+Any green row in this file that is not backed by the named evidence class is a
+documentation bug: fix the row, not the rule.
+
+## Coverage ledger (fill before release sign-off)
+
+Mirrors the ledger discipline of `docs/testing/download-open-smoke.md`: a blank
+cell keeps the claim honest. `exec` = recorded execution; `inv` = test exists
+(static inventory, no recorded execution); `—` = no automated coverage
+identified; blank = not verified on that class.
+
+| Surface | mock / unit | mocked-e2e | packaged-os | physical-device |
+|---|---|---|---|---|
+| Clean install per artifact | — | — | (1b) | (4.7 sideload) |
+| Version badge / channel / first-run pill | inv (1.21, 1.22) | exec (1.20) | (1.18, 1.19) | n/a |
+| Catalog search/filter/views | exec (2.6–2.12) | exec (2.1–2.3) | (2.14–2.18) | n/a |
+| Custom apps incl. empty-URL crash regression | exec (2.6, 2.7) | — | (2.16) | n/a |
+| Table delete confirmation | exec (2.8) | — | (2.17) | n/a |
+| Command palette / language / RTL / 320 px | — | exec (2.4, 2.5, 2.10, 2.11) | (2.18) | n/a |
+| Download progress/cancel/retry/checksum | exec (3.5) | exec (3.1–3.4) | (3.15–3.20) | n/a |
+| Open / reveal per desktop handler | exec (3.12) | exec (3.6–3.10) | (3.15–3.18) | n/a |
+| AppImage restricted launcher | exec (3.12) | exec (3.11) | (3.19) | n/a |
+| Open-failure honesty, no auto-loop | exec (3.12) | exec (3.9) | (3.20) | n/a |
+| APK → system installer handoff (FileProvider) | inv (4.12) | inv (4.8) | n/a | (4.1, 4.2) |
+| Unknown-source gate / consent / cancel | — | — | n/a | (4.3, 4.4) |
+| Non-APK open/share fallback | inv (4.10) | exec (4.9, UI half) | n/a | (4.5) |
+| Restored-row fail-closed honesty | exec (3.12, 7.13: native) | exec (3.14, 7.12) | (7.9, 7.10) | (4.6, 7.11) |
+| Stable channel never offered beta | inv (5.1–5.3) | inv (5.8–5.18) | (5.24–5.27) | n/a |
+| Track-migration (no silent downgrade) | inv (5.4, 5.5) | inv (5.12) | n/a | n/a |
+| Real updater vs published v1.0.0 feed | — | — | (5.28, 8.9) | n/a |
+| Beta→stable installer transitions | review (6.8) | — | (6.1–6.6) | (6.7) |
+| Persistence across transitions | exec (7.14) | exec (7.15) | (7.1–7.5) | (7.6) |
+| Crash recovery mid-download | exec (7.13) | exec (7.12) | (7.9, 7.10) | (7.11) |
+| Publication gate (bytes, manifest, docs) | exec-on-beta only (0.15–0.17) | — | (8.9) | n/a |
+
+## Change log for this record
+
+| Version | Date (UTC) | What changed |
+|---|---|---|
+| r1 | 2026-10-14 | initial v1.0.0 qualification record on integrate/stable-candidate e771423 |
+| r2 | 2026-10-14 | candidate execution recorded (Section 0-r2): full frontend+E2E+visual+perf green on tree 7dcfceea; DEFECT 1 fixed; channel-pin fix; D6-1 recorded; Section 6 reconciled with transition-qualification (T2 dual hypothesis, W-3 decisive); 27 mock/mocked-e2e/unit rows carry the candidate execution |

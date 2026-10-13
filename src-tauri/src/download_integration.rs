@@ -12,6 +12,7 @@
 //     exercised here. See CONTRIBUTING.md for the coverage this leaves.
 //   - Temp directories are per-test and removed best-effort afterwards.
 
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use super::download_finalize::{
@@ -21,7 +22,7 @@ use super::download_finalize::{
 use super::sanitize_filename;
 use super::{
     fetch_fdroid_package, fetch_latest_release, fetch_recent_releases, fetch_text,
-    parse_gh_release, FETCH_TEXT_BODY_CAP,
+    parse_gh_release, API_BODY_CAP, FETCH_TEXT_BODY_CAP,
 };
 
 // ---------------------------------------------------------------------------
@@ -423,4 +424,90 @@ async fn fetch_text_enforces_https_and_the_host_allowlist_before_any_request() {
 fn body_cap_is_the_documented_two_megabytes() {
     // The cap bounds how much of a vendor manifest can ever be buffered.
     assert_eq!(FETCH_TEXT_BODY_CAP, 2 * 1024 * 1024);
+}
+
+// ---------------------------------------------------------------------------
+// read_capped_api_text — the JSON API commands' whole-body bound
+// ---------------------------------------------------------------------------
+
+/// Loopback HTTP server serving ONE scripted raw response, then closing.
+/// Returns the base URL and joins the writer thread on drop of the guard.
+fn spawn_raw_http(reply: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    let handle = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            // Drain the request head (GET has no body).
+            let mut buf = [0u8; 2048];
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = stream.write_all(&reply);
+            let _ = stream.flush();
+            // Closing the socket ends the response (close-delimited when no
+            // Content-Length is present).
+        }
+    });
+    (format!("http://{addr}/payload"), handle)
+}
+
+async fn api_get(url: &str) -> reqwest::Response {
+    reqwest::Client::new()
+        .get(reqwest::Url::parse(url).expect("loopback url"))
+        .send()
+        .await
+        .expect("loopback request succeeds")
+}
+
+#[tokio::test]
+async fn api_text_reads_accept_a_body_under_the_cap() {
+    let mut reply = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n".to_vec();
+    reply.extend_from_slice(b"[1,2]");
+    let (url, _join) = spawn_raw_http(reply);
+    let body = super::read_capped_api_text_with_cap(api_get(&url).await, 16)
+        .await
+        .expect("an under-cap body must be read");
+    assert_eq!(body, "[1,2]");
+}
+
+#[tokio::test]
+async fn api_text_reads_refuse_an_oversized_content_length_before_the_body() {
+    // An honestly advertised oversized body is refused on the header - no
+    // body bytes are pulled into memory at all.
+    let reply =
+        b"HTTP/1.1 200 OK\r\nContent-Length: 4096\r\n\r\nonly-a-few-bytes-sent-anyway".to_vec();
+    let (url, _join) = spawn_raw_http(reply);
+    let err = super::read_capped_api_text_with_cap(api_get(&url).await, 16)
+        .await
+        .expect_err("an oversized advertised body must be refused");
+    assert!(err.contains("too large"), "unexpected error: {err}");
+}
+
+#[tokio::test]
+async fn api_text_reads_refuse_a_body_that_grows_past_the_cap_midstream() {
+    // The lying-server case: no Content-Length (close-delimited), the body
+    // grows past the cap while streaming. The read stops at the cap line
+    // and refuses instead of buffering an unbounded body.
+    let mut reply = b"HTTP/1.1 200 OK\r\n\r\n".to_vec();
+    reply.extend_from_slice(&[b'x'; 4096]);
+    let (url, _join) = spawn_raw_http(reply);
+    let err = super::read_capped_api_text_with_cap(api_get(&url).await, 16)
+        .await
+        .expect_err("a body growing past the cap must be refused");
+    assert!(err.contains("too large"), "unexpected error: {err}");
+}
+
+#[test]
+fn api_body_cap_is_the_documented_ten_megabytes() {
+    // Generous enough that no legitimate release list or F-Droid package
+    // answer can hit it; small enough that a hostile pinned host cannot
+    // balloon the app's memory.
+    assert_eq!(API_BODY_CAP, 10 * 1024 * 1024);
 }

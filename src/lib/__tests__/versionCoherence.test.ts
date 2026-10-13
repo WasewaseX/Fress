@@ -8,9 +8,9 @@
  *
  * The validator's core is pure: it takes file CONTENT by path, so every rule
  * below runs against in-memory fixtures — no production file is ever mutated
- * to manufacture a failure state. The two spawn tests at the end exercise the
+ * to manufacture a failure state. The spawn tests at the end exercise the
  * real npm script (the stable interface Agent 4 wires into CI) for actual
- * exit codes.
+ * exit codes, on temporary fixture checkouts.
  */
 
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -22,6 +22,8 @@ import {
   loadVersionFiles,
   parseCargoLockFressVersion,
   parseCargoTomlVersion,
+  parseGradleKtsVersionName,
+  parseTauriAndroidVersionName,
   stripVPrefix,
   validateVersions,
   type ParseResult,
@@ -34,6 +36,18 @@ import {
 function expectErr(result: ParseResult, fragment: string): void {
   if (result.kind === 'ok') {
     throw new Error(`expected a failure containing "${fragment}", got ok with value "${result.value}"`);
+  }
+  expect(result.error).toContain(fragment);
+}
+
+/** Same contract for OPTIONAL fields: 'absent' is legitimate and must fail
+ * this assertion too — only a real 'err' may pass. */
+function expectOptionalErr(result: { kind: string; value?: string; error?: string }, fragment: string): void {
+  if (result.kind === 'ok') {
+    throw new Error(`expected a failure containing "${fragment}", got ok with value "${result.value}"`);
+  }
+  if (result.kind === 'absent') {
+    throw new Error(`expected a failure containing "${fragment}", got 'absent' (legitimate no-field state)`);
   }
   expect(result.error).toContain(fragment);
 }
@@ -99,6 +113,30 @@ const HISTORICAL_CHANGELOG = [
   '## 1.0.8-beta (2026-10-02)',
   '- even older things',
 ].join('\n');
+
+/** The versionName line as `tauri android init` writes it into the generated
+ * Gradle project (Kotlin DSL), wrapped in a realistic defaultConfig block. */
+function androidGradleKts(version: string, opts: { groovyStyle?: boolean; extraCommentLine?: boolean } = {}): string {
+  const assignment = opts.groovyStyle ? `        versionName "${version}"` : `        versionName = "${version}"`;
+  return [
+    'plugins {',
+    '    id("org.gradle.application")',
+    '}',
+    'android {',
+    '    namespace = "com.fress.app"',
+    '    defaultConfig {',
+    '        applicationId = "com.fress.app"',
+    '        minSdk = 24',
+    '        targetSdk = 34',
+    '        versionCode = 10',
+    assignment,
+    ...(opts.extraCommentLine ? ['        // historical note: versionName = "1.0.9-beta" was the previous release'] : []),
+    '    }',
+    '}',
+  ].join('\n');
+}
+
+const GRADLE_PATH = 'src-tauri/gen/android/app/build.gradle.kts';
 
 function validate(files: Partial<Record<RequiredFile, string>>, rest: Omit<ValidateInput, 'files'> = {}) {
   return validateVersions({ files, ...rest });
@@ -170,7 +208,41 @@ describe('version grammar', () => {
   });
 });
 
-// -- the eight required regression cases --------------------------------------
+describe('optional Android parsers', () => {
+  it('parseGradleKtsVersionName: Kotlin DSL assignment, Groovy style, and comment immunity', () => {
+    expect(parseGradleKtsVersionName(androidGradleKts('1.0.10-beta'))).toEqual({ kind: 'ok', value: '1.0.10-beta' });
+    expect(parseGradleKtsVersionName(androidGradleKts('1.0.10-beta', { groovyStyle: true }))).toEqual({ kind: 'ok', value: '1.0.10-beta' });
+    // A commented-out historical assignment must never be read as the version.
+    expect(parseGradleKtsVersionName(androidGradleKts('1.0.10-beta', { extraCommentLine: true }))).toEqual({ kind: 'ok', value: '1.0.10-beta' });
+    expect(parseGradleKtsVersionName('// versionName = "9.9.9-old"\nversionName = "1.0.10-beta" // live')).toEqual({ kind: 'ok', value: '1.0.10-beta' });
+  });
+
+  it('parseGradleKtsVersionName: zero, ambiguous and unquoted assignments fail closed', () => {
+    expectErr(parseGradleKtsVersionName('android {\n  defaultConfig {\n    applicationId = "x"\n  }\n}'), 'no parseable versionName');
+    expectErr(
+      parseGradleKtsVersionName('versionName = "1.0.10-beta"\nversionName = "1.0.9-beta"'),
+      '2 versionName assignments'
+    );
+    // Unquoted Kotlin property (versionName from a variable) is not a literal
+    // the build pins — treated as missing, not guessed.
+    expectErr(parseGradleKtsVersionName('versionName = project.findProperty("v") as String'), 'no parseable versionName');
+  });
+
+  it('parseTauriAndroidVersionName: absent path, present override, and malformed values', () => {
+    // No bundle section at all (the current repo state).
+    expect(parseTauriAndroidVersionName(JSON.stringify({ productName: 'Fress', version: '1.0.10-beta' }))).toEqual({ kind: 'absent' });
+    // bundle exists without android, android without versionName.
+    expect(parseTauriAndroidVersionName(JSON.stringify({ bundle: { targets: ['nsis'] } }))).toEqual({ kind: 'absent' });
+    expect(parseTauriAndroidVersionName(JSON.stringify({ bundle: { android: {} } }))).toEqual({ kind: 'absent' });
+    // A real override.
+    expect(parseTauriAndroidVersionName(JSON.stringify({ bundle: { android: { versionName: '1.0.10-beta' } } }))).toEqual({ kind: 'ok', value: '1.0.10-beta' });
+    // Present-but-malformed never silently passes.
+    expectOptionalErr(parseTauriAndroidVersionName(JSON.stringify({ bundle: { android: { versionName: 42 } } })), 'not a non-empty string');
+    expectOptionalErr(parseTauriAndroidVersionName(JSON.stringify({ bundle: { android: { versionName: '' } } })), 'not a non-empty string');
+  });
+});
+
+// -- the required regression matrix --------------------------------------------
 
 describe('validateVersions: the required regression matrix', () => {
   it('1. a fully coherent candidate passes', () => {
@@ -311,6 +383,124 @@ describe('validateVersions: the required regression matrix', () => {
   });
 });
 
+// -- Android metadata: conditional-authoritative (new brief cases 5) ------------
+
+describe('validateVersions: Android metadata', () => {
+  it('5a. a stale generated Android versionName fails, naming file, field and value', () => {
+    // A checkout that ran `tauri android init`: the generated project pins an
+    // old version while every manifest was bumped — exactly the partial-bump
+    // class this guard exists for, on a file CI would otherwise never see.
+    const report = validate(coherentFiles(), {
+      optionalFiles: { [GRADLE_PATH]: androidGradleKts('1.0.9-beta') },
+    });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'src-tauri/gen/android/app/build.gradle.kts versionName is "1.0.9-beta", expected "1.0.10-beta"'
+    );
+    expect(failureText(report)).toContain('tauri android build');
+    const row = report.checks.find((c) => c.file === GRADLE_PATH);
+    expect(row?.status).toBe('fail');
+  });
+
+  it('5b. a mismatching .bundle.android.versionName override fails', () => {
+    const files = coherentFiles();
+    files['src-tauri/tauri.conf.json'] = JSON.stringify({
+      productName: 'Fress',
+      version: '1.0.10-beta',
+      bundle: { android: { versionName: '1.0.9-beta' } },
+    });
+    const report = validate(files);
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain(
+      'src-tauri/tauri.conf.json .bundle.android.versionName is "1.0.9-beta", expected "1.0.10-beta"'
+    );
+  });
+
+  it('a matching Android override and a matching generated project both pass', () => {
+    const files = coherentFiles();
+    files['src-tauri/tauri.conf.json'] = JSON.stringify({
+      productName: 'Fress',
+      version: '1.0.10-beta',
+      bundle: { android: { versionName: '1.0.10-beta' } },
+    });
+    const report = validate(files, { optionalFiles: { [GRADLE_PATH]: androidGradleKts('1.0.10-beta') } });
+    expect(report.ok).toBe(true);
+    expect(report.checks.find((c) => c.file === GRADLE_PATH)?.status).toBe('ok');
+    expect(report.checks.find((c) => c.field === '.bundle.android.versionName')?.status).toBe('ok');
+  });
+
+  it('absent Android metadata is legitimate — no row, no failure (generated at build time)', () => {
+    const report = validate(coherentFiles());
+    expect(report.ok).toBe(true);
+    expect(report.checks.some((c) => c.file === GRADLE_PATH)).toBe(false);
+    expect(report.checks.some((c) => c.field === '.bundle.android.versionName')).toBe(false);
+  });
+
+  it('a present-but-malformed generated project fails closed (no silent skip)', () => {
+    for (const bad of [
+      'android { defaultConfig { applicationId = "com.fress.app" } }', // no versionName
+      'versionName = computedValue // unquoted, not a pinned literal',
+    ]) {
+      const report = validate(coherentFiles(), { optionalFiles: { [GRADLE_PATH]: bad } });
+      expect(report.ok).toBe(false);
+      expect(failureText(report)).toContain('src-tauri/gen/android/app/build.gradle.kts');
+      expect(failureText(report)).toContain('versionName');
+    }
+  });
+
+  it('an unreadable Android build file fails closed too', () => {
+    const report = validate(coherentFiles(), {
+      optionalReadErrors: { [GRADLE_PATH]: 'EISDIR: illegal operation on a directory' },
+    });
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain('exists but could not be read');
+  });
+});
+
+// -- malformed manifests must not disable validation (new brief case 10) --------
+
+describe('validateVersions: malformed manifests cannot silently disable validation', () => {
+  it('10a. a malformed package.json fails with an actionable diagnostic, not a crash', () => {
+    const files = coherentFiles();
+    files['package.json'] = '{ "name": "fress", "version": 1.0.10-beta, }'; // invalid JSON
+    const report = validate(files);
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain('package.json is not valid JSON');
+    // The canonical is unreadable, so every other field must ALSO refuse to
+    // claim agreement (fail closed in both directions, not just "source bad").
+    expect(report.canonical).toBeNull();
+    expect(failureText(report)).toContain('cannot verify agreement');
+  });
+
+  it('10b. one malformed manifest never blinds the others — every independent defect is reported', () => {
+    const files = coherentFiles();
+    files['src-tauri/tauri.conf.json'] = '{ truncated'; // malformed
+    files['src-tauri/Cargo.lock'] = files['src-tauri/Cargo.lock']!.replace(
+      'name = "fress"\nversion = "1.0.10-beta"',
+      'name = "fress"\nversion = "1.0.8-beta"' // stale AND unrelated to the malformed file
+    );
+    const report = validate(files);
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain('src-tauri/tauri.conf.json is not valid JSON');
+    expect(failureText(report)).toContain('src-tauri/Cargo.lock [[package] name="fress"] version is "1.0.8-beta"');
+  });
+
+  it('10c. a corrupted Cargo.lock (duplicated key inside the fress record) fails as malformed', () => {
+    const files = coherentFiles();
+    files['src-tauri/Cargo.lock'] = [
+      'version = 4',
+      '',
+      '[[package]]',
+      'name = "fress"',
+      'version = "1.0.10-beta"',
+      'version = "1.0.9-beta"',
+    ].join('\n');
+    const report = validate(files);
+    expect(report.ok).toBe(false);
+    expect(failureText(report)).toContain('duplicated "version" key');
+  });
+});
+
 // -- release-tag and equality semantics ----------------------------------------
 
 describe('validateVersions: release-tag semantics', () => {
@@ -342,7 +532,11 @@ describe('loadVersionFiles + the real npm script', () => {
     for (const root of scratchRoots) rmSync(root, { recursive: true, force: true });
   });
 
-  function makeFixtureRoot(version: string, mutate?: (root: string) => void): string {
+  function makeFixtureRoot(
+    version: string,
+    mutate?: (root: string) => void,
+    opts: { androidVersion?: string | null } = {}
+  ): string {
     const root = mkdtempSync(join(resolve(process.cwd()), 'node_modules', '.tmp-version-fixture-'));
     scratchRoots.push(root);
     for (const [rel, content] of Object.entries(coherentFiles(version))) {
@@ -351,6 +545,11 @@ describe('loadVersionFiles + the real npm script', () => {
       writeFileSync(abs, content!);
     }
     writeFileSync(join(root, 'CHANGELOG.md'), HISTORICAL_CHANGELOG);
+    if (opts.androidVersion !== undefined && opts.androidVersion !== null) {
+      const gradlePath = join(root, 'src-tauri/gen/android/app/build.gradle.kts');
+      mkdirSync(join(gradlePath, '..'), { recursive: true });
+      writeFileSync(gradlePath, androidGradleKts(opts.androidVersion));
+    }
     mutate?.(root);
     return root;
   }
@@ -411,6 +610,44 @@ describe('loadVersionFiles + the real npm script', () => {
     expect(match.status).toBe(0);
   });
 
+  it('--expect-tag is accepted as an exact alias of --release-tag (wiring compatibility)', () => {
+    const root = makeFixtureRoot('1.0.10-beta');
+    const mismatch = spawnSync(
+      'npm',
+      ['run', '--silent', 'validate:versions', '--', '--root', root, '--expect-tag', 'v1.0.9-beta'],
+      { cwd: resolve(process.cwd()), encoding: 'utf8', timeout: 120_000 }
+    );
+    expect(mismatch.status).toBe(1);
+    expect(mismatch.stdout).toContain('disagrees with the build version');
+
+    const match = spawnSync(
+      'npm',
+      ['run', '--silent', 'validate:versions', '--', '--root', root, '--expect-tag', 'v1.0.10-beta'],
+      { cwd: resolve(process.cwd()), encoding: 'utf8', timeout: 120_000 }
+    );
+    expect(match.status).toBe(0);
+  });
+
+  it('the real npm script checks a generated Android project on disk: stale fails, current passes', () => {
+    const stale = makeFixtureRoot('1.0.10-beta', undefined, { androidVersion: '1.0.9-beta' });
+    const staleRun = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--root', stale], {
+      cwd: resolve(process.cwd()),
+      encoding: 'utf8',
+      timeout: 120_000,
+    });
+    expect(staleRun.status).toBe(1);
+    expect(staleRun.stdout).toContain('src-tauri/gen/android/app/build.gradle.kts versionName is "1.0.9-beta"');
+
+    const current = makeFixtureRoot('1.0.10-beta', undefined, { androidVersion: '1.0.10-beta' });
+    const okRun = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--root', current], {
+      cwd: resolve(process.cwd()),
+      encoding: 'utf8',
+      timeout: 120_000,
+    });
+    expect(okRun.status).toBe(0);
+    expect(okRun.stdout).toContain('src-tauri/gen/android/app/build.gradle.kts');
+  });
+
   it('unknown CLI arguments exit 2 with usage', () => {
     const root = makeFixtureRoot('1.0.10-beta');
     const run = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--nonsense'], {
@@ -420,5 +657,34 @@ describe('loadVersionFiles + the real npm script', () => {
     });
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('unknown argument');
+  });
+
+  it('inside GitHub Actions a failure emits ::error:: annotations for every violation', () => {
+    const drifted = makeFixtureRoot('1.0.10-beta', (root) => {
+      const lockPath = join(root, 'package-lock.json');
+      const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+      lock.packages[''].version = '1.0.9-beta';
+      writeFileSync(lockPath, JSON.stringify(lock, null, 2));
+    });
+    const run = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--root', drifted], {
+      cwd: resolve(process.cwd()),
+      encoding: 'utf8',
+      timeout: 120_000,
+      env: { ...process.env, GITHUB_ACTIONS: 'true' },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('::error::validate:versions:');
+    expect(run.stderr).toContain('package-lock.json .packages[""].version is "1.0.9-beta"');
+
+    // A passing run emits no annotations.
+    const good = makeFixtureRoot('1.0.10-beta');
+    const okRun = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--root', good], {
+      cwd: resolve(process.cwd()),
+      encoding: 'utf8',
+      timeout: 120_000,
+      env: { ...process.env, GITHUB_ACTIONS: 'true' },
+    });
+    expect(okRun.status).toBe(0);
+    expect(okRun.stderr).not.toContain('::error::');
   });
 });

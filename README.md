@@ -52,7 +52,7 @@ The web preview works without Rust: download buttons hand off to your browser. I
 
 ## Releases
 
-Releases are tagged and published on the [official Releases page](https://github.com/WasewaseX/Fress/releases). Every published release ships installers for all platforms, built by GitHub Actions. The table below uses `*` in place of the version, so it does not go stale; the shapes were re-verified file-by-file against release [`v1.0.12-beta`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.12-beta) (published 2026-10-13, 22 files: the 20 installers/archives below plus `SHA256SUMS.txt` and the updater manifest `latest.json`):
+Releases are tagged and published on the [official Releases page](https://github.com/WasewaseX/Fress/releases). Every published release ships installers for all platforms, built by GitHub Actions. The table below uses `*` in place of the version, so it does not go stale; the shapes were re-verified file-by-file against release [`v1.0.12-beta`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.12-beta) (published 2026-10-13, 22 files: the 15 installers/archives below, their 5 minisign `.sig` sidecars, plus `SHA256SUMS.txt` and the updater manifest `latest.json`):
 
 | Platform | File | Updater signature | In-app update |
 | --- | --- | --- | --- |

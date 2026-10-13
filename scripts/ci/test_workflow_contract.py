@@ -150,6 +150,23 @@ class TestReleaseWorkflowContract(unittest.TestCase):
         self.assertGreater(publish_at, -1, "verify-release must contain the publish step")
         self.assertLess(audit_at, publish_at, "the audit must run BEFORE the draft is published")
 
+    def test_verify_release_audits_freshly_downloaded_release_bytes(self):
+        # The audit must judge the EXACT bytes uploaded to the release, never
+        # a stale workspace copy: the job downloads the whole release fresh
+        # (--clobber) at the start of every run, BEFORE the audit. This also
+        # carries the retry contract: a transient download failure re-runs
+        # the whole job (fresh bytes each time), while a hard integrity
+        # verdict can never retry itself into a pass because the verdict is
+        # recomputed from scratch on every run.
+        code = _code(self.jobs["verify-release"]["body"])
+        download_at = code.find("gh release download")
+        clobber_at = code.find("--clobber")
+        audit_at = code.find("verify-release-artifacts.py")
+        self.assertGreater(download_at, -1, "verify-release must download the release assets it audits")
+        self.assertGreater(clobber_at, -1, "the download must --clobber so no stale copy can survive a re-run")
+        self.assertLess(download_at, clobber_at, "--clobber must belong to the download step")
+        self.assertLess(clobber_at, audit_at, "the audit must run on the freshly downloaded bytes")
+
     def test_draft_flip_is_the_only_publication_switch(self):
         self.assertEqual(
             self.text.count("--draft=false"), 1,

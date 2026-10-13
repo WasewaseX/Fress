@@ -410,6 +410,41 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         failures = self._failures()
         self.assertTrue(any("lacks required platform windows-aarch64" in f for f in failures), failures)
 
+    def test_hard_verdicts_cannot_retry_into_a_pass(self):
+        # Publication-retry contract: a corrupted release may be re-audited
+        # any number of times (a failed job re-run is how a transient
+        # TRANSPORT error is retried), but the integrity verdict itself is
+        # stateless and deterministic - the same corrupt bytes must produce
+        # the same non-empty failures on EVERY run. No retry loop, cache or
+        # hidden state inside the auditor may ever escalate a hard failure
+        # into a pass.
+        target = f"Fress_{VERSION}_x64-setup.exe"
+        path = os.path.join(self.dir, target)
+        blob = bytearray(open(path, "rb").read())
+        blob[20] ^= 0x01
+        open(path, "wb").write(bytes(blob))
+        first_failures, _ = self.audit()
+        self.assertTrue(first_failures, "corrupt bytes must fail the first audit")
+        for attempt in (2, 3, 4):
+            failures, _ = self.audit()
+            self.assertEqual(failures, first_failures, f"audit run {attempt} diverged from run 1")
+            self.assertTrue(failures, f"audit run {attempt} must not retry into a pass")
+
+    def test_verifier_is_offline_no_transport_layer(self):
+        # The auditor computes its verdict LOCALLY over the bytes it is
+        # given; downloading belongs to the workflow (which re-fetches the
+        # whole release with --clobber on every run before invoking this
+        # script). No network/transport import may exist here: any future
+        # "download with retries" logic inside the verdict would reintroduce
+        # exactly the retry-into-a-pass hazard this suite forbids.
+        source = open(os.path.join(_HERE, "verify-release-artifacts.py"), encoding="utf-8").read()
+        for forbidden in ("import socket", "import urllib", "from urllib", "import http.client",
+                          "from http", "import requests", "import ftplib", "import telnetlib"):
+            self.assertNotIn(forbidden, source, f"the verifier must stay offline: found {forbidden!r}")
+        # The stdlib imports it does have are the expected offline ones.
+        for required in ("import hashlib", "import json", "import os"):
+            self.assertIn(required, source)
+
 
 if __name__ == "__main__":
     unittest.main()

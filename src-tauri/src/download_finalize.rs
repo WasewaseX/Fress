@@ -737,7 +737,10 @@ pub(crate) async fn read_part_meta(part: &Path) -> Option<PartMeta> {
     // from being buffered without limit; a sidecar that is truncated by
     // the bound fails the JSON parse below and reads as "no validators",
     // which fail-closes the resume into a discard.
-    let mut file = tokio::fs::File::open(meta_path_for(part)).await.ok()?;
+    let file = tokio::fs::File::open(meta_path_for(part)).await.ok()?;
+    // take() bounds the read at 64 KiB: a tampered sidecar can never be
+    // buffered without limit. AsyncReadExt::take consumes `file`, so the
+    // binding needs no mut (clippy unused_mut, -D warnings).
     let mut raw = String::new();
     file.take(64 * 1024).read_to_string(&mut raw).await.ok()?;
     serde_json::from_str(&raw).ok()
@@ -867,8 +870,11 @@ impl StagingSink for DiskStaging {
 ///   - the total T, when present (not `*`), MUST be greater than M.
 ///
 /// Any violation refuses the resume instead of appending to the staging
-/// file; the download fails with a clear reason and the .part survives so
-/// a corrected server (or a fresh start) can still recover.
+/// file: `evaluate_response` maps every validation failure to
+/// `DiscardAndFail`, so the staging bytes AND the response's validators are
+/// deleted rather than retained as resumable state (an impossible range has
+/// forfeited the byte accounting; keeping a poisoned tail resumable would
+/// let a later byte-identity resume glue it into a final file).
 ///
 /// On success returns the number of bytes the range promised
 /// (`end - start + 1`) so the caller can verify the body actually
@@ -3207,6 +3213,48 @@ mod tests {
         assert!(err.0.contains("HTTP 416"));
         assert!(!part.exists());
         assert!(!meta_path_for(&part).exists());
+    }
+
+    #[tokio::test]
+    async fn a_mismatched_start_content_range_discards_the_staged_bytes() {
+        // End-to-end filesystem pin for the THIRD hostile-resume shape: a
+        // server that answers the bytes=600- request with a 206 claiming a
+        // DIFFERENT offset (bytes 999-...). evaluate_response refuses it
+        // before any byte of the hostile body is written, and the discard
+        // must leave NOTHING resumable on disk - neither the staged bytes
+        // nor the validator sidecar (the plan-level decision is pinned by
+        // evaluate_206_mismatched_start_discards_staging; this proves the
+        // engine's side effect, like the u64::MAX and 416 tests above).
+        let tmp = TempDir::new("e2e-mismatched-start");
+        let server = spawn_mock(vec![MockReply::partial_206(
+            "bytes 999-1099/1100",
+            b"hostile-tail",
+        )]);
+        let part = tmp.path().join("setup.exe.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &pattern(600)).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let err = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect_err("a mismatched resume offset must fail the attempt");
+        assert!(
+            err.0.contains("resumed at offset"),
+            "the offset mismatch must be named: {err:?}"
+        );
+        assert_eq!(err.1.as_deref(), Some("resume-invalid"));
+        // Final error, no destination, no completed record, nothing on disk.
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("setup.exe").exists());
+        assert_eq!(session.registry.completed_len(), 0);
+        assert!(!part.exists(), "the staged bytes must be discarded");
+        assert!(
+            !meta_path_for(&part).exists(),
+            "the validator sidecar must be discarded"
+        );
     }
 
     #[tokio::test]

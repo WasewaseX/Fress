@@ -617,6 +617,7 @@ const en: Dict = {
   'update.noAssetHint': 'No file for this platform could be picked automatically. Download it from the releases page.',
   'update.trackMigration': 'Your build (v{bv}) is newer than the newest {channel} release (v{cv}).',
   'update.trackMigrationHint': 'Fress never downgrades in the background. To move to the {channel} track, install that version yourself from the official releases page.',
+  'update.trackMigrationHintAsset': 'Fress never downgrades in the background. To move to the {channel} track, download {asset} (v{cv}) from the official releases page and install it yourself.',
   'update.trackMigrationShort': 'Newer than the {channel} channel',
   'update.releasesPageAction': 'Open the releases page',
 
@@ -1363,6 +1364,7 @@ const fa: Dict = {
   'update.noAssetHint': 'فایلی برای این سکو به‌طور خودکار پیدا نشد. آن را از صفحه Releases دریافت کنید.',
   'update.trackMigration': 'نسخه شما (v{bv}) از جدیدترین انتشار کانال {channel} (v{cv}) جدیدتر است.',
   'update.trackMigrationHint': 'فریس هرگز در پس‌زمینه به نسخه قدیمی‌تر برنمی‌گردد. برای جابه‌جایی به کانال {channel}، آن نسخه را خودتان از صفحه رسمی Releases نصب کنید.',
+  'update.trackMigrationHintAsset': 'فریس هرگز در پس‌زمینه به نسخه قدیمی‌تر برنمی‌گردد. برای جابه‌جایی به کانال {channel}، فایل {asset} (v{cv}) را از صفحه رسمی Releases دریافت و خودتان نصب کنید.',
   'update.trackMigrationShort': 'جدیدتر از کانال {channel}',
   'update.releasesPageAction': 'باز کردن صفحه Releases',
 
@@ -2103,6 +2105,7 @@ const es: Dict = {
   'update.noAssetHint': 'No se pudo elegir automáticamente un archivo para esta plataforma. Descárgalo desde la página de releases.',
   'update.trackMigration': 'Tu versión (v{bv}) es más reciente que la última publicación del canal {channel} (v{cv}).',
   'update.trackMigrationHint': 'Fress nunca retrocede en segundo plano. Para pasarte al canal {channel}, instala esa versión tú mismo desde la página oficial de releases.',
+  'update.trackMigrationHintAsset': 'Fress nunca retrocede en segundo plano. Para pasarte al canal {channel}, descarga {asset} (v{cv}) desde la página oficial de releases e instálalo tú mismo.',
   'update.trackMigrationShort': 'Más reciente que el canal {channel}',
   'update.releasesPageAction': 'Abrir la página de releases',
 
@@ -2844,6 +2847,7 @@ const fr: Dict = {
   'update.noAssetHint': 'Aucun fichier n’a pu être choisi automatiquement pour cette plateforme. Téléchargez-le depuis la page des releases.',
   'update.trackMigration': 'Votre version (v{bv}) est plus récente que la dernière publication du canal {channel} (v{cv}).',
   'update.trackMigrationHint': 'Fress ne revient jamais en arrière en arrière-plan. Pour passer au canal {channel}, installez vous-même cette version depuis la page officielle des releases.',
+  'update.trackMigrationHintAsset': 'Fress ne revient jamais en arrière en arrière-plan. Pour passer au canal {channel}, téléchargez {asset} (v{cv}) depuis la page officielle des releases et installez-le vous-même.',
   'update.trackMigrationShort': 'Plus récent que le canal {channel}',
   'update.releasesPageAction': 'Ouvrir la page des releases',
 
@@ -3585,6 +3589,7 @@ const de: Dict = {
   'update.noAssetHint': 'Für diese Plattform konnte keine Datei automatisch gewählt werden. Laden Sie sie von der Releases-Seite herunter.',
   'update.trackMigration': 'Ihr Build (v{bv}) ist neuer als die neueste {channel}-Veröffentlichung (v{cv}).',
   'update.trackMigrationHint': 'Fress geht im Hintergrund niemals zurück. Um zum {channel}-Kanal zu wechseln, installieren Sie diese Version selbst von der offiziellen Releases-Seite.',
+  'update.trackMigrationHintAsset': 'Fress geht im Hintergrund niemals zurück. Um zum {channel}-Kanal zu wechseln, laden Sie {asset} (v{cv}) von der offiziellen Releases-Seite herunter und installieren Sie es selbst.',
   'update.trackMigrationShort': 'Neuer als der {channel}-Kanal',
   'update.releasesPageAction': 'Releases-Seite öffnen',
 

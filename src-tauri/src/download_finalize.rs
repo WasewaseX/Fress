@@ -917,7 +917,14 @@ pub(crate) fn validate_resume_content_range(
             ));
         }
     }
-    Ok(end - start + 1)
+    // The promised length must itself be representable: a hostile
+    // `end == u64::MAX` with `start == 0` would otherwise overflow
+    // `end - start + 1` (a panic under overflow-checks, a silent wrap to 0
+    // without). Either shape poisons every downstream length decision, so
+    // the header is refused as malformed instead.
+    (end - start)
+        .checked_add(1)
+        .ok_or_else(|| "Content-Range byte range is too large".to_string())
 }
 
 /// What the caller must do with one HTTP response before any byte of the
@@ -1558,8 +1565,12 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
 
     let mut stream = first.bytes_stream();
     let mut downloaded: u64 = already_have;
+    // Display-only total (progress/ETA): a hostile Content-Length near
+    // u64::MAX must not overflow the sum; saturating keeps the bar honest
+    // without any panic surface. The COMPLETION decision below uses the
+    // exact promise, never this display value.
     let total = if remote_len > 0 {
-        remote_len + already_have
+        remote_len.saturating_add(already_have)
     } else if resuming {
         range_total.unwrap_or(0)
     } else {
@@ -1690,7 +1701,23 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
     // a full 200 body - and refuse to finalize a truncated file. The
     // .part survives so Resume can fetch exactly the missing bytes.
     let expected_downloaded: Option<u64> = match expected_range_len {
-        Some(range_len) => Some(already_have + range_len),
+        Some(range_len) => {
+            // The sum must be representable: a hostile `Content-Range` end
+            // near u64::MAX validated against a large staging prefix could
+            // overflow here. That is a protocol violation, not a length -
+            // refuse the transfer instead of wrapping (release) or panicking
+            // (overflow-checks builds).
+            match already_have.checked_add(range_len) {
+                Some(sum) => Some(sum),
+                None => {
+                    return Err((
+                        "Server announced an impossible byte range; the download was refused"
+                            .to_string(),
+                        None,
+                    ))
+                }
+            }
+        }
         // No verifiable range: fall back to Content-Length on a full-body
         // 200. A chunked 200 without Content-Length cannot be checked.
         None if !resuming && remote_len > 0 => Some(remote_len),
@@ -2132,6 +2159,33 @@ mod tests {
     fn rejects_a_total_not_larger_than_the_end() {
         assert!(validate_resume_content_range("bytes 1024-2047/2047", 1024).is_err());
         assert!(validate_resume_content_range("bytes 1024-2047/0", 1024).is_err());
+    }
+
+    #[test]
+    fn a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked() {
+        // Regression: `end - start + 1` overflows when a hostile server
+        // sends `end == u64::MAX`. The only header shape that reaches the
+        // arithmetic is an unknown total (`/*`): an explicit total must be
+        // strictly larger than the end, which no u64 can be. Under
+        // overflow-checks builds this used to panic; without them the length
+        // silently wrapped to 0 and poisoned the completion decision. The
+        // header is now refused as malformed instead - a named error, in
+        // both profiles.
+        let err = validate_resume_content_range("bytes 0-18446744073709551615/*", 0)
+            .expect_err("a u64::MAX range must be refused");
+        assert!(err.contains("too large"), "unexpected error: {err}");
+        // A start offset inside the range keeps the length representable
+        // here - the poisoned SUM (`already_have + range_len`) is refused by
+        // the second checked layer in run_download_on, pinned end to end by
+        // `a_hostile_u64_max_content_range_fails_named_without_completing`.
+        assert!(validate_resume_content_range("bytes 5-18446744073709551615/*", 5).is_ok());
+        // An explicit total equal to the end is refused by the pre-existing
+        // sanity check before the arithmetic is ever reached.
+        assert!(validate_resume_content_range(
+            "bytes 0-18446744073709551615/18446744073709551615",
+            0
+        )
+        .is_err());
     }
 
     // -----------------------------------------------------------------------
@@ -3022,6 +3076,44 @@ mod tests {
         assert!(!part.exists());
         assert!(!meta_path_for(&part).exists());
         assert!(!tmp.path().join("setup.exe").exists());
+    }
+
+    #[tokio::test]
+    async fn a_hostile_u64_max_content_range_fails_named_without_completing() {
+        // End-to-end regression for the hostile-`Content-Range` overflow:
+        // a resumed download whose server answers a verified-offset 206
+        // with `end == u64::MAX`. The representable-but-poisoned length
+        // (`600 + range_len` overflows u64) is refused at the completion
+        // decision with a named protocol error - never a panic (overflow-
+        // checks builds), never a silent wrap into a completion, no
+        // destination file and no completed-artifact record.
+        let tmp = TempDir::new("e2e-hostile-range");
+        let server = spawn_mock(vec![MockReply::partial_206(
+            "bytes 600-18446744073709551615/*",
+            b"tail-bytes",
+        )]);
+        let part = tmp.path().join("setup.exe.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &pattern(600)).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let err = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect_err("a u64::MAX Content-Range must fail the attempt");
+        assert!(
+            err.0.contains("impossible byte range"),
+            "unexpected: {err:?}"
+        );
+        // A named protocol violation is final - no automatic retry.
+        assert_eq!(err.1, None, "unexpected: {err:?}");
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("setup.exe").exists());
+        // No completed-artifact record either: a refused transfer never
+        // reaches the commit path.
+        assert_eq!(session.registry.completed_len(), 0);
     }
 
     #[tokio::test]

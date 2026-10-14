@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 
 import {
   compareVersions,
@@ -14,6 +14,7 @@ import {
   planUpdateDelivery,
   signatureSidecarFor,
   checkForUpdate,
+  setUpdateChannel,
 } from '../selfUpdate';
 import type { OwnRelease } from '../selfUpdate';
 
@@ -1164,6 +1165,24 @@ describe('fetchOwnAssetSignature, the plan-time shape gate (browser fallback pat
 });
 
 describe('checkForUpdate checksum plumbing (browser fallback path)', () => {
+  beforeEach(() => {
+    // These tests pin the browser checksum plumbing, not channel policy:
+    // pin the widest prerelease channel explicitly so the feed fixture (a
+    // prerelease release) stays visible regardless of the running build's
+    // own version. A stable 1.0.0 build would otherwise default to the
+    // 'stable' channel, which correctly hides prerelease feeds — the
+    // build-aware default from the stable-channel policy — and these
+    // assertions would never reach the checksum code under test. This file
+    // runs in the node environment (no DOM), so the storage surface itself
+    // is stubbed with the minimal contract getUpdateChannel uses.
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    setUpdateChannel('alpha');
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -1250,6 +1269,19 @@ describe('checkForUpdate checksum plumbing (browser fallback path)', () => {
 });
 
 describe('fetchExpectedSha256 hardening (via checkForUpdate, browser path)', () => {
+  beforeEach(() => {
+    // Same contract coupling as the checksum-plumbing describe above: the
+    // fixture feed is a prerelease, so the widest channel is pinned
+    // explicitly (via the same minimal node-env storage stub) instead of
+    // relying on the running build's default.
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    setUpdateChannel('alpha');
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });

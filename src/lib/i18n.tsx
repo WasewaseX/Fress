@@ -615,6 +615,11 @@ const en: Dict = {
   'update.releasesPage': 'Opening the releases page instead',
   'update.unverifiableHint': 'This update could not be verified against the published SHA256SUMS.txt, so it will not be downloaded automatically. Verify manually, then install.',
   'update.noAssetHint': 'No file for this platform could be picked automatically. Download it from the releases page.',
+  'update.trackMigration': 'Your build (v{bv}) is newer than the newest {channel} release (v{cv}).',
+  'update.trackMigrationHint': 'Fress never downgrades in the background. To move to the {channel} track, install that version yourself from the official releases page.',
+  'update.trackMigrationHintAsset': 'Fress never downgrades in the background. To move to the {channel} track, download {asset} (v{cv}) from the official releases page and install it yourself.',
+  'update.trackMigrationShort': 'Newer than the {channel} channel',
+  'update.releasesPageAction': 'Open the releases page',
 
   // Round 26: final localization pass. Privacy-Pack category names (the raw
   // strings live in data/privacyPack.ts and are translated at render time
@@ -1357,6 +1362,11 @@ const fa: Dict = {
   'update.releasesPage': 'به‌جای آن صفحه Releases باز می‌شود',
   'update.unverifiableHint': 'این به‌روزرسانی با SHA256SUMS.txt منتشرشده تأیید نشد، بنابراین به‌طور خودکار دریافت نمی‌شود. دستی بررسی و سپس نصب کنید.',
   'update.noAssetHint': 'فایلی برای این سکو به‌طور خودکار پیدا نشد. آن را از صفحه Releases دریافت کنید.',
+  'update.trackMigration': 'نسخه شما (v{bv}) از جدیدترین انتشار کانال {channel} (v{cv}) جدیدتر است.',
+  'update.trackMigrationHint': 'فریس هرگز در پس‌زمینه به نسخه قدیمی‌تر برنمی‌گردد. برای جابه‌جایی به کانال {channel}، آن نسخه را خودتان از صفحه رسمی Releases نصب کنید.',
+  'update.trackMigrationHintAsset': 'فریس هرگز در پس‌زمینه به نسخه قدیمی‌تر برنمی‌گردد. برای جابه‌جایی به کانال {channel}، فایل {asset} (v{cv}) را از صفحه رسمی Releases دریافت و خودتان نصب کنید.',
+  'update.trackMigrationShort': 'جدیدتر از کانال {channel}',
+  'update.releasesPageAction': 'باز کردن صفحه Releases',
 
   // Round 26: final localization pass (privacy-pack categories, combo copy,
   // download-option labels, platform-unavailable notes).
@@ -2093,6 +2103,11 @@ const es: Dict = {
   'update.releasesPage': 'Abriendo la página de releases',
   'update.unverifiableHint': 'Esta actualización no pudo verificarse con el SHA256SUMS.txt publicado, así que no se descargará automáticamente. Verifícala manualmente y luego instala.',
   'update.noAssetHint': 'No se pudo elegir automáticamente un archivo para esta plataforma. Descárgalo desde la página de releases.',
+  'update.trackMigration': 'Tu versión (v{bv}) es más reciente que la última publicación del canal {channel} (v{cv}).',
+  'update.trackMigrationHint': 'Fress nunca retrocede en segundo plano. Para pasarte al canal {channel}, instala esa versión tú mismo desde la página oficial de releases.',
+  'update.trackMigrationHintAsset': 'Fress nunca retrocede en segundo plano. Para pasarte al canal {channel}, descarga {asset} (v{cv}) desde la página oficial de releases e instálalo tú mismo.',
+  'update.trackMigrationShort': 'Más reciente que el canal {channel}',
+  'update.releasesPageAction': 'Abrir la página de releases',
 
   // Round 26: final localization pass (privacy-pack categories, combo copy,
   // download-option labels, platform-unavailable notes).
@@ -2830,6 +2845,11 @@ const fr: Dict = {
   'update.releasesPage': 'Ouverture de la page des releases',
   'update.unverifiableHint': 'Cette mise à jour n’a pas pu être vérifiée avec le SHA256SUMS.txt publié ; elle ne sera donc pas téléchargée automatiquement. Vérifiez manuellement, puis installez.',
   'update.noAssetHint': 'Aucun fichier n’a pu être choisi automatiquement pour cette plateforme. Téléchargez-le depuis la page des releases.',
+  'update.trackMigration': 'Votre version (v{bv}) est plus récente que la dernière publication du canal {channel} (v{cv}).',
+  'update.trackMigrationHint': 'Fress ne revient jamais en arrière en arrière-plan. Pour passer au canal {channel}, installez vous-même cette version depuis la page officielle des releases.',
+  'update.trackMigrationHintAsset': 'Fress ne revient jamais en arrière en arrière-plan. Pour passer au canal {channel}, téléchargez {asset} (v{cv}) depuis la page officielle des releases et installez-le vous-même.',
+  'update.trackMigrationShort': 'Plus récent que le canal {channel}',
+  'update.releasesPageAction': 'Ouvrir la page des releases',
 
   // Round 26: final localization pass (privacy-pack categories, combo copy,
   // download-option labels, platform-unavailable notes).
@@ -3567,6 +3587,11 @@ const de: Dict = {
   'update.releasesPage': 'Stattdessen öffnet sich die Releases-Seite',
   'update.unverifiableHint': 'Dieses Update konnte nicht gegen die veröffentlichte SHA256SUMS.txt verifiziert werden und wird daher nicht automatisch geladen. Bitte manuell prüfen und dann installieren.',
   'update.noAssetHint': 'Für diese Plattform konnte keine Datei automatisch gewählt werden. Laden Sie sie von der Releases-Seite herunter.',
+  'update.trackMigration': 'Ihr Build (v{bv}) ist neuer als die neueste {channel}-Veröffentlichung (v{cv}).',
+  'update.trackMigrationHint': 'Fress geht im Hintergrund niemals zurück. Um zum {channel}-Kanal zu wechseln, installieren Sie diese Version selbst von der offiziellen Releases-Seite.',
+  'update.trackMigrationHintAsset': 'Fress geht im Hintergrund niemals zurück. Um zum {channel}-Kanal zu wechseln, laden Sie {asset} (v{cv}) von der offiziellen Releases-Seite herunter und installieren Sie es selbst.',
+  'update.trackMigrationShort': 'Neuer als der {channel}-Kanal',
+  'update.releasesPageAction': 'Releases-Seite öffnen',
 
   // Round 26: final localization pass (privacy-pack categories, combo copy,
   // download-option labels, platform-unavailable notes).

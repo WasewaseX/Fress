@@ -30,6 +30,41 @@ jobs:
       - name: Install dependencies from the lockfile
         # tsx (the validator's TypeScript loader) comes from devDependencies.
         run: npm ci
+      - name: Refuse a tag that exists in a conflicting state
+        # The unique v1.0.0 stable tag (and every future tag) must point at
+        # EXACTLY the commit this workflow is building. A tag that was
+        # re-pointed after the run started, or that resolves to some other
+        # commit than the checked-out release candidate, is a conflicting
+        # state: building it would put bytes on a release whose tag proves
+        # nothing about the source. Fail closed instead; never move or
+        # re-point an existing tag.
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          TAGGED=$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "$TAGGED" != "$HEAD_SHA" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} points at ${TAGGED} but this workflow is building ${HEAD_SHA}. The tag is in a conflicting state; never move or re-point an existing tag - delete the run, restore the tag to the intended release commit and re-tag only from the validated candidate."
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} resolves to the exact release commit ${HEAD_SHA}"
+      - name: No-Chinese source gate (single source checker)
+        # Agent 2's one no-Chinese checker runs against the release candidate
+        # BEFORE anything is built or uploaded. This pre-build pass is
+        # deliberately SOURCE-ONLY: --include-dist must never run here
+        # because dist/ does not exist yet - the generated dist/ tree is
+        # scanned post-build by every build job after its frontend build.
+        # The release fails closed on any unintended Chinese/CJK hit in the
+        # candidate source tree, and equally on a missing checker: a release
+        # that could not be scanned must never publish silently.
+        run: |
+          set -euo pipefail
+          if [ ! -f scripts/ci/check-no-chinese.mjs ]; then
+            echo "::error::scripts/ci/check-no-chinese.mjs is missing - the no-Chinese gate cannot run. The release fails closed until the single source checker (owned by the CI agent) is present on the release commit."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs
       - id: v
         run: |
           set -euo pipefail
@@ -53,10 +88,30 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          if echo "$VERSION" | grep -qiE 'beta|rc|alpha|dev'; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          # Prerelease classification via THE authoritative grammar
+          # (validate-versions.ts --is-prerelease), not a second suffix list:
+          # plain 1.0.0 classifies as a STABLE GitHub release, any version
+          # carrying a SemVer prerelease segment (beta, rc, next, ...) stays a
+          # prerelease, and an unparsable version fails the run instead of
+          # being published as stable.
+          PRERELEASE=$(npx tsx scripts/ci/validate-versions.ts --is-prerelease "$VERSION")
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          # Channel-conditional release-notes line: a stable release must not
+          # carry prerelease wording and a prerelease must not pose as stable.
+          if [ "$PRERELEASE" = "true" ]; then
+            {
+              echo "channel_note<<FRESS_NOTE_EOF"
+              echo "Pre-release: features may change between releases."
+              echo "FRESS_NOTE_EOF"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "channel_note<<FRESS_NOTE_EOF"
+              echo "**Stable release.** The in-app updater's stable channel only offers stable releases; beta and alpha builds stay on their own channels."
+              echo ""
+              echo "**Coming from a beta build?** Your beta installation is never downgraded automatically. To move to stable deliberately: on Windows run the v$VERSION setup.exe over the existing install (if you use the MSI, it may refuse the downgrade - in that case uninstall the beta MSI first); on macOS replace the app in /Applications; on Linux install the v$VERSION bundle (deb/rpm need an explicit downgrade: \`apt install --allow-downgrades\` or \`rpm -U --oldpackage\`); on Android uninstall the beta APK first, which clears the app's private data. Desktop settings live in your user profile, not the install directory, and survive the transition."
+              echo "FRESS_NOTE_EOF"
+            } >> "$GITHUB_OUTPUT"
           fi
 
   create-release:
@@ -110,7 +165,7 @@ jobs:
 
             Verify any download against `SHA256SUMS.txt`.
 
-            Pre-release: features may change between releases.
+            ${{ needs.version.outputs.channel_note }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           # Draft until the verify-release job proves every required artifact
           # is present and hashes match. A failed build then leaves nothing
@@ -255,6 +310,32 @@ jobs:
           # uploads it. (It used to be uploaded straight away and stayed the
           # only unsigned Windows artifact.)
           Write-Host "MSI staged in workspace root as $finalName (uploaded after signing)"
+      - name: No-Chinese dist gate (post-build scan of the packaged frontend)
+        # Agent 2 owns scripts/ci/check-no-chinese.mjs and its --include-dist
+        # flag (PR #79); this workflow only wires the invocation. The
+        # pre-build gate in the version job stays source-only on purpose:
+        # --include-dist must never run before a build exists. This
+        # post-build pass covers the generated dist/ tree this job just
+        # produced (beforeBuildCommand = npm run build -> vite build ->
+        # dist/) and packaged into its bundles. Placement: immediately after
+        # this job's LAST frontend build (the MSI step above re-runs
+        # beforeBuildCommand) and before the first upload step the job
+        # itself performs. (The tauri-action step uploads the installer
+        # inside its own build step and cannot be interleaved; the release
+        # is a private draft until verify-release and a failure here fails
+        # the job, which blocks checksums and verify-release via needs:, so
+        # nothing can ever publish.) The pass fails closed on all three
+        # paths: a missing dist/ (the checker only warns there, so the
+        # guard below turns it into an error), a checker crash (exit 2) and
+        # any hit (exit 1).
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "::error::dist/ does not exist after the frontend build - the post-build no-Chinese dist scan cannot run. Fail closed; fix the build and re-run."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs --include-dist
       - name: Sign with Azure Trusted Signing
         # Runs only when the signing account is configured. One-time setup
         # steps are in CODE_SIGNING.md.
@@ -551,6 +632,30 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: false
           args: '--target aarch64-pc-windows-msvc --bundles nsis'
+      - name: No-Chinese dist gate (post-build scan of the packaged frontend)
+        # Agent 2 owns scripts/ci/check-no-chinese.mjs and its --include-dist
+        # flag (PR #79); this workflow only wires the invocation. The
+        # pre-build gate in the version job stays source-only on purpose:
+        # --include-dist must never run before a build exists. This
+        # post-build pass covers the generated dist/ tree the bundler just
+        # produced and packaged (beforeBuildCommand = npm run build -> vite
+        # build -> dist/). Placement: immediately after this job's only
+        # frontend build and before the first upload step the job itself
+        # performs (the tauri-action step uploads the installer inside its
+        # own build step and cannot be interleaved; the release is a private
+        # draft until verify-release and a failure here fails the job, which
+        # blocks checksums and verify-release via needs:, so nothing can
+        # ever publish). The pass fails closed on all three paths: a missing
+        # dist/ (the checker only warns there, so the guard below turns it
+        # into an error), a checker crash (exit 2) and any hit (exit 1).
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "::error::dist/ does not exist after the frontend build - the post-build no-Chinese dist scan cannot run. Fail closed; fix the build and re-run."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs --include-dist
       - name: Sign the ARM64 installer with Azure Trusted Signing
         if: env.FRESS_SIGNING_CONFIGURED == 'true'
         uses: azure/trusted-signing-action@b37b55d83a0c5c993cb33d1b376b20b75e13668c # v0
@@ -717,6 +822,30 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
           args: '--target x86_64-unknown-linux-gnu --bundles appimage deb rpm ${{ steps.updater.outputs.args }}'
+      - name: No-Chinese dist gate (post-build scan of the packaged frontend)
+        # Agent 2 owns scripts/ci/check-no-chinese.mjs and its --include-dist
+        # flag (PR #79); this workflow only wires the invocation. The
+        # pre-build gate in the version job stays source-only on purpose:
+        # --include-dist must never run before a build exists. This
+        # post-build pass covers the generated dist/ tree the bundler just
+        # produced and packaged (beforeBuildCommand = npm run build -> vite
+        # build -> dist/). Placement: immediately after this job's only
+        # frontend build. (The tauri-action step uploads the bundles inside
+        # its own build step and cannot be interleaved; the release is a
+        # private draft until verify-release and a failure here fails the
+        # job, which blocks updater-manifest, checksums and verify-release
+        # via needs:, so nothing can ever publish.) The pass fails closed
+        # on all three paths: a missing dist/ (the checker only warns
+        # there, so the guard below turns it into an error), a checker
+        # crash (exit 2) and any hit (exit 1).
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "::error::dist/ does not exist after the frontend build - the post-build no-Chinese dist scan cannot run. Fail closed; fix the build and re-run."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs --include-dist
 
   build-macos-arm:
     permissions:
@@ -834,6 +963,31 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
           args: '--target aarch64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
+      - name: No-Chinese dist gate (post-build scan of the packaged frontend)
+        # Agent 2 owns scripts/ci/check-no-chinese.mjs and its --include-dist
+        # flag (PR #79); this workflow only wires the invocation. The
+        # pre-build gate in the version job stays source-only on purpose:
+        # --include-dist must never run before a build exists. This
+        # post-build pass covers the generated dist/ tree the bundler just
+        # produced and packaged (beforeBuildCommand = npm run build -> vite
+        # build -> dist/). Placement: immediately after this job's last
+        # frontend build (exactly one of the signed/unsigned variants above
+        # runs; both produce dist/). (The tauri-action steps upload the
+        # dmg inside their own build step and cannot be interleaved; the
+        # release is a private draft until verify-release and a failure
+        # here fails the job, which blocks updater-manifest, checksums and
+        # verify-release via needs:, so nothing can ever publish.) The pass
+        # fails closed on all three paths: a missing dist/ (the checker
+        # only warns there, so the guard below turns it into an error), a
+        # checker crash (exit 2) and any hit (exit 1).
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "::error::dist/ does not exist after the frontend build - the post-build no-Chinese dist scan cannot run. Fail closed; fix the build and re-run."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs --include-dist
 
   build-macos-intel:
     permissions:
@@ -932,6 +1086,31 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
           args: '--target x86_64-apple-darwin --bundles dmg ${{ steps.updater.outputs.args }}'
+      - name: No-Chinese dist gate (post-build scan of the packaged frontend)
+        # Agent 2 owns scripts/ci/check-no-chinese.mjs and its --include-dist
+        # flag (PR #79); this workflow only wires the invocation. The
+        # pre-build gate in the version job stays source-only on purpose:
+        # --include-dist must never run before a build exists. This
+        # post-build pass covers the generated dist/ tree the bundler just
+        # produced and packaged (beforeBuildCommand = npm run build -> vite
+        # build -> dist/). Placement: immediately after this job's last
+        # frontend build (exactly one of the signed/unsigned variants above
+        # runs; both produce dist/). (The tauri-action steps upload the
+        # dmg inside their own build step and cannot be interleaved; the
+        # release is a private draft until verify-release and a failure
+        # here fails the job, which blocks updater-manifest, checksums and
+        # verify-release via needs:, so nothing can ever publish.) The pass
+        # fails closed on all three paths: a missing dist/ (the checker
+        # only warns there, so the guard below turns it into an error), a
+        # checker crash (exit 2) and any hit (exit 1).
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "::error::dist/ does not exist after the frontend build - the post-build no-Chinese dist scan cannot run. Fail closed; fix the build and re-run."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs --include-dist
 
   build-android:
     permissions:
@@ -1055,6 +1234,28 @@ jobs:
           # cached between the passes - the second run is mostly packaging.
           npx tauri android build --apk --split-per-abi --target aarch64 --target armv7 --target i686 --target x86_64
           npx tauri android build --apk --target aarch64 --target armv7 --target i686 --target x86_64
+      - name: No-Chinese dist gate (post-build scan of the packaged frontend)
+        # Agent 2 owns scripts/ci/check-no-chinese.mjs and its --include-dist
+        # flag (PR #79); this workflow only wires the invocation. The
+        # pre-build gate in the version job stays source-only on purpose:
+        # --include-dist must never run before a build exists. This
+        # post-build pass covers the generated dist/ tree the Android build
+        # just produced and embedded into the APKs
+        # (beforeBuildCommand = npm run build -> vite build -> dist/).
+        # Placement: immediately after the build step and BEFORE the
+        # align/sign/upload step - this job's uploads all happen after this
+        # gate, so a hit can never reach the draft release. The pass fails
+        # closed on all three paths: a missing dist/ (the checker only
+        # warns there, so the guard below turns it into an error), a
+        # checker crash (exit 2) and any hit (exit 1).
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d dist ]; then
+            echo "::error::dist/ does not exist after the frontend build - the post-build no-Chinese dist scan cannot run. Fail closed; fix the build and re-run."
+            exit 1
+          fi
+          node scripts/ci/check-no-chinese.mjs --include-dist
       - name: Align, sign, and upload APKs
         # The old arm64 lookup (-path '*arm64*') never matched the actual
         # gradle output layout, so every release silently shipped only the

@@ -1,0 +1,16 @@
+# Fress - a catalog of free and open-source software.
+# Copyright (c) 2026 WasewaseX and Fress contributors
+# SPDX-License-Identifier: MIT
+#
+# Default permission set of the fress-open plugin.
+#
+# The plugin exposes no commands to the webview (see build.rs), so this set
+# intentionally enables nothing. It exists because the Tauri plugin build
+# convention requires a default permission document; keeping it empty is the
+# honest expression of the plugin's zero guest-facing surface.
+
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "No capability: the fress-open plugin has no webview-facing commands."
+permissions = []

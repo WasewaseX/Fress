@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fress - a catalog of free and open-source software.
+  Copyright (c) 2026 WasewaseX and Fress contributors
+  SPDX-License-Identifier: MIT
+
+  Merged into the app manifest by gradle. One addition:
+
+  - REQUEST_INSTALL_PACKAGES: Android 8+ only reaches the package installer's
+    consent flow for a calling app that declares it. Declaring it does NOT
+    bypass unknown-source restrictions - it is what lets the user grant Fress
+    the standard per-app "install unknown apps" toggle that the system
+    installer then enforces on every install.
+
+  The plugin deliberately does NOT declare its own FileProvider: the Tauri
+  app project already ships one (authority `<applicationId>.fileprovider`,
+  exported=false, grantUriPermissions=true) whose paths live in the generated
+  `gen/android/app/src/main/res/xml/file_paths.xml`. A second same-named
+  provider resource would collide in the manifest merger, and a same-named
+  resource file would be silently shadowed by the app module. Instead, the
+  plugin's build.rs idempotently adds the `fress_downloads` files-path entry
+  to the GENERATED paths file at build time, so the app's own provider covers
+  exactly the engine's downloads directory too.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+</manifest>

@@ -158,6 +158,34 @@ describe('useAppCatalog feedback toasts (de)', () => {
     expect(toastMock.info).toHaveBeenCalledWith('„Mein Werkzeug 2“ aus Ihrem Katalog entfernt.');
   });
 
+  it('a "$&" in a custom app name cannot corrupt the add/update/remove toasts', async () => {
+    // String.prototype.replace treats "$&" in the REPLACEMENT value as the
+    // whole match, so a user-chosen name used to shred the toast text.
+    // The call sites now interpolate with formatMessage (split/join).
+    const { useAppCatalog } = await import('../catalog/useAppCatalog');
+    let api: ReturnType<typeof useAppCatalog> | null = null;
+    const Probe: React.FC = () => {
+      api = useAppCatalog();
+      return null;
+    };
+    render(
+      <I18nProvider>
+        <Probe />
+      </I18nProvider>
+    );
+    const hostile = { ...makeApp('custom-$&', 'a$&b{c}'), isCustom: true };
+    act(() => api!.saveApp(hostile));
+    const added = toastMock.success.mock.calls[0][0] as string;
+    expect(added).toContain('a$&b{c}');
+    expect(added).not.toContain('aadded'); // "$&" would have expanded to the match
+    act(() => api!.saveApp({ ...hostile, name: 'x$&y' }));
+    const updated = toastMock.success.mock.calls[1][0] as string;
+    expect(updated).toContain('x$&y');
+    act(() => api!.deleteApp('custom-$&'));
+    const removed = toastMock.info.mock.calls[0][0] as string;
+    expect(removed).toContain('x$&y');
+  });
+
   it('rejects a broken backup with the German reason', async () => {
     withGermanLocale();
     const { useAppCatalog } = await import('../catalog/useAppCatalog');

@@ -737,7 +737,7 @@ pub(crate) async fn read_part_meta(part: &Path) -> Option<PartMeta> {
     // from being buffered without limit; a sidecar that is truncated by
     // the bound fails the JSON parse below and reads as "no validators",
     // which fail-closes the resume into a discard.
-    let mut file = tokio::fs::File::open(meta_path_for(part)).await.ok()?;
+    let file = tokio::fs::File::open(meta_path_for(part)).await.ok()?;
     let mut raw = String::new();
     file.take(64 * 1024).read_to_string(&mut raw).await.ok()?;
     serde_json::from_str(&raw).ok()

@@ -759,8 +759,7 @@ mod tests {
         write(&app, b"elf-bytes");
         let canonical = std::fs::canonicalize(&app).unwrap();
         let err = launch_app_image(&app, 999, &canonical)
-            .err()
-            .expect("a size drift must be refused");
+            .expect_err("a size drift must be refused");
         assert_eq!(err, OpenRejection::ReplacedOnDisk);
     }
 
@@ -775,8 +774,7 @@ mod tests {
         let elsewhere = dir.path().join("elsewhere.AppImage");
         write(&elsewhere, b"other-elf");
         let err = launch_app_image(&app, 9, &std::fs::canonicalize(&elsewhere).unwrap())
-            .err()
-            .expect("a canonical drift must be refused");
+            .expect_err("a canonical drift must be refused");
         assert_eq!(err, OpenRejection::ReplacedOnDisk);
     }
 }

@@ -8,7 +8,7 @@ import { openExternal } from '../lib/external';
 import { useLiveStars, formatStarCount } from '../lib/starFetch';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
-import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
+import { formatMessage, useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { useAppText } from '../lib/appText';
 import {
   Star,
@@ -184,7 +184,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                       isFav ? 'text-rose-400' : 'text-slate-500 hover:text-slate-300'
                     }`}
                     title={isFav ? t('card.fav.on') : t('card.fav.off')}
-                    aria-label={isFav ? t('card.fav.ariaOn').replace('{name}', app.name) : t('card.fav.ariaOff').replace('{name}', app.name)}
+                    aria-label={isFav ? formatMessage(t('card.fav.ariaOn'), { name: app.name }) : formatMessage(t('card.fav.ariaOff'), { name: app.name })}
                     aria-pressed={isFav}
                   >
                     <Bookmark className={`w-3.5 h-3.5 ${isFav ? 'fill-rose-400' : ''}`} aria-hidden="true" />
@@ -199,7 +199,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                       checked={isBatch}
                       onChange={() => onToggleBatchSelect(app.id)}
                       className="w-3.5 h-3.5 fr-touch-target rounded border-slate-950/20 dark:border-white/20 bg-slate-950/5 dark:bg-white/5 text-sky-500 focus:ring-sky-500 cursor-pointer accent-sky-500"
-                      aria-label={t('card.batch.aria').replace('{name}', app.name)}
+                      aria-label={formatMessage(t('card.batch.aria'), { name: app.name })}
                     />
                   </td>
                 )}
@@ -219,7 +219,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                     </button>
                     {app.proprietaryAlternative && (
                       <span className="text-[11px] font-mono text-amber-900 bg-amber-400/15 dark:text-amber-300/90 dark:bg-amber-400/10 border border-amber-400/20 px-1.5 py-0.2 rounded max-w-[24ch] truncate">
-                        {t('table.vs').replace('{app}', app.proprietaryAlternative)}
+                        {formatMessage(t('table.vs'), { app: app.proprietaryAlternative })}
                       </span>
                     )}
                     {app.isOwnerPick && (
@@ -316,7 +316,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onToggleCompare(app.id)}
-                        aria-label={isComp ? t('card.compare.ariaRemove').replace('{name}', app.name) : t('card.compare.ariaAdd').replace('{name}', app.name)}
+                        aria-label={isComp ? formatMessage(t('card.compare.ariaRemove'), { name: app.name }) : formatMessage(t('card.compare.ariaAdd'), { name: app.name })}
                         aria-pressed={isComp}
                         className={`p-1 fr-touch-target rounded transition-colors ${
                           isComp ? 'text-sky-400 bg-sky-400/20' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06]'
@@ -338,8 +338,8 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                           rel="noopener noreferrer"
                           onClick={(e) => { e.preventDefault(); void openExternal(link.url); }}
                           className="p-1 fr-touch-target text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
-                          title={t('card.source.tip').replace('{host}', hostLabel)}
-                          aria-label={t('card.source.aria').replace('{name}', app.name).replace('{host}', hostLabel)}
+                          title={formatMessage(t('card.source.tip'), { host: hostLabel })}
+                          aria-label={formatMessage(t('card.source.aria'), { name: app.name, host: hostLabel })}
                         >
                           <Icon className="w-3.5 h-3.5" aria-hidden="true" />
                         </a>
@@ -354,7 +354,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                         onClick={(e) => { e.preventDefault(); void openExternal(app.websiteUrl); }}
                         className="p-1 fr-touch-target text-slate-400 hover:text-slate-100 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title={t('table.website.tip')}
-                        aria-label={t('table.website.aria').replace('{name}', app.name)}
+                        aria-label={formatMessage(t('table.website.aria'), { name: app.name })}
                       >
                         <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                       </a>
@@ -364,7 +364,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onEditApp(app)}
-                        aria-label={t('card.edit.aria').replace('{name}', app.name)}
+                        aria-label={formatMessage(t('card.edit.aria'), { name: app.name })}
                         className="p-1 fr-touch-target text-slate-400 hover:text-sky-300 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                         title={t('card.edit.tip')}
                       >
@@ -383,7 +383,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                             }
                           }}
                         >
-                          <span className="sr-only">{t('card.deleteConfirm').replace('{name}', app.name)}</span>
+                          <span className="sr-only">{formatMessage(t('card.deleteConfirm'), { name: app.name })}</span>
                           <button
                             type="button"
                             aria-label={`${t('card.deleteConfirmAction')}: ${app.name}`}
@@ -418,7 +418,7 @@ const TableViewImpl: React.FC<TableViewProps> = ({
                             pendingTrashRef.current = e.currentTarget;
                             setConfirmDeleteId(app.id);
                           }}
-                          aria-label={t('card.delete.aria').replace('{name}', app.name)}
+                          aria-label={formatMessage(t('card.delete.aria'), { name: app.name })}
                           className="p-1 fr-touch-target text-slate-400 hover:text-rose-400 hover:bg-slate-950/[0.06] dark:hover:bg-white/[0.06] rounded transition-colors"
                           title={t('card.delete.tip')}
                         >

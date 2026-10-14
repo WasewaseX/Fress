@@ -56,6 +56,16 @@ async function fetchTextOnce(url: string): Promise<TextFetchResult> {
       { url }
     );
     if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
+    // The native reader reports a body cut at its cap with truncated:true -
+    // and an EMPTY body when the advertised content-length already exceeded
+    // the cap. A truncated document is NOT a vendor manifest: parsing it
+    // would read a partially-transferred page (a directory index cut before
+    // the newest entry resolves an OLD version as "latest"; a YAML feed cut
+    // mid-list silently loses installers). Refuse with a NAMED error so the
+    // retry layer treats it as transient and the resolver's null result
+    // lands in the short failure cache - never in the 6-hour success cache
+    // (the browser path has no native cap and keeps its plain contract).
+    if (r.truncated) throw new Error('Response truncated');
     return { status: r.status, finalUrl: r.final_url, contentLength: r.content_length, body: r.body };
   }
   const resp = await fetch(url, {

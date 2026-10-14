@@ -160,16 +160,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       const haystacks = [t(action.aliasesKey), t(action.titleKey), t(action.subKey)];
       for (const extra of action.extraTextKeys ?? []) haystacks.push(t(extra));
       const viewTitle = action.id === 'act-view'
-        ? t(action.titleKey)
-            .replace('{mode}', viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'))
-            .toLowerCase()
+        ? formatMessage(t(action.titleKey), {
+            mode: viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'),
+          }).toLowerCase()
         : null;
       if (haystacks.some((h) => h.toLowerCase().includes(q)) || (viewTitle !== null && viewTitle.includes(q))) {
         matches.push({
           type: 'action',
           id: action.id,
           title: action.id === 'act-view'
-            ? t(action.titleKey).replace('{mode}', viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'))
+            ? formatMessage(t(action.titleKey), {
+                mode: viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'),
+              })
             : t(action.titleKey),
           subtitle: t(action.subKey),
           action: () => {

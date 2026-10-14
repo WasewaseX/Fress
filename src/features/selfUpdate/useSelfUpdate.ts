@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
@@ -69,7 +69,10 @@ export function pillStatusFor(
   version: string,
   t: (key: string) => string
 ): { label: string; busy: boolean } | null {
-  const v = (key: string) => t(key).replace('{v}', version);
+  // formatMessage (split/join): literal insertion, every occurrence - the
+  // version is SemVer-gated today, but the pill mapping must stay safe by
+  // construction, not by an upstream validation it does not control.
+  const v = (key: string) => formatMessage(t(key), { v: version });
   switch (delivery.phase) {
     case 'fetching-signature':
     case 'downloading':
@@ -109,6 +112,25 @@ export function useSelfUpdate(
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>(() => getUpdateChannel());
 
+  // In-flight-check bookkeeping. `checkEpochRef` counts every check start;
+  // a channel switch bumps it WITHOUT starting a check, which marks any
+  // check already in flight as stale. `recheckAfterStaleRef` remembers
+  // that a channel switch wants a fresh (quiet) check even though one was
+  // still running at the moment it happened. `checkingRef` is the in-flight
+  // guard itself - a ref, not the state: state updates are asynchronous, so
+  // two calls in one tick (or the stale-recheck path re-entering before the
+  // re-render) could both read a stale `updateChecking` and run concurrent
+  // checks; a ref makes the guard exact.
+  const checkEpochRef = useRef(0);
+  const recheckAfterStaleRef = useRef(false);
+  const checkingRef = useRef(false);
+  // The version of the update a DELIVERY (or its failure states) refers to.
+  // A channel switch clears ownUpdate - the DETECTED update of the old
+  // channel is stale - but a delivery already in flight for that release is
+  // not: its pill label must keep naming the version actually being
+  // downloaded and verified instead of interpolating an empty {v}.
+  const deliveredVersionRef = useRef('');
+
   // Delivery lifecycle: subscribe for the pill, translate module toasts,
   // and mirror the download manager's items so terminal download events
   // can be bound to this update through the manager's own records.
@@ -118,6 +140,10 @@ export function useSelfUpdate(
   useEffect(() => {
     setDeliveryTranslator(t);
   }, [t]);
+
+  useEffect(() => {
+    if (ownUpdate) deliveredVersionRef.current = ownUpdate.release.version;
+  }, [ownUpdate]);
 
   useEffect(() => {
     syncDeliveryItems(
@@ -134,6 +160,17 @@ export function useSelfUpdate(
   const handleUpdateChannelChange = (channel: UpdateChannel) => {
     setUpdateChannelState(channel);
     setUpdateChannel(channel);
+    // The preference change is the exact moment every result of the OLD
+    // channel becomes stale: an in-flight check was started under the old
+    // channel (checkForUpdate pins the channel when the fetch starts), and
+    // a still-rendered pill from the old channel would keep offering an
+    // update the new channel may not even carry. Invalidate the epoch (the
+    // in-flight result will be discarded when it lands), clear the stale
+    // pill NOW, and ask for a fresh quiet check under the new channel.
+    checkEpochRef.current += 1;
+    recheckAfterStaleRef.current = true;
+    setOwnUpdate(null);
+    void runUpdateCheck(false);
     // The channel NAME is localized (the raw id is an internal value, not
     // user-facing wording - "stable" showed as-is in Persian before).
     // formatMessage (split/join) for the interpolation, same as everywhere.
@@ -144,17 +181,35 @@ export function useSelfUpdate(
   };
 
   const runUpdateCheck = async (announce: boolean): Promise<UpdateState | null> => {
-    if (updateChecking) return null;
+    if (checkingRef.current) return null;
+    checkingRef.current = true;
     setUpdateChecking(true);
+    const epoch = ++checkEpochRef.current;
     const res = await checkForUpdate(pkg.version);
+    checkingRef.current = false;
+    setUpdateChecking(false);
+    if (epoch !== checkEpochRef.current) {
+      // The channel changed while THIS check was in flight: the result
+      // describes the OLD channel, so it must never overwrite the state of
+      // the newer channel selection (and its announce toast, if one was
+      // requested, must not fire either - "update available" for a channel
+      // the user just left is exactly the stale-news lie this guard is
+      // here to prevent). If the switch asked for a refresh, run it now
+      // under the new channel.
+      if (recheckAfterStaleRef.current) {
+        recheckAfterStaleRef.current = false;
+        return runUpdateCheck(false);
+      }
+      return res;
+    }
     setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset, expectedSha256: res.expectedSha256 } : null);
     if (announce) {
       if (res.kind === 'available') {
-        toast.info(t('update.availableToast').replace('{version}', res.release.version), {
+        toast.info(formatMessage(t('update.availableToast'), { version: res.release.version }), {
           description: t('update.availableToastHint'),
         });
       } else if (res.kind === 'latest') {
-        toast.success(t('update.latestToast').replace('{version}', pkg.version));
+        toast.success(formatMessage(t('update.latestToast'), { version: pkg.version }));
       } else if (res.kind === 'track-migration') {
         // A beta client that selected Stable while the newest stable release
         // is OLDER than the running build. "Up to date" would be a lie, a
@@ -261,7 +316,7 @@ export function useSelfUpdate(
     handleHeaderUpdateClick,
     updatePillStatus: pillStatusFor(
       deliveryState,
-      ownUpdate ? ownUpdate.release.version : '',
+      ownUpdate ? ownUpdate.release.version : deliveredVersionRef.current,
       t
     ),
   };

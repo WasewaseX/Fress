@@ -60,7 +60,7 @@ import {
   setUpdateChannel,
   signatureSidecarFor,
 } from '../selfUpdate';
-import type { OwnRelease } from '../selfUpdate';
+import type { OwnRelease, UpdateState } from '../selfUpdate';
 import { useSelfUpdate } from '../../features/selfUpdate/useSelfUpdate';
 
 const CHANNEL_KEY = 'fress.updateChannel';
@@ -815,5 +815,126 @@ describe('spec §5: channel selection feeds the SAME fail-closed delivery gate',
     // pair that could be mistaken for a deliverable update.
     expect(res.channelVersion).toBe('1.0.0');
     expect(res.release.assets).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Invariant 12: stale async results from an OLD channel can never     */
+/* overwrite the state of a newer channel selection.                   */
+/* ------------------------------------------------------------------ */
+describe('spec §6 (invariant 12): stale results from an old channel are discarded', () => {
+  /** Raw GitHub list body for a deferred fetch stub. */
+  const ghBody = (entries: Array<{ tag: string; prerelease: boolean }>): Response =>
+    new Response(
+      JSON.stringify(
+        entries.map((e) => ({
+          tag_name: e.tag,
+          name: e.tag,
+          draft: false,
+          prerelease: e.prerelease,
+          published_at: '2026-10-01T00:00:00Z',
+          html_url: `https://github.com/WasewaseX/Fress/releases/tag/${e.tag}`,
+          assets: [],
+        }))
+      ),
+      { status: 200 }
+    );
+
+  it('a check in flight under the old channel is discarded after a channel switch, and the re-check runs under the new one', async () => {
+    // KILL-TEST REVIEW: this case pins the epoch guard in useSelfUpdate's
+    // runUpdateCheck. Without it (the pre-fix shape: land the result, then
+    // setOwnUpdate unconditionally), the in-flight Beta check below would
+    // resolve AFTER the user switched to Stable and (a) repopulate the pill
+    // with the abandoned channel's release and (b) fire "update available"
+    // for a channel the user just left - both assertions fail. Removing the
+    // immediate setOwnUpdate(null) on channel change also fails the
+    // right-after-switch assertion below.
+    setUpdateChannel('beta');
+
+    // Phase 1: the mount-time check resolves immediately; a Beta update is
+    // detected and the pill is live.
+    vi.stubGlobal('fetch', apiWith([{ tag: 'v1.0.13-beta', prerelease: true }]) as unknown as typeof fetch);
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-id');
+    const startDownload = vi.fn();
+    const { result } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.updateChecking).toBe(false));
+    expect(result.current.ownUpdate?.release.version).toBe('1.0.13-beta');
+    infoSpy.mockClear();
+
+    // Phase 2: a manual ANNOUNCED check whose response is deferred, so the
+    // channel switch can land while it is in flight.
+    const resolvers: Array<(r: Response) => void> = [];
+    const deferred = vi.fn((_url: string | URL | Request) => {
+      return new Promise<Response>((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+    vi.stubGlobal('fetch', deferred as unknown as typeof fetch);
+
+    let manualPromise: Promise<UpdateState | null> = Promise.resolve(null);
+    act(() => {
+      manualPromise = result.current.runUpdateCheck(true) ?? Promise.resolve(null);
+    });
+    await waitFor(() => expect(resolvers.length).toBe(1));
+
+    // The user switches to Stable while the check is in flight:
+    act(() => {
+      result.current.handleUpdateChannelChange('stable');
+    });
+    // ...the stale pill is cleared IMMEDIATELY (it must not linger until
+    // the in-flight check lands) ...
+    expect(result.current.ownUpdate).toBeNull();
+    expect(result.current.updateChannel).toBe('stable');
+    // ...and the only announcement so far is the channel-set toast.
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+
+    // The in-flight check now lands with an even NEWER beta release. Under
+    // the abandoned channel this is "update available"; under Stable it is
+    // stale news from a channel the user just left.
+    await act(async () => {
+      resolvers[0](ghBody([{ tag: 'v1.0.14-beta', prerelease: true }]));
+    });
+    // The stale result was DISCARDED: no pill, no "update available" toast.
+    // (updateChecking may still read true here: the discarded check hands
+    // straight off to the requested re-check, so no idle frame is rendered
+    // in between - the next wait targets that re-check's fetch instead.)
+    expect(result.current.ownUpdate).toBeNull();
+    expect(infoSpy).toHaveBeenCalledTimes(1); // channel-set only; no available toast
+
+    // The switch requested a fresh quiet check under the NEW channel - it
+    // starts once the stale check was discarded.
+    await waitFor(() => expect(resolvers.length).toBe(2));
+    await act(async () => {
+      resolvers[1](ghBody([{ tag: 'v1.0.13', prerelease: false }]));
+    });
+    // The NEW channel's result IS applied: v1.0.13 stable is newer than the
+    // running 1.0.12-beta build and eligible on Stable.
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13'));
+    // The outer manual check resolves with the RE-CHECK's result (the
+    // stale one was replaced, not reported).
+    const res = await manualPromise;
+    expect(res?.kind).toBe('available');
+    if (res?.kind === 'available') expect(res.release.version).toBe('1.0.13');
+    // No delivery was started by any of this - checking never delivers.
+    expect(startDownload).not.toHaveBeenCalled();
+  });
+
+  it('a channel switch never leaves the previous channel\'s pill on screen even without any check in flight', async () => {
+    // Same contract, no in-flight check: the clearing is unconditional.
+    setUpdateChannel('beta');
+    vi.stubGlobal('fetch', apiWith([{ tag: 'v1.0.13-beta', prerelease: true }]) as unknown as typeof fetch);
+    const startDownload = vi.fn();
+    const { result } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13-beta'));
+
+    // Switch to Alpha (the new feed would also carry the beta release, but
+    // the OLD result still describes a check that never ran under Alpha).
+    act(() => {
+      result.current.handleUpdateChannelChange('alpha');
+    });
+    expect(result.current.ownUpdate).toBeNull();
+    // And the fresh quiet check re-detects the release under the new channel.
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13-beta'));
+    expect(startDownload).not.toHaveBeenCalled();
   });
 });

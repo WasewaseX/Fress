@@ -4,7 +4,7 @@
 //
 import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 import { AppItem } from '../types';
 import { 
   Download, 
@@ -278,7 +278,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             clipped by the panel's overflow-hidden. */}
         <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <span className="text-xs text-slate-400 font-mono">
-            {t('export.readyCount').replace('{n}', String(apps.length))}
+            {formatMessage(t('export.readyCount'), { n: apps.length })}
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <button

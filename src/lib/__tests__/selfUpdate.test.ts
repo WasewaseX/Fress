@@ -199,6 +199,49 @@ describe('releaseMatchesChannel', () => {
     expect(releaseMatchesChannel('weird', 'alpha')).toBe(false);
     expect(releaseMatchesChannel('1.0.7junk', 'alpha')).toBe(false);
   });
+
+  it('UNKNOWN prerelease identifiers are never classified as Beta (no substring/prefix shortcuts)', () => {
+    // KILL-TEST REVIEW: this case exists to fail if prereleaseStage() ever
+    // returns to broad matching. The previous rule - first.includes('rc')
+    // and first.startsWith('beta') || first.startsWith('b') - classified
+    // every one of these tags as stage 1, i.e. a ROUTINE Beta update:
+    //   "1.0.5-source"    contains "rc" as a substring (sou-rc-e)
+    //   "1.0.5-build.1"   starts with "b"
+    //   "1.0.5-bugfix"    starts with "b"
+    //   "1.0.5-circle-ci" contains "rc" (ci-rc-le)
+    // Beta is limited to the stages the project actually publishes and
+    // documents (beta; rc per the release workflow). Removing the strict
+    // whole-token rule makes every assertion below fail.
+    expect(releaseMatchesChannel('1.0.5-source', 'beta')).toBe(false);
+    expect(releaseMatchesChannel('1.0.5-build.1', 'beta')).toBe(false);
+    expect(releaseMatchesChannel('1.0.5-bugfix', 'beta')).toBe(false);
+    expect(releaseMatchesChannel('1.0.5-circle-ci', 'beta')).toBe(false);
+    // ...and unknown labels are never widened onto Stable either.
+    expect(releaseMatchesChannel('1.0.5-source', 'stable')).toBe(false);
+    expect(releaseMatchesChannel('1.0.5-build.1', 'stable')).toBe(false);
+  });
+
+  it('unknown identifiers stay visible on the Alpha channel (nothing is lost)', () => {
+    // The tightening moves unknown labels from Beta-eligible to Alpha-only;
+    // the widest channel must still see them so no published build silently
+    // disappears from every feed.
+    expect(releaseMatchesChannel('1.0.5-source', 'alpha')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-build.1', 'alpha')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-next.1', 'alpha')).toBe(true);
+  });
+
+  it('the documented Beta/RC naming shapes stay Beta-eligible', () => {
+    // The contract the strict rule must keep honoring: plain "beta" (every
+    // prerelease tag to date), numbered betas, rc with dot or digit suffix.
+    expect(releaseMatchesChannel('1.0.5-beta', 'beta')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-beta.2', 'beta')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-beta2', 'beta')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-rc', 'beta')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-rc.1', 'beta')).toBe(true);
+    expect(releaseMatchesChannel('1.0.5-rc1', 'beta')).toBe(true);
+    // A stable release is visible on Beta too (stage 0 <= 1).
+    expect(releaseMatchesChannel('1.0.5', 'beta')).toBe(true);
+  });
 });
 
 describe('pickOwnAsset, macOS assets', () => {

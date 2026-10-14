@@ -452,6 +452,190 @@ class TestReleaseWorkflowContract(unittest.TestCase):
         self.assertRegex(code, r"(?m)^\s*node scripts/ci/check-no-chinese\.mjs\s*$",
                          "the release gate must invoke the checker bare, exactly like the CI job")
 
+    def test_stable_channel_note_is_version_agnostic_not_hardcoded(self):
+        # Round-2 critique fix, restored after the r3 integration silently
+        # reverted it: the stable migration instructions must interpolate
+        # the release version. A hardcoded v1.0.0 would tell every FUTURE
+        # stable release's users to download a v1.0.0 artifact that is not
+        # the one this release shipped.
+        code = _code(self.jobs["version"]["body"])
+        self.assertIn("v$VERSION setup.exe", code)
+        self.assertIn("v$VERSION bundle", code)
+        self.assertNotIn("v1.0.0 setup.exe", code)
+        self.assertNotIn("v1.0.0 bundle", code)
+
+    def test_no_swallowed_failures_on_release_gates(self):
+        # `|| true` turns any failing gate into a pass. The release path
+        # has no legitimate use for it: every check must be allowed to
+        # fail the job. (continue-on-error is pinned separately above.)
+        self.assertNotIn("|| true", self.text)
+
+
+_DIST_SCAN = "node scripts/ci/check-no-chinese.mjs --include-dist"
+_DIST_SOURCE_SCAN = "node scripts/ci/check-no-chinese.mjs"
+
+# Every release.yml job that builds the frontend (tauri-action and
+# `tauri android build` both run beforeBuildCommand = npm run build ->
+# vite build -> dist/) and uploads release artifacts, mapped to
+# (last-frontend-build anchor, first job-owned upload anchor or None when
+# all of the job's uploads happen inside tauri-action's own step).
+_DIST_JOB_ANCHORS = {
+    "build-windows": (
+        "npx tauri build --target x86_64-pc-windows-msvc --bundles msi",
+        "gh release upload",
+    ),
+    "build-windows-arm64": (
+        "--target aarch64-pc-windows-msvc --bundles nsis",
+        "gh release upload",
+    ),
+    "build-linux": ("--bundles appimage deb rpm", None),
+    "build-macos-arm": ("--target aarch64-apple-darwin --bundles dmg", None),
+    "build-macos-intel": ("--target x86_64-apple-darwin --bundles dmg", None),
+    "build-android": ("npx tauri android build", "gh release upload"),
+}
+
+
+class TestNoChineseDistGateContract(unittest.TestCase):
+    """release.yml x Agent 2's checker (scripts/ci/check-no-chinese.mjs,
+    PR #79): the workflow invokes the one checker - never re-implements it -
+    in exactly two passes: a source-only pre-build gate in the version job,
+    and a post-build --include-dist pass in EVERY job that builds the
+    frontend and uploads artifacts. The dist pass must run after the build
+    that produces dist/ and before the job's own uploads, and must fail
+    closed on a missing dist/ (the checker only warns there), on a checker
+    crash (exit 2) and on any hit (exit 1)."""
+
+    def setUp(self):
+        self.jobs = _jobs(_RELEASE)
+        self.text = open(_RELEASE, encoding="utf-8").read()
+        self.code = {name: _code(job["body"]) for name, job in self.jobs.items()}
+
+    def test_every_frontend_building_upload_job_has_the_dist_scan(self):
+        # Discover the frontend-building jobs structurally (the bundler
+        # actions that run beforeBuildCommand), so a NEW build job added
+        # later without the dist gate fails here instead of shipping
+        # unscanned dist/ bytes.
+        builders = {
+            name
+            for name, code in self.code.items()
+            if "tauri-apps/tauri-action" in code or "tauri android build" in code
+        }
+        self.assertEqual(
+            builders,
+            set(_DIST_JOB_ANCHORS),
+            "the set of frontend-building jobs changed; wire the post-build "
+            "--include-dist pass into every new builder and update "
+            "_DIST_JOB_ANCHORS",
+        )
+        for name in _DIST_JOB_ANCHORS:
+            self.assertEqual(
+                self.code[name].count(_DIST_SCAN),
+                1,
+                f"{name} must run the post-build dist scan exactly once",
+            )
+
+    def test_dist_scan_runs_after_the_build_and_before_job_owned_uploads(self):
+        for name, (build_anchor, upload_anchor) in _DIST_JOB_ANCHORS.items():
+            code = self.code[name]
+            scan_at = code.index(_DIST_SCAN)
+            self.assertGreater(
+                scan_at,
+                code.rindex(build_anchor),
+                f"{name}: the dist scan must run AFTER the job's last "
+                f"frontend build (anchor: {build_anchor}) - the checker only "
+                "warns when dist/ is missing, so a scan placed before the "
+                "build would be a false guarantee",
+            )
+            if upload_anchor:
+                self.assertLess(
+                    scan_at,
+                    code.index(upload_anchor),
+                    f"{name}: the dist scan must run BEFORE the first "
+                    f"job-owned upload (anchor: {upload_anchor})",
+                )
+            else:
+                # Every upload in this job happens inside tauri-action's own
+                # build step and cannot be interleaved; enforcement there is
+                # the needs-chain (failed scan -> failed job -> checksums and
+                # verify-release never run -> the draft can never publish).
+                # Pin that no separate upload step is smuggled in either.
+                self.assertNotIn(
+                    "gh release upload",
+                    code,
+                    f"{name} grew a job-owned upload step; the dist scan "
+                    "must then be ordered before it",
+                )
+
+    def test_pre_build_gate_stays_source_only(self):
+        # The hard rule: --include-dist must never run before a build
+        # exists. The version job's pre-build gate is source-only; no
+        # non-build job may grow a --include-dist pass either.
+        version = self.code["version"]
+        self.assertIn(_DIST_SOURCE_SCAN, version)
+        self.assertNotIn(
+            "--include-dist",
+            version,
+            "the pre-build gate must stay source-only: dist/ does not exist "
+            "before the build and the checker only warns about that, so a "
+            "pre-build --include-dist pass would be a false guarantee",
+        )
+        for name in (
+            "create-release",
+            "updater-manifest",
+            "checksums",
+            "verify-release",
+            "virustotal",
+        ):
+            self.assertNotIn(
+                "--include-dist",
+                self.code[name],
+                f"{name} builds no frontend; --include-dist is meaningless there",
+            )
+
+    def test_dist_scan_fails_closed(self):
+        # Three failure paths, all of which must fail the job: a missing
+        # dist/ (the checker only emits a warning for that - the workflow
+        # guard turns it into an error BEFORE the scan is even attempted),
+        # a checker crash (exit 2 propagates under set -euo pipefail) and
+        # any hit (exit 1).
+        for name in _DIST_JOB_ANCHORS:
+            code = self.code[name]
+            guard_at = code.find("[ ! -d dist ]")
+            self.assertGreater(
+                guard_at,
+                -1,
+                f"{name}: the dist pass must fail closed when dist/ is missing",
+            )
+            exit_at = code.find("exit 1", guard_at)
+            self.assertGreater(
+                exit_at,
+                -1,
+                f"{name}: the missing-dist guard must exit nonzero",
+            )
+            self.assertLess(
+                exit_at,
+                code.index(_DIST_SCAN),
+                f"{name}: the missing-dist guard must fire before the scan "
+                "invocation",
+            )
+            self.assertIn(
+                "set -euo pipefail",
+                code,
+                f"{name}: the dist pass must run under set -euo pipefail so a "
+                "checker crash cannot pass silently",
+            )
+
+    def test_dist_scan_uses_the_ci_agents_documented_flag(self):
+        # The checker's usage header documents exactly one spelling:
+        # --include-dist. The workflow must invoke the checker with that
+        # exact spelling - no variant that a refactor might introduce and
+        # the checker would silently treat as an unknown argument.
+        for name in _DIST_JOB_ANCHORS:
+            self.assertIn(_DIST_SCAN, self.code[name])
+        self.assertNotIn("--include_dist", self.text)
+        self.assertNotIn("--includedist", self.text)
+        self.assertNotIn("--includeDist", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

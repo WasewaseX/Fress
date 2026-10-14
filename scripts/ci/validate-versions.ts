@@ -42,19 +42,36 @@
  * read also fails — an unreadable manifest must never silently disable its
  * check.
  *
- * IN-REPO ANDROID PLUGIN (conditional-authoritative, same policy).
- * src-tauri/plugins/fress-open is a path dependency of the app crate: once
- * it exists, its crate version ships inside the release binary and is part
- * of the application version surface:
+ * IN-REPO PLUGIN CRATES (conditional-authoritative, ENUMERATED).
+ * Every crate under src-tauri/plugins/ is a path dependency of the app
+ * crate: once it exists, its crate version ships inside the release binary
+ * and is part of the application version surface:
  *
- *   src-tauri/plugins/fress-open/Cargo.toml  [package] version
- *   src-tauri/Cargo.lock         [[package]] name="tauri-plugin-fress-open" -> version
+ *   src-tauri/plugins/<dir>/Cargo.toml  [package] name + [package] version
+ *   src-tauri/Cargo.lock            [[package]] name="<crate name>" -> version
  *
- * Both must equal the canonical version (and therefore each other). The
- * checks are conditional on the plugin manifest EXISTING: absent manifest
- * + absent lock entry is the legitimate pre-plugin state of every
- * checkout; an orphan lock entry without the manifest (or a manifest
- * without its lock entry) is stale-lockfile drift and fails closed.
+ * The plugin set is DISCOVERED, not hardcoded, so a plugin added tomorrow
+ * cannot escape the check. The enumerated set is the union of two
+ * independent sources, checked against each other:
+ *   - the crate manifests that exist on disk (src-tauri/plugins/<dir>/Cargo.toml,
+ *     found by the loader's directory scan); and
+ *   - the path dependencies the app crate declares into plugins/ (parsed
+ *     structurally from src-tauri/Cargo.toml [dependencies]) — so a crate
+ *     whose manifest was deleted but whose dependency is still declared is
+ *     still named, with or without a leftover lock record.
+ * For every crate in the set: its manifest version and its Cargo.lock
+ * record version must both equal the canonical version (and therefore each
+ * other). This mirrors cargo's own semantics — for a path dependency,
+ * Cargo.lock records exactly the version the path crate's manifest
+ * declares, so a lock entry that disagrees with either side is a stale or
+ * hand-edited lockfile.
+ *
+ * The checks are conditional on the crate EXISTING: zero plugins (no
+ * manifests, no plugins/ path dependencies) is the legitimate pre-plugin
+ * state of every checkout and passes clean. A manifest without its lock
+ * entry (stale lockfile), a declared path dependency without its manifest
+ * (broken tree), or an orphan lock record without its manifest all fail
+ * closed.
  *
  * Why lockfiles are checked, not just manifests: a release cut from a stale
  * lockfile ships an old `npm view` version and embeds the old crate version
@@ -100,8 +117,8 @@
  *     They document PAST versions by design and are allowed to trail the
  *     build version (a changelog entry is written when a version ships).
  *   - README.md examples, screenshots, test fixtures: prose and test data.
- * Do not mass-replace version strings in those files; only the six fields
- * above are build inputs.
+ * Do not mass-replace version strings in those files; only the enumerated
+ * manifest and lock fields above are build inputs.
  *
  * Workflow wiring (complete): `ci.yml` → `version-guard` and the `frontend`
  * job run `npm run validate:versions` (development mode); `release.yml` →
@@ -129,7 +146,7 @@
  *   wiring can use either spelling; prefer --release-tag.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -184,13 +201,16 @@ export function isPrereleaseVersion(v: string): boolean {
  * under that setting TypeScript does not narrow boolean-literal
  * discriminated unions (verified with tsc 5.8) — string literals narrow
  * fine. Do not "simplify" this back to a boolean discriminant. */
-export type ParseResult = { kind: 'ok'; value: string } | { kind: 'err'; error: string };
+export type ParseResult =
+  | { kind: 'ok'; value: string }
+  | { kind: 'delegated' }
+  | { kind: 'err'; error: string };
 
 /** Extract a required string field from parsed JSON. `field` is a display
  * path like `.version` or `.packages[""].version`; `segments` carries the
  * real lookup keys ("" is a real key inside packages, so paths are spelled
  * out instead of being re-parsed from the display string). */
-function jsonField(data: unknown, file: string, field: string, segments: string[]): ParseResult {
+function jsonField(data: unknown, file: string, field: string, segments: string[]): RequiredParseResult {
   let cur: unknown = data;
   for (const seg of segments) {
     if (cur === null || typeof cur !== 'object') {
@@ -208,7 +228,7 @@ function jsonField(data: unknown, file: string, field: string, segments: string[
 }
 
 /** package.json — the canonical application version. */
-export function parsePackageJsonVersion(text: string): ParseResult {
+export function parsePackageJsonVersion(text: string): RequiredParseResult {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -219,7 +239,7 @@ export function parsePackageJsonVersion(text: string): ParseResult {
 }
 
 /** package-lock.json — BOTH root version fields. */
-export function parsePackageLockVersions(text: string): { root: ParseResult; pkg: ParseResult } {
+export function parsePackageLockVersions(text: string): { root: RequiredParseResult; pkg: RequiredParseResult } {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -234,7 +254,7 @@ export function parsePackageLockVersions(text: string): { root: ParseResult; pkg
 }
 
 /** src-tauri/tauri.conf.json — the Tauri/bundle version. */
-export function parseTauriConfVersion(text: string): ParseResult {
+export function parseTauriConfVersion(text: string): RequiredParseResult {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -285,12 +305,19 @@ export function parseTauriAndroidVersionName(text: string): OptionalParseResult 
 /** src-tauri/gen/android/app/build.gradle.kts — the generated Android
  * project's versionName. Kotlin DSL assignments come in two shapes Tauri
  * emits/accepts: `versionName = "1.0.0"` and Groovy-style
- * `versionName "1.0.0"`. Comments are ignored; exactly ONE uncommented
- * assignment must exist — zero means the authoritative field is missing,
- * several means it is ambiguous, and both fail closed. */
+ * `versionName "1.0.0"`. Newer Tauri CLI releases (2.11+) delegate the
+ * value to the generated `app/tauri.properties` instead of inlining it:
+ * `versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")`
+ * — that shape returns kind 'delegated' and the authoritative value must
+ * be read from the sibling properties file (the call site resolves it).
+ * Comments are ignored; exactly ONE uncommented assignment (literal or
+ * delegation) must exist — zero means the authoritative field is missing,
+ * a literal MIXED with a delegation is ambiguous, and all of these fail
+ * closed. */
 export function parseGradleKtsVersionName(text: string): ParseResult {
   const FILE = 'src-tauri/gen/android/app/build.gradle.kts';
   const found: string[] = [];
+  let delegated = 0;
 
   for (const rawLine of text.split('\n')) {
     let line = rawLine.trim();
@@ -306,14 +333,50 @@ export function parseGradleKtsVersionName(text: string): ParseResult {
     const assign = /^(?:[a-zA-Z_][\w.]*\.)?versionName\s*(?:=\s*)?"((?:[^"\\]|\\.)*)"\s*$/.exec(line);
     if (assign) {
       found.push(assign[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+      continue;
     }
+    // The delegation shape current CLIs generate: the value lives in the
+    // sibling tauri.properties (versionName = tauriProperties.getProperty(
+    // "tauri.android.versionName", "1.0")); the default literal inside the
+    // call is NOT authoritative and must not be parsed as a literal.
+    const delegate = /^(?:[a-zA-Z_][\w.]*\.)?versionName\s*=\s*tauriProperties\.getProperty\(\s*["']tauri\.android\.versionName["']\s*(?:,\s*["'][^"']*["']\s*)?\)\s*$/.exec(line);
+    if (delegate) delegated++;
   }
 
-  if (found.length === 0) {
+  if (found.length === 0 && delegated === 0) {
     return { kind: 'err', error: `${FILE} exists but has no parseable versionName assignment (the authoritative Android version field is missing or mangled)` };
   }
+  if (found.length > 1 || (found.length >= 1 && delegated >= 1) || delegated > 1) {
+    const shapes = [...found, ...(delegated > 0 ? ['tauriProperties.getProperty(tauri.android.versionName)'] : [])];
+    return { kind: 'err', error: `${FILE} has ${shapes.length} versionName assignments (${shapes.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+  }
+  if (delegated === 1) return { kind: 'delegated' };
+  return { kind: 'ok', value: found[0] };
+}
+
+/** src-tauri/gen/android/app/tauri.properties — the generated properties
+ * file the delegating build.gradle.kts reads its versionName from
+ * (`tauri.android.versionName=...`). Comments (#) are ignored; exactly one
+ * uncommented assignment must exist; an empty value fails closed. This
+ * file never delegates further, so it returns the required two-shape
+ * result only. */
+export function parseTauriPropertiesVersionName(text: string): RequiredParseResult {
+  const FILE = 'src-tauri/gen/android/app/tauri.properties';
+  const found: string[] = [];
+  for (const rawLine of text.split('\n')) {
+    let line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const assign = /^tauri\.android\.versionName\s*=\s?(.*)$/.exec(line);
+    if (assign) found.push(assign[1].trim());
+  }
+  if (found.length === 0) {
+    return { kind: 'err', error: `${FILE} exists but has no parseable tauri.android.versionName entry (the delegating build.gradle.kts reads the Android version from here)` };
+  }
   if (found.length > 1) {
-    return { kind: 'err', error: `${FILE} has ${found.length} versionName assignments (${found.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+    return { kind: 'err', error: `${FILE} has ${found.length} tauri.android.versionName entries (${found.join(', ')}) — ambiguous, cannot tell which one the build uses` };
+  }
+  if (found[0] === '') {
+    return { kind: 'err', error: `${FILE} has an empty tauri.android.versionName value` };
   }
   return { kind: 'ok', value: found[0] };
 }
@@ -347,14 +410,14 @@ function readTomlStringLine(line: string): { key: string; value: string; rest: s
   return null;
 }
 
-/** src-tauri/Cargo.toml — the [package] table's version key. Sub-tables
- * like [package.metadata] do not count; comments are ignored; a duplicated
- * version key inside [package] is malformed (TOML forbids redefining a
- * key). */
-export function parseCargoTomlVersion(text: string, file = 'src-tauri/Cargo.toml'): ParseResult {
+/** Shared scanner behind parseCargoTomlVersion/parseCargoTomlPackageName:
+ * reads ONE [package]-table string key, table-aware. Sub-tables like
+ * [package.metadata] do not count; comments are ignored; a duplicated key
+ * inside [package] is malformed (TOML forbids redefining a key). */
+function parseCargoTomlPackageString(text: string, key: 'name' | 'version', file: string): RequiredParseResult {
   let current: string | null = null;
   let seenPackage = false;
-  let version: string | null = null;
+  let value: string | null = null;
 
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim();
@@ -370,21 +433,139 @@ export function parseCargoTomlVersion(text: string, file = 'src-tauri/Cargo.toml
 
     if (current === 'package') {
       const parsed = readTomlStringLine(line);
-      if (!parsed || parsed.key !== 'version' || !parsed.value) continue;
-      if (version !== null) {
-        return { kind: 'err', error: `${file} [package] redefines the "version" key (malformed TOML)` };
+      if (!parsed || parsed.key !== key || !parsed.value) continue;
+      if (value !== null) {
+        return { kind: 'err', error: `${file} [package] redefines the "${key}" key (malformed TOML)` };
       }
-      version = parsed.value;
+      value = parsed.value;
     }
   }
 
   if (!seenPackage) {
     return { kind: 'err', error: `${file} has no [package] table` };
   }
-  if (version === null) {
-    return { kind: 'err', error: `${file} [package] has no "version" key` };
+  if (value === null) {
+    return { kind: 'err', error: `${file} [package] has no "${key}" key` };
   }
-  return { kind: 'ok', value: version };
+  return { kind: 'ok', value };
+}
+
+/** src-tauri/Cargo.toml — the [package] table's version key. Sub-tables
+ * like [package.metadata] do not count; comments are ignored; a duplicated
+ * version key inside [package] is malformed (TOML forbids redefining a
+ * key). */
+export function parseCargoTomlVersion(text: string, file = 'src-tauri/Cargo.toml'): RequiredParseResult {
+  return parseCargoTomlPackageString(text, 'version', file);
+}
+
+/** Any Cargo.toml — the [package] table's name key (the crate name cargo
+ * mirrors into the [[package]] lock record). Same table-aware rules as the
+ * version scanner: sub-tables do not count, comments are ignored, a
+ * duplicated name key inside [package] is malformed. */
+export function parseCargoTomlPackageName(text: string, file: string): RequiredParseResult {
+  return parseCargoTomlPackageString(text, 'name', file);
+}
+
+// --- Plugin enumeration (app-crate path dependencies) -----------------------
+
+/** One plugins/ path dependency declared by the app crate. */
+export interface PluginPathDep {
+  /** The dependency key — the crate name cargo expects at that path. */
+  crate: string;
+  /** The declared path, normalized (no leading "./", no trailing "/"). */
+  path: string;
+  /** The repo-relative manifest path the declaration resolves to. */
+  manifestPath: string;
+}
+
+/** src-tauri/Cargo.toml — the [dependencies] entries that are path
+ * dependencies into plugins/ (`name = { path = "plugins/x" }`). This is
+ * the second source of the enumerated plugin set: it names crates whose
+ * manifest has been deleted (broken tree) and makes their Cargo.lock
+ * records REQUIRED, not merely checked-when-present.
+ *
+ * Structurally parsed and table-aware: only [dependencies] (and its dotted
+ * sub-tables) are read — [build-dependencies] and [dev-dependencies] do not
+ * ship in the release binary; registry-style string values (`name = "2"`)
+ * have no path and are skipped; comments are ignored. Inline tables are
+ * read line-by-line, the single-line shape every manifest in this repo and
+ * the Tauri plugin template uses. A duplicated dependency key is malformed
+ * TOML and fails closed. */
+export function parseCargoTomlPluginPathDeps(
+  text: string,
+  file = 'src-tauri/Cargo.toml'
+): { deps: PluginPathDep[] } | { error: string } {
+  const deps: PluginPathDep[] = [];
+  const seen = new Set<string>();
+  let current: string | null = null;
+
+  const unquote = (s: string): string => {
+    if (s.length >= 2 && ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))) {
+      return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+    return s;
+  };
+  const unescape = (raw: string, quoted: boolean): string =>
+    quoted ? raw.replace(/\\"/g, '"').replace(/\\\\/g, '\\') : raw;
+  /** A declared path is a plugins/ path dependency iff it normalizes into
+   * plugins/<crate dir>; anything else is not part of the plugin set. */
+  const toPluginPathDep = (crate: string, rawPath: string): PluginPathDep | null => {
+    const normalized = rawPath.replace(/^\.\//, '').replace(/\/+$/, '');
+    if (!normalized.startsWith('plugins/')) return null;
+    return { crate, path: normalized, manifestPath: `src-tauri/${normalized}/Cargo.toml` };
+  };
+  const push = (dep: PluginPathDep | null): { error: string } | null => {
+    if (dep === null) return null;
+    if (seen.has(dep.crate)) {
+      return { error: `${file} [dependencies] redefines the "${dep.crate}" dependency (malformed TOML)` };
+    }
+    seen.add(dep.crate);
+    deps.push(dep);
+    return null;
+  };
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+
+    const arrayHeader = TOML_ARRAY_HEADER.exec(line);
+    const tableHeader = arrayHeader ? null : TOML_TABLE_HEADER.exec(line);
+    if (arrayHeader || tableHeader) {
+      current = (arrayHeader ? arrayHeader[1] : tableHeader![1]).trim();
+      continue;
+    }
+    if (current === null) continue;
+    const inDependencies = current === 'dependencies' || current.startsWith('dependencies.');
+    if (!inDependencies) continue;
+
+    // `[dependencies.<crate>]` sub-table form: the crate name is the rest
+    // of the header, the path arrives as a `path = "..."` key/value line.
+    if (current.startsWith('dependencies.')) {
+      const pathAssign = /^path\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*(?:#.*)?$/.exec(line);
+      if (!pathAssign) continue;
+      const raw = unescape(pathAssign[1] ?? pathAssign[2], pathAssign[1] !== undefined);
+      const dep = toPluginPathDep(unquote(current.slice('dependencies.'.length)), raw);
+      const err = push(dep);
+      if (err) return err;
+      continue;
+    }
+
+    // `name = { ... }` inline-table form (the shape this repo and the
+    // Tauri plugin template use).
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = unquote(line.slice(0, eq).trim());
+    const value = line.slice(eq + 1).trim();
+    if (!value.startsWith('{')) continue; // registry dep: no path, no plugin
+    const pathMatch = /\bpath\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/.exec(value);
+    if (!pathMatch) continue;
+    const raw = unescape(pathMatch[1] ?? pathMatch[2], pathMatch[1] !== undefined);
+    const dep = toPluginPathDep(key, raw);
+    const err = push(dep);
+    if (err) return err;
+  }
+
+  return { deps };
 }
 
 interface LockPackage {
@@ -443,7 +624,7 @@ function scanCargoLockPackageRecords(text: string): { records: LockPackage[] } |
  * src-tauri/Cargo.lock. Zero or several such records is a failure, not a
  * guess; `missingMessage` lets each crate carry a diagnostic that names the
  * reason that crate must exist in the lock. */
-function parseCargoLockEntryVersion(text: string, crateName: string, missingMessage: string): ParseResult {
+function parseCargoLockEntryVersion(text: string, crateName: string, missingMessage: string): RequiredParseResult {
   const scanned = scanCargoLockPackageRecords(text);
   if ('error' in scanned) {
     return { kind: 'err', error: scanned.error };
@@ -467,7 +648,7 @@ function parseCargoLockEntryVersion(text: string, crateName: string, missingMess
  *
  * Only the [[package]] record whose name is exactly "fress" counts. Zero or
  * several such records is a failure, not a guess. */
-export function parseCargoLockFressVersion(text: string): ParseResult {
+export function parseCargoLockFressVersion(text: string): RequiredParseResult {
   return parseCargoLockEntryVersion(
     text,
     'fress',
@@ -475,15 +656,17 @@ export function parseCargoLockFressVersion(text: string): ParseResult {
   );
 }
 
-/** src-tauri/Cargo.lock — the version of the in-repo plugin crate's record.
- * The plugin is a path dependency of the app crate, so its record must
- * exist and carry the same version the manifest declares (missing record =
- * stale lockfile; several = corrupted). */
-export function parseCargoLockPluginVersion(text: string): ParseResult {
+/** src-tauri/Cargo.lock — the version of ONE named in-repo crate's
+ * [[package]] record. The plugin crates are path dependencies of the app
+ * crate, so their records must exist and carry the same version their
+ * manifests declare (missing record = stale lockfile; several =
+ * corrupted). Consumed by the enumerated plugin loop; the message names
+ * the crate so the diagnostic stays specific. */
+export function parseCargoLockCrateVersion(text: string, crateName: string): RequiredParseResult {
   return parseCargoLockEntryVersion(
     text,
-    'tauri-plugin-fress-open',
-    'src-tauri/Cargo.lock has no [[package]] entry with name = "tauri-plugin-fress-open" (the in-repo plugin crate is missing from the lockfile — run any cargo command in src-tauri/)'
+    crateName,
+    `src-tauri/Cargo.lock has no [[package]] entry with name = "${crateName}" (the in-repo plugin crate is missing from the lockfile — run any cargo command in src-tauri/)`
   );
 }
 
@@ -506,13 +689,17 @@ export type RequiredFile = (typeof REQUIRED_FILES)[number];
 
 /** Optional-authoritative files: checked ONLY when present on disk. Absent
  * means the build input does not exist in this checkout (the Android Gradle
- * project is generated by `tauri android init`; the plugin directory is
- * simply not part of pre-plugin trees), which is legitimate — not a skip of
- * a required check. Present means authoritative: it must parse and must
- * agree with the canonical version. */
+ * project is generated by `tauri android init`), which is legitimate — not
+ * a skip of a required check. Present means authoritative: it must parse
+ * and must agree with the canonical version.
+ *
+ * In-repo plugin crate manifests are NOT listed here: they are ENUMERATED
+ * by a directory scan of src-tauri/plugins/<dir>/Cargo.toml (see
+ * loadVersionFiles), so a plugin added tomorrow is checked without touching
+ * this list. */
 export const OPTIONAL_FILES = [
   'src-tauri/gen/android/app/build.gradle.kts',
-  'src-tauri/plugins/fress-open/Cargo.toml',
+  'src-tauri/gen/android/app/tauri.properties',
 ] as const;
 
 export type OptionalFile = (typeof OPTIONAL_FILES)[number];
@@ -549,8 +736,43 @@ export interface ValidateInput {
   optionalFiles?: Partial<Record<OptionalFile, string>>;
   /** Optional paths that exist but could not be read — fails closed. */
   optionalReadErrors?: Record<string, string>;
+  /** In-repo plugin crate manifests discovered on disk, by repo-relative
+   * path (src-tauri/plugins/<dir>/Cargo.toml — the enumerated plugin set's
+   * first source; the loader fills this by directory scan). A path absent
+   * from this map means the manifest does not exist; a path PRESENT here
+   * is validated like a required field. */
+  pluginFiles?: Record<string, string>;
+  /** Plugin manifest paths that exist but could not be read — fails
+   * closed, like every unreadable build input. */
+  pluginReadErrors?: Record<string, string>;
   /** Release-context tag (e.g. "v1.0.10-beta" from GITHUB_REF_NAME). */
   releaseTag?: string;
+}
+
+/** The result shape the REQUIRED-file extractors produce: always a real
+ * value or a real failure — the 'delegated' kind only arises from the
+ * OPTIONAL generated-Android parsers, which the field loop never calls. */
+type RequiredParseResult = { kind: 'ok'; value: string } | { kind: 'err'; error: string };
+
+/** One crate of the enumerated in-repo plugin set: the union of the
+ * manifests found under src-tauri/plugins/ and the plugins/ path
+ * dependencies declared by the app crate. */
+interface EnumeratedPlugin {
+  /** The crate name: the manifest's [package].name when that parses (it is
+   * what cargo mirrors into the lock record), else the declared dependency
+   * key. null only when a present manifest's name is unparsable — that
+   * failure is reported on its own row. */
+  crate: string | null;
+  manifestPath: string;
+  /** The manifest file exists on disk (or is unreadable — see readError). */
+  present: boolean;
+  /** Declared as a path dependency of the app crate: its Cargo.lock record
+   * is REQUIRED, not merely checked when present. */
+  wired: boolean;
+  /** The declared path value, for diagnostics (null when only discovered). */
+  declaredPath: string | null;
+  /** Set when the manifest exists but could not be read. */
+  readError: string | null;
 }
 
 interface FieldSpec {
@@ -561,7 +783,7 @@ interface FieldSpec {
   id: string;
   /** package-lock.json is parsed once for BOTH fields, so it has no
    * single-field extractor; the loop handles it explicitly. */
-  extract?: (text: string) => ParseResult;
+  extract?: (text: string) => RequiredParseResult;
   hint: string;
 }
 
@@ -795,10 +1017,6 @@ export function validateVersions(input: ValidateInput): ValidationReport {
   }
 
   for (const optPath of OPTIONAL_FILES) {
-    // The plugin crate manifest is checked in its own section below (it
-    // additionally needs the Cargo.lock content); handling its read errors
-    // there keeps every plugin failure reported exactly once.
-    if (optPath === 'src-tauri/plugins/fress-open/Cargo.toml') continue;
     if (optPath in (input.optionalReadErrors ?? {})) {
       const reason = input.optionalReadErrors![optPath];
       const msg = `${optPath} exists but could not be read (${reason}) — an unreadable build input must not silently disable its check.`;
@@ -816,139 +1034,268 @@ export function validateVersions(input: ValidateInput): ValidationReport {
         failures.push(parsed.error);
         continue;
       }
+      // Delegation form (Tauri CLI 2.11+): build.gradle.kts reads the
+      // version from the generated sibling tauri.properties. The value is
+      // still authoritative — it just lives one file over, so resolve it
+      // there, failing closed when the file is missing or unparsable.
+      // Rows are attributed to the file that actually carries the value.
+      const PROP_FILE = 'src-tauri/gen/android/app/tauri.properties';
+      let reportFile: string = optPath;
+      let reportField = 'versionName';
+      let value: string | null = null;
+      if (parsed.kind === 'delegated') {
+        reportFile = PROP_FILE;
+        reportField = 'tauri.android.versionName';
+        const propText = input.optionalFiles?.[PROP_FILE];
+        if (typeof propText !== 'string') {
+          const msg = `${optPath} delegates versionName to tauriProperties.getProperty("tauri.android.versionName", …) but ${PROP_FILE} is absent — the authoritative Android version cannot be verified (fail closed; re-run "tauri android init" or pin a literal versionName).`;
+          checks.push({ file: optPath, field: 'versionName', value: '(delegated, unresolved)', status: 'fail', detail: msg });
+          failures.push(msg);
+          continue;
+        }
+        const prop = parseTauriPropertiesVersionName(propText);
+        if (prop.kind === 'err') {
+          checks.push({ file: PROP_FILE, field: 'tauri.android.versionName', value: '(unparsable)', status: 'fail', detail: prop.error });
+          failures.push(prop.error);
+          continue;
+        }
+        value = prop.value;
+      } else if (parsed.kind === 'ok') {
+        value = parsed.value;
+      } else {
+        continue; // unreachable: 'err' already reported above
+      }
       if (canonical === null) {
-        const msg = `${optPath} versionName is "${parsed.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
-        checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'fail', detail: msg });
+        const msg = `${reportFile} versionName is "${value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
+        checks.push({ file: reportFile, field: reportField, value, status: 'fail', detail: msg });
         failures.push(msg);
         continue;
       }
-      if (stripVPrefix(parsed.value) !== canonical) {
-        const msg = expectedLine(optPath, 'versionName', `"${parsed.value}"`, `"${canonical}"`, 're-run "tauri android build" so the generated project records the current version');
-        checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'fail', detail: msg, hint: 're-run "tauri android build" so the generated project records the current version' });
+      if (stripVPrefix(value) !== canonical) {
+        const msg = expectedLine(reportFile, 'versionName', `"${value}"`, `"${canonical}"`, 're-run "tauri android build" so the generated project records the current version');
+        checks.push({ file: reportFile, field: reportField, value, status: 'fail', detail: msg, hint: 're-run "tauri android build" so the generated project records the current version' });
         failures.push(msg);
         continue;
       }
-      checks.push({ file: optPath, field: 'versionName', value: parsed.value, status: 'ok' });
+      checks.push({ file: reportFile, field: reportField, value, status: 'ok' });
     }
   }
 
   // ---------------------------------------------------------------------
-  // IN-REPO ANDROID PLUGIN crate (conditional-authoritative).
+  // IN-REPO PLUGIN CRATES (conditional-authoritative, enumerated).
   //
-  // src-tauri/plugins/fress-open is a path dependency of the app crate; its
-  // crate version is compiled into the release binary. When the plugin
-  // exists, its manifest version and its Cargo.lock record are part of the
-  // application version surface and must equal the canonical version (and
-  // therefore each other):
+  // Every crate under src-tauri/plugins/ is a path dependency of the app
+  // crate; its crate version is compiled into the release binary. The
+  // plugin set is DISCOVERED, never hardcoded — the union of two
+  // independent sources that are checked against each other:
+  //   (a) the crate manifests on disk: src-tauri/plugins/*/Cargo.toml,
+  //       found by the loader's directory scan (input.pluginFiles);
+  //   (b) the path dependencies the app crate declares into plugins/
+  //       (parsed structurally from src-tauri/Cargo.toml) — so a crate
+  //       whose manifest was deleted but whose dependency is still
+  //       declared is still named, with or without a leftover lock record.
+  // Per crate, the manifest version and the Cargo.lock record version must
+  // both equal the canonical version (and therefore each other) — exactly
+  // what cargo itself writes, because for a path dependency the lock
+  // records the path crate's manifest version verbatim:
   //   manifest present + lock entry present  -> both must equal canonical
   //   manifest present + lock entry missing  -> stale lockfile, fail closed
-  //   manifest absent  + lock entry present  -> orphan record, fail closed
-  //   manifest absent  + lock entry absent   -> the legitimate pre-plugin
-  //                                             state: no rows at all
+  //                                             (required only when the
+  //                                             crate is wired as a path
+  //                                             dependency; an unwired
+  //                                             manifest is not part of
+  //                                             the dependency graph and
+  //                                             legitimately has no lock
+  //                                             record — but any record
+  //                                             that DOES exist must
+  //                                             still agree)
+  //   manifest missing + lock entry present  -> orphan record, fail closed
+  //   manifest missing + lock entry missing  -> declared-but-deleted crate,
+  //                                             fail closed on the missing
+  //                                             manifest
+  // Zero plugins (no manifests, no plugins/ path dependencies) is the
+  // legitimate pre-plugin state: no rows at all, clean pass.
   // When the lock itself is missing/unparsable, the required-file failure
   // above already blocks the run; no plugin lock row is added (no double
   // reporting from untrustworthy content).
-  const pluginManifestPath: OptionalFile = 'src-tauri/plugins/fress-open/Cargo.toml';
+  const appManifestText = files['src-tauri/Cargo.toml'];
+  const declaredPlugins: { deps: PluginPathDep[] } | { error: string } =
+    typeof appManifestText === 'string'
+      ? parseCargoTomlPluginPathDeps(appManifestText)
+      : { deps: [] };
+  if ('error' in declaredPlugins) {
+    checks.push({
+      file: 'src-tauri/Cargo.toml',
+      field: '[dependencies]',
+      value: '(malformed)',
+      status: 'fail',
+      detail: declaredPlugins.error,
+    });
+    failures.push(declaredPlugins.error);
+  }
+
   const lockText = files['src-tauri/Cargo.lock'];
   const lockEntry = observed.get('Cargo.lock:fress.version');
   const lockUsable = typeof lockText === 'string' && !!lockEntry && lockEntry.error === null;
 
-  if (pluginManifestPath in (input.optionalReadErrors ?? {})) {
-    const reason = input.optionalReadErrors![pluginManifestPath];
-    const msg = `${pluginManifestPath} exists but could not be read (${reason}) — an unreadable build input must not silently disable its check.`;
-    checks.push({ file: pluginManifestPath, field: '(file)', value: '(unreadable)', status: 'fail', detail: msg });
-    failures.push(msg);
-  } else {
-    const pluginText = input.optionalFiles?.[pluginManifestPath];
-    if (typeof pluginText !== 'string') {
-      // Plugin absent. The only plugin-related failure possible is an
-      // orphan Cargo.lock record for a crate this tree does not contain.
-      if (lockUsable) {
-        const orphan = parseCargoLockPluginVersion(lockText!);
-        if (orphan.kind === 'ok') {
-          const msg =
-            `src-tauri/Cargo.lock [[package] name="tauri-plugin-fress-open"] is "${orphan.value}" but ${pluginManifestPath} does not exist — ` +
-            'the lockfile records a crate the tree does not contain (stale lockfile). Fix: run any cargo command in src-tauri/ so Cargo.lock matches the manifest graph.';
-          checks.push({
-            file: 'src-tauri/Cargo.lock',
-            field: '[[package] name="tauri-plugin-fress-open"] version',
-            value: orphan.value,
-            status: 'fail',
-            detail: msg,
-          });
-          failures.push(msg);
-        }
-      }
-    } else {
-      // Plugin present: its manifest version is authoritative app-version
-      // surface, checked exactly like a required field.
-      const pluginVersion = parseCargoTomlVersion(pluginText, pluginManifestPath);
-      if (pluginVersion.kind === 'err') {
-        checks.push({ file: pluginManifestPath, field: '[package] version', value: '(malformed)', status: 'fail', detail: pluginVersion.error });
-        failures.push(pluginVersion.error);
-      } else if (!isProjectVersion(pluginVersion.value)) {
-        const msg = `${pluginManifestPath} [package] version is "${pluginVersion.value}" — not a valid project version (expected a SemVer string like 1.0.12-beta).`;
-        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg, hint: 'set the plugin crate version to the canonical app version (it is a path dependency that ships inside the app binary)' });
-        failures.push(msg);
-      } else if (canonical === null) {
-        const msg = `${pluginManifestPath} [package] version is "${pluginVersion.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
-        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg });
-        failures.push(msg);
-      } else if (stripVPrefix(pluginVersion.value) !== canonical) {
-        const msg = expectedLine(
-          pluginManifestPath,
-          '[package] version',
-          `"${pluginVersion.value}"`,
-          `"${canonical}"`,
-          'set the plugin crate version to the canonical app version (it is a path dependency that ships inside the app binary)'
-        );
-        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg, hint: 'set the plugin crate version to the canonical app version' });
-        failures.push(msg);
-      } else {
-        checks.push({ file: pluginManifestPath, field: '[package] version', value: pluginVersion.value, status: 'ok' });
-      }
+  const plugins = new Map<string, EnumeratedPlugin>();
+  if ('deps' in declaredPlugins) {
+    for (const dep of declaredPlugins.deps) {
+      plugins.set(dep.manifestPath, {
+        crate: dep.crate,
+        manifestPath: dep.manifestPath,
+        present: false,
+        wired: true,
+        declaredPath: dep.path,
+        readError: null,
+      });
+    }
+  }
+  for (const [manifestPath, reason] of Object.entries(input.pluginReadErrors ?? {})) {
+    plugins.set(manifestPath, { crate: null, manifestPath, present: true, wired: false, declaredPath: null, readError: reason });
+  }
+  for (const manifestPath of Object.keys(input.pluginFiles ?? {})) {
+    const text = input.pluginFiles![manifestPath];
+    const name = parseCargoTomlPackageName(text, manifestPath);
+    const existing = plugins.get(manifestPath);
+    if (existing) {
+      if (existing.readError === null) existing.present = true;
+      // The manifest's own [package].name is what cargo mirrors into the
+      // lock record, so when it parses it settles the crate identity.
+      if (name.kind === 'ok') existing.crate = name.value;
+      continue;
+    }
+    plugins.set(manifestPath, {
+      crate: name.kind === 'ok' ? name.value : null,
+      manifestPath,
+      present: true,
+      wired: false,
+      declaredPath: null,
+      readError: null,
+    });
+  }
 
-      // The lock record must exist and agree — but only when the lockfile
-      // itself parsed cleanly (otherwise the required-field failure above
-      // already reports the real problem; piling plugin rows onto corrupt
-      // content would double-report without adding information).
-      if (lockUsable) {
-        const lockPlugin = parseCargoLockPluginVersion(lockText!);
-        if (lockPlugin.kind === 'err') {
+  const byManifestPath = (a: EnumeratedPlugin, b: EnumeratedPlugin) =>
+    a.manifestPath < b.manifestPath ? -1 : a.manifestPath > b.manifestPath ? 1 : 0;
+  for (const plugin of [...plugins.values()].sort(byManifestPath)) {
+    const lockField = (crate: string) => `[[package] name="${crate}"] version`;
+
+    if (plugin.readError !== null) {
+      const msg = `${plugin.manifestPath} exists but could not be read (${plugin.readError}) — an unreadable build input must not silently disable its check.`;
+      checks.push({ file: plugin.manifestPath, field: '(file)', value: '(unreadable)', status: 'fail', detail: msg });
+      failures.push(msg);
+      continue;
+    }
+
+    if (!plugin.present) {
+      // Declared as a path dependency but not on disk. A leftover lock
+      // record is reported against the lock (cargo keeps the record until
+      // the next lockfile rewrite); otherwise the missing manifest itself
+      // is the failure. When the lock is unusable, the required-file
+      // failure above already explains the run's failure — no extra row.
+      if (!lockUsable) continue;
+      const orphan = plugin.crate !== null ? parseCargoLockCrateVersion(lockText!, plugin.crate) : null;
+      if (orphan !== null && orphan.kind === 'ok') {
+        const msg =
+          `src-tauri/Cargo.lock ${lockField(plugin.crate!)} is "${orphan.value}" but ${plugin.manifestPath} does not exist — ` +
+          'the lockfile records a crate the tree does not contain (stale lockfile). Fix: run any cargo command in src-tauri/ so Cargo.lock matches the manifest graph.';
+        checks.push({
+          file: 'src-tauri/Cargo.lock',
+          field: lockField(plugin.crate!),
+          value: orphan.value,
+          status: 'fail',
+          detail: msg,
+        });
+        failures.push(msg);
+        continue;
+      }
+      const msg =
+        `${plugin.manifestPath} does not exist but src-tauri/Cargo.toml declares "${plugin.crate}" as a path dependency ("${plugin.declaredPath}") — ` +
+        "the app crate's dependency graph references a crate the tree does not contain (broken tree). Fix: restore the plugin crate or remove the dependency declaration.";
+      checks.push({ file: plugin.manifestPath, field: '(file)', value: '(missing)', status: 'fail', detail: msg });
+      failures.push(msg);
+      continue;
+    }
+
+    // Manifest present: its [package] name and version are authoritative
+    // app-version surface, checked exactly like a required field.
+    const manifestText = input.pluginFiles![plugin.manifestPath];
+    const name = parseCargoTomlPackageName(manifestText, plugin.manifestPath);
+    if (name.kind === 'err') {
+      checks.push({ file: plugin.manifestPath, field: '[package] name', value: '(malformed)', status: 'fail', detail: name.error });
+      failures.push(name.error);
+      continue;
+    }
+    const crate = name.value;
+    const pluginVersion = parseCargoTomlVersion(manifestText, plugin.manifestPath);
+    if (pluginVersion.kind === 'err') {
+      checks.push({ file: plugin.manifestPath, field: '[package] version', value: '(malformed)', status: 'fail', detail: pluginVersion.error });
+      failures.push(pluginVersion.error);
+    } else if (!isProjectVersion(pluginVersion.value)) {
+      const msg = `${plugin.manifestPath} [package] version is "${pluginVersion.value}" — not a valid project version (expected a SemVer string like 1.0.12-beta).`;
+      checks.push({ file: plugin.manifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg, hint: 'set the plugin crate version to the canonical app version (it is a path dependency that ships inside the app binary)' });
+      failures.push(msg);
+    } else if (canonical === null) {
+      const msg = `${plugin.manifestPath} [package] version is "${pluginVersion.value}" but the canonical package.json version is unavailable — cannot verify agreement (fail closed).`;
+      checks.push({ file: plugin.manifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg });
+      failures.push(msg);
+    } else if (stripVPrefix(pluginVersion.value) !== canonical) {
+      const msg = expectedLine(
+        plugin.manifestPath,
+        '[package] version',
+        `"${pluginVersion.value}"`,
+        `"${canonical}"`,
+        'set the plugin crate version to the canonical app version (it is a path dependency that ships inside the app binary)'
+      );
+      checks.push({ file: plugin.manifestPath, field: '[package] version', value: pluginVersion.value, status: 'fail', detail: msg, hint: 'set the plugin crate version to the canonical app version' });
+      failures.push(msg);
+    } else {
+      checks.push({ file: plugin.manifestPath, field: '[package] version', value: pluginVersion.value, status: 'ok' });
+    }
+
+    // The lock record must exist (when the crate is wired as a path
+    // dependency) and agree — but only when the lockfile itself parsed
+    // cleanly (otherwise the required-file failure above already reports
+    // the real problem; piling plugin rows onto corrupt content would
+    // double-report without adding information).
+    if (lockUsable) {
+      const lockPlugin = parseCargoLockCrateVersion(lockText!, crate);
+      if (lockPlugin.kind === 'err') {
+        if (plugin.wired) {
           checks.push({
             file: 'src-tauri/Cargo.lock',
-            field: '[[package] name="tauri-plugin-fress-open"] version',
+            field: lockField(crate),
             value: '(missing)',
             status: 'fail',
             detail: lockPlugin.error,
             hint: 'run any cargo command in src-tauri/ so Cargo.lock records the in-repo plugin crate',
           });
           failures.push(lockPlugin.error);
-        } else if (canonical !== null && stripVPrefix(lockPlugin.value) !== canonical) {
-          const msg = expectedLine(
-            'src-tauri/Cargo.lock',
-            '[[package] name="tauri-plugin-fress-open"] version',
-            `"${lockPlugin.value}"`,
-            `"${canonical}"`,
-            'run any cargo command in src-tauri/ so Cargo.lock records the plugin crate at the canonical version'
-          );
-          checks.push({
-            file: 'src-tauri/Cargo.lock',
-            field: '[[package] name="tauri-plugin-fress-open"] version',
-            value: lockPlugin.value,
-            status: 'fail',
-            detail: msg,
-            hint: 'run any cargo command in src-tauri/ so Cargo.lock records the plugin crate at the canonical version',
-          });
-          failures.push(msg);
-        } else if (canonical !== null) {
-          checks.push({
-            file: 'src-tauri/Cargo.lock',
-            field: '[[package] name="tauri-plugin-fress-open"] version',
-            value: lockPlugin.value,
-            status: 'ok',
-          });
         }
+      } else if (canonical !== null && stripVPrefix(lockPlugin.value) !== canonical) {
+        const msg = expectedLine(
+          'src-tauri/Cargo.lock',
+          lockField(crate),
+          `"${lockPlugin.value}"`,
+          `"${canonical}"`,
+          'run any cargo command in src-tauri/ so Cargo.lock records the plugin crate at the canonical version'
+        );
+        checks.push({
+          file: 'src-tauri/Cargo.lock',
+          field: lockField(crate),
+          value: lockPlugin.value,
+          status: 'fail',
+          detail: msg,
+          hint: 'run any cargo command in src-tauri/ so Cargo.lock records the plugin crate at the canonical version',
+        });
+        failures.push(msg);
+      } else if (canonical !== null) {
+        checks.push({
+          file: 'src-tauri/Cargo.lock',
+          field: lockField(crate),
+          value: lockPlugin.value,
+          status: 'ok',
+        });
       }
     }
   }
@@ -967,6 +1314,11 @@ export interface LoadedFiles {
   optionalFiles: Partial<Record<OptionalFile, string>>;
   /** Optional paths that exist but could not be read (fail closed). */
   optionalReadErrors: Record<string, string>;
+  /** Enumerated plugin manifests that exist on disk, by repo-relative
+   * path (src-tauri/plugins/<dir>/Cargo.toml). */
+  pluginFiles: Record<string, string>;
+  /** Plugin manifest paths that exist but could not be read (fail closed). */
+  pluginReadErrors: Record<string, string>;
 }
 
 /** Read the required files from a checkout. Missing files are reported (and
@@ -974,7 +1326,7 @@ export interface LoadedFiles {
  * (the generated Android project) are read only when present; a read error
  * on an EXISTING optional file is recorded and fails closed. */
 export function loadVersionFiles(root: string): LoadedFiles {
-  const out: LoadedFiles = { files: {}, missing: [], readErrors: {}, optionalFiles: {}, optionalReadErrors: {} };
+  const out: LoadedFiles = { files: {}, missing: [], readErrors: {}, optionalFiles: {}, optionalReadErrors: {}, pluginFiles: {}, pluginReadErrors: {} };
   for (const rel of REQUIRED_FILES) {
     try {
       out.files[rel] = readFileSync(join(root, rel), 'utf8');
@@ -993,6 +1345,34 @@ export function loadVersionFiles(root: string): LoadedFiles {
         // Exists but unreadable: authoritative metadata must not silently
         // disable its own check.
         out.optionalReadErrors[rel] = e instanceof Error ? e.message : String(e);
+      }
+    }
+  }
+  // Enumerated plugin manifests: every crate directory directly under
+  // src-tauri/plugins/ contributes its Cargo.toml when one exists. A
+  // directory scan (not a static list) is what makes the plugin set
+  // unhideable — a new plugin crate is picked up with no validator change;
+  // a manifest one level deeper (plugins/x/sub/Cargo.toml) is not a plugin
+  // crate directory and is not part of the set.
+  let pluginDirs: string[] = [];
+  try {
+    pluginDirs = readdirSync(join(root, 'src-tauri', 'plugins'), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    // No plugins directory at all: the legitimate pre-plugin state, zero
+    // enumerated rows.
+  }
+  for (const dir of pluginDirs) {
+    const rel = `src-tauri/plugins/${dir}/Cargo.toml`;
+    try {
+      out.pluginFiles[rel] = readFileSync(join(root, rel), 'utf8');
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        // Exists but unreadable: fails closed in validateVersions.
+        out.pluginReadErrors[rel] = e instanceof Error ? e.message : String(e);
       }
     }
   }
@@ -1062,8 +1442,11 @@ Options:
 Android metadata (src-tauri/gen/android/app/build.gradle.kts versionName and
 the tauri.conf.json .bundle.android.versionName override) is checked whenever
 it exists; its absence is legitimate because it is generated at build time.
-The in-repo plugin crate (src-tauri/plugins/fress-open/Cargo.toml and its
-Cargo.lock record) is checked the same way whenever the plugin exists.
+Every in-repo plugin crate (any manifest under src-tauri/plugins/*/Cargo.toml,
+plus its Cargo.lock record) is checked the same way whenever it exists — the
+plugin set is discovered by directory scan (and cross-checked against the
+path dependencies declared in src-tauri/Cargo.toml), so a plugin added
+tomorrow is checked automatically.
 
 Exit codes: 0 pass, 1 validation failure, 2 usage error.`;
 
@@ -1126,6 +1509,8 @@ export function runCli(argv: string[]): number {
     readErrors: loaded.readErrors,
     optionalFiles: loaded.optionalFiles,
     optionalReadErrors: loaded.optionalReadErrors,
+    pluginFiles: loaded.pluginFiles,
+    pluginReadErrors: loaded.pluginReadErrors,
     releaseTag,
   });
   const rendered = renderReport(report);

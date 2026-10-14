@@ -797,6 +797,27 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const appImageLaunchSupported =
     isTauri() && !isAndroidWebview() && /linux/i.test(navigator.userAgent);
 
+  // ---- The Android adapter binding ---------------------------------------
+  // On Android the SAME openCompletedArtifact policy runs with ONE dep
+  // swapped: the opener plugin's open_path cannot hand out app-private
+  // files, so openPath binds to the registry-validated native adapter
+  // command. It resolves the exact path against the session's download
+  // registry (the same discipline as the updater's signature verification)
+  // and routes .apk artifacts to the system package installer through a
+  // FileProvider content URI, everything else to a MIME viewer with a
+  // share fallback - temporary read grant only. The policy and the UI do
+  // not branch for Android; this is a platform dep binding, the same
+  // pattern as appImageLaunchSupported above. Errors surface in the
+  // open-artifact/<code> typed namespace the boundary already parses.
+  const androidAdapterSupported = isTauri() && isAndroidWebview();
+  const androidOpenAdapter = useCallback(
+    async (path: string): Promise<void> => {
+      await invoke('open_downloaded_file', { path });
+    },
+    []
+  );
+  const artifactOpenPath = androidAdapterSupported ? androidOpenAdapter : openPath;
+
   const openFile = useCallback(
     async (artifact: CompletedArtifactRef): Promise<OpenOutcome> => {
       if (!isTauri()) return { ok: false, kind: 'unknown' };
@@ -808,7 +829,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!busyStore.begin(artifact.id, 'open')) return { ok: false, kind: 'busy' };
       try {
         const outcome = await openCompletedArtifact(artifact, {
-          openPath,
+          openPath: artifactOpenPath,
           launchAppImage: ({ id, path }) => invoke('launch_app_image_artifact', { id, path }),
           appImageLaunchSupported,
           warn: (message, detail) => console.warn(`[download-open] ${message}`, detail),
@@ -828,7 +849,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         busyStore.end(artifact.id, 'open');
       }
     },
-    [busyStore, appImageLaunchSupported]
+    [busyStore, appImageLaunchSupported, artifactOpenPath]
   );
 
   // openFolder reads the folder through a ref so its identity - and with

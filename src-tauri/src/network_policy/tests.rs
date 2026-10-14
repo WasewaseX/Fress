@@ -314,6 +314,7 @@ fn hop_result_flagged(
             max_hops,
             host_rule,
             block_private_literals,
+            path_pin: None,
         },
         &previous,
         &next,
@@ -656,6 +657,13 @@ fn ambiguous_host_forms_are_handled_predictably() {
         .expect("percent-decoded host is the genuine pinned host");
     // A punycode host that is NOT the pinned host is refused byte-exactly.
     assert!(policy.validate("https://xn--80ak6aa92e.com/x").is_err());
+    // A Unicode homoglyph of the pinned host (Cyrillic а U+0430) normalizes
+    // to punycode (xn--pi-6kc.github.com), which is NOT the pinned host and
+    // is refused - the IDN direction of the same exact-match rule.
+    assert!(matches!(
+        policy.validate("https://\u{0430}pi.github.com/repos/x/y"),
+        Err(PolicyError::DisallowedHost { .. })
+    ));
     // The port is not part of the host: a pinned-host URL on a different
     // port still connects to the pinned host's addresses. Documented so
     // the behavior is a decision, not an accident.
@@ -1253,4 +1261,114 @@ async fn the_self_update_client_refuses_an_off_allowlist_redirect_before_any_con
         text.contains("not on the"),
         "the allowlist reason must surface: {text}"
     );
+}
+
+#[tokio::test]
+async fn the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin() {
+    // Client-level proof for the hop-side repo pin: the 302 re-enters
+    // github.com (an ALLOWLISTED host) but outside /WasewaseX/Fress/ - the
+    // host rule alone would follow it, the path pin must refuse it before
+    // any connection to that host is made.
+    let port = spawn_one_shot_http(
+        b"HTTP/1.1 302 Found\r\n\
+          Location: https://github.com/evil-mirror/not-fress/releases.atom\r\n\
+          Content-Length: 0\r\n\
+          Connection: close\r\n\r\n",
+    );
+    let client = UrlPolicy::self_update_feed()
+        .http_client()
+        .expect("policy client builds");
+    let err = client
+        .get(format!("http://127.0.0.1:{port}/feed"))
+        .send()
+        .await
+        .expect_err("a github.com redirect outside the repo pin must be refused");
+    assert!(err.is_redirect(), "got: {err}");
+    let text = error_chain_text(&err);
+    assert!(
+        text.contains("pinned repository path"),
+        "the repo-pin reason must surface: {text}"
+    );
+}
+
+#[test]
+fn the_self_update_path_pin_binds_github_hops_to_the_fress_repo() {
+    // Pure hop-decision matrix for the PathPin: github.com hops must stay
+    // inside the repository; the asset-CDN hosts keep their opaque paths.
+    let feed = UrlPolicy::self_update_feed();
+    let origin: Url = "https://github.com/WasewaseX/Fress/releases.atom"
+        .parse()
+        .unwrap();
+
+    // In-path hops are followed (the repo pin admits prefix and bare root).
+    for next in [
+        "https://github.com/WasewaseX/Fress/releases/download/v1.0.12-beta/SHA256SUMS.txt",
+        "https://github.com/WasewaseX/Fress",
+    ] {
+        assert!(
+            evaluate_redirect_hop(
+                &feed.redirects,
+                std::slice::from_ref(&origin),
+                &next.parse().unwrap()
+            )
+            .is_ok(),
+            "{next} must stay inside the pinned path"
+        );
+    }
+
+    // Off-path github.com hops are refused even though the HOST is
+    // allowlisted (this is the N-3 gap the pin closes).
+    for next in [
+        "https://github.com/evil-mirror/not-fress/releases.atom",
+        "https://github.com/WasewaseX/Other/releases.atom",
+        // A dot-segment escape resolves in the URL parser to a path that
+        // lost the /WasewaseX/Fress/ prefix - refused like any other.
+        "https://github.com/WasewaseX/Fress/../evil/x",
+    ] {
+        assert!(
+            matches!(
+                evaluate_redirect_hop(
+                    &feed.redirects,
+                    std::slice::from_ref(&origin),
+                    &next.parse().unwrap()
+                ),
+                Err(RedirectRejection::OffPinnedPath { .. })
+            ),
+            "{next} must be refused as an off-pin hop"
+        );
+    }
+
+    // The asset-CDN hosts carry opaque token paths and are NOT bound by
+    // the pin (only the github.com origin is).
+    assert!(evaluate_redirect_hop(
+        &feed.redirects,
+        std::slice::from_ref(&origin),
+        &"https://release-assets.githubusercontent.com/github-production-release-asset/opaque-token"
+            .parse()
+            .unwrap()
+    )
+    .is_ok());
+}
+
+#[test]
+fn the_api_timeouts_are_pinned_to_the_documented_values() {
+    // Independence pin for the time rail: the request timeout that bounds a
+    // slow-drip API body (http_body's loopback timeout test drives the cap
+    // rail separately) and the connect timeout are what their docs claim.
+    // Neither may be quietly removed as a substitute for the body caps.
+    assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(15));
+    assert_eq!(API_REQUEST_TIMEOUT, Duration::from_secs(20));
+    // And the wiring: every short-lived policy CARRIES the request timeout
+    // (http_client() applies it as the reqwest whole-request timeout); the
+    // download policy deliberately carries none (the engine enforces its
+    // own 60 s stall window instead).
+    for policy in [
+        UrlPolicy::api_github(),
+        UrlPolicy::api_fdroid(),
+        UrlPolicy::resolver_manifest(),
+        UrlPolicy::self_update_feed(),
+    ] {
+        assert_eq!(policy.request_timeout, Some(API_REQUEST_TIMEOUT));
+    }
+    assert_eq!(UrlPolicy::executable_download().request_timeout, None);
 }

@@ -635,7 +635,11 @@ test.describe('Workflow D2: download-to-open', () => {
       { path: '/home/test/Downloads/My Tools (v1.2)/LocalSend setup 1.17.exe' },
       { path: '/home/test/Downloads/برنامه-های من/LocalSend-1.17.0.exe' },
       { path: "/home/test/Downloads/$(rm -rf ~); `cmd` |&.exe" },
-      { path: '/home/test/Downloads/报告 (最终版) [x64].exe' },
+      // Polytonic Greek: 3-byte UTF-8 like the CJK code points this case
+      // originally exercised, satisfying the project's zero-Chinese-content
+      // gate (scripts/ci/check-no-chinese.mjs) while keeping the byte-exact
+      // pass-through assertion meaningful (multibyte + parens + brackets).
+      { path: '/home/test/Downloads/Ἀναφορά (τελική ἔκδοση) [x64].exe' },
     ];
     // Four transfers of the same asset (distinct engine ids): three fill
     // the engine slots, the fourth queues and promotes once a slot frees.

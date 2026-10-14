@@ -137,8 +137,15 @@ impl OpenRejection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OpenRoute {
     /// Launch the registry-validated AppImage directly (chmod +x restricted
-    /// to this file, then exec, no shell).
-    LaunchAppImage { path: PathBuf },
+    /// to this file, then exec, no shell). The expected canonical location
+    /// and committed size travel with the plan so [`launch_app_image`] can
+    /// re-check them at the instant of the spawn - plan and launch are two
+    /// instants, and the file must be the engine's bytes at BOTH.
+    LaunchAppImage {
+        path: PathBuf,
+        expected_size: u64,
+        expected_canonical: PathBuf,
+    },
 }
 
 /// Name gates shared by every request. Returns `Err` for anything that is
@@ -224,7 +231,12 @@ pub(crate) fn plan_open(
     let record = registry
         .completed_artifact_for_path(path)
         .ok_or(OpenRejection::NotRegistered)?;
-    if record.id != id as u32 {
+    // The id is an i64 across the IPC bridge but a u32 in the registry: an
+    // out-of-range value must refuse, not truncate (2^32 + 42 used to alias
+    // to record 42 and PASS this check). Negative ids were refused above,
+    // so only the > u32::MAX half can get here.
+    let id = u32::try_from(id).map_err(|_| OpenRejection::NotRegistered)?;
+    if record.id != id {
         return Err(OpenRejection::IdMismatch);
     }
     // Canonical stability (mirrors the signature verifier): the artifact
@@ -243,6 +255,8 @@ pub(crate) fn plan_open(
 
     Ok(OpenRoute::LaunchAppImage {
         path: record.path.clone(),
+        expected_size: record.size,
+        expected_canonical: record.canonical.clone(),
     })
 }
 
@@ -258,11 +272,27 @@ pub(crate) fn plan_open(
 /// from the UI, and reaped in the background so Fress exit cannot kill it
 /// and running it cannot leave a zombie behind.
 #[cfg(target_os = "linux")]
-pub(crate) fn launch_app_image(path: &Path) -> Result<(), OpenRejection> {
+pub(crate) fn launch_app_image(
+    path: &Path,
+    expected_size: u64,
+    expected_canonical: &Path,
+) -> Result<(), OpenRejection> {
     use std::os::unix::fs::PermissionsExt;
 
-    // Re-check at launch time (the plan and the launch are two instants).
+    // Re-check at launch time (the plan and the launch are two instants):
+    // shape, canonical location and committed size in one breath, so a file
+    // swapped between plan_open and here is not exec'd. The kernel still
+    // re-resolves the path at spawn, so a same-user racer with write access
+    // to this directory has a theoretical window after these checks; that
+    // actor could exec the file directly anyway, and closing it fully would
+    // need /proc/self/fd exec tricks not worth the surface they add.
     let meta = require_regular_file(path)?;
+    let current = std::fs::canonicalize(path).map_err(|_| OpenRejection::NotFound {
+        detail: "the downloaded file is no longer on disk".to_string(),
+    })?;
+    if current != expected_canonical || meta.len() != expected_size {
+        return Err(OpenRejection::ReplacedOnDisk);
+    }
 
     let mut permissions = meta.permissions();
     if permissions.mode() & 0o111 == 0 {
@@ -322,13 +352,17 @@ pub(crate) async fn launch_app_image_artifact(
 
     match planned {
         #[cfg(target_os = "linux")]
-        OpenRoute::LaunchAppImage { path } => {
-            tokio::task::spawn_blocking(move || launch_app_image(&path))
-                .await
-                .map_err(|e| OpenRejection::Internal(format!("open task failed: {e}")))
-                .and_then(|inner| inner)
-                .map_err(|rej| rej.render())
-        }
+        OpenRoute::LaunchAppImage {
+            path,
+            expected_size,
+            expected_canonical,
+        } => tokio::task::spawn_blocking(move || {
+            launch_app_image(&path, expected_size, &expected_canonical)
+        })
+        .await
+        .map_err(|e| OpenRejection::Internal(format!("open task failed: {e}")))
+        .and_then(|inner| inner)
+        .map_err(|rej| rej.render()),
         #[cfg(not(target_os = "linux"))]
         OpenRoute::LaunchAppImage { .. } => Err(OpenRejection::UnsupportedPlatform.render()),
     }
@@ -376,6 +410,10 @@ mod tests {
 
     fn write(path: &Path, bytes: &[u8]) {
         std::fs::write(path, bytes).unwrap();
+    }
+
+    fn write_len(path: &Path) -> u64 {
+        std::fs::metadata(path).unwrap().len()
     }
 
     // ---- Name gates ------------------------------------------------------
@@ -492,7 +530,31 @@ mod tests {
         register(&registry, 42, &app);
 
         let route = plan_open(&registry, 42, app.to_str().unwrap()).unwrap();
-        assert_eq!(route, OpenRoute::LaunchAppImage { path: app.clone() });
+        assert_eq!(
+            route,
+            OpenRoute::LaunchAppImage {
+                path: app.clone(),
+                expected_size: 3,
+                expected_canonical: std::fs::canonicalize(&app).unwrap(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_id_above_u32_max_does_not_alias_to_a_real_record() {
+        // The id crosses the IPC bridge as i64 but lives in the registry as
+        // u32: a truncated cast used to let 2^32 + 42 alias to record 42 and
+        // PASS the id binding. The try_from gate refuses it instead - an id
+        // that large cannot exist, so the caller learns not-registered.
+        let dir = TempDir::new("appimage-alias");
+        let app = dir.path().join("alias.AppImage");
+        write(&app, b"elf");
+        let registry = DownloadRegistry::default();
+        register(&registry, 42, &app);
+
+        let aliased = i64::from(u32::MAX) + 42;
+        let err = plan_open(&registry, aliased, app.to_str().unwrap()).unwrap_err();
+        assert_eq!(err, OpenRejection::NotRegistered);
     }
 
     #[test]
@@ -598,7 +660,9 @@ mod tests {
         assert_eq!(
             route,
             OpenRoute::LaunchAppImage {
-                path: weird.clone()
+                path: weird.clone(),
+                expected_size: write_len(&weird),
+                expected_canonical: std::fs::canonicalize(&weird).unwrap(),
             }
         );
     }
@@ -680,5 +744,37 @@ mod tests {
             plan_open(&registry, 14, app.to_str().unwrap()).unwrap(),
             OpenRoute::LaunchAppImage { .. }
         ));
+    }
+
+    // ---- Launch-time recheck (plan and launch are two instants) ----------
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_size_drift_between_plan_and_launch_is_refused() {
+        // The plan validated the committed size; the file was replaced at
+        // the same location before the launch. The launcher's own recheck
+        // must refuse before any chmod or spawn.
+        let dir = TempDir::new("appimage-size-drift");
+        let app = dir.path().join("drift.AppImage");
+        write(&app, b"elf-bytes");
+        let canonical = std::fs::canonicalize(&app).unwrap();
+        let err =
+            launch_app_image(&app, 999, &canonical).expect_err("a size drift must be refused");
+        assert_eq!(err, OpenRejection::ReplacedOnDisk);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_canonical_drift_between_plan_and_launch_is_refused() {
+        // Same shape: the expected canonical location no longer matches the
+        // file at the requested path (replaced/moved/swapped). Refused.
+        let dir = TempDir::new("appimage-canonical-drift");
+        let app = dir.path().join("cswap.AppImage");
+        write(&app, b"elf-bytes");
+        let elsewhere = dir.path().join("elsewhere.AppImage");
+        write(&elsewhere, b"other-elf");
+        let err = launch_app_image(&app, 9, &std::fs::canonicalize(&elsewhere).unwrap())
+            .expect_err("a canonical drift must be refused");
+        assert_eq!(err, OpenRejection::ReplacedOnDisk);
     }
 }

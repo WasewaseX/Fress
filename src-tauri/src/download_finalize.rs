@@ -731,7 +731,15 @@ pub(crate) struct PartMeta {
 }
 
 pub(crate) async fn read_part_meta(part: &Path) -> Option<PartMeta> {
-    let raw = tokio::fs::read_to_string(meta_path_for(part)).await.ok()?;
+    use tokio::io::AsyncReadExt as _;
+    // The sidecar is our own tiny JSON document (a URL plus two header
+    // strings). The size bound keeps even a tampered or corrupted sidecar
+    // from being buffered without limit; a sidecar that is truncated by
+    // the bound fails the JSON parse below and reads as "no validators",
+    // which fail-closes the resume into a discard.
+    let file = tokio::fs::File::open(meta_path_for(part)).await.ok()?;
+    let mut raw = String::new();
+    file.take(64 * 1024).read_to_string(&mut raw).await.ok()?;
     serde_json::from_str(&raw).ok()
 }
 
@@ -859,8 +867,11 @@ impl StagingSink for DiskStaging {
 ///   - the total T, when present (not `*`), MUST be greater than M.
 ///
 /// Any violation refuses the resume instead of appending to the staging
-/// file; the download fails with a clear reason and the .part survives so
-/// a corrected server (or a fresh start) can still recover.
+/// file: `evaluate_response` maps every validation failure to
+/// `DiscardAndFail`, so the staging bytes AND the response's validators are
+/// deleted rather than retained as resumable state (an impossible range has
+/// forfeited the byte accounting; keeping a poisoned tail resumable would
+/// let a later byte-identity resume glue it into a final file).
 ///
 /// On success returns the number of bytes the range promised
 /// (`end - start + 1`) so the caller can verify the body actually
@@ -917,7 +928,14 @@ pub(crate) fn validate_resume_content_range(
             ));
         }
     }
-    Ok(end - start + 1)
+    // The promised length must itself be representable: a hostile
+    // `end == u64::MAX` with `start == 0` would otherwise overflow
+    // `end - start + 1` (a panic under overflow-checks, a silent wrap to 0
+    // without). Either shape poisons every downstream length decision, so
+    // the header is refused as malformed instead.
+    (end - start)
+        .checked_add(1)
+        .ok_or_else(|| "Content-Range byte range is too large".to_string())
 }
 
 /// What the caller must do with one HTTP response before any byte of the
@@ -1558,8 +1576,12 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
 
     let mut stream = first.bytes_stream();
     let mut downloaded: u64 = already_have;
+    // Display-only total (progress/ETA): a hostile Content-Length near
+    // u64::MAX must not overflow the sum; saturating keeps the bar honest
+    // without any panic surface. The COMPLETION decision below uses the
+    // exact promise, never this display value.
     let total = if remote_len > 0 {
-        remote_len + already_have
+        remote_len.saturating_add(already_have)
     } else if resuming {
         range_total.unwrap_or(0)
     } else {
@@ -1627,7 +1649,20 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
             drop(file);
             return Err((format!("Disk write failed: {}", e), None));
         }
-        downloaded += bytes.len() as u64;
+        // The running byte count must stay representable like every other
+        // server-reachable sum: a wrapped counter would poison the exact
+        // completion equality check below. No real transfer can overflow
+        // u64 here (the 60 s stall window and disk-bound writes make an
+        // 18-exabyte stream physically impossible), so an overflow is a
+        // broken counter, not a bandwidth event - refuse the attempt.
+        let Some(new_downloaded) = downloaded.checked_add(bytes.len() as u64) else {
+            drop(file);
+            return Err((
+                "Byte count overflowed; the download was refused".to_string(),
+                None,
+            ));
+        };
+        downloaded = new_downloaded;
 
         // Emit progress at most ~10x per second
         if last_emit.elapsed() >= Duration::from_millis(100) {
@@ -1690,7 +1725,37 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
     // a full 200 body - and refuse to finalize a truncated file. The
     // .part survives so Resume can fetch exactly the missing bytes.
     let expected_downloaded: Option<u64> = match expected_range_len {
-        Some(range_len) => Some(already_have + range_len),
+        Some(range_len) => {
+            // The sum must be representable: a hostile `Content-Range` end
+            // near u64::MAX validated against a large staging prefix could
+            // overflow here. That is a protocol violation, not a length -
+            // refuse the transfer instead of wrapping (release) or panicking
+            // (overflow-checks builds).
+            match already_have.checked_add(range_len) {
+                Some(sum) => Some(sum),
+                None => {
+                    // The refusal fires AFTER this attempt's tail bytes were
+                    // appended to the staging file and this response's
+                    // validators were recorded, so the .part currently holds
+                    // an honest prefix plus a tail the server's own header
+                    // makes unaccountable. Keeping it (resumable, with those
+                    // validators) would let a later byte-identity resume glue
+                    // the poisoned tail into a final file; a server that
+                    // announces an impossible range has forfeited the byte
+                    // accounting this design trusts. Discard the staging
+                    // files entirely - the next attempt starts clean (the
+                    // 416 path below discards for the same reason), and the
+                    // error stays final (kind None) because there is nothing
+                    // left to resume.
+                    discard_staging(&part).await;
+                    return Err((
+                        "Server announced an impossible byte range; the download was refused"
+                            .to_string(),
+                        None,
+                    ));
+                }
+            }
+        }
         // No verifiable range: fall back to Content-Length on a full-body
         // 200. A chunked 200 without Content-Length cannot be checked.
         None if !resuming && remote_len > 0 => Some(remote_len),
@@ -2132,6 +2197,67 @@ mod tests {
     fn rejects_a_total_not_larger_than_the_end() {
         assert!(validate_resume_content_range("bytes 1024-2047/2047", 1024).is_err());
         assert!(validate_resume_content_range("bytes 1024-2047/0", 1024).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_oversized_part_meta_sidecar_reads_as_no_validators() {
+        // The 64 KiB take() bound on read_part_meta: a corrupted or
+        // tampered sidecar larger than the bound is truncated mid-JSON,
+        // fails the parse, and reads as "no validators" - the same
+        // fail-closed shape as a missing sidecar (the resume then discards
+        // the staging unless a trusted checksum exists).
+        let tmp = TempDir::new("meta-oversize");
+        let part = tmp.path().join("f.bin.part");
+        std::fs::write(&part, b"staged").unwrap();
+        let meta = meta_path_for(&part);
+        // Kill-test note: the oversized sidecar must be VALID JSON - a
+        // malformed one would fail the parse with or without the take()
+        // bound, and the assertion would pass for the wrong reason. A
+        // well-formed document larger than the bound (an 80 KiB etag
+        // value) is exactly the shape the bound exists to refuse: the
+        // truncation cuts the string mid-value, the parse fails, and the
+        // sidecar reads as "no validators". Removing the bound makes this
+        // test fail (the huge-but-valid document parses and yields
+        // validators) - verified by kill-test this round.
+        let mut huge = String::from("{\"url\":\"https://example.com/f\",\"etag\":\"");
+        huge.push_str(&"x".repeat(80 * 1024)); // > 64 KiB, still valid JSON when closed
+        huge.push_str("\"}");
+        std::fs::write(&meta, huge).unwrap();
+        assert!(
+            read_part_meta(&part).await.is_none(),
+            "an oversized sidecar must read as no validators"
+        );
+        // A normal sidecar still reads fine.
+        write_part_meta(&part, "https://example.com/f", &Default::default()).await;
+        let read = read_part_meta(&part).await.expect("small meta reads");
+        assert_eq!(read.url, "https://example.com/f");
+    }
+
+    #[test]
+    fn a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked() {
+        // Regression: `end - start + 1` overflows when a hostile server
+        // sends `end == u64::MAX`. The only header shape that reaches the
+        // arithmetic is an unknown total (`/*`): an explicit total must be
+        // strictly larger than the end, which no u64 can be. Under
+        // overflow-checks builds this used to panic; without them the length
+        // silently wrapped to 0 and poisoned the completion decision. The
+        // header is now refused as malformed instead - a named error, in
+        // both profiles.
+        let err = validate_resume_content_range("bytes 0-18446744073709551615/*", 0)
+            .expect_err("a u64::MAX range must be refused");
+        assert!(err.contains("too large"), "unexpected error: {err}");
+        // A start offset inside the range keeps the length representable
+        // here - the poisoned SUM (`already_have + range_len`) is refused by
+        // the second checked layer in run_download_on, pinned end to end by
+        // `a_hostile_u64_max_content_range_fails_named_without_completing`.
+        assert!(validate_resume_content_range("bytes 5-18446744073709551615/*", 5).is_ok());
+        // An explicit total equal to the end is refused by the pre-existing
+        // sanity check before the arithmetic is ever reached.
+        assert!(validate_resume_content_range(
+            "bytes 0-18446744073709551615/18446744073709551615",
+            0
+        )
+        .is_err());
     }
 
     // -----------------------------------------------------------------------
@@ -3025,6 +3151,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_hostile_u64_max_content_range_fails_named_without_completing() {
+        // End-to-end regression for the hostile-`Content-Range` overflow:
+        // a resumed download whose server answers a verified-offset 206
+        // with `end == u64::MAX`. The representable-but-poisoned length
+        // (`600 + range_len` overflows u64) is refused at the completion
+        // decision with a named protocol error - never a panic (overflow-
+        // checks builds), never a silent wrap into a completion, no
+        // destination file and no completed-artifact record.
+        let tmp = TempDir::new("e2e-hostile-range");
+        let server = spawn_mock(vec![MockReply::partial_206(
+            "bytes 600-18446744073709551615/*",
+            b"tail-bytes",
+        )]);
+        let part = tmp.path().join("setup.exe.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &pattern(600)).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let err = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect_err("a u64::MAX Content-Range must fail the attempt");
+        assert!(
+            err.0.contains("impossible byte range"),
+            "unexpected: {err:?}"
+        );
+        // A named protocol violation is final - no automatic retry.
+        assert_eq!(err.1, None, "unexpected: {err:?}");
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("setup.exe").exists());
+        // No completed-artifact record either: a refused transfer never
+        // reaches the commit path.
+        assert_eq!(session.registry.completed_len(), 0);
+        // And the staging files are GONE: the refusal fires after the
+        // hostile tail was appended and the response's validators were
+        // recorded, so what is on disk is honest-prefix + unaccountable
+        // tail. Keeping it would let a later byte-identity resume glue the
+        // poisoned tail into the final file; the discard leaves the next
+        // attempt a clean start (pinned since the staging-poison fix).
+        assert!(!part.exists(), "the poisoned .part must be discarded");
+        assert!(
+            !meta_path_for(&part).exists(),
+            "the poisoned sidecar must be discarded"
+        );
+    }
+
+    #[tokio::test]
     async fn staging_larger_than_the_remote_total_is_discarded_via_416() {
         // A resumed staging file whose size exceeds the expected total: the
         // Range is unsatisfiable and a conforming server answers 416.
@@ -3045,6 +3220,48 @@ mod tests {
         assert!(err.0.contains("HTTP 416"));
         assert!(!part.exists());
         assert!(!meta_path_for(&part).exists());
+    }
+
+    #[tokio::test]
+    async fn a_mismatched_start_content_range_discards_the_staged_bytes() {
+        // End-to-end filesystem pin for the THIRD hostile-resume shape: a
+        // server that answers the bytes=600- request with a 206 claiming a
+        // DIFFERENT offset (bytes 999-...). evaluate_response refuses it
+        // before any byte of the hostile body is written, and the discard
+        // must leave NOTHING resumable on disk - neither the staged bytes
+        // nor the validator sidecar (the plan-level decision is pinned by
+        // evaluate_206_mismatched_start_discards_staging; this proves the
+        // engine's side effect, like the u64::MAX and 416 tests above).
+        let tmp = TempDir::new("e2e-mismatched-start");
+        let server = spawn_mock(vec![MockReply::partial_206(
+            "bytes 999-1099/1100",
+            b"hostile-tail",
+        )]);
+        let part = tmp.path().join("setup.exe.part");
+        seed_staging(&part, &server.url, Some("\"test-etag\""), &pattern(600)).await;
+
+        let mut plan = plan_for(&server.url, tmp.path(), Some("setup.exe"));
+        plan.resume = true;
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+
+        let err = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect_err("a mismatched resume offset must fail the attempt");
+        assert!(
+            err.0.contains("resumed at offset"),
+            "the offset mismatch must be named: {err:?}"
+        );
+        assert_eq!(err.1.as_deref(), Some("resume-invalid"));
+        // Final error, no destination, no completed record, nothing on disk.
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("setup.exe").exists());
+        assert_eq!(session.registry.completed_len(), 0);
+        assert!(!part.exists(), "the staged bytes must be discarded");
+        assert!(
+            !meta_path_for(&part).exists(),
+            "the validator sidecar must be discarded"
+        );
     }
 
     #[tokio::test]

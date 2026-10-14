@@ -415,20 +415,30 @@ describe('provider openFile/openFolder wiring', () => {
     }
   });
 
-  it('does not offer the launch fallback on Android, and keeps the reveal chain', async () => {
+  it('does not offer the launch fallback on Android; the adapter serves the open, the reveal chain stays', async () => {
     const original = navigator.userAgent;
     Object.defineProperty(window.navigator, 'userAgent', {
       value: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Mobile Safari/537.36',
       configurable: true,
     });
     try {
-      h.openPath.mockRejectedValueOnce('Permission denied');
+      // Since the Android adapter landed (open_downloaded_file below the
+      // same boundary), an Android openPath dep call does NOT reach the
+      // opener plugin at all: the adapter command resolves the path
+      // against the session registry and serves the open (APK -> system
+      // installer, everything else -> viewer/share). The opener plugin's
+      // rejection therefore never happens on the happy path.
       const actions = await mountActions();
       const out = await actions.openFile(APPIMAGE);
-      // No launch command on Android: the honest classification of the
-      // plugin's own rejection is the whole answer (the Android adapter
-      // fixes this BELOW the boundary, in native code).
-      expect(out).toMatchObject({ ok: false, kind: 'permission' });
+      expect(out).toMatchObject({ ok: true });
+      expect(h.invoke).toHaveBeenCalledWith('open_downloaded_file', { path: APPIMAGE.path });
+      expect(h.openPath).not.toHaveBeenCalled();
+
+      // No launch command on Android, ever: the AppImage launcher stays a
+      // desktop-Linux capability even when the open fails there.
+      h.invoke.mockRejectedValueOnce('open-artifact/not-registered');
+      const refused = await actions.openFile(APPIMAGE);
+      expect(refused).toMatchObject({ ok: false, kind: 'unregistered' });
       expect(h.invoke).not.toHaveBeenCalledWith('launch_app_image_artifact', expect.anything());
 
       // The reveal chain stays intact for non-APK artifacts where a

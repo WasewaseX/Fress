@@ -101,7 +101,7 @@ it names — never by a weaker one.
 | Test method (evidence class) | one of the classes defined above |
 | Tester + UTC date | who executed it and when (blank = not executed) |
 | Evidence reference | reproducible by a stranger (test file › test name, CI run, command + exit code, audit doc section) |
-| Status | PASS / FAIL / NOT RUN / UNAVAILABLE |
+| Status | PASS / FAIL / NOT RUN / UNAVAILABLE — a PASS may carry a narrow-scope qualifier in parentheses (e.g. `PASS (UI contract only)`, `PASS (beta bytes only)`, `PASS (main-era scope)`, `PASS (review only)`, `PASS (CI)`) when the execution that backs it covers a strictly smaller scope than the row's full claim; the qualifier names the boundary, and any leg outside it must appear as NOT RUN somewhere in the record. `OPEN GAP` marks an inventoried contract with no test of its own (not a run status). |
 
 Pre-filled tester policy for this record: rows that already carry automated
 evidence (recorded executions on named commits, or the v1.0.12-beta byte audit)
@@ -129,7 +129,7 @@ status `NOT RUN` until a fresh run on the candidate SHA. One known merge defect
 | # | Scope | Command / source | Result | Evidence reference | Status |
 |---|---|---|---|---|---|
 | 0.1 | Types | `npm run typecheck` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.1 record | PASS |
-| 0.2 | Frontend unit suite | `npm test` | 707 passed / 2 skipped (51 files), exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.2 record | PASS |
+| 0.2 | Frontend unit suite | `npm test` | 707 passed / 2 skipped (50 files), exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.2 record | PASS |
 | 0.3 | Catalog validator | `npm run validate:catalog` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.3 record | PASS |
 | 0.4 | Security config validator | `npm run validate:security` | PASS, exit 0 (main @ 93f87ce, 2026-10-13) | #83 draft S0.4 record | PASS |
 | 0.5 | Version coherence | `npm run validate:versions` | PASS, exit 0, development mode (main @ 93f87ce, 2026-10-13) | #83 draft S0.5 record | PASS |
@@ -705,4 +705,4 @@ identified; blank = not verified on that class.
 |---|---|---|
 | r1 | 2026-10-14 | initial v1.0.0 qualification record on integrate/stable-candidate e771423 |
 | r2 | 2026-10-14 | candidate execution recorded (Section 0-r2): full frontend+E2E+visual+perf green on tree 7dcfceea; DEFECT 1 fixed; channel-pin fix; D6-1 recorded; Section 6 reconciled with transition-qualification (T2 dual hypothesis, W-3 decisive); 27 mock/mocked-e2e/unit rows carry the candidate execution |
-| r3 | 2026-10-14 | critique round applied: green evidence re-executed and archived on the final tip 50c4365 (command-matrix-final-tree.log, test-visual-final.log, five E2E chunk logs, 90/90); Rust rows re-cited to CI run 38486865438 (fmt/clippy/test green on linux+windows+macOS); favorites-gap (2.13) and offline (5.19) rows restored to honest non-PASS states; stale execution-gap actuals refreshed; §6 shared-facts survival claim rewritten per F-3/F-4; candidate-of-record updated to the tip |
+| r3 | 2026-10-14 | critique round applied: green evidence re-executed and archived on the final tip 50c4365 (command-matrix-final-tree.log, test-visual-final.log, five E2E chunk logs, 90/90); Rust rows re-cited to CI run 38486865438 (fmt/clippy/test green on linux+windows+macOS); favorites-gap (2.13) and offline (5.19) rows restored to honest non-PASS states; stale execution-gap actuals refreshed; §6 shared-facts survival claim rewritten per F-3/F-4; candidate-of-record updated to the tip. Current record totals: ~90 PASS rows (55 original automated/byte-audit + 35 rows upgraded by the candidate execution and CI run 38486865438), 68 NOT RUN (every packaged-os/physical-device row), 3 UNAVAILABLE (minisign CLI, local cargo-audit, local Rust toolchain — all CI-covered), 1 FAIL (validate:versions = D6-1, release-agent-owned), 1 OPEN GAP (favorites-restart automated test) |

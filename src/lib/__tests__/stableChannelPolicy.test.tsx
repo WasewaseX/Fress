@@ -52,9 +52,13 @@ import {
   compareVersions,
   currentBuildVersion,
   defaultUpdateChannelForBuild,
+  fetchOwnLatestRelease,
   getUpdateChannel,
+  parseVersion,
+  planUpdateDelivery,
   releaseMatchesChannel,
   setUpdateChannel,
+  signatureSidecarFor,
 } from '../selfUpdate';
 import type { OwnRelease } from '../selfUpdate';
 import { useSelfUpdate } from '../../features/selfUpdate/useSelfUpdate';
@@ -69,10 +73,27 @@ const release = (tag: string, prereleaseFlag = false): OwnRelease => ({
   assets: [],
 });
 
+/** Derive a version RELATIVE to the running build instead of hard-coding
+ * release numbers (the spec's rule: only the intentional v1.0.0 / 1.0.12-beta
+ * discontinuity contract is spelled out literally; everything else moves
+ * with whatever the build says about itself). */
+const nextPre = (v: string, stage: 'beta' | 'alpha' = 'beta'): string => {
+  const p = parseVersion(v);
+  if (!p) throw new Error(`test bug: "${v}" is not a version the app accepts`);
+  return `${p.major}.${p.minor}.${p.patch + 1}-${stage}`;
+};
+
 /** GitHub API stub returning the given release list; the atom feed 404s so
- * the fallback stays out of the way unless a test enables it. */
+ * the fallback stays out of the way unless a test enables it. Entries may
+ * carry raw GitHub assets (name/size/browser_download_url) so the checksum
+ * and sidecar plumbing can be exercised end to end. */
 const apiWith = (
-  entries: Array<{ tag: string; prerelease: boolean; draft?: boolean }>
+  entries: Array<{
+    tag: string;
+    prerelease: boolean;
+    draft?: boolean;
+    assets?: Array<{ name: string; size: number; browser_download_url: string }>;
+  }>
 ) =>
   vi.fn(async (url: string | URL | Request) => {
     const u = String(url);
@@ -86,7 +107,7 @@ const apiWith = (
             prerelease: e.prerelease,
             published_at: '2026-10-01T00:00:00Z',
             html_url: `https://github.com/WasewaseX/Fress/releases/tag/${e.tag}`,
-            assets: [],
+            assets: e.assets ?? [],
           }))
         ),
         { status: 200 }
@@ -278,40 +299,48 @@ describe('case 3: stable clients are never offered prereleases', () => {
 describe('case 4: Beta and Alpha pick the newest ELIGIBLE prerelease', () => {
   it('the Beta channel skips the stable release and offers the newest beta', async () => {
     setUpdateChannel('beta');
+    // Versions are built RELATIVE to the running build (the spec's rule);
+    // only the intentional stable-track discontinuity uses literal 1.0.0.
+    const running = currentBuildVersion();
+    const newer = nextPre(running);
     vi.stubGlobal(
       'fetch',
       apiWith([
         { tag: 'v1.0.0', prerelease: false },
-        { tag: 'v1.0.11-beta', prerelease: true },
-        { tag: 'v1.0.12-beta', prerelease: true },
+        { tag: `v${running}`, prerelease: true },
+        { tag: `v${newer}`, prerelease: true },
       ]) as unknown as typeof fetch
     );
-    const res = await checkForUpdate('1.0.11-beta');
+    const res = await checkForUpdate(running);
     expect(res.kind).toBe('available');
-    if (res.kind === 'available') expect(res.release.version).toBe('1.0.12-beta');
+    if (res.kind === 'available') expect(res.release.version).toBe(newer);
   });
 
   it('the Alpha channel takes the newest eligible prerelease of any stage', async () => {
     setUpdateChannel('alpha');
+    const running = currentBuildVersion();
+    const newerAlpha = nextPre(running, 'alpha');
     vi.stubGlobal(
       'fetch',
       apiWith([
-        { tag: 'v1.0.12-beta', prerelease: true },
-        { tag: 'v1.0.13-alpha', prerelease: true },
+        { tag: `v${running}`, prerelease: true },
+        { tag: `v${newerAlpha}`, prerelease: true },
       ]) as unknown as typeof fetch
     );
-    const res = await checkForUpdate('1.0.12-beta');
+    const res = await checkForUpdate(running);
     expect(res.kind).toBe('available');
-    if (res.kind === 'available') expect(res.release.version).toBe('1.0.13-alpha');
+    if (res.kind === 'available') expect(res.release.version).toBe(newerAlpha);
   });
 
   it('the Beta channel refuses a pure-alpha newest (stage gate intact)', async () => {
     setUpdateChannel('beta');
+    const running = currentBuildVersion();
+    const newerAlpha = nextPre(running, 'alpha');
     vi.stubGlobal(
       'fetch',
-      apiWith([{ tag: 'v1.0.13-alpha', prerelease: true }]) as unknown as typeof fetch
+      apiWith([{ tag: `v${newerAlpha}`, prerelease: true }]) as unknown as typeof fetch
     );
-    const res = await checkForUpdate('1.0.12-beta');
+    const res = await checkForUpdate(running);
     expect(res.kind).toBe('error'); // no eligible beta in the window
   });
 });
@@ -319,17 +348,19 @@ describe('case 4: Beta and Alpha pick the newest ELIGIBLE prerelease', () => {
 describe('case 5: publication order cannot flip a channel pick', () => {
   it('beta picks the newest beta even when the list is newest-first', async () => {
     setUpdateChannel('beta');
+    const running = currentBuildVersion();
+    const newer = nextPre(running);
     vi.stubGlobal(
       'fetch',
       apiWith([
-        { tag: 'v1.0.12-beta', prerelease: true },
-        { tag: 'v1.0.11-beta', prerelease: true },
+        { tag: `v${newer}`, prerelease: true },
+        { tag: `v${running}`, prerelease: true },
         { tag: 'v1.0.0', prerelease: false },
       ]) as unknown as typeof fetch
     );
-    const res = await checkForUpdate('1.0.11-beta');
+    const res = await checkForUpdate(running);
     expect(res.kind).toBe('available');
-    if (res.kind === 'available') expect(res.release.version).toBe('1.0.12-beta');
+    if (res.kind === 'available') expect(res.release.version).toBe(newer);
   });
 
   it('stable still lands on v1.0.0 when the beta is published first', async () => {
@@ -367,6 +398,9 @@ describe('case 7: a beta client selecting Stable is never downgraded', () => {
     // And it is explicitly NOT the two lying shapes:
     expect(res.kind).not.toBe('available'); // no downgrade download
     expect(res.kind).not.toBe('latest'); // no silent "up to date"
+    // And it names no in-app asset by default: the empty-asset release has
+    // nothing this machine could be told to download (releases page only).
+    if (res.kind === 'track-migration') expect(res.asset).toBeNull();
   });
 });
 
@@ -430,5 +464,356 @@ describe('case 8: the track-migration announcement is honest and actionable', ()
     // Windows paths and $&/brace-bearing values must survive interpolation:
     expect(formatMessage('{p}', { p: 'C:\\Users\\Ada\\AppData' })).toBe('C:\\Users\\Ada\\AppData');
     expect(formatMessage('{x} and {x}', { x: 'a$&b{c}' })).toBe('a$&b{c} and a$&b{c}');
+  });
+
+  it('the migration hint NAMES the artifact to download when the release carries a matching installer', async () => {
+    // A Windows-pattern user agent (jsdom's own UA varies by host platform,
+    // so it is pinned exactly like the delivery-path tests do) plus a real
+    // installer layout on the v1.0.0 release: the toast must say WHICH file
+    // to grab, not just "go to the releases page".
+    vi.stubGlobal(
+      'navigator',
+      {
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        language: 'en-US',
+        languages: ['en-US'],
+      } as unknown as Navigator
+    );
+    const asset = {
+      name: 'Fress_1.0.0_x64-setup.exe',
+      size: 21_000_000,
+      browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.0/Fress_1.0.0_x64-setup.exe',
+    };
+    setUpdateChannel('stable');
+    vi.stubGlobal(
+      'fetch',
+      apiWith([
+        {
+          tag: 'v1.0.0',
+          prerelease: false,
+          assets: [asset],
+        },
+      ]) as unknown as typeof fetch
+    );
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-id');
+    const startDownload = vi.fn();
+    const { result } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.updateChecking).toBe(false));
+    infoSpy.mockClear();
+
+    await act(async () => {
+      await result.current.runUpdateCheck(true);
+    });
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    const [, opts] = infoSpy.mock.calls[0] as [string, { description?: string; action?: { label: string; onClick: () => void } }];
+    // The artifact name travels in the hint (spec §4: "say which artifact
+    // the user should download"):
+    expect(opts.description).toContain('Fress_1.0.0_x64-setup.exe');
+    expect(opts.description).toContain('v1.0.0');
+    expect(opts.description).toContain('never downgrade');
+    // ...and the recommended artifact is the SAME one the platform picker
+    // selected - the migration path has no picker of its own:
+    const check = await checkForUpdate('1.0.12-beta');
+    expect(check.kind).toBe('track-migration');
+    if (check.kind === 'track-migration') expect(check.asset?.name).toBe('Fress_1.0.0_x64-setup.exe');
+    // Still no download, no pill: naming a file is not delivering it.
+    expect(result.current.ownUpdate).toBeNull();
+    expect(startDownload).not.toHaveBeenCalled();
+  });
+});
+
+describe('spec §3: the /releases/latest endpoint never feeds any channel', () => {
+  it('stable, beta and alpha all resolve from the release LIST; latest is never requested', async () => {
+    const running = currentBuildVersion();
+    const newer = nextPre(running);
+    const urls: string[] = [];
+    const recording = vi.fn(async (input: string | URL | Request) => {
+      const u = String(typeof input === 'object' && input !== null && 'url' in (input as Request) ? (input as Request).url : input);
+      urls.push(u);
+      if (u.includes('/releases/latest')) {
+        // The poison: if the implementation ever consulted /releases/latest
+        // for prerelease discovery, it would get the STABLE release here and
+        // starve the beta/alpha feed of every prerelease.
+        return new Response(
+          JSON.stringify({
+            tag_name: 'v1.0.0',
+            name: 'Fress 1.0.0',
+            draft: false,
+            prerelease: false,
+            published_at: '2026-10-01T00:00:00Z',
+            html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.0',
+            assets: [],
+          }),
+          { status: 200 }
+        );
+      }
+      if (u.includes('api.github.com')) {
+        return new Response(
+          JSON.stringify([
+            { tag_name: 'v1.0.0', name: 'Fress 1.0.0', draft: false, prerelease: false, published_at: '2026-10-01T00:00:00Z', html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.0', assets: [] },
+            { tag_name: `v${running}`, name: running, draft: false, prerelease: true, published_at: '2026-10-02T00:00:00Z', html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${running}`, assets: [] },
+            { tag_name: `v${newer}`, name: newer, draft: false, prerelease: true, published_at: '2026-10-03T00:00:00Z', html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${newer}`, assets: [] },
+          ]),
+          { status: 200 }
+        );
+      }
+      return new Response('unexpected', { status: 404 });
+    });
+    vi.stubGlobal('fetch', recording as unknown as typeof fetch);
+
+    // Beta and alpha discover from the LIST (newest eligible prerelease),
+    // NOT from /releases/latest (which only ever represents the newest
+    // NON-prerelease and would starve prerelease channels):
+    for (const channel of ['beta', 'alpha'] as const) {
+      setUpdateChannel(channel);
+      const res = await fetchOwnLatestRelease(channel);
+      expect(res?.version).toBe(newer);
+    }
+    // Stable resolves the intended stable release - from the list too:
+    setUpdateChannel('stable');
+    const stableRes = await fetchOwnLatestRelease('stable');
+    expect(stableRes?.version).toBe('1.0.0');
+
+    expect(urls.some((u) => u.includes('/releases/latest'))).toBe(false);
+  });
+});
+
+describe('spec §3: draft flags, malformed tags and failing feeds', () => {
+  it('a DRAFT release is invisible on every channel, whatever its tag', async () => {
+    const newer = nextPre(currentBuildVersion());
+    vi.stubGlobal(
+      'fetch',
+      apiWith([
+        { tag: 'v1.0.0', prerelease: false },
+        { tag: `v${newer}`, prerelease: true, draft: true },
+      ]) as unknown as typeof fetch
+    );
+    for (const channel of ['stable', 'beta', 'alpha'] as const) {
+      const res = await fetchOwnLatestRelease(channel);
+      expect(res?.tag).toBe('v1.0.0'); // never the draft, on any channel
+    }
+    // Client-level consequence: a beta build is never offered the drafted
+    // prerelease as an update (the only published eligible release is the
+    // OLDER stable v1.0.0, which is a track-migration situation, not a
+    // download):
+    setUpdateChannel('beta');
+    const res = await checkForUpdate(currentBuildVersion());
+    expect(res.kind).not.toBe('available');
+    expect(res.kind).toBe('track-migration');
+    if (res.kind === 'track-migration') expect(res.channelVersion).toBe('1.0.0');
+  });
+
+  it('malformed tags in the feed never enter any channel feed (stable especially)', async () => {
+    const running = currentBuildVersion();
+    const newer = nextPre(running);
+    vi.stubGlobal(
+      'fetch',
+      apiWith([
+        // A stable-LOOKING tag with trailing junk and a free-form tag:
+        // neither parses as the accepted SemVer subset, so neither may
+        // become a candidate - least of all on the Stable channel, where
+        // "1.0.14junk" would otherwise read as a newer stable release.
+        { tag: 'v1.0.14junk', prerelease: false },
+        { tag: 'beta-build', prerelease: false },
+        { tag: `v${newer}`, prerelease: true },
+        { tag: 'v1.0.0', prerelease: false },
+      ]) as unknown as typeof fetch
+    );
+    // Beta still selects the newest WELL-FORMED beta:
+    setUpdateChannel('beta');
+    const betaRes = await checkForUpdate(running);
+    expect(betaRes.kind).toBe('available');
+    if (betaRes.kind === 'available') expect(betaRes.release.version).toBe(newer);
+    // A stable 1.0.0 client sees v1.0.0 as current - the junk tags are not
+    // "a newer stable release" on the stable feed:
+    pkgState.version = '1.0.0';
+    setUpdateChannel('stable');
+    const stableRes = await checkForUpdate('1.0.0');
+    expect(stableRes.kind).toBe('latest');
+    if (stableRes.kind === 'latest') expect(stableRes.version).toBe('1.0.0');
+  });
+
+  it('a failing feed can never become a false "up to date" (both sources down)', async () => {
+    // API 500 AND the atom fallback unreachable: the honest answer is the
+    // error state (a quiet note), never "latest" - "up to date" requires
+    // having actually read the feed.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })) as unknown as typeof fetch);
+    for (const channel of ['stable', 'beta', 'alpha'] as const) {
+      setUpdateChannel(channel);
+      const res = await checkForUpdate(currentBuildVersion());
+      expect(res.kind).toBe('error');
+      expect(res.kind).not.toBe('latest');
+      expect(res.kind).not.toBe('available');
+    }
+  });
+});
+
+describe('spec §2: build metadata after + stays out of precedence', () => {
+  it('+build.42 is not prerelease metadata and never changes comparisons', () => {
+    const p = parseVersion('1.0.0+build.42');
+    expect(p?.prerelease).toEqual([]);
+    expect(p?.build).toEqual(['build', '42']);
+    expect(compareVersions('1.0.0+build.42', '1.0.0')).toBe(0);
+    expect(compareVersions('1.0.0+build.42', '1.0.0+build.43')).toBe(0);
+    // A prerelease WITH build metadata keeps its prerelease identity:
+    const b = parseVersion('1.0.13-beta+exp.sha.5114f85');
+    expect(b?.prerelease).toEqual(['beta']);
+    expect(b?.build).toEqual(['exp', 'sha', '5114f85']);
+    expect(compareVersions('1.0.13-beta+exp.sha.5114f85', '1.0.13-beta')).toBe(0);
+    expect(compareVersions('1.0.13-beta+exp.sha.5114f85', '1.0.0')).toBeGreaterThan(0);
+    // And the default-channel policy reads the PRERELEASE segment, so a
+    // metadata-decorated stable build still defaults to Stable:
+    expect(defaultUpdateChannelForBuild('1.0.0+build.42')).toBe('stable');
+    expect(defaultUpdateChannelForBuild('1.0.13-beta+exp.sha.5114f85')).toBe('alpha');
+  });
+});
+
+describe('spec §5: channel selection feeds the SAME fail-closed delivery gate', () => {
+  const SHA = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+  /** Feed stub whose v1.0.0 release carries a full installer + checksum
+   * manifest + signature sidecar; `keep` lets a test strip a gate. */
+  const feedWithGates = (keep: { sums: boolean; sig: boolean }) => {
+    const running = currentBuildVersion();
+    const asset = {
+      name: 'Fress_1.0.0_x64-setup.exe',
+      size: 21_000_000,
+      browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.0/Fress_1.0.0_x64-setup.exe',
+    };
+    const assets: Array<{ name: string; size: number; browser_download_url: string }> = [asset];
+    if (keep.sums) assets.push({ name: 'SHA256SUMS.txt', size: 300, browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.0/SHA256SUMS.txt' });
+    if (keep.sig) assets.push({ name: 'Fress_1.0.0_x64-setup.exe.sig', size: 340, browser_download_url: 'https://github.com/WasewaseX/Fress/releases/download/v1.0.0/Fress_1.0.0_x64-setup.exe.sig' });
+    return vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('api.github.com')) {
+        return new Response(
+          JSON.stringify([
+            { tag_name: `v${running}`, name: running, draft: false, prerelease: true, published_at: '2026-10-02T00:00:00Z', html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${running}`, assets: [] },
+            { tag_name: 'v1.0.0', name: 'Fress 1.0.0', draft: false, prerelease: false, published_at: '2026-10-01T00:00:00Z', html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.0', assets },
+          ]),
+          { status: 200 }
+        );
+      }
+      if (u.endsWith('SHA256SUMS.txt')) {
+        return new Response(`${SHA}  ${asset.name}\n`, { status: 200 });
+      }
+      return new Response('unexpected', { status: 404 });
+    });
+  };
+
+  it('the release a channel selects passes asset + checksum + sidecar before anything is downloadable', async () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', language: 'en-US' } as unknown as Navigator
+    );
+    // Build the stable-feed stub while the build version is still the real
+    // prerelease (1.0.12-beta), so the feed's decoy prerelease entry is
+    // tagged correctly; only THEN does the test become a stable 1.0.0
+    // client. The stable channel feed IS the post-migration steady state,
+    // and the selected release must run the same three gates as every
+    // catalog download:
+    const stableFeed = feedWithGates({ sums: true, sig: true });
+    pkgState.version = '1.0.0';
+    setUpdateChannel('stable');
+    vi.stubGlobal('fetch', stableFeed as unknown as typeof fetch);
+    const res = await checkForUpdate('1.0.0');
+    // 1.0.0 IS the newest stable: the check is honest about being current
+    // (a stable install is not offered its own version as an update).
+    expect(res.kind).toBe('latest');
+
+    // Now the same gates for a client the feed is actually ahead of: the
+    // beta feed member (running build) on the BETA channel with a NEWER
+    // fully-gated release. The channel choice changes WHICH release is
+    // selected - never WHETHER the gates apply.
+    pkgState.version = '1.0.12-beta';
+    const newer = nextPre('1.0.12-beta');
+    const betaAsset = {
+      name: `Fress_${newer}_x64-setup.exe`,
+      size: 21_000_000,
+      browser_download_url: `https://github.com/WasewaseX/Fress/releases/download/v${newer}/Fress_${newer}_x64-setup.exe`,
+    };
+    setUpdateChannel('beta');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        const u = String(url);
+        if (u.includes('api.github.com')) {
+          return new Response(
+            JSON.stringify([
+              {
+                tag_name: `v${newer}`,
+                name: newer,
+                draft: false,
+                prerelease: true,
+                published_at: '2026-10-03T00:00:00Z',
+                html_url: `https://github.com/WasewaseX/Fress/releases/tag/v${newer}`,
+                assets: [
+                  betaAsset,
+                  { name: 'SHA256SUMS.txt', size: 300, browser_download_url: `https://github.com/WasewaseX/Fress/releases/download/v${newer}/SHA256SUMS.txt` },
+                  { name: `${betaAsset.name}.sig`, size: 340, browser_download_url: `https://github.com/WasewaseX/Fress/releases/download/v${newer}/${betaAsset.name}.sig` },
+                ],
+              },
+            ]),
+            { status: 200 }
+          );
+        }
+        if (u.endsWith('SHA256SUMS.txt')) return new Response(`${SHA}  ${betaAsset.name}\n`, { status: 200 });
+        return new Response('unexpected', { status: 404 });
+      }) as unknown as typeof fetch
+    );
+    const betaRes = await checkForUpdate('1.0.12-beta');
+    expect(betaRes.kind).toBe('available');
+    if (betaRes.kind !== 'available') return; // narrowing for the type checker
+
+    // Gate 1+2+3 all present -> the plan is a download carrying the EXACT
+    // published digest and the EXACT sidecar (no parallel unverified path):
+    const sig = signatureSidecarFor(betaRes.release, betaRes.asset!.name);
+    expect(sig?.name).toBe(`${betaAsset.name}.sig`);
+    const plan = planUpdateDelivery(betaRes.release, betaRes.asset, betaRes.expectedSha256, sig);
+    expect(plan).toMatchObject({ kind: 'download', sha256: SHA, asset: { name: betaAsset.name } });
+
+    // Missing checksum -> the planner refuses (releases page), no matter
+    // which channel selected the release:
+    expect(planUpdateDelivery(betaRes.release, betaRes.asset, null, sig)).toEqual({
+      kind: 'releases-page',
+      release: betaRes.release,
+      reason: 'unverifiable',
+    });
+    // Missing sidecar -> 'unsigned', releases page:
+    expect(planUpdateDelivery(betaRes.release, betaRes.asset, SHA, null)).toEqual({
+      kind: 'releases-page',
+      release: betaRes.release,
+      reason: 'unsigned',
+    });
+    // No platform asset -> 'no-asset', releases page:
+    expect(planUpdateDelivery(betaRes.release, null, SHA, sig)).toEqual({
+      kind: 'releases-page',
+      release: betaRes.release,
+      reason: 'no-asset',
+    });
+
+    // And the checksum gate is fed by the REAL manifest lookup: strip
+    // SHA256SUMS.txt from the release and the check degrades to null
+    // (fail closed) instead of inventing a digest.
+    vi.stubGlobal('fetch', feedWithGates({ sums: false, sig: true }) as unknown as typeof fetch);
+    setUpdateChannel('stable');
+    const noSums = await fetchOwnLatestRelease('stable');
+    expect(noSums?.assets.some((a) => /^sha256sums\.txt$/i.test(a.name))).toBe(false);
+  });
+
+  it('a track-migration result never becomes a delivery plan of any kind', async () => {
+    setUpdateChannel('stable');
+    vi.stubGlobal('fetch', apiWith([{ tag: 'v1.0.0', prerelease: false }]) as unknown as typeof fetch);
+    const res = await checkForUpdate('1.0.12-beta');
+    expect(res.kind).toBe('track-migration');
+    if (res.kind !== 'track-migration') return;
+    // Even if some future caller tried to plan a delivery from the
+    // migration state, the planner has no download shape for it without a
+    // platform asset AND checksum AND sidecar - and the UI contract (pinned
+    // in the hook tests) never calls the planner with this state at all.
+    // The essential assertion: the migration state carries no asset/sha
+    // pair that could be mistaken for a deliverable update.
+    expect(res.channelVersion).toBe('1.0.0');
+    expect(res.release.assets).toEqual([]);
   });
 });

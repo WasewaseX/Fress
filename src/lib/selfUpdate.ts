@@ -84,8 +84,15 @@ export type UpdateState =
    * lie ("up to date" for a downgrading channel switch) and 'available'
    * would be a downgrade; this state says plainly that the build is newer
    * than its channel, that no downgrade is offered, and (in the UI) where
-   * to get the channel's version manually. */
-  | { kind: 'track-migration'; channel: UpdateChannel; channelVersion: string; release: OwnRelease }
+   * to get the channel's version manually.
+   *
+   * `asset` is the platform-matched installer the user SHOULD download for
+   * the deliberate manual transition - produced by the SAME pickOwnAsset
+   * gates as an in-app update (it is a recommendation for the releases
+   * page, never a download the app started: track migration has no in-app
+   * delivery path at all). null when nothing on the release matches this
+   * machine; the UI then just links the releases page. */
+  | { kind: 'track-migration'; channel: UpdateChannel; channelVersion: string; release: OwnRelease; asset: { name: string; size: number; url: string } | null }
   | { kind: 'error' };
 
 /** How rough a build the user wants to hear about. */
@@ -826,7 +833,23 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateStat
       // The channel's newest release is OLDER than the running build. Never
       // "latest" (the channel switch is not a no-op) and never a downgrade
       // download: say what the channel offers and that the build is ahead.
-      return { kind: 'track-migration', channel, channelVersion: release.version, release };
+      // The migration message can also name the exact installer to grab,
+      // through the same platform/arch gates as a real update (Tauri host
+      // arch, never the WebView's CPU claim; failure degrades to null and
+      // the UI keeps the plain releases-page link).
+      let arch: string | undefined;
+      try {
+        arch = await getHostArch();
+      } catch {
+        arch = undefined;
+      }
+      return {
+        kind: 'track-migration',
+        channel,
+        channelVersion: release.version,
+        release,
+        asset: pickOwnAsset(release, arch),
+      };
     }
     // The Tauri host arch, not the WebView user agent: macOS WebKit claims
     // "Intel" even on Apple Silicon, which handed Intel dmgs to M-series

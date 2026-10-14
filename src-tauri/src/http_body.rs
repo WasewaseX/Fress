@@ -407,6 +407,43 @@ mod tests {
         assert!(fetched.body.bytes().all(|b| b == b'x'));
     }
 
+    #[tokio::test]
+    async fn text_reads_accept_a_close_delimited_body_at_exactly_the_cap() {
+        // Boundary pin for the text rail's streaming check: a body of
+        // exactly `FETCH_TEXT_BODY_CAP` bytes (close-delimited, so only the
+        // streaming check guards it) completes WITHOUT the truncation flag.
+        // `room` equals the remaining bytes for the last chunk, so the
+        // strict `>` keeps it - the same exactly-at-cap semantics the API
+        // reader pins above.
+        let mut reply = b"HTTP/1.1 200 OK\r\n\r\n".to_vec();
+        reply.extend_from_slice(&[b'x'; 2 * 1024 * 1024]);
+        let (url, _join) = spawn_raw_http(reply);
+        let fetched = read_capped_text(api_get(&url).await)
+            .await
+            .expect("an exactly-cap streamed text body must be accepted");
+        assert!(!fetched.truncated, "exactly-cap is not a truncation");
+        assert_eq!(fetched.body.len() as u64, FETCH_TEXT_BODY_CAP);
+    }
+
+    #[tokio::test]
+    async fn text_reads_accept_an_advertised_body_at_exactly_the_cap() {
+        // Boundary pin for the text rail's advertised-length check: the
+        // strict `>` accepts Content-Length == cap and reads the body
+        // normally (never the empty-body + truncated shape reserved for
+        // bodies OVER the cap).
+        let body = vec![b'm'; 2 * 1024 * 1024];
+        let mut reply =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+        reply.extend_from_slice(&body);
+        let (url, _join) = spawn_raw_http(reply);
+        let fetched = read_capped_text(api_get(&url).await)
+            .await
+            .expect("an exactly-cap advertised text body must be accepted");
+        assert!(!fetched.truncated);
+        assert_eq!(fetched.body.len() as u64, FETCH_TEXT_BODY_CAP);
+        assert_eq!(fetched.content_length, Some(FETCH_TEXT_BODY_CAP));
+    }
+
     #[test]
     fn body_cap_is_the_documented_two_megabytes() {
         // The cap bounds how much of a vendor manifest can ever be buffered.

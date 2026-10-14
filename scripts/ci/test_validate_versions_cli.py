@@ -223,8 +223,12 @@ class TestRealCandidateTree(unittest.TestCase):
         run = _run_validator([])
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn("validate:versions PASSED", run.stdout)
-        # One source row + five agreeing fields.
-        self.assertEqual(run.stdout.count(" ok"), 5, run.stdout)
+        # One source row plus, at minimum, the five agreeing app-side
+        # fields. The enumerated in-repo plugin set adds further "ok" rows
+        # (plugin manifest + its lock record), so the count grows with the
+        # plugin set by design — a regression here is a hard failure above,
+        # and the enumeration itself is pinned by its own tests.
+        self.assertGreaterEqual(run.stdout.count(" ok"), 5, run.stdout)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import { ResolvedDownload } from './releaseFetch';
 import {
   retryGitHubResolve,
   retryFdroidResolve,
+  retryResolveDownloadFor,
 } from './release/resolve';
 import { retryOfficialResolve } from './officialResolvers';
 
@@ -28,12 +29,20 @@ import { retryOfficialResolve } from './officialResolvers';
  *     before re-running the resolver. That eviction is resolver-side code
  *     and belongs with the rest of the cache.
  *
- * The three functions below are that agreement, pinned as a TypeScript
+ * The functions below are that agreement, pinned as a TypeScript
  * interface so both sides can be built and tested against the same shape:
  *
  *   retryGitHubResolve(app, platform)   -> Promise<ResolvedDownload | null>
  *   retryFdroidResolve(pkgId)           -> Promise<ResolvedDownload | null>
  *   retryOfficialResolve(app, platform) -> Promise<ResolvedDownload | null>
+ *   retryResolveDownloadFor(app, platform) -> Promise<ResolvedDownload | null>
+ *
+ * The first three evict exactly ONE source's failed lookup; the composite
+ * fourth (added for the catalog card's quick action) evicts every failed
+ * lookup the full resolution chain may have produced for this app|platform
+ * (GitHub, F-Droid and the vendor manifest) and re-runs the normal
+ * resolution policy - because the card never knows WHICH source failed,
+ * only that the chain returned null.
  *
  * Contract every implementation must keep:
  *   1. Resolve to the SAME result type as the plain resolvers - never
@@ -60,6 +69,10 @@ export interface ResolverRetryApi {
   retryFdroidResolve(pkgId: string): Promise<ResolvedDownload | null>;
   /** Re-run the vendor-manifest (official) lookup for one app|platform. */
   retryOfficialResolve(app: AppItem, platform: Platform): Promise<ResolvedDownload | null>;
+  /** Re-run the WHOLE resolution chain for one app|platform after evicting
+   * every failed source lookup. Card-level retry: the card consumes the
+   * composite result, not a per-source answer. */
+  retryResolveDownloadFor(app: AppItem, platform: Platform): Promise<ResolvedDownload | null>;
 }
 
 export const resolverRetry: ResolverRetryApi = {
@@ -70,4 +83,5 @@ export const resolverRetry: ResolverRetryApi = {
   retryGitHubResolve: (app: AppItem, platform: Platform) => retryGitHubResolve(app, platform),
   retryFdroidResolve: (pkgId: string) => retryFdroidResolve(pkgId),
   retryOfficialResolve: (app: AppItem, platform: Platform) => retryOfficialResolve(app, platform),
+  retryResolveDownloadFor: (app: AppItem, platform: Platform) => retryResolveDownloadFor(app, platform),
 };

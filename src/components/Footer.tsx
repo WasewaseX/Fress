@@ -93,14 +93,26 @@ const UpdateButton: React.FC = () => {
     return <RefreshCw className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />;
   })();
 
-  const tooltip =
-    state.kind === 'track-migration'
-      ? formatMessage(t('update.trackMigration'), {
-          bv: pkg.version,
+  const tooltip = (() => {
+    if (state.kind !== 'track-migration') return t('update.tooltip');
+    // The honest headline plus the actual instruction - naming the exact
+    // installer to grab when the release carries one this machine can run
+    // (the same hint the announced toast shows, so button and toast agree).
+    const channelLabel = t(`header.channel.${state.channel}`);
+    const headline = formatMessage(t('update.trackMigration'), {
+      bv: pkg.version,
+      cv: state.channelVersion,
+      channel: channelLabel,
+    });
+    const hint = state.asset
+      ? formatMessage(t('update.trackMigrationHintAsset'), {
+          channel: channelLabel,
+          asset: state.asset.name,
           cv: state.channelVersion,
-          channel: t(`header.channel.${state.channel}`),
         })
-      : t('update.tooltip');
+      : formatMessage(t('update.trackMigrationHint'), { channel: channelLabel });
+    return `${headline}\n${hint}`;
+  })();
 
   const active = state.kind === 'idle' || state.kind === 'error' || state.kind === 'track-migration';
   const primary = state.kind === 'available';

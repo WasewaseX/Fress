@@ -22,7 +22,8 @@ import {
 import { bestDownloadFor } from '../lib/appDownloads';
 import { useDownloadActions, useAppDownloadStatus } from '../lib/downloads';
 import { openExternal } from '../lib/external';
-import { resolveDownloadFor, guessUserPlatform } from '../lib/releaseFetch';
+import { resolveDownloadFor, guessUserPlatform, peekResolveFailure, ResolvedDownload } from '../lib/releaseFetch';
+import { resolverRetry } from '../lib/resolveRetry';
 import { sourceLinksFor } from '../lib/sourceLinks';
 import { toast } from 'sonner';
 import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
@@ -137,6 +138,61 @@ const AppCardImpl: React.FC<AppCardProps> = ({
     );
   };
 
+  const lastLaunchRef = useRef<{ url: string; at: number } | null>(null);
+  // Same re-entry contract as the detail dialog's launchDownload: a rapid
+  // second click on the SAME target must not enqueue the same file twice.
+  // The resolving guard only covers the lookup; between the native start
+  // being dispatched and its item becoming visible (or while the transfer
+  // sits queued at the concurrency cap), isDownloading is still false, so
+  // this time-window dedupe is the only thing standing between a double
+  // click and two transfers of one file. Different targets stay clickable.
+  const launchDirect = (url: string, name: string, opts?: { expectedSha256?: string; expectedSha512?: string }) => {
+    const now = Date.now();
+    if (lastLaunchRef.current && lastLaunchRef.current.url === url && now - lastLaunchRef.current.at < 1500) return;
+    lastLaunchRef.current = { url, at: now };
+    void startDownload(url, name, opts);
+  };
+
+  /** Starts a RESOLVED artifact. A weak pick is still a real in-app
+   * transfer, but it must never masquerade as a confidently identified
+   * installer: the card says so, exactly like the detail dialog's amber
+   * row and the batch flow's weak-note toast. */
+  const startResolved = (resolved: ResolvedDownload) => {
+    if (resolved.weak) {
+      toast.info(t('card.toast.weakPick'));
+    }
+    launchDirect(resolved.url, resolved.filename, {
+      expectedSha256: resolved.expectedSha256,
+      expectedSha512: resolved.expectedSha512,
+    });
+  };
+
+  /** Curated fallback. Reached ONLY when the resolver honestly ANSWERED
+   * "no automatic installer exists for this platform" - a failed lookup
+   * never gets here (see handleDownload). Page/store/package targets open
+   * externally and say so; they never imply an in-app transfer began. */
+  const openCuratedFallback = (platform: Platform) => {
+    const target = bestDownloadFor(app, platform);
+    if (!target) {
+      toast.info(t('card.toast.options').replace('{name}', app.name));
+      onOpenDetail(app);
+      return;
+    }
+    if (target.kind === 'direct') {
+      launchDirect(target.url, `${app.name} ${target.label}`.trim());
+    } else {
+      // Every other target IS the download page: open it in the
+      // browser and say so. Popping the in-app guide here (the
+      // old behavior) read as "the download button opens a help
+      // window instead of downloading".
+      recordExternalOpen(`${app.name}: ${target.label}`, target.url);
+      toast.info(t('card.toast.officialPage').replace('{name}', app.name), {
+        description: t('card.toast.inBrowser').replace('{label}', target.label),
+      });
+      void openExternal(target.url);
+    }
+  };
+
   const handleDownload = () => {
     // Re-entry guard: every click while a resolve/download is already in
     // flight used to start ANOTHER resolver run (and could enqueue a second
@@ -152,32 +208,56 @@ const AppCardImpl: React.FC<AppCardProps> = ({
         // GitHub pick, then the F-Droid package, then a weak pick.
         const resolved = await resolveDownloadFor(app, platform);
         if (resolved) {
-          void startDownload(resolved.url, resolved.filename, {
-            expectedSha256: resolved.expectedSha256,
-            expectedSha512: resolved.expectedSha512,
+          startResolved(resolved);
+          return;
+        }
+        // null has TWO meanings and the card must never confuse them:
+        //   - an honest "no automatic installer exists" (the resolver
+        //     ANSWERED), where the curated fallback below is the intended,
+        //     honestly-labeled path;
+        //   - a FAILED lookup (rate limit, network, API error - recorded
+        //     by the resolver), where opening an external page would be
+        //     exactly the "Fress opened a browser instead of downloading"
+        //     defect the installed app shipped: GitHub's unauthenticated
+        //     quota (60 req/h per IP, shared with the live-star refresh)
+        //     makes that failure routine, and the webview swallows
+        //     window.open, so the visible result was the OPENER PLUGIN
+        //     launching the system browser on a releases page. A failed
+        //     lookup gets a retryable error instead - NEVER a page.
+        const failure = peekResolveFailure(app, platform);
+        if (failure) {
+          toast.error(t('card.toast.lookupFailed').replace('{name}', app.name), {
+            description: t('card.toast.lookupFailedDesc'),
+            action: {
+              label: t('downloads.retry'),
+              onClick: () => {
+                void (async () => {
+                  setResolving(true);
+                  try {
+                    // The agreed retry seam: evicts exactly this
+                    // app|platform's FAILED lookups (GitHub, F-Droid,
+                    // vendor manifest), then re-runs the normal chain.
+                    const retried = await resolverRetry.retryResolveDownloadFor(app, platform);
+                    if (retried) {
+                      startResolved(retried);
+                      return;
+                    }
+                    // The retry ANSWERED: genuinely no automatic installer
+                    // exists. NOW the curated fallback is legitimate.
+                    openCuratedFallback(platform);
+                  } catch {
+                    // Defensive: the retry contract settles, never rejects.
+                    // Stay on the error state - do not open a page.
+                  } finally {
+                    setResolving(false);
+                  }
+                })();
+              },
+            },
           });
           return;
         }
-        // 3) Curated targets: direct links stream in the app
-        const target = bestDownloadFor(app, platform);
-        if (!target) {
-          toast.info(t('card.toast.options').replace('{name}', app.name));
-          onOpenDetail(app);
-          return;
-        }
-        if (target.kind === 'direct') {
-          void startDownload(target.url, `${app.name} ${target.label}`.trim());
-        } else {
-          // Every other target IS the download page: open it in the
-          // browser and say so. Popping the in-app guide here (the
-          // old behavior) read as "the download button opens a help
-          // window instead of downloading".
-          recordExternalOpen(`${app.name}: ${target.label}`, target.url);
-          toast.info(t('card.toast.officialPage').replace('{name}', app.name), {
-            description: t('card.toast.inBrowser').replace('{label}', target.label),
-          });
-          void openExternal(target.url);
-        }
+        openCuratedFallback(platform);
       } catch {
         // No click may end in silence: worst case, show the in-app guide.
         toast.info(t('card.toast.options').replace('{name}', app.name));

@@ -6,7 +6,8 @@ stable v1.0.0 release DOES NOT EXIST YET (no draft), so the v1.0.0 audit
 section below is an explicit DO-NOT-PASTE-WITH-EXPECTED-VALUES template whose
 cells read VERIFY-ON-PUBLISH until the real publish-run audit fills them.
 Before this file may describe v1.0.0 as published, run the byte-audit
-sequence (docs-bytes-audit.md §5) against the actual published assets and
+sequence (the v1.0.0 audit template below; the repository's own gate for it
+is scripts/ci/verify-release-artifacts.py) against the actual published assets and
 replace every gated cell with the real verdict. Never label a beta artifact
 audit as an audit of v1.0.0.
 ============================================================================ -->
@@ -437,7 +438,7 @@ dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MzhDNjgxMjNGQjYzM0IKUldR
 
 <!-- VERIFY-ON-PUBLISH TEMPLATE — DO NOT PASTE WITH EXPECTED VALUES.
 This section must be filled ONLY from the actual published v1.0.0 bytes,
-after running the audit sequence (work/reports/docs-bytes-audit.md §5):
+after running the audit sequence below (steps 1–5):
 
 1. All 22 assets (or the actual count) downloaded from the release and
    re-hashed against SHA256SUMS.txt — every entry matched, both directions.
@@ -727,8 +728,9 @@ signatures are produced from the key secret alone. Two notes for when that
 plugin gets wired:
 
 - The endpoint points at GitHub's `releases/latest/download/latest.json`
- alias, which resolves only once a STABLE release exists. It now does
- (v1.0.0), but the alias would hand the STABLE manifest to every client
+ alias, which resolves only once a STABLE release exists — v1.0.0 will be
+ the first, once it is published on the stable track — but the alias would
+ hand the STABLE manifest to every client
  including beta builds, so a per-channel manifest (a branch file or a tiny
  redirect service listing the newest release per track) is still the right
  shape before wiring the plugin. The per-release `latest.json`

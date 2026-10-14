@@ -222,6 +222,35 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         failures = self._failures()
         self.assertTrue(any("version field" in f and "!= release version" in f for f in failures), failures)
 
+    def test_missing_latest_json_fails_by_name(self):
+        # The updater manifest is release-blocking (release.yml's REQUIRED
+        # list): without it no in-app verified update is possible. The
+        # audit must fail BY NAME, not merely as a checksum manifest
+        # mismatch or a silent zero-platform manifest.
+        os.remove(os.path.join(self.dir, "latest.json"))
+        failures = self._failures()
+        self.assertTrue(any("latest.json is missing" in f for f in failures), failures)
+
+    def test_manifest_referencing_asset_whose_sidecar_is_absent_fails(self):
+        # A platform entry whose artifact IS on the release but whose .sig
+        # sidecar is not: the manifest would advertise an update the
+        # updater could never verify against published signature bytes.
+        # The checksum manifest is kept consistent (the sidecar's line is
+        # removed together with the file) so this manifest check is what
+        # fires, not a checksum failure.
+        exe = f"Fress_{VERSION}_arm64-setup.exe"
+        sig_name = exe + ".sig"
+        os.remove(os.path.join(self.dir, sig_name))
+        sums = os.path.join(self.dir, "SHA256SUMS.txt")
+        lines = [l for l in open(sums).read().splitlines() if not l.endswith("  " + sig_name)]
+        self.assertEqual(len(lines), len(open(sums).read().splitlines()) - 1, "fixture precondition: sidecar entry removed")
+        open(sums, "w").write("\n".join(lines) + "\n")
+        failures = self._failures()
+        self.assertTrue(
+            any(f"references {sig_name} but that sidecar is not on the release" in f for f in failures),
+            failures,
+        )
+
     def test_manifest_url_for_another_tag_fails(self):
         path = os.path.join(self.dir, "latest.json")
         lj = json.load(open(path))
@@ -391,6 +420,60 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
                 first_combined = combined
             else:
                 self.assertEqual(combined, first_combined, "the CLI verdict must be deterministic across runs")
+
+    def test_cli_exits_zero_on_a_good_release_and_nonzero_after_tampering(self):
+        # The other half of the exit contract the docstring promises ("exit
+        # 0 iff every hard check passes"): the REAL CLI (selftest +
+        # production-key load + audit) must exit 0 and print the pass
+        # marker over a complete, correctly signed set. The production key
+        # is a GitHub secret, so the CLI runs against a disposable
+        # "mini repo": a byte-identical copy of the verifier plus a
+        # synthetic tauri.conf.json whose pubkey field is swapped for the
+        # test key's. Nothing in the real repository is read as a fixture
+        # and nothing is written outside the temp dir; no network is used.
+        mini = self.tmp
+        ci_dir = os.path.join(mini, "scripts", "ci")
+        os.makedirs(ci_dir)
+        shutil.copy2(os.path.join(_HERE, "verify-release-artifacts.py"), os.path.join(ci_dir, "verify-release-artifacts.py"))
+        conf = {"plugins": {"updater": {"pubkey": base64.b64encode(TEST_PUBKEY_DOC.encode()).decode()}}}
+        os.makedirs(os.path.join(mini, "src-tauri"))
+        with open(os.path.join(mini, "src-tauri", "tauri.conf.json"), "w") as f:
+            json.dump(conf, f)
+        script = os.path.join(ci_dir, "verify-release-artifacts.py")
+
+        def run_cli():
+            return subprocess.run(
+                [sys.executable, script, self.dir, TAG, VERSION, REPO],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        good = run_cli()
+        self.assertEqual(
+            good.returncode,
+            0,
+            f"a complete correct set must exit 0, got:\n{good.stdout}{good.stderr}",
+        )
+        self.assertIn("verifier selftest:", good.stdout, "the selftest must run before the audit")
+        self.assertIn("FINAL ARTIFACT AUDIT PASSED", good.stdout)
+        self.assertNotIn("::error::", good.stdout + good.stderr)
+        self.assertNotIn("HARD FAILURES", good.stdout)
+
+        # ...and the SAME CLI over the SAME directory after one corrupted
+        # byte must flip to non-zero: the verdict tracks the bytes on disk,
+        # never a cached or retried state.
+        target = f"Fress_{VERSION}_amd64.AppImage"
+        path = os.path.join(self.dir, target)
+        blob = bytearray(open(path, "rb").read())
+        blob[5] ^= 0x01
+        open(path, "wb").write(bytes(blob))
+        bad = run_cli()
+        self.assertNotEqual(bad.returncode, 0, "tampered bytes must flip the CLI verdict to non-zero")
+        combined = bad.stdout + bad.stderr
+        self.assertIn("::error::final artifact audit FAILED", combined)
+        self.assertIn(target, combined)
+        self.assertNotIn("FINAL ARTIFACT AUDIT PASSED", combined)
 
     def test_orphan_sidecar_fails(self):
         with open(os.path.join(self.dir, "Ghost_1.0.0.AppImage.sig"), "w") as f:

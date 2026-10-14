@@ -136,8 +136,9 @@ export function useSelfUpdate(
     setUpdateChannel(channel);
     // The channel NAME is localized (the raw id is an internal value, not
     // user-facing wording - "stable" showed as-is in Persian before).
+    // formatMessage (split/join) for the interpolation, same as everywhere.
     const label = t(`header.channel.${channel}`);
-    toast.info(t('update.channelSet').replace('{channel}', label), {
+    toast.info(formatMessage(t('update.channelSet'), { channel: label }), {
       description: t('update.channelSetHint'),
     });
   };
@@ -160,7 +161,9 @@ export function useSelfUpdate(
         // downgrade download would be destructive: the toast says plainly
         // that the build is ahead of the channel, that nothing is downgraded,
         // and offers the official releases page (the supported path for
-        // moving to the stable track) as a real action button.
+        // moving to the stable track) as a real action button. When the
+        // release carries an installer this machine can run, the hint NAMES
+        // it - the user should never have to guess which file v1.0.0 means.
         const channelLabel = t(`header.channel.${res.channel}`);
         toast.info(
           formatMessage(t('update.trackMigration'), {
@@ -169,9 +172,15 @@ export function useSelfUpdate(
             channel: channelLabel,
           }),
           {
-            description: formatMessage(t('update.trackMigrationHint'), {
-              channel: channelLabel,
-            }),
+            description: res.asset
+              ? formatMessage(t('update.trackMigrationHintAsset'), {
+                  channel: channelLabel,
+                  asset: res.asset.name,
+                  cv: res.channelVersion,
+                })
+              : formatMessage(t('update.trackMigrationHint'), {
+                  channel: channelLabel,
+                }),
             action: {
               label: t('update.releasesPageAction'),
               onClick: () => void openExternal(res.release.htmlUrl),

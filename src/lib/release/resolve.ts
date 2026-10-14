@@ -4,7 +4,11 @@
 //
 import { AppItem, Platform } from '../../types';
 import { getDownloadOptions } from '../appDownloads';
-import { officialSupported, resolveOfficialDownload } from '../officialResolvers';
+import {
+  officialSupported,
+  resolveOfficialDownload,
+  retryOfficialResolve,
+} from '../officialResolvers';
 import { compileSafePattern } from '../patternSafety';
 import { cleanVersion, effectiveRepo } from './repo';
 import {
@@ -12,6 +16,7 @@ import {
   clearResolveFailure,
   evictFailedLookups,
   fdCache,
+  fdroidFailureKey,
   ghCache,
   cacheSet,
   ghCacheKey,
@@ -286,6 +291,46 @@ export async function retryFdroidResolve(pkgId: string): Promise<ResolvedDownloa
     purgePersistedFailures(`fdroid|${pkg}`);
   }
   return resolveFdroidDownload(pkgId);
+}
+
+/**
+ * Composite retry for the catalog card's quick action.
+ *
+ * resolveDownloadFor deliberately never rejects: every source lookup
+ * settles to null so the card can fall back to curated targets. That
+ * contract is exactly right for the happy path and exactly wrong for an
+ * explicit Retry - the failed memo entries (GitHub/F-Droid 30s, official
+ * 30s) and the 5-minute persisted failures would be handed straight back.
+ *
+ * This is the card-level mirror of the detail dialog's per-source Retry:
+ * evict every FAILED lookup this app|platform may have produced (GitHub,
+ * F-Droid and the vendor manifests), then re-run the normal composite
+ * resolution. Successes are never touched, no unrelated app is evicted,
+ * and the official re-run result is cached so resolveDownloadFor below
+ * reuses it instead of fetching twice.
+ */
+export async function retryResolveDownloadFor(
+  app: AppItem,
+  platform: Platform
+): Promise<ResolvedDownload | null> {
+  const repo = effectiveRepo(app, platform);
+  if (repo) {
+    // Session memo keys start `repo|platform|`; the persisted store
+    // additionally suffixes the host arch, so the same prefix covers it.
+    await evictFailedLookups(ghCache, `${repo}|${platform}|`);
+    purgePersistedFailures(`${repo}|${platform}|`);
+  }
+  if (platform === 'android' && app.fdroidId) {
+    await evictFailedLookups(fdCache, app.fdroidId.trim());
+    purgePersistedFailures(fdroidFailureKey(app.fdroidId));
+  }
+  if (officialSupported(app, platform)) {
+    // retryOfficialResolve evicts exactly the failed official memo entry
+    // (and persisted failure) for this app|platform, then re-runs it. When
+    // the official lookup never failed this is a cheap cache read.
+    await retryOfficialResolve(app, platform);
+  }
+  return resolveDownloadFor(app, platform);
 }
 
 export async function resolveDownloadFor(

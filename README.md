@@ -4,8 +4,10 @@ The current PUBLISHED release is still v1.0.12-beta; the stable v1.0.0 release
 DOES NOT EXIST YET (no draft). Every byte-level claim below is therefore
 anchored to the v1.0.12-beta audit and carries an explicit VERIFY-ON-PUBLISH
 gate: before this file may describe v1.0.0 as published, re-run the byte audit
-(docs-bytes-audit.md §5 sequence) against the actual published v1.0.0 assets
-and swap the anchors named in the gates. Never state a stable release is
+(the SHA-256 + minisign + manifest sequence spelled out in the v1.0.0 audit
+template in [CODE_SIGNING.md](CODE_SIGNING.md); the repository's own gate for
+it is scripts/ci/verify-release-artifacts.py) against the actual published
+v1.0.0 assets and swap the anchors named in the gates. Never state a stable release is
 published while it remains a draft.
 ============================================================================ -->
 
@@ -31,7 +33,7 @@ accordingly. Confirm the badge URLs resolve once v1.0.0 is published. -->
   installers and the three Linux bundles), and latest.json is expected to carry
   the same eight windows-*/linux-* platform entries and no darwin/android
   entries. Do not publish this paragraph until the published bytes agree. -->
-  Today the Windows setup installers (the two `*-setup.exe` files) and the Linux bundles carry updater signatures, so those are the artifacts delivered in-app; the Windows MSI, the portable zips, the macOS dmgs and the Android APKs do not, so for those Fress routes you to the releases page. A stable build like this one is only ever offered releases from the stable track; it is never pointed at a newer-numbered beta. [CODE_SIGNING.md](CODE_SIGNING.md) records which artifacts are signed, which platforms get cryptographically verified in-app updates, and how to verify a download manually.
+  On every release so far — through `v1.0.12-beta`, the newest published release at this writing — the Windows setup installers (the two `*-setup.exe` files) and the Linux bundles carry updater signatures, so those are the artifacts delivered in-app; the Windows MSI, the portable zips, the macOS dmgs and the Android APKs do not, so for those Fress routes you to the releases page. By default a stable build like this one is offered only releases from the stable track — never a newer-numbered beta — and the updater never moves you down a track in the background: if you explicitly pick a channel whose newest release is older than your build, the app says so and links to the releases page instead of offering a downgrade. [CODE_SIGNING.md](CODE_SIGNING.md) records which artifacts are signed, which platforms get cryptographically verified in-app updates, and how to verify a download manually.
 - **Download manager built in.** Downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification, saved to the folder you choose (your system Downloads folder by default).
 - **Device-aware downloads.** Windows, macOS, Linux, and Android (GitHub APK, F-Droid, Google Play): Fress picks the right file for your architecture.
 - **Light and dark themes.** The light mode uses warm paper tones, the dark mode is easy on the eyes, and both follow your system preference until you pick one yourself.
@@ -85,7 +87,7 @@ count, name, or signature row, fix the table AND this paragraph before
 merging. The previous verification anchor was v1.0.12-beta (published
 2026-10-13), whose bytes produced exactly this shape. -->
 
-The shapes below were re-verified file-by-file against release [`v1.0.12-beta`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.12-beta) (published 2026-10-13, 22 files: the 15 installers/archives below, their 5 minisign `.sig` sidecars, plus `SHA256SUMS.txt` and the updater manifest `latest.json`). <!-- VERIFY-ON-PUBLISH: re-run the byte audit on the actual published v1.0.0 assets (docs-bytes-audit.md §5 sequence) and re-anchor this sentence to the v1.0.0 tag + publish date if the shape matches; if any count, name, or signature row differs, fix the table AND this paragraph instead of trusting the beta anchor. -->
+The shapes below were re-verified file-by-file against release [`v1.0.12-beta`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.12-beta) (published 2026-10-13, 22 files: the 15 installers/archives below, their 5 minisign `.sig` sidecars, plus `SHA256SUMS.txt` and the updater manifest `latest.json`). <!-- VERIFY-ON-PUBLISH: re-run the byte audit on the actual published v1.0.0 assets (the audit sequence in CODE_SIGNING.md's v1.0.0 template) and re-anchor this sentence to the v1.0.0 tag + publish date if the shape matches; if any count, name, or signature row differs, fix the table AND this paragraph instead of trusting the beta anchor. -->
 
 | Platform | File | Updater signature | In-app update |
 | --- | --- | --- | --- |
@@ -131,7 +133,7 @@ this caveat until those rows have real PASS entries. Note also that
 the stable track will downgrade you, and the move is a deliberate manual
 install. -->
 
-Stable (`1.0.0`) and beta (`1.0.13-beta` and onward) are separate tracks; the app's updater will not move you between them. To switch deliberately:
+Stable (`1.0.0`) and beta (`1.0.13-beta` and onward) are separate tracks; the app's updater never moves you between them automatically — a stable build defaults to the Stable channel, your own channel choice in the app's More menu is always respected, and the updater never offers a downgrade (if your build is newer than the channel's newest release, it says so and links here instead). To switch deliberately:
 
 - **Windows (NSIS installer):** run the `Fress_1.0.0_x64-setup.exe` (or `_arm64-`) installer over your existing install. Your settings are kept in the app's WebView profile, which the installer update does not delete — the packaged test that proves it end to end (W-1 in the testing docs) has not run yet. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST — no packaged-os install row has run yet.*</sub>
 - **Windows (MSI):** two hypotheses are on the record and only a real install test (W-3 in the testing docs) decides: the toolchain evidence (Tauri's `allowDowngrades` defaults to enabled and the beta MSI carries the matching bytes) predicts the v1.0.0 MSI installs straight over the beta MSI as a normal major upgrade, while the release notes' current wording says the beta must be uninstalled first. Either way your WebView profile is not touched by the install itself. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
@@ -182,7 +184,7 @@ no-signing-certificate path. If a certificate was configured for v1.0.0,
 REWRITE this whole subsection instead of trusting the draft. -->
 
 - Every release ships a `SHA256SUMS.txt` covering every other asset on the release, and the app itself verifies its own updates against that file before offering the installer. Verify manually with `sha256sum -c SHA256SUMS.txt` after downloading. A checksum match is an integrity guarantee — it is not publisher identity.
-- The Windows setup installers and Linux bundles additionally carry a minisign updater signature produced by CI; the signatures on the current release have been verified byte-for-byte against the published public key (see the release signature audit in [CODE_SIGNING.md](CODE_SIGNING.md)). For its own in-app updates, Fress checks the downloaded file against that signature — through the key embedded in the app — before it reports the update as verified, and an update without a verifiable signature is routed to the releases page instead. A checksum proves integrity with the release manifest, the signature proves who authorized the artifact — they are separate guarantees, and neither is an Authenticode publisher identity.
+- The Windows setup installers and Linux bundles additionally carry a minisign updater signature produced by CI; the signatures on the current published release (`v1.0.12-beta`) have been verified byte-for-byte against the published public key (see the release signature audit in [CODE_SIGNING.md](CODE_SIGNING.md)). For its own in-app updates, Fress checks the downloaded file against that signature — through the key embedded in the app — before it reports the update as verified, and an update without a verifiable signature is routed to the releases page instead. A checksum proves integrity with the release manifest, the signature proves who authorized the artifact — they are separate guarantees, and neither is an Authenticode publisher identity.
 <!-- VERIFY-ON-PUBLISH: the signature-verification claim above must be
 re-proven on the actual published v1.0.0 bytes (scripts/ci/verify-release-artifacts.py
 against the downloaded assets) before merging. The v1.0.12-beta bytes passed

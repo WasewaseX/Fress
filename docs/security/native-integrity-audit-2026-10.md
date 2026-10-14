@@ -284,8 +284,9 @@ rustfmt), installed locally and used for every command.
 | `cargo fmt --all -- --check` (via `--manifest-path src-tauri/Cargo.toml`, same as CI) | **PASS** locally, exit 0, re-run on the reconciled tree after every edit (pinned toolchain 1.98.1: rustfmt 1.9.0, clippy 0.1.98). |
 | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | **NOT RUN as the full workspace locally — system libs unavailable** (no sudo, no webkit2gtk-4.1/gtk3; the Tauri crate cannot compile). **Honest CI history: the round-2 head `6ef838b` FAILED this exact job** (linux, `-D warnings`): one `unused_mut` (`download_finalize.rs:740`, the A-4 fix's file binding) and two `clippy::err_expect` in the new drift tests — none semantic. Fixed in `9c8b2f4`; the local Tauri-free harness (the three production modules, unmodified) passes `cargo clippy --all-targets -- -D warnings` on the reconciled tree. Full-workspace clippy remains CI-proven; run ID for the final head is cited in the PR report comment. |
 | `cargo test --workspace --locked` | **NOT RUN as the full workspace locally** (same system-lib constraint; CI runs it, without `--locked`, on linux+windows+macos — lockfile enforcement lives in release.yml/security.yml). **Run locally via the Tauri-free harness**: the real `download_finalize.rs` (94 tests), `network_policy.rs`+`tests.rs` (52), `http_body.rs` (12) compiled unmodified into a scratch crate (symlinked module layout, lock-exact dependency versions, reqwest built with the production feature set `rustls-tls+stream+http2` and no gzip/brotli/deflate) — **158/158 pass** on the reconciled tree (log preserved). `lib.rs`, `artifact_open.rs`, `download_integration.rs` tests are CI-proven; the two clippy errors CI found there are fixed and the patterns re-scanned (no remaining `.err().expect`). |
-| `cargo audit --file src-tauri/Cargo.lock` | **Re-run on the reconciled candidate's lockfile with a fresh advisory DB (cloned 2026-10-14, 1294 advisory files) plus a full yanked-pins sweep of all 526 registry versions (crates.io API, 0 lookup errors). `cargo-audit` itself could not compile in this sandbox (the toolchain install was killed twice by the environment mid-build) — the scan reproduces cargo-audit's data source and matching semantics from the same DB; this is stated rather than claimed as a tool run. Results, reported separately as the mandate requires: (1) VULNERABILITY-class, version-matched — 5 findings on 2 crates: rustls 0.23.45 ×4 (RUSTSEC-2026-0346 Debug-impl secret exposure, -0347 ECH buffered data after rejection, -0348 brotli cert-decompression pre-auth allocation, -0349 unauthenticated ServerHello downgrade to classical KEX; all dated 2026-10-14, all patched in ≥ 0.23.46 — newer than round 2's clean scan; the lock's rustls carries NO brotli/zlib/ECH feature deps, so -0346/-0347/-0348's flagged code paths are feature-gated OFF in this build, while -0349 applies to the protocol proper and the production stack IS reachable: reqwest 0.12.28 → hyper-rustls → rustls 0.23.45); hashbrown 0.12.3 (RUSTSEC-2024-0402 borsh non-canonical serialization; arrives via indexmap 1.9.3; the affected code path is borsh HashMap encoding/decoding, which nothing in the tree uses; the co-pinned hashbrown 0.17.1 is patched). (2) YANKED — exactly 1: yoke-derive 0.8.3 (no advisory). (3) ADVISORY-GRADE/informational — 41 matches (17 unmaintained incl. proc-macro-error, the unic-* set via urlpattern, dirs 5.0.1, the atk/gtk/gdkx11 0.18 stack, ring 0.17.14; 24 unsound incl. glib 0.18.5, tokio, smallvec, crossbeam-*, socket2, bumpalo, tracing, anyhow) — a larger set than round 2's "8" because the DB grew; all 8 previously recorded are contained in it. (4) Ownership: none of these findings is introduced by this PR's diff (the lockfile delta is the version bump + the in-repo path crate); the version bumps for rustls ≥ 0.23.46, yoke ≥ 0.8.4 and (optionally) indexmap/hashbrown belong to the dependency-owning lane (Agent 2/3) as an explicit, owner-routed follow-up. A zero-vulnerability claim is NOT made. |
-| Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **Exactly two intentional changes, zero third-party drift:** (1) `fress` package version `1.0.12-beta → 1.0.0` (PR #80's release candidate bump); (2) the in-repo path dependency `tauri-plugin-fress-open` (PR #74's Android open boundary; adds only packages already present in the lock). The plugin crate's version — the one `validate:versions` defect recorded earlier on this integration — is **fixed on the current candidate** (Agent 3's `9133655`/`639ecfb`); the gate now reports **PASSED — 8 authoritative fields agree on 1.0.0** (re-run locally on the reconciled tree). No new external dependency, no git source, no upgrade. |
+| `cargo audit --file src-tauri/Cargo.lock` (cargo-audit 0.22.2, RustSec DB fetched live 2026-10-14, 528 deps) | **First live run against the reconciled candidate: FAIL — 4 vulnerabilities, all `rustls 0.23.45`** (transitive of reqwest, no in-repo code path needed): RUSTSEC-2026-0346 (Debug impls expose TLS secrets), -0347 (ECH-rejection buffered data sent to outer server), -0348 (Brotli cert decompression ≤1 GiB pre-auth alloc), -0349 (unauthenticated ServerHello downgrade) — all patched in ≥0.23.46. **Fix applied on main via PR #88 (commit `84eecc9`, merged `0db3d09`):** compatible-range lockfile bump `rustls 0.23.45 → 0.23.46` (crates.io source unchanged; the yanked `yoke-derive 0.8.3 → 0.8.4` rides along in-range). **Re-run on main's tree: PASS — 0 vulnerabilities, exit 0.** 7 advisory-grade warnings remain, all transitive, none counted as vulnerabilities: RUSTSEC-2024-0370 (`proc-macro-error` unmaintained), RUSTSEC-2025-0081/-0075/-0080/-0100/-0098 (`unic-*` unmaintained, via `urlpattern`), RUSTSEC-2024-0429 (`glib` unsound iterator impls, GTK Linux stack). A zero-vulnerability scanner result is NOT proof of zero dependency risk — the unmaintained/unsound advisories are accepted, documented residuals, and the scanner's advisory lag is exactly why the earlier "0 vulnerabilities expected to persist" phrasing was replaced by this live-verified record. Note: security.yml's audit job is advisory-only (`continue-on-error`) and does not run on PRs. |
+| Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **Exactly three intentional changes, zero unexplained third-party drift:** (1) `fress` package version `1.0.12-beta → 1.0.0` (PR #80's release candidate bump); (2) the in-repo path dependency `tauri-plugin-fress-open` (PR #74's Android open boundary; adds only packages already present in the lock); (3) the advisory bump `rustls 0.23.46` + `yoke-derive 0.8.4` (row above; the only third-party version changes, both compatible-range, registry source unchanged). The plugin crate's version — the one `validate:versions` defect recorded earlier on this integration — is **fixed on the current candidate** (Agent 3's `9133655`/`639ecfb`); the gate now reports **PASSED — 8 authoritative fields agree on 1.0.0** (re-run locally on the reconciled tree). No new external dependency, no git source, no upgrade outside the compatible range. |
+| Independent cross-check of the same DB (this audit's second pass) | A from-scratch scanner reproducing cargo-audit's data source and matching semantics (RustSec DB cloned 2026-10-14, 1294 files, `unaffected`/`patched` ranges honored) independently reproduces the live result: the PRE-fix lock yields exactly the same 4 rustls findings and nothing else; the POST-fix tree yields 0. Honesty note: the scanner's FIRST draft flagged hashbrown 0.12.3 because it ignored the advisory's explicit `unaffected: < 0.15.0` range — corrected, the finding disappears; the false positive is recorded because the kill-test discipline applies to audit tooling too. The cross-check also adds a full yanked-pins sweep (all 526 registry versions via the crates.io API, 0 lookup errors): the pre-fix lock has exactly 1 yanked pin (yoke-derive 0.8.3), the final tree has 0. Graph reachability notes: the lock's rustls carries NO brotli/zlib/ECH feature dependencies, so the paths flagged by -0346/-0347/-0348 are feature-gated OFF in this build; -0349 (ServerHello downgrade) applies to the protocol proper, and the production stack (reqwest 0.12.28 → hyper-rustls → rustls) IS reachable — the bump, not the feature gate, is the fix. The scanner's informational-class count is broader than the tool's 7 warnings (it matches unsound/unmaintained advisories without default tool filtering); the live tool's count is the authoritative one. (Environment note: the final-integration audit sandbox DID build the real cargo-audit 0.22.2 and ran it live — exit 0 on the final tree — so the tool-run claim in the Conclusion's dependency bullet and this row's from-scratch reproduction are two independent environments reaching the same verdict.) |
 | Final-diff scan (secrets / debug leftovers / unsafe / spawn / dep-source changes) | **0 hits** across the audit-owned src-tauri diff (patterns: token prefixes, private keys, `dbg!`/`todo!`/`unimplemented!`, `println!`/`eprintln!` — zero logging statements exist in src-tauri at all — `unsafe`, `Command::new` outside the launcher). Zero Chinese/CJK-script content: the repo's `check-no-chinese` gate passes on the reconciled tree, and the last kana warning class (the `sanitize_filename` fixture) is closed by the candidate's merged `7c3f8b6` fixture (Unicode-escapes, no CJK glyph in committed source). |
 
 ## 8. Defects and fixes (PR #81's two verified + this round's)
@@ -305,6 +306,9 @@ rustfmt), installed locally and used for every command.
 | GAP-2 (this round) | INFO (test gap) | verifier | `.sig` sidecar refusal via registry scope unpinned | registry-scope refusal test-pinned | `staging_part_files_are_never_verification_candidates` extended |
 | N-7/N-8 (this round) | INFO (test gaps) | admission tests | repo-pin normalization cases and unicode-IDN case unpinned | normalization matrix (dot-segments, `%2F`, `//`, case, query control) through the extracted production gate; Cyrillic-homoglyph case | `refuses_github_paths_that_normalize_outside_the_repository`, extended `ambiguous_host_forms_are_handled_predictably` |
 | DOC-1 (this round) | DOC | `lib.rs` comment | key id cited as "published in CODE_SIGNING.md" — it is published in `docs/release-readiness.md:168` | comment corrected | — |
+| DOC-2 (round 3, Agent 4 final integration) | DOC | `validate_resume_content_range` docstring | claimed "the .part survives so a corrected server can still recover" — stale: every validation failure maps to `DiscardAndFail`, which deletes the staging files | docstring rewritten to the actual discard semantics | — |
+| R-5 (round 3, Agent 4 final integration) | INFO (test gaps) | `http_body.rs` text rail; `download_finalize.rs` e2e | the text rail had no exactly-at-cap ACCEPTANCE pins (invariant 5 covers BOTH rails; only the 3 MiB truncate shape was pinned), and the mismatched-start hostile resume had no filesystem-side-effect proof (only the u64::MAX and 416 shapes did) | two exactly-at-cap acceptance pins (`text_reads_accept_a_close_delimited_body_at_exactly_the_cap`, `text_reads_accept_an_advertised_body_at_exactly_the_cap`) and `a_mismatched_start_content_range_discards_the_staged_bytes` (asserts `.part` + `.meta` gone, no destination, no registry record) | harness 161/161 on the final tree; kill-test: flipping either strict `>` to `>=` fails the cap pins; deleting the DiscardAndFail `discard_staging` call fails the e2e on `part.exists()` |
+| DEP-1 (this round, live audit) | MEDIUM (4 TLS advisories) | `Cargo.lock` (rustls 0.23.45, transitive of reqwest) | RUSTSEC-2026-0346/-0347/-0348/-0349: pre-auth memory amplification, TLS-secret Debug exposure, ServerHello downgrade, ECH-rejection data leak — present on the reconciled candidate, found by the live RustSec scan | compatible-range bump to rustls 0.23.46 (+ yoke-derive 0.8.4 for the yank); crates.io source unchanged | `cargo audit` exit 0 re-run on the final tree; lockfile diff = 2 packages, 4 lines |
 
 Adversarial critique loop (two independent reviewers over the final diff)
 verified: the PathPin admits no bypass string the allowlist doesn't already
@@ -337,6 +341,13 @@ guard restored, and the full suite re-run:
   the "the poisoned .part must be discarded" assertion (the pure arithmetic
   test correctly keeps passing — it pins a different property). Guard
   restored → 158/158 green.
+- **Round 3 additions share the A-1 discard path**: the new
+  `a_mismatched_start_content_range_discards_the_staged_bytes` drives the
+  SAME `DiscardAndFail → discard_staging` call site through a THIRD hostile
+  shape (mismatched start), so the executed A-1 kill-test (discard deleted →
+  e2e fails on the filesystem assertion) covers it by construction; the
+  exactly-at-cap pins fail on any `>` → `>=` boundary flip in either the
+  advertised-length or the streaming check.
 - Properties that are implementation- rather than behavior-observable (A-2's
   physically-unreachable counter overflow; A-3's never-transiently-over-cap
   buffer; OBS-3's `u32::try_from` and OBS-4's launch-time re-check, whose
@@ -368,21 +379,23 @@ claimed as run:
 
 ## 10. Conclusion
 
-**PASS with one owner-routed dependency follow-up — PR #81's fixes verified
+**PASS with the dependency follow-up RESOLVED — PR #81's fixes verified
 real; PR #84's round-2 fixes verified real and retained; 2 release-adjacent
 defects found and fixed this round (A-1, N-3) plus hardening (OBS-3/OBS-4,
-A-2/A-3/A-4) and 7 test-gap fills; the round-2 CI-clippy regression fixed;
+A-2/A-3/A-4) and 9 test-gap fills; the round-2 CI-clippy regression fixed;
 one regression fixture strengthened after its kill-test found it could pass
-without its guard; no native security/correctness defect remains in the
-audit-owned code; the dependency scan's version-matched findings (rustls
-2026-10-14 advisories, yoke yank) are explicitly routed to the
-dependency-owning lane and are not introduced by this diff.**
+without its guard; round 3 (final integration, Agent 4) added the text-rail
+exactly-at-cap pins and the mismatched-start discard proof (R-5) and
+corrected the stale resume docstring (DOC-2); no native security/correctness
+defect remains in the audit-owned code; the dependency scan's findings were
+resolved the same day (PR #88: rustls 0.23.46, yoke-derive 0.8.4) and the
+final tree re-audits clean.**
 
 - The response-reading and arithmetic defects are fixed WITH regressions, and
   the size-cap/timeout rails are proven independently enforced by loopback
-  tests that run against the real readers (158/158 locally executed on the
-  reconciled tree; per-module: download_finalize 94, network_policy 52,
-  http_body 12).
+  tests that run against the real readers (161/161 locally executed on the
+  final tree; per-module: download_finalize 95, network_policy 52,
+  http_body 14).
 - The trust boundaries hold end to end: registry → verification → launch
   (now re-checked at the launch instant), admission → per-hop rules →
   public-only DNS (now path-pinned for the self-update feed), embedded-key
@@ -390,20 +403,21 @@ dependency-owning lane and are not introduced by this diff.**
 - Capabilities are minimal and match the documented matrix; no shell surface;
   three accepted residuals documented (§5) with no change to the intentional
   trust policy.
-- Dependency audit: re-run on the reconciled candidate's lockfile — **NOT a
-  zero-vulnerability result**: 5 version-matched vulnerability-class findings
-  (rustls 0.23.45 ×4 — new advisories dated the day of this audit, patched in
-  0.23.46; hashbrown 0.12.3 via indexmap, borsh path unused here), 1 yanked
-  pin (yoke-derive 0.8.3), 41 advisory-grade transitive warnings (full
-  breakdown and reachability notes in §7). None is introduced by this PR's
-  diff; the version bumps are routed to the dependency-owning lane as an
-  explicit follow-up with owners. The final diff carries no
+- Dependency audit: final tree re-audited with the real tool — **exit 0, 0
+  vulnerabilities** (rustls 0.23.46 + yoke-derive 0.8.4 landed via PR #88 the
+  same day the advisories published); 7 advisory-grade transitive warnings,
+  classified (§7); the hashbrown-via-indexmap pin remains optional hygiene
+  (borsh path unused). The final diff carries no
   secrets/debug/unsafe/spawn changes and the zero-CJK gate passes with zero
   warnings.
-- Reconciliation: this branch now stacks on `integrate/stable-candidate`
-  (PR #85) and carries ALL of PR #81; no #85 change is overwritten and no
-  competing release branch exists (the retargeted PR #84 is the single
-  native-integrity delta on the candidate).
+- Reconciliation: the round's integration is complete — PR #85 (the
+  integrated candidate, merged `0767082`), PR #84 (this audit, merged
+  `80250f1`), PR #88 (the dependency fix, merged `0db3d09`), the no-Chinese
+  round (PR #79, merged `550c030`) and the per-workstream integration merges
+  (#81 at `7e029c9`, #82 at `2bd125e`) are all on main; the final-integration
+  PR adds the last uncovered work (Agent 1's #86 frontend fix and the round-3
+  R-5/DOC-2 fills). No #85 change was overwritten and no competing release
+  branch exists.
 - Version coherence: `validate:versions` PASSES on the reconciled tree (8
   authoritative fields agree on 1.0.0, including the in-repo plugin crate
   after Agent 3's fix on the candidate). The final diff carries no

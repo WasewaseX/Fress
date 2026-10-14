@@ -18,10 +18,15 @@
  *   5 -> test 5    6 -> test 6    7 -> test 7b    8 -> tests 10b, 8b, 8c, 8d
  *   9 -> test 9b  10 -> test 10  11 -> tests 7, 13b  12 -> tests 8, 9
  *  13 -> tests 11, 12, 12c, 12d  14 -> test 9 (12b proves kana warning routing)
+ *
+ * Critique-round additions (Agent 2 audit wave 2): 12c-12g prove Korean
+ * script is never classified as Chinese; 15/15b/16/16b prove byte-level
+ * parser correctness; 17/17b/17c/17d prove determinism, safe --out
+ * behavior, strict flag validation and honest history reporting.
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -67,7 +72,7 @@ function commitAll(root: string): void {
 
 interface Report {
   summary: { total_hits: number; warnings_count: number; result: string; exit_code: number };
-  hits: Array<{ kind: string; path: string; line: number | null; col: number | null; codepoint: string | null; category: string; family: string; context_escaped: string; owner_action: string; role_hint?: string }>;
+  hits: Array<{ kind: string; path: string; line: number | null; col: number | null; codepoint: string | null; category: string; family: string; context_escaped: string; owner_action: string; role_hint?: string; source?: string; severity?: string }>;
   warnings: Array<{ path: string; codepoint: string | null; category: string }>;
   scope: Record<string, number | null>;
   commit: string | null;
@@ -330,6 +335,89 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(rep.summary.total_hits).toBe(0);
     expect(rep.summary.warnings_count).toBeGreaterThan(0);
     expect(rep.warnings[0].category).toContain('Kana');
+  });
+
+  // ---------------------------------------------------------------------
+  // Critique-round regressions (Agent 2 audit, wave 2): Korean script must
+  // NEVER be classified as blocking Chinese content - "Hangul" literally
+  // starts with the letters "Han", which the first classifier implementation
+  // exploited as a false positive. Every fixture below is code-point-built.
+  // ---------------------------------------------------------------------
+
+  it('12c. Hangul syllables (Korean) are exit-neutral warnings, never blocking Chinese hits', () => {
+    const root = makeRepo();
+    // U+C5EC U+BCF4 U+C138 U+C694 - a Korean word, built from code points.
+    const HANGUL_WORD = String.fromCodePoint(0xc5ec, 0xbcf4, 0xc138, 0xc694);
+    writeFileSync(join(root, 'korean.txt'), `greeting: ${HANGUL_WORD}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(0); // Korean script alone must not fail the gate
+    const rep = r.report();
+    expect(rep.summary.total_hits).toBe(0);
+    expect(rep.summary.warnings_count).toBe(4);
+    for (const w of rep.warnings) {
+      expect(w.category).toContain('Hangul');
+      expect(w.category).toContain('Korean');
+    }
+  });
+
+  it('12d. Hangul compatibility jamo (U+3130-318F) are warnings, not Chinese hits', () => {
+    const root = makeRepo();
+    const JAMO = String.fromCodePoint(0x3131, 0x3134, 0x3137);
+    writeFileSync(join(root, 'jamo.txt'), `jamo: ${JAMO}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(0);
+    const rep = r.report();
+    expect(rep.summary.total_hits).toBe(0);
+    expect(rep.summary.warnings_count).toBe(3);
+    expect(rep.warnings[0].category).toContain('Hangul compatibility jamo');
+  });
+
+  it('12e. halfwidth Hangul (U+FFA0-FFDC) is a declared warning, not invisible', () => {
+    const root = makeRepo();
+    const HALF_HANGUL = String.fromCodePoint(0xffa1, 0xffa2, 0xffa3);
+    writeFileSync(join(root, 'halfwidth.txt'), `half: ${HALF_HANGUL}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(0);
+    const rep = r.report();
+    expect(rep.summary.total_hits).toBe(0);
+    expect(rep.summary.warnings_count).toBe(3);
+    expect(rep.warnings[0].category).toContain('Halfwidth Hangul');
+  });
+
+  it('12f. halfwidth kana (U+FF65-FF9F) is a warning; halfwidth ideographic punctuation blocks', () => {
+    const root = makeRepo();
+    const HALF_KANA = String.fromCodePoint(0xff71, 0xff72); // halfwidth katakana
+    const HALF_PUNCT = String.fromCodePoint(0xff61); // halfwidth ideographic full stop
+    const rootA = makeRepo();
+    writeFileSync(join(rootA, 'half-kana.txt'), `x: ${HALF_KANA}\n`);
+    commitAll(rootA);
+    const rA = runChecker(rootA);
+    expect(rA.status).toBe(0);
+    expect(rA.report().summary.warnings_count).toBe(2);
+    const rootB = makeRepo();
+    writeFileSync(join(rootB, 'half-punct.txt'), `y: ${HALF_PUNCT}\n`);
+    commitAll(rootB);
+    const rB = runChecker(rootB);
+    expect(rB.status).toBe(1); // CJK-language punctuation remains blocking
+    const repB = rB.report();
+    expect(repB.hits).toHaveLength(1);
+    expect(repB.hits[0].codepoint).toBe(`U+${0xff61.toString(16).toUpperCase()}`);
+  });
+
+  it('12g. mixed Han + Hangul + kana: only the Han code points block', () => {
+    const root = makeRepo();
+    const HANGUL_WORD = String.fromCodePoint(0xc5ec, 0xbcf4);
+    writeFileSync(join(root, 'mixed.txt'), `note: ${HANChar}${HANChar2} ${HANGUL_WORD} ${KANA_A}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1); // the two Han code points block
+    const rep = r.report();
+    expect(rep.summary.total_hits).toBe(2);
+    expect(rep.hits.every((h) => h.family === 'Chinese script (Han)')).toBe(true);
+    expect(rep.summary.warnings_count).toBe(3); // 2 Hangul + 1 kana, exit-neutral
   });
 
   // ---------------------------------------------------------------------
@@ -596,5 +684,136 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     const rep = r.report();
     expect(rep.hits.filter((h) => h.path === 'app-han.jpg').length).toBe(3);
     expect(rep.hits.some((h) => h.path === 'app-noise.jpg')).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------
+  // Critique-round tooling regressions (Agent 2 audit, wave 2): byte-level
+  // parser correctness, report determinism and honest CLI validation.
+  // ---------------------------------------------------------------------
+
+  it('15. JPEG FF fill padding before COM no longer desyncs the segment walk', () => {
+    const root = makeRepo();
+    const filler = Buffer.alloc(8, 0xff); // legal padding bytes before the marker
+    const com = Buffer.concat([Buffer.from(`note ${HANChar}${HANChar}${HANChar}`, 'utf8')]);
+    const jpeg = Buffer.concat([
+      Buffer.from([0xff, 0xd8]),
+      filler,
+      Buffer.from([0xff, 0xfe]),
+      (() => { const l = Buffer.alloc(2); l.writeUInt16BE(com.length + 2); return l; })(),
+      com,
+      Buffer.from([0xff, 0xd9]),
+    ]);
+    writeFileSync(join(root, 'padded.jpg'), jpeg);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1); // the COM payload must be found, not skipped
+    const hits = r.report().hits.filter((h) => h.path === 'padded.jpg');
+    expect(hits.length).toBe(3);
+    expect(hits[0].codepoint).toBe(`U+${0x62a5.toString(16).toUpperCase()}`);
+  });
+
+  it('15b. a .png file with no parseable PNG structure still gets the opaque run scan', () => {
+    const root = makeRepo();
+    const fake = Buffer.concat([
+      Buffer.alloc(64, 0x00), // NULs make it binary; signature is wrong
+      Buffer.from(`zzz ${HANChar}${HANChar}${HANChar} yyy`, 'utf8'), // 3-CJK run clears the evidence bar
+    ]);
+    writeFileSync(join(root, 'broken.png'), fake);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1); // a known extension must never become a blind spot
+    const hits = r.report().hits.filter((h) => h.path === 'broken.png');
+    expect(hits.length).toBe(3);
+    expect(hits[0].source).toBe('binary printable-run');
+  });
+
+  it('16. two banned locale ids on ONE line are both reported', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'two-ids.txt'), `langs: ${ZH_PLAIN}-CN and ${YUE_ROOT}-Hant\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const localeHits = r.report().hits.filter((h) => h.kind === 'locale-identifier');
+    expect(localeHits.length).toBe(2);
+    expect(localeHits.map((h) => h.category)).toContain(`Chinese locale identifier "${ZH_PLAIN}-CN"`);
+    expect(localeHits.map((h) => h.category)).toContain(`Chinese locale identifier "${YUE_ROOT}-Hant"`);
+  });
+
+  it('16b. astral-plane Han (Extension B) reports a true code-point column and context', () => {
+    const root = makeRepo();
+    const EXT_B = String.fromCodePoint(0x20000); // astral Han, 2 UTF-16 units
+    // "A" (1) + EXT_B (2) + HANChar (3): BOTH astral and BMP Han block, and
+    // the columns must be true CODE-POINT columns (2 and 3 - a UTF-16-indexed
+    // scan would have reported 4 for the second hit), and the context window
+    // of the second hit must start at the real line start.
+    writeFileSync(join(root, 'astral.txt'), `A${EXT_B}${HANChar}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const rep = r.report();
+    expect(rep.hits).toHaveLength(2);
+    expect(rep.hits[0].codepoint).toBe(`U+${0x20000.toString(16).toUpperCase()}`);
+    expect(rep.hits[0].col).toBe(2);
+    expect(rep.hits[1].codepoint).toBe(`U+${0x62a5.toString(16).toUpperCase()}`);
+    expect(rep.hits[1].col).toBe(3);
+    // The context of the BMP hit begins at the line start, astral char intact
+    // (escapeForDisplay: ASCII stays literal, astral becomes \Uxxxxxxxx).
+    expect(rep.hits[1].context_escaped.startsWith(`A\\U${0x20000.toString(16).padStart(8, '0')}\\u62a5`)).toBe(true);
+  });
+
+  it('17. the JSON report is byte-deterministic across runs', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'det.txt'), `note: ${HANChar}\n`);
+    commitAll(root);
+    const r1 = runChecker(root);
+    const r2 = runChecker(root);
+    expect(r1.stdout).toBe(r2.stdout);
+    expect(r1.stderr).toBe(r2.stderr);
+  });
+
+  it('17b. an extensionless --out path is never clobbered by the .md companion', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'out.txt'), 'clean content\n');
+    commitAll(root);
+    const outPath = join(root, 'report'); // deliberately no extension
+    const r = runChecker(root, ['--out', outPath]);
+    expect(r.status).toBe(0);
+    const jsonText = readFileSync(outPath, 'utf8');
+    const parsed = JSON.parse(jsonText) as Report; // the JSON survived the .md write
+    expect(parsed.summary.total_hits).toBe(0);
+    expect(readFileSync(`${outPath}.md`, 'utf8')).toContain('# Zero-Chinese-content scan');
+  });
+
+  it('17c. unknown flags and a valueless --out exit 2 with an error annotation', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'ok.txt'), 'clean\n');
+    commitAll(root);
+    const r = runChecker(root, ['--root', '/etc']);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('::error::');
+    expect(r.stderr).toContain('unknown argument');
+    const r2 = runChecker(root, ['--out']);
+    expect(r2.status).toBe(2);
+    expect(r2.stderr).toContain('--out requires a path');
+  });
+
+  it('17d. the history report declares every skip class and labels the touching commit', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'hist.txt'), `note: ${HANChar}${HANChar2}\n`);
+    commitAll(root);
+    // Fix the file: the history finding must be reported as still detectable
+    // in history but gone from the current tree, with a commit label.
+    writeFileSync(join(root, 'hist.txt'), 'clean now\n');
+    commitAll(root);
+    const r = runChecker(root, ['--history']);
+    expect(r.status).toBe(0); // history mode stays report-only
+    const rep = r.report();
+    expect(rep.scope.history_blobs_scanned).toBeGreaterThan(0);
+    expect(rep.scope.history_blobs_skipped_empty_or_unreadable).toBe(0);
+    const historyHits = (rep as unknown as { history_hits: Array<{ path: string; still_present: boolean; last_touching_commit: string }> }).history_hits;
+    expect(historyHits.length).toBe(2);
+    expect(historyHits[0].still_present).toBe(false);
+    expect(historyHits[0].last_touching_commit).toBeTruthy();
+    expect(historyHits[0].last_touching_commit).not.toBe('unattributed');
   });
 });

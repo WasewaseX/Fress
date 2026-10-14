@@ -78,7 +78,9 @@ const HAN_RANGES = [
   [0xf900, 0xfaff, 'CJK Compatibility Ideographs (Han)'],
   [0xfe30, 0xfe4f, 'CJK Compatibility Forms'],
   [0xff01, 0xff5e, 'Fullwidth ASCII forms (CJK language content)'],
-  [0xff61, 0xff9f, 'Halfwidth Kana/Hangul forms'],
+  [0xff61, 0xff64, 'Halfwidth ideographic punctuation'],
+  [0xff65, 0xff9f, 'Halfwidth Kana (Japanese)'],
+  [0xffa0, 0xffdc, 'Halfwidth Hangul compatibility jamo (Korean)'],
   [0xffe0, 0xffef, 'Fullwidth signs'],
   [0x20000, 0x2a6df, 'CJK Unified Ideographs Extension B (Han)'],
   [0x2a700, 0x2ebef, 'CJK Unified Ideographs Extensions C-F (Han)'],
@@ -97,6 +99,7 @@ const YUE_ROOT = String.fromCharCode(0x79, 0x75, 0x65);
 const SUBTAG = '(?:[-_](?:[hH][aA][nN][sS]|[hH][aA][nN][tT]|[cC][nN]|[tT][wW]|[hH][kK]|[sS][gG]|[mM][oO]))?';
 const LOCALE_RE_CI_SUBTAGS = new RegExp(
   `(?:^|[^A-Za-z0-9])(${ZH_ROOT}|${YUE_ROOT})${SUBTAG}(?![A-Za-z0-9])`,
+  'g', // global: the report loops exec() per line/path; without 'g' exec never advances and every loop would spin forever on the first match
 );
 
 const FONT_EXTS = new Set(['.ttf', '.otf', '.woff', '.woff2', '.eot']);
@@ -105,11 +108,17 @@ const BINARY_EXTS = new Set([...FONT_EXTS, '.png', '.jpg', '.jpeg', '.gif', '.ic
   '.wasm', '.node', '.so', '.dylib', '.dll', '.bin', '.der', '.p12', '.keystore']);
 
 function classifyCodePoint(cp) {
+  // ORDER MATTERS: Korean/Japanese ranges must be classified BEFORE the Han
+  // family. 'Hangul syllables (Korean)' literally starts with the letters
+  // "Han", so a naive name.startsWith('Han') test classified Korean syllables
+  // as blocking Chinese content - a false positive against non-Chinese CJK
+  // script that the audit brief explicitly forbids. The Han branch now also
+  // matches the exact "(Han)" marker instead of a prefix.
   for (const [lo, hi, name] of HAN_RANGES) {
     if (cp >= lo && cp <= hi) {
-      if (name.startsWith('Han') || name.includes('(Han)')) return { name, family: 'Chinese script (Han)' };
-      if (name.includes('Japanese') || name.includes('Kana')) return { name, family: 'Japanese script (unexpected)' };
       if (name.includes('Korean') || name.includes('Hangul')) return { name, family: 'Korean script (unexpected)' };
+      if (name.includes('Japanese') || name.includes('Kana')) return { name, family: 'Japanese script (unexpected)' };
+      if (name.includes('(Han)')) return { name, family: 'Chinese script (Han)' };
       if (name.includes('Fullwidth') || name.includes('punctuation')) return { name, family: 'CJK punctuation/fullwidth' };
       return { name, family: 'CJK symbols (unexpected)' };
     }
@@ -250,6 +259,7 @@ function jpegTextPayloads(buf) {
   while (off + 4 <= buf.length) {
     if (buf[off] !== 0xff) { off += 1; continue; }
     const marker = buf[off + 1];
+    if (marker === 0xff) { off += 1; continue; } // FF fill padding before a marker is not a segment: reading a length here desyncs the walk and silently skips the real COM/APPn that follows
     if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { off += 2; continue; }
     if (marker === 0xda || marker === 0xd9) break; // entropy-coded data starts
     const segLen = buf.readUInt16BE(off + 2);
@@ -275,7 +285,8 @@ function jpegTextPayloads(buf) {
 }
 
 const SUMMARY = { tracked: 0, untracked: 0, dist: 0, textScanned: 0, binarySkipped: 0, fontSkipped: 0,
-  pngMetadata: 0, jpegMetadata: 0, binaryStringScans: 0, historyBlobs: 0 };
+  pngMetadata: 0, jpegMetadata: 0, binaryStringScans: 0, historyBlobs: 0,
+  historyNonBlobObjects: 0, historySkippedOversize: 0, historySkippedEmpty: 0, historySkippedUndecodable: 0 };
 
 const HITS = [];
 const WARNINGS = [];
@@ -311,8 +322,9 @@ function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allow
   const lines = text.split('\n');
   for (let li = 0; li < lines.length; li += 1) {
     const line = lines[li];
-    let ci = 0;
-    for (const ch of line) { // code-point iteration
+    const cps = Array.from(line); // ci counts CODE POINTS, so the context window must be sliced by code points too (a UTF-16 slice shifts when astral chars precede the hit)
+    for (let ci = 0; ci < cps.length; ci += 1) {
+      const ch = cps[ci];
       const cp = ch.codePointAt(0);
       const cls = classifyCodePoint(cp);
       if (cls) {
@@ -320,18 +332,21 @@ function scanTextPayload(kind, scope, relPath, text, { sourceLabel = null, allow
         found.push({ severity, kind, line: li + 1, col: ci + 1, codepoint: `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`,
           category: cls.name, family: cls.family,
           match_escaped: escapeForDisplay(ch),
-          context_escaped: escapeForDisplay(line.slice(Math.max(0, ci - 24), ci + 25)),
+          context_escaped: escapeForDisplay(cps.slice(Math.max(0, ci - 24), ci + 25).join('')),
           ...(sourceLabel ? { source: sourceLabel } : {}),
           role_hint: roleHint(relPath),
           owner_action: severity === 'blocking'
             ? 'replace the character with correct English (or a supported-language) wording; never silently suppress'
             : 'non-Chinese CJK script (unadvertised language): owner should replace with a supported-language fixture' });
       }
-      ci += 1;
     }
     if (allowLocale) {
-      const loc = LOCALE_RE_CI_SUBTAGS.exec(line);
-      if (loc) {
+      // Global regex with an explicit per-line loop: EVERY banned identifier
+      // on the line is reported, not just the first one. lastIndex is reset
+      // per line - a shared global regex keeps state across exec calls.
+      LOCALE_RE_CI_SUBTAGS.lastIndex = 0;
+      let loc;
+      while ((loc = LOCALE_RE_CI_SUBTAGS.exec(line)) !== null) {
         // loc[0] includes the consumed boundary character; the reported
         // identifier is the clean root+subtag form, and the column points
         // at the root's first character.
@@ -432,19 +447,21 @@ function scanBinaryFile(kind, scope, absPath, relPath, buf) {
   scanFilename(kind, scope, relPath);
   if (FONT_EXTS.has(ext)) { SUMMARY.fontSkipped += 1; return; } // glyph coverage is not UI copy
   if (ext === '.png') {
-    SUMMARY.pngMetadata += 1;
     const payloads = pngTextPayloads(buf);
     if (payloads) {
+      SUMMARY.pngMetadata += 1;
       for (const p of payloads) {
         for (const hit of scanTextPayload('binary-metadata', scope, relPath, p.text, { sourceLabel: `PNG ${p.source}` })) pushHit2(hit, 'binary-metadata', scope, relPath);
       }
+      return;
     }
-    return;
-  }
-  if (ext === '.jpg' || ext === '.jpeg') {
-    SUMMARY.jpegMetadata += 1;
+    // A file that claims .png but carries no parseable PNG structure falls
+    // through to the opaque printable-run scan below - a known extension
+    // must never become a blind spot (fail-closed over fail-open).
+  } else if (ext === '.jpg' || ext === '.jpeg') {
     const payloads = jpegTextPayloads(buf);
     if (payloads) {
+      SUMMARY.jpegMetadata += 1;
       for (const p of payloads) {
         if (p.utf8) {
           for (const hit of scanTextPayload('binary-metadata', scope, relPath, p.text, { sourceLabel: `JPEG ${p.source}` })) pushHit2(hit, 'binary-metadata', scope, relPath);
@@ -455,8 +472,8 @@ function scanBinaryFile(kind, scope, absPath, relPath, buf) {
           }
         }
       }
+      return;
     }
-    return;
   }
   // Opaque binary: conservative printable-run scan of the whole payload.
   // Locale-id detection is DISABLED here: random byte runs in compressed
@@ -489,8 +506,9 @@ function scanFilename(kind, scope, relPath) {
     }
     ci += 1;
   }
-  const loc = LOCALE_RE_CI_SUBTAGS.exec(norm);
-  if (loc) {
+  LOCALE_RE_CI_SUBTAGS.lastIndex = 0;
+  let loc;
+  while ((loc = LOCALE_RE_CI_SUBTAGS.exec(norm)) !== null) {
     const idStart = loc[0].indexOf(loc[1]);
     const id = loc[0].slice(idStart);
     pushHit('locale-identifier', scope, relPath, { severity: 'blocking', line: null, col: loc.index + idStart + 1, codepoint: null,
@@ -526,7 +544,26 @@ if (argv.includes('--help')) {
   process.stdout.write(`usage: node scripts/ci/check-no-chinese.mjs [--out <path>] [--include-dist] [--history] [--json]\n\nScans tracked + untracked files (and optionally dist/) for Chinese/CJK-language\ncontent and Chinese locale identifiers. Exit 0 = zero hits, 1 = hits found,\n2 = scan could not run. No dependencies, no network.\n`);
   process.exit(0);
 }
-const outArg = argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : null;
+// Strict argument validation: the header documents "usage errors exit 2",
+// so unknown flags and a valueless --out must fail loudly instead of being
+// silently ignored (a silently ignored --include-dist would weaken the gate).
+const KNOWN_FLAGS = new Set(['--help', '--out', '--include-dist', '--history', '--json']);
+let outArg = null;
+for (let i = 0; i < argv.length; i += 1) {
+  if (argv[i] === '--out') {
+    outArg = argv[i + 1];
+    if (!outArg) {
+      process.stderr.write('::error::check-no-chinese: --out requires a path argument (usage errors exit 2)\n');
+      process.exit(2);
+    }
+    i += 1;
+    continue;
+  }
+  if (!KNOWN_FLAGS.has(argv[i])) {
+    process.stderr.write(`::error::check-no-chinese: unknown argument "${argv[i]}" (usage errors exit 2; run with --help)\n`);
+    process.exit(2);
+  }
+}
 const includeDist = argv.includes('--include-dist');
 const historyMode = argv.includes('--history');
 const jsonStdout = argv.includes('--json');
@@ -622,11 +659,12 @@ if (historyMode) {
   };
   for (const [sha, path] of blobs) {
     const show = spawnSync('git', ['cat-file', '-t', sha], { encoding: 'utf8' });
-    if (show.status !== 0 || show.stdout.trim() !== 'blob') continue;
+    if (show.status !== 0 || show.stdout.trim() !== 'blob') { SUMMARY.historyNonBlobObjects += 1; continue; }
     const size = spawnSync('git', ['cat-file', '-s', sha], { encoding: 'utf8' });
-    if (size.status !== 0 || Number(size.stdout.trim()) > 5 * 1024 * 1024) continue;
+    if (size.status !== 0) { SUMMARY.historySkippedUndecodable += 1; continue; }
+    if (Number(size.stdout.trim()) > 5 * 1024 * 1024) { SUMMARY.historySkippedOversize += 1; continue; } // DECLARED cap: oversized blobs are skipped and counted, never silently
     const buf = git(['cat-file', 'blob', sha], { allowFail: true });
-    if (!buf || buf.length === 0) continue;
+    if (!buf || buf.length === 0) { SUMMARY.historySkippedEmpty += 1; continue; }
     SUMMARY.historyBlobs += 1;
     const pseudoPath = path || `blob:${sha.slice(0, 12)}`;
     const hitsBefore = HITS.length;
@@ -635,20 +673,23 @@ if (historyMode) {
     else {
       let text;
       try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
-      catch { continue; } // undecodable historical blob: not a current-tree finding
+      catch { SUMMARY.historySkippedUndecodable += 1; continue; } // undecodable historical blob: not a current-tree finding, but the skip is declared
       SUMMARY.textScanned += 1;
       for (const hit of scanTextPayload('content', 'history', pseudoPath, text)) pushHit2(hit, 'content', 'history', pseudoPath);
       scanFilename('content', 'history', pseudoPath);
     }
     const log = git(['log', '--all', '--find-object', sha, '--format=%H|%s', '-n', '1'], { allowFail: true }).toString().trim();
     const [cSha, ...cSubj] = log.split('|');
+    // Honest label: --find-object reports the most recent commit that TOUCHED
+    // the blob (added OR removed it) - it is not provably the introducing
+    // commit, so the field is named last_touching_commit.
     const attribution = cSha ? `${cSha.slice(0, 12)} ${cSubj.join('|')}` : 'unattributed';
     const newHits = HITS.splice(hitsBefore); // history findings live in HISTORY_HITS only
     const newWarns = WARNINGS.splice(warnsBefore);
     const findings = [...newHits, ...newWarns];
     const stillThere = stillPresentInCurrentTree(pseudoPath, findings);
     for (const f of findings) {
-      HISTORY_HITS.push({ ...f, blob: sha.slice(0, 12), introducing_commit: attribution, still_present: stillThere });
+      HISTORY_HITS.push({ ...f, blob: sha.slice(0, 12), last_touching_commit: attribution, still_present: stillThere });
     }
   }
   // Sanity: a repo with objects but ZERO scannable blobs means the parsing
@@ -660,11 +701,14 @@ if (historyMode) {
 }
 
 // -- reporting ---------------------------------------------------------------
-HITS.sort((a, b) => (a.path + '').localeCompare(b.path + '') || ((a.line || 0) - (b.line || 0)) || ((a.col || 0) - (b.col || 0)));
+// Codepoint-order sort (NOT localeCompare): the report must be byte-stable
+// regardless of the ICU locale the runner happens to have installed.
+HITS.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || ((a.line || 0) - (b.line || 0)) || ((a.col || 0) - (b.col || 0)));
 const report = {
   tool: 'fress/no-chinese@v1',
   commit: headSha,
-  scanned_at: new Date().toISOString(),
+  // No wall-clock timestamp field: the report is fully byte-deterministic
+  // for identical trees (CI run logs carry the timing metadata already).
   scope: {
     tracked_files: SUMMARY.tracked,
     untracked_files_included: SUMMARY.untracked,
@@ -677,6 +721,10 @@ const report = {
     opaque_binaries_string_scanned: SUMMARY.binaryStringScans,
     history_blobs_scanned: historyMode ? SUMMARY.historyBlobs : null,
     history_only_findings: historyMode ? HISTORY_HITS.length : null,
+    history_non_blob_objects_skipped: historyMode ? SUMMARY.historyNonBlobObjects : null,
+    history_blobs_skipped_oversize_declared_cap_5mb: historyMode ? SUMMARY.historySkippedOversize : null,
+    history_blobs_skipped_empty_or_unreadable: historyMode ? SUMMARY.historySkippedEmpty : null,
+    history_blobs_skipped_undecodable: historyMode ? SUMMARY.historySkippedUndecodable : null,
   },
   hits: HITS,
   warnings: WARNINGS,
@@ -706,7 +754,13 @@ md.push(`| - font binaries skipped (glyph coverage is not UI copy) | ${SUMMARY.f
 md.push(`| - PNG metadata payloads inspected | ${SUMMARY.pngMetadata} |`);
 md.push(`| - JPEG metadata payloads inspected | ${SUMMARY.jpegMetadata} |`);
 md.push(`| - opaque binaries printable-run scanned | ${SUMMARY.binaryStringScans} |`);
-if (historyMode) md.push(`| history blobs scanned (report-only) | ${SUMMARY.historyBlobs} |`);
+if (historyMode) {
+  md.push(`| history blobs scanned (report-only) | ${SUMMARY.historyBlobs} |`);
+  md.push(`| history non-blob objects skipped | ${SUMMARY.historyNonBlobObjects} |`);
+  md.push(`| history blobs skipped: oversize (declared 5 MB cap) | ${SUMMARY.historySkippedOversize} |`);
+  md.push(`| history blobs skipped: empty or unreadable | ${SUMMARY.historySkippedEmpty} |`);
+  md.push(`| history blobs skipped: undecodable as UTF-8 | ${SUMMARY.historySkippedUndecodable} |`);
+}
 md.push('');
 if (HITS.length > 0) {
   md.push('| Kind | Path | Line:Col | Code point | Category | Context (escaped) | Owner action |');
@@ -727,18 +781,23 @@ if (WARNINGS.length > 0) {
 }
 if (historyMode && HISTORY_HITS.length > 0) {
   md.push('');
-  md.push('## History-only findings (removed from the current tree - NOT reintroduced)');
+  md.push('## History findings (report-only - each row states whether it is still present in the current tree)');
   md.push('');
   for (const h of HISTORY_HITS) {
-    md.push(`- \`${h.path}\` blob ${h.blob} via ${h.introducing_commit} - ${h.category} at ${h.line !== null && h.line !== undefined ? `${h.line}:${h.col}` : 'name'} ${h.still_present ? '(STILL PRESENT)' : '(since removed)'}`);
+    md.push(`- \`${h.path}\` blob ${h.blob} via ${h.last_touching_commit} - ${h.category} at ${h.line !== null && h.line !== undefined ? `${h.line}:${h.col}` : 'name'} ${h.still_present ? '(STILL PRESENT)' : '(since removed)'}`);
   }
 }
 md.push('');
 const mdText = md.join('\n');
 
 if (outArg) {
-  writeFileSync(resolve(outArg), `${JSON.stringify(report, null, 1)}\n`);
-  writeFileSync(resolve(outArg).replace(/\.[^.]+$/, '.md'), `${mdText}\n`);
+  const jsonPath = resolve(outArg);
+  // The markdown companion is ALWAYS a sibling file: an extensionless (or
+  // non-.json) --out path must never have its JSON report clobbered by the
+  // .md write.
+  const mdPath = /\.json$/i.test(jsonPath) ? jsonPath.replace(/\.json$/i, '.md') : `${jsonPath}.md`;
+  writeFileSync(jsonPath, `${JSON.stringify(report, null, 1)}\n`);
+  writeFileSync(mdPath, `${mdText}\n`);
 }
 if (jsonStdout) {
   process.stdout.write(`${JSON.stringify(report, null, 1)}\n`);

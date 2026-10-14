@@ -2207,8 +2207,18 @@ mod tests {
         let part = tmp.path().join("f.bin.part");
         std::fs::write(&part, b"staged").unwrap();
         let meta = meta_path_for(&part);
-        let mut huge = String::from("{\"url\":\"https://example.com/f\",\"etag\":\"x\"");
-        huge.push_str(&" ".repeat(80 * 1024)); // > 64 KiB, never closed
+        // Kill-test note: the oversized sidecar must be VALID JSON - a
+        // malformed one would fail the parse with or without the take()
+        // bound, and the assertion would pass for the wrong reason. A
+        // well-formed document larger than the bound (an 80 KiB etag
+        // value) is exactly the shape the bound exists to refuse: the
+        // truncation cuts the string mid-value, the parse fails, and the
+        // sidecar reads as "no validators". Removing the bound makes this
+        // test fail (the huge-but-valid document parses and yields
+        // validators) - verified by kill-test this round.
+        let mut huge = String::from("{\"url\":\"https://example.com/f\",\"etag\":\"");
+        huge.push_str(&"x".repeat(80 * 1024)); // > 64 KiB, still valid JSON when closed
+        huge.push_str("\"}");
         std::fs::write(&meta, huge).unwrap();
         assert!(
             read_part_meta(&part).await.is_none(),

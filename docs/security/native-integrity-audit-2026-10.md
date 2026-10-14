@@ -284,7 +284,7 @@ rustfmt), installed locally and used for every command.
 | `cargo fmt --all -- --check` (via `--manifest-path src-tauri/Cargo.toml`, same as CI) | **PASS** locally, exit 0, re-run on the reconciled tree after every edit (pinned toolchain 1.98.1: rustfmt 1.9.0, clippy 0.1.98). |
 | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | **NOT RUN as the full workspace locally — system libs unavailable** (no sudo, no webkit2gtk-4.1/gtk3; the Tauri crate cannot compile). **Honest CI history: the round-2 head `6ef838b` FAILED this exact job** (linux, `-D warnings`): one `unused_mut` (`download_finalize.rs:740`, the A-4 fix's file binding) and two `clippy::err_expect` in the new drift tests — none semantic. Fixed in `9c8b2f4`; the local Tauri-free harness (the three production modules, unmodified) passes `cargo clippy --all-targets -- -D warnings` on the reconciled tree. Full-workspace clippy remains CI-proven; run ID for the final head is cited in the PR report comment. |
 | `cargo test --workspace --locked` | **NOT RUN as the full workspace locally** (same system-lib constraint; CI runs it, without `--locked`, on linux+windows+macos — lockfile enforcement lives in release.yml/security.yml). **Run locally via the Tauri-free harness**: the real `download_finalize.rs` (94 tests), `network_policy.rs`+`tests.rs` (52), `http_body.rs` (12) compiled unmodified into a scratch crate (symlinked module layout, lock-exact dependency versions, reqwest built with the production feature set `rustls-tls+stream+http2` and no gzip/brotli/deflate) — **158/158 pass** on the reconciled tree (log preserved). `lib.rs`, `artifact_open.rs`, `download_integration.rs` tests are CI-proven; the two clippy errors CI found there are fixed and the patterns re-scanned (no remaining `.err().expect`). |
-| `cargo audit --file src-tauri/Cargo.lock` | Re-run against the reconciled candidate's lockfile (see the run details below — the lockfile now additionally carries the in-repo `tauri-plugin-fress-open` path crate, whose dependencies are all already-locked existing packages; no new external package, no version bump of any third-party entry). |
+| `cargo audit --file src-tauri/Cargo.lock` | **Re-run on the reconciled candidate's lockfile with a fresh advisory DB (cloned 2026-10-14, 1294 advisory files) plus a full yanked-pins sweep of all 526 registry versions (crates.io API, 0 lookup errors). `cargo-audit` itself could not compile in this sandbox (the toolchain install was killed twice by the environment mid-build) — the scan reproduces cargo-audit's data source and matching semantics from the same DB; this is stated rather than claimed as a tool run. Results, reported separately as the mandate requires: (1) VULNERABILITY-class, version-matched — 5 findings on 2 crates: rustls 0.23.45 ×4 (RUSTSEC-2026-0346 Debug-impl secret exposure, -0347 ECH buffered data after rejection, -0348 brotli cert-decompression pre-auth allocation, -0349 unauthenticated ServerHello downgrade to classical KEX; all dated 2026-10-14, all patched in ≥ 0.23.46 — newer than round 2's clean scan; the lock's rustls carries NO brotli/zlib/ECH feature deps, so -0346/-0347/-0348's flagged code paths are feature-gated OFF in this build, while -0349 applies to the protocol proper and the production stack IS reachable: reqwest 0.12.28 → hyper-rustls → rustls 0.23.45); hashbrown 0.12.3 (RUSTSEC-2024-0402 borsh non-canonical serialization; arrives via indexmap 1.9.3; the affected code path is borsh HashMap encoding/decoding, which nothing in the tree uses; the co-pinned hashbrown 0.17.1 is patched). (2) YANKED — exactly 1: yoke-derive 0.8.3 (no advisory). (3) ADVISORY-GRADE/informational — 41 matches (17 unmaintained incl. proc-macro-error, the unic-* set via urlpattern, dirs 5.0.1, the atk/gtk/gdkx11 0.18 stack, ring 0.17.14; 24 unsound incl. glib 0.18.5, tokio, smallvec, crossbeam-*, socket2, bumpalo, tracing, anyhow) — a larger set than round 2's "8" because the DB grew; all 8 previously recorded are contained in it. (4) Ownership: none of these findings is introduced by this PR's diff (the lockfile delta is the version bump + the in-repo path crate); the version bumps for rustls ≥ 0.23.46, yoke ≥ 0.8.4 and (optionally) indexmap/hashbrown belong to the dependency-owning lane (Agent 2/3) as an explicit, owner-routed follow-up. A zero-vulnerability claim is NOT made. |
 | Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **Exactly two intentional changes, zero third-party drift:** (1) `fress` package version `1.0.12-beta → 1.0.0` (PR #80's release candidate bump); (2) the in-repo path dependency `tauri-plugin-fress-open` (PR #74's Android open boundary; adds only packages already present in the lock). The plugin crate's version — the one `validate:versions` defect recorded earlier on this integration — is **fixed on the current candidate** (Agent 3's `9133655`/`639ecfb`); the gate now reports **PASSED — 8 authoritative fields agree on 1.0.0** (re-run locally on the reconciled tree). No new external dependency, no git source, no upgrade. |
 | Final-diff scan (secrets / debug leftovers / unsafe / spawn / dep-source changes) | **0 hits** across the audit-owned src-tauri diff (patterns: token prefixes, private keys, `dbg!`/`todo!`/`unimplemented!`, `println!`/`eprintln!` — zero logging statements exist in src-tauri at all — `unsafe`, `Command::new` outside the launcher). Zero Chinese/CJK-script content: the repo's `check-no-chinese` gate passes on the reconciled tree, and the last kana warning class (the `sanitize_filename` fixture) is closed by the candidate's merged `7c3f8b6` fixture (Unicode-escapes, no CJK glyph in committed source). |
 
@@ -368,13 +368,15 @@ claimed as run:
 
 ## 10. Conclusion
 
-**PASS on the reconciled stable candidate — PR #81's fixes verified real;
-PR #84's round-2 fixes verified real and retained; 2 release-adjacent defects
-found and fixed this round (A-1, N-3) plus hardening (OBS-3/OBS-4,
+**PASS with one owner-routed dependency follow-up — PR #81's fixes verified
+real; PR #84's round-2 fixes verified real and retained; 2 release-adjacent
+defects found and fixed this round (A-1, N-3) plus hardening (OBS-3/OBS-4,
 A-2/A-3/A-4) and 7 test-gap fills; the round-2 CI-clippy regression fixed;
 one regression fixture strengthened after its kill-test found it could pass
-without its guard; no known release-blocking native security/correctness
-defect remains.**
+without its guard; no native security/correctness defect remains in the
+audit-owned code; the dependency scan's version-matched findings (rustls
+2026-10-14 advisories, yoke yank) are explicitly routed to the
+dependency-owning lane and are not introduced by this diff.**
 
 - The response-reading and arithmetic defects are fixed WITH regressions, and
   the size-cap/timeout rails are proven independently enforced by loopback
@@ -388,11 +390,16 @@ defect remains.**
 - Capabilities are minimal and match the documented matrix; no shell surface;
   three accepted residuals documented (§5) with no change to the intentional
   trust policy.
-- Dependency audit: re-run against the reconciled candidate's lockfile —
-  results recorded in §7 (0 vulnerabilities expected to persist; the only
-  lockfile deltas are the intentional version bump and the in-repo path
-  crate). The final diff carries no secrets/debug/unsafe/spawn changes and
-  the zero-CJK gate passes with zero warnings.
+- Dependency audit: re-run on the reconciled candidate's lockfile — **NOT a
+  zero-vulnerability result**: 5 version-matched vulnerability-class findings
+  (rustls 0.23.45 ×4 — new advisories dated the day of this audit, patched in
+  0.23.46; hashbrown 0.12.3 via indexmap, borsh path unused here), 1 yanked
+  pin (yoke-derive 0.8.3), 41 advisory-grade transitive warnings (full
+  breakdown and reachability notes in §7). None is introduced by this PR's
+  diff; the version bumps are routed to the dependency-owning lane as an
+  explicit follow-up with owners. The final diff carries no
+  secrets/debug/unsafe/spawn changes and the zero-CJK gate passes with zero
+  warnings.
 - Reconciliation: this branch now stacks on `integrate/stable-candidate`
   (PR #85) and carries ALL of PR #81; no #85 change is overwritten and no
   competing release branch exists (the retargeted PR #84 is the single

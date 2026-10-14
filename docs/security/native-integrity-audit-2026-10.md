@@ -10,13 +10,17 @@ audit-owned files: `lib.rs`, `http_body.rs` (new), `download_finalize.rs`,
 `download_integration.rs`, `artifact_open.rs`, `network_policy.rs`,
 `network_policy/tests.rs`, and this report. Reconciliation history: the
 round-2 work was authored against PR #81's tree; it is now replayed on the
-candidate (rebase `924c051`), the three-content-commit history shared with
-#81 is retained through #85's own merge of `e4280e4`, #81's final
-kana-fixture commit (`7c3f8b6`) is cherry-picked so the branch carries ALL of
-PR #81 (the zero-CJK-gate kana warnings go to zero), the CI-clippy gate the
-round-2 head tripped is closed (`882ecca`), and the A-4 regression fixture
-was strengthened after the kill-test review found it could pass without its
-guard (`d6758c5`). The app-code delta between the v1.0.12-beta release tag
+candidate (first onto `a9c38f02`, then re-rebased onto the moved candidate
+head `ff64643` after the candidate integrated the corrected PR #81 head and
+the plugin-version fix). The three-content-commit history shared with #81 is
+retained through the candidate's own merges of `e4280e4` and `7c3f8b6`, so
+the branch carries ALL of PR #81 with no duplicate (the zero-CJK-gate kana
+fixture arrives via the candidate's merge; the checker reports zero CJK
+warnings), the CI-clippy gate the round-2 head tripped is closed (`9c8b2f4`),
+and the A-4 regression fixture was strengthened after the kill-test review
+found it could pass without its guard (`6b6b047`).
+
+The app-code delta between the v1.0.12-beta release tag
 (`6d338fd`) and the audited tree is zero outside these audit-owned files plus
 the other integrated PRs' own scopes (Android plugin, release candidate
 version/docs, channel policy, smoke docs). Auditor: native-integrity round 2
@@ -278,11 +282,11 @@ rustfmt), installed locally and used for every command.
 | Check | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` (via `--manifest-path src-tauri/Cargo.toml`, same as CI) | **PASS** locally, exit 0, re-run on the reconciled tree after every edit (pinned toolchain 1.98.1: rustfmt 1.9.0, clippy 0.1.98). |
-| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | **NOT RUN as the full workspace locally — system libs unavailable** (no sudo, no webkit2gtk-4.1/gtk3; the Tauri crate cannot compile). **Honest CI history: the round-2 head `6ef838b` FAILED this exact job** (linux, `-D warnings`): one `unused_mut` (`download_finalize.rs:740`, the A-4 fix's file binding) and two `clippy::err_expect` in the new drift tests — none semantic. Fixed in `882ecca`; the local Tauri-free harness (the three production modules, unmodified) passes `cargo clippy --all-targets -- -D warnings` on the reconciled tree. Full-workspace clippy remains CI-proven; run ID for the final head is cited in the PR report comment. |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | **NOT RUN as the full workspace locally — system libs unavailable** (no sudo, no webkit2gtk-4.1/gtk3; the Tauri crate cannot compile). **Honest CI history: the round-2 head `6ef838b` FAILED this exact job** (linux, `-D warnings`): one `unused_mut` (`download_finalize.rs:740`, the A-4 fix's file binding) and two `clippy::err_expect` in the new drift tests — none semantic. Fixed in `9c8b2f4`; the local Tauri-free harness (the three production modules, unmodified) passes `cargo clippy --all-targets -- -D warnings` on the reconciled tree. Full-workspace clippy remains CI-proven; run ID for the final head is cited in the PR report comment. |
 | `cargo test --workspace --locked` | **NOT RUN as the full workspace locally** (same system-lib constraint; CI runs it, without `--locked`, on linux+windows+macos — lockfile enforcement lives in release.yml/security.yml). **Run locally via the Tauri-free harness**: the real `download_finalize.rs` (94 tests), `network_policy.rs`+`tests.rs` (52), `http_body.rs` (12) compiled unmodified into a scratch crate (symlinked module layout, lock-exact dependency versions, reqwest built with the production feature set `rustls-tls+stream+http2` and no gzip/brotli/deflate) — **158/158 pass** on the reconciled tree (log preserved). `lib.rs`, `artifact_open.rs`, `download_integration.rs` tests are CI-proven; the two clippy errors CI found there are fixed and the patterns re-scanned (no remaining `.err().expect`). |
 | `cargo audit --file src-tauri/Cargo.lock` | Re-run against the reconciled candidate's lockfile (see the run details below — the lockfile now additionally carries the in-repo `tauri-plugin-fress-open` path crate, whose dependencies are all already-locked existing packages; no new external package, no version bump of any third-party entry). |
-| Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **Exactly two intentional changes, zero third-party drift:** (1) `fress` package version `1.0.12-beta → 1.0.0` (PR #80's release candidate bump); (2) the in-repo path dependency `tauri-plugin-fress-open` (PR #74's Android open boundary; adds only packages already present in the lock). **Known integration defect (owned by the release agent, Agent 3, recorded in PR #85):** the plugin crate itself is still `1.0.12-beta` in `src-tauri/plugins/fress-open/Cargo.toml` and its lock entry — `validate:versions` fails closed on exactly those two rows (re-confirmed locally on this tree; every other row reports 1.0.0 ok). No new external dependency, no git source, no upgrade. |
-| Final-diff scan (secrets / debug leftovers / unsafe / spawn / dep-source changes) | **0 hits** across the audit-owned src-tauri diff (patterns: token prefixes, private keys, `dbg!`/`todo!`/`unimplemented!`, `println!`/`eprintln!` — zero logging statements exist in src-tauri at all — `unsafe`, `Command::new` outside the launcher). Zero Chinese/CJK-script content: the repo's `check-no-chinese` gate passes on the reconciled tree, and the last kana warning class (the `sanitize_filename` fixture) is closed by the cherry-picked `7c3f8b6` (Unicode-escapes fixture). |
+| Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **Exactly two intentional changes, zero third-party drift:** (1) `fress` package version `1.0.12-beta → 1.0.0` (PR #80's release candidate bump); (2) the in-repo path dependency `tauri-plugin-fress-open` (PR #74's Android open boundary; adds only packages already present in the lock). The plugin crate's version — the one `validate:versions` defect recorded earlier on this integration — is **fixed on the current candidate** (Agent 3's `9133655`/`639ecfb`); the gate now reports **PASSED — 8 authoritative fields agree on 1.0.0** (re-run locally on the reconciled tree). No new external dependency, no git source, no upgrade. |
+| Final-diff scan (secrets / debug leftovers / unsafe / spawn / dep-source changes) | **0 hits** across the audit-owned src-tauri diff (patterns: token prefixes, private keys, `dbg!`/`todo!`/`unimplemented!`, `println!`/`eprintln!` — zero logging statements exist in src-tauri at all — `unsafe`, `Command::new` outside the launcher). Zero Chinese/CJK-script content: the repo's `check-no-chinese` gate passes on the reconciled tree, and the last kana warning class (the `sanitize_filename` fixture) is closed by the candidate's merged `7c3f8b6` fixture (Unicode-escapes, no CJK glyph in committed source). |
 
 ## 8. Defects and fixes (PR #81's two verified + this round's)
 
@@ -325,7 +329,7 @@ guard restored, and the full suite re-run:
 - **A-4's 64 KiB `take()` bound deleted** (unbounded `read_to_string`
   restored) → **the original fixture did NOT fail** (it was malformed JSON,
   which refuses with or without the bound — a real test-quality gap found by
-  this exercise, fixed in `d6758c5`). The strengthened fixture (valid JSON
+  this exercise, fixed in `6b6b047`). The strengthened fixture (valid JSON
   with an 80 KiB etag value) FAILS without the bound and passes with it —
   verified in both directions.
 - **A-1's staging discard deleted** from the impossible-range refusal →
@@ -393,9 +397,11 @@ defect remains.**
   (PR #85) and carries ALL of PR #81; no #85 change is overwritten and no
   competing release branch exists (the retargeted PR #84 is the single
   native-integrity delta on the candidate).
-- Known open item NOT owned here: `validate:versions` fails closed on the
-  `fress-open` plugin crate's `1.0.12-beta` rows (Agent 3's version
-  correction, pre-recorded in PR #85); every other version row is 1.0.0 ok.
+- Version coherence: `validate:versions` PASSES on the reconciled tree (8
+  authoritative fields agree on 1.0.0, including the in-repo plugin crate
+  after Agent 3's fix on the candidate). The final diff carries no
+  secrets/debug/unsafe/spawn changes and the zero-CJK gate passes with zero
+  warnings.
 
 NOT RUN locally (CI-proven on linux+windows+macos instead): the full
 workspace clippy/test build (sandbox lacks the GTK/WebKit system libraries);

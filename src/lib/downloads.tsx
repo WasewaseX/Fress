@@ -73,6 +73,13 @@ export function isAndroidWebview(): boolean {
   return typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 }
 
+/** A completed download that is an Android package: the "open" action is
+ * really an INSTALL (the open_path boundary hands it to the system package
+ * installer through the scoped FileProvider), so the button says so. */
+export function isAndroidApkArtifact(name: string): boolean {
+  return isAndroidWebview() && /\.apk$/i.test(name);
+}
+
 /** Commands only. Every function here is referentially stable across the
  * provider's lifetime, so consumers that only need actions (detail modal,
  * footer, batch selection) NEVER rerender because download state moved. */
@@ -667,7 +674,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const openFile = useCallback((path: string) => {
     if (isTauri()) {
-      openPath(path).catch(() => toast.error(tRef.current('downloads.toast.openFileFailed')));
+      // The shared open_path boundary. On the desktop this delegates to the
+      // opener plugin exactly like the old direct plugin call did; on
+      // Android it validates the path against the download engine's
+      // completed-artifact registry and routes APKs to the system package
+      // installer through the scoped FileProvider (everything else goes to
+      // Android's view flow with the share sheet as fallback). The refusal
+      // is intentionally generic - the UI adds no detail the boundary did
+      // not already decide to share.
+      invoke('open_path', { path }).catch(() => toast.error(tRef.current('downloads.toast.openFileFailed')));
     }
   }, []);
 

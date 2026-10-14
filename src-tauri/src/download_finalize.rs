@@ -323,7 +323,15 @@ pub(crate) const COMPLETED_RECORD_CAP: usize = 32;
 /// updater's signature-verification boundary (see the module docs). Created
 /// exclusively by the commit path; never by cancelled, failed or
 /// checksum-mismatched downloads.
-#[derive(Clone, Debug)]
+///
+/// The serde derives serve the completed-artifact persistence file: the
+/// Android open_path boundary survives an app restart by reloading the
+/// engine-written records from the app data dir (see
+/// [`DownloadRegistry::load_persisted_completed`]). The file is written by
+/// the engine ONLY - the frontend has no command that can insert records -
+/// so loading it cannot turn a webview-controlled path into a registered
+/// artifact.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CompletedArtifact {
     pub(crate) id: u32,
     /// The exact final path the engine reported in its completion event
@@ -372,11 +380,26 @@ pub(crate) struct CompletedArtifact {
 /// purpose: its two callers are the engine's commit path (no await while
 /// held) and the verifier's blocking thread, which cannot lock an async
 /// mutex. No guard is ever held across an await point.
-#[derive(Default)]
 pub(crate) struct DownloadRegistry {
     next_id: AtomicU32,
     active: Mutex<HashMap<u32, ActiveDownload>>,
     completed: std::sync::Mutex<VecDeque<CompletedArtifact>>,
+    /// Where the completed-artifact records are durably mirrored, when the
+    /// host platform wants restart survival (Android's open_path boundary
+    /// sets this; desktop stays session-scoped exactly as before). `None`
+    /// = in-memory only, the historical behavior.
+    persist_path: std::sync::Mutex<Option<std::path::PathBuf>>,
+}
+
+impl Default for DownloadRegistry {
+    fn default() -> Self {
+        Self {
+            next_id: AtomicU32::new(0),
+            active: Mutex::new(HashMap::new()),
+            completed: std::sync::Mutex::new(VecDeque::new()),
+            persist_path: std::sync::Mutex::new(None),
+        }
+    }
 }
 
 impl DownloadRegistry {
@@ -442,6 +465,90 @@ impl DownloadRegistry {
             url: url.to_string(),
             checksum_verified,
         });
+        // Durable mirror (platform-dependent). Best effort: a persistence
+        // failure must never turn a completed download into an error, and
+        // the open boundary re-checks the filesystem at open time anyway.
+        self.persist_completed_locked(&completed);
+    }
+
+    /// Point the registry at the directory that should hold the
+    /// completed-artifact persistence file. Called once at startup, before
+    /// any download can commit; a later call just overwrites the setting.
+    /// (Android-only caller today; see the persistence docs above.)
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn set_persist_dir(&self, dir: &Path) {
+        let mut persist = self
+            .persist_path
+            .lock()
+            .expect("completed-artifact persist path poisoned");
+        *persist = Some(dir.join(PERSIST_FILE_NAME));
+    }
+
+    /// Reload the completed-artifact records the engine persisted for a
+    /// previous session. Restores ONLY what the engine itself wrote: the
+    /// file lives in the app's private data dir, is rewritten atomically on
+    /// every commit and is never fed by the frontend. Records whose file no
+    /// longer exists are dropped eagerly (the open boundary re-checks the
+    /// filesystem at open time anyway; this keeps the in-memory queue close
+    /// to the truth). The cap still applies. (Android-only caller today.)
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn load_persisted_completed(&self, dir: &Path) {
+        self.set_persist_dir(dir);
+        let file = dir.join(PERSIST_FILE_NAME);
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            return;
+        };
+        let Ok(parsed) = serde_json::from_str::<PersistedCompletedArtifacts>(&text) else {
+            // A malformed or future-format file is treated as absent: the
+            // queue stays empty and the next commit overwrites the file.
+            return;
+        };
+        let mut completed = self
+            .completed
+            .lock()
+            .expect("completed-artifact registry poisoned");
+        completed.clear();
+        for mut record in parsed.artifacts.into_iter().rev() {
+            if !record.path.is_file() {
+                continue;
+            }
+            // The canonical path is re-derived: the app data dir itself may
+            // have moved between sessions (device restore, work profile
+            // clone). If the file still exists under the recorded path, the
+            // fresh canonicalization is the truthful one.
+            record.canonical =
+                std::fs::canonicalize(&record.path).unwrap_or_else(|_| record.path.clone());
+            while completed.len() >= COMPLETED_RECORD_CAP {
+                completed.pop_front();
+            }
+            completed.push_back(record);
+        }
+    }
+
+    /// Write the in-memory completed queue to the persistence file, using
+    /// the write-temp-then-rename pattern so a crash mid-write can never
+    /// leave a torn file behind. Callers hold the completed lock.
+    fn persist_completed_locked(&self, completed: &VecDeque<CompletedArtifact>) {
+        let target = {
+            let persist = self
+                .persist_path
+                .lock()
+                .expect("completed-artifact persist path poisoned");
+            match persist.as_ref() {
+                Some(p) => p.clone(),
+                None => return,
+            }
+        };
+        let payload = PersistedCompletedArtifacts {
+            artifacts: completed.iter().cloned().collect(),
+        };
+        let Ok(json) = serde_json::to_string(&payload) else {
+            return;
+        };
+        let tmp = target.with_extension("json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, &target);
+        }
     }
 
     /// Boundary lookup for the signature verifier: the completed-artifact
@@ -472,6 +579,120 @@ impl DownloadRegistry {
             .lock()
             .expect("completed-artifact registry poisoned")
             .len()
+    }
+}
+
+/// File name of the completed-artifact persistence mirror inside the app
+/// data dir. Only Android's startup wiring consumes it today (desktop keeps
+/// the session-scoped registry), hence the desktop dead-code allowance:
+/// the machinery is shared, the caller is platform-gated.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) const PERSIST_FILE_NAME: &str = "completed-downloads.json";
+
+/// The on-disk shape of the completed-artifact mirror. One version, one
+/// field set; a parse failure is treated as "no mirror" and the next commit
+/// rewrites the file.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedCompletedArtifacts {
+    artifacts: Vec<CompletedArtifact>,
+}
+
+/// What the open_path boundary decided a validated path is good for.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenKind {
+    /// An .apk artifact: hand it to Android's package installer through the
+    /// scoped FileProvider with the package-archive MIME type.
+    InstallApk,
+    /// Anything else: Android's normal view flow, with the share sheet as
+    /// the fallback when no activity can display the file type.
+    OpenOrShare,
+}
+
+/// The uniform refusal of the open_path boundary. Same design as the
+/// updater verifier's refusal: one message for every "not a completed
+/// download" outcome, so the command can never be turned into a filesystem
+/// probe by comparing error shapes.
+pub(crate) const OPEN_SCOPE_REFUSAL: &str =
+    "Open refused: this path is not a completed Fress download artifact";
+
+/// THE open boundary's validation half (the platform half lives in the
+/// command): `path` must be a completed, registered download artifact whose
+/// file is still exactly where the engine committed it, exactly as large as
+/// when it was committed.
+///
+/// The checks, in order (mirroring the updater verifier's rigor):
+///   1. Registry scope - exact reported-path match first, then the
+///      canonicalized fallback. Miss => the uniform refusal.
+///   2. Staging shapes - `.part` / `.part.meta` names are refused by
+///      construction (the engine never records one).
+///   3. Canonical stability - the recorded path re-canonicalized NOW must
+///      equal the canonical path recorded at completion. A symlink swap,
+///      move or re-home after completion is refused even when the bytes
+///      would be harmless.
+///   4. Regular file + committed size - a deleted, replaced or truncated
+///      artifact is refused here instead of opened.
+///   5. Classification - the (lowercased) extension decides InstallApk vs
+///      OpenOrShare. Only `.apk` reaches the package installer; the
+///      registry does NOT need to prove provenance for the APK's CONTENTS
+///      (that is what the publisher digest / installer's own verification
+///      are for) - it proves the file IS the engine's committed download
+///      and nothing swapped it in place.
+///
+/// Desktop builds never call this (their open_path delegates to the opener
+/// plugin), so the dead-code allowance keeps clippy -D warnings green while
+/// the cross-platform tests still exercise it.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) fn classify_completed_open(
+    registry: &DownloadRegistry,
+    raw_path: &str,
+) -> Result<OpenKind, String> {
+    let requested = std::path::PathBuf::from(raw_path.trim());
+    if requested.as_os_str().is_empty() {
+        return Err(OPEN_SCOPE_REFUSAL.to_string());
+    }
+    let name = requested
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if name.is_empty() || name.ends_with(".part") || name.ends_with(".part.meta") {
+        return Err(OPEN_SCOPE_REFUSAL.to_string());
+    }
+    let Some(record) = registry.completed_artifact_for_path(&requested) else {
+        return Err(OPEN_SCOPE_REFUSAL.to_string());
+    };
+    let current = std::fs::canonicalize(&record.path).map_err(|_| {
+        format!(
+            "Open refused: the completed download artifact is no longer on disk (download #{}, originally from {})",
+            record.id, record.url
+        )
+    })?;
+    if current != record.canonical {
+        return Err(
+            "Open refused: the completed download artifact was moved or replaced on disk"
+                .to_string(),
+        );
+    }
+    let meta = std::fs::metadata(&current).map_err(|_| OPEN_SCOPE_REFUSAL.to_string())?;
+    if !meta.is_file() {
+        return Err(OPEN_SCOPE_REFUSAL.to_string());
+    }
+    if meta.len() != record.size {
+        return Err(
+            "Open refused: the file at the completed download's path has changed since completion"
+                .to_string(),
+        );
+    }
+    let ext = current
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext == "apk" {
+        Ok(OpenKind::InstallApk)
+    } else {
+        Ok(OpenKind::OpenOrShare)
     }
 }
 
@@ -5149,6 +5370,142 @@ mod tests {
             .expect("record present");
         assert_eq!(record.id, 2);
         assert_eq!(record.size, 20, "the stale size must not survive");
+    }
+
+    // -- open_path boundary (classify_completed_open) ----------------------
+
+    #[test]
+    fn open_boundary_refuses_every_unregistered_path_with_the_uniform_refusal() {
+        let registry = DownloadRegistry::default();
+        // Empty, unregistered and staging shapes all get the SAME refusal:
+        // no error-shape differences that could turn the command into a
+        // filesystem probe.
+        for path in [
+            "",
+            "  ",
+            "/tmp/some-random-file.apk",
+            "/tmp/downloaded-setup.apk.part",
+            "/tmp/downloaded-setup.apk.part.meta",
+            "relative/path/file.exe",
+        ] {
+            let outcome = classify_completed_open(&registry, path);
+            assert_eq!(outcome.unwrap_err(), OPEN_SCOPE_REFUSAL, "path: {path:?}");
+        }
+    }
+
+    #[test]
+    fn open_boundary_sends_a_registered_apk_to_the_installer() {
+        let tmp = TempDir::new("e2e-open-apk");
+        let path = tmp.path().join("F-Droid_1021051.apk");
+        std::fs::write(&path, vec![0u8; 128]).unwrap();
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(7, &path, "https://f-droid.org/F-Droid.apk", None);
+        let kind = classify_completed_open(&registry, path.to_str().unwrap())
+            .expect("a registered completed apk is installable");
+        assert_eq!(kind, OpenKind::InstallApk);
+    }
+
+    #[test]
+    fn open_boundary_classifies_non_apk_artifacts_as_open_or_share() {
+        let tmp = TempDir::new("e2e-open-nonapk");
+        let path = tmp.path().join("report.PDF");
+        std::fs::write(&path, vec![0u8; 64]).unwrap();
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(3, &path, "https://example.com/report.pdf", None);
+        // Extension match is case-insensitive; any registered non-apk file
+        // goes through the view/share flow, never the installer.
+        let kind = classify_completed_open(&registry, path.to_str().unwrap())
+            .expect("a registered completed file is openable");
+        assert_eq!(kind, OpenKind::OpenOrShare);
+    }
+
+    #[test]
+    fn open_boundary_refuses_an_apk_swapped_or_truncated_after_completion() {
+        let tmp = TempDir::new("e2e-open-swapped");
+        let path = tmp.path().join("app.apk");
+        std::fs::write(&path, vec![0u8; 100]).unwrap();
+        let registry = DownloadRegistry::default();
+        registry.record_completed_artifact(5, &path, "https://example.com/app.apk", None);
+
+        // Same path, different bytes: the post-completion replacement
+        // detector (committed size) must refuse before anything reaches
+        // Java.
+        std::fs::write(&path, vec![0u8; 90]).unwrap();
+        let outcome = classify_completed_open(&registry, path.to_str().unwrap());
+        assert!(
+            outcome.unwrap_err().contains("changed since completion"),
+            "a resized artifact must be refused"
+        );
+
+        // Restored size, but the artifact moved: canonical instability.
+        let moved = tmp.path().join("app-renamed.apk");
+        std::fs::write(&path, vec![0u8; 100]).unwrap();
+        std::fs::rename(&path, &moved).unwrap();
+        let outcome = classify_completed_open(&registry, path.to_str().unwrap());
+        assert!(
+            outcome.unwrap_err().contains("no longer on disk"),
+            "a moved artifact must be refused"
+        );
+    }
+
+    #[test]
+    fn open_boundary_survives_a_restart_through_the_persistence_mirror() {
+        let tmp = TempDir::new("e2e-open-persist");
+        let apk = tmp.path().join("F-Droid.apk");
+        std::fs::write(&apk, vec![1u8; 256]).unwrap();
+
+        // Session 1: commit + persist.
+        let registry = DownloadRegistry::default();
+        registry.set_persist_dir(tmp.path());
+        registry.record_completed_artifact(11, &apk, "https://f-droid.org/F-Droid.apk", Some(true));
+        let mirror = tmp.path().join(PERSIST_FILE_NAME);
+        assert!(mirror.exists(), "the commit must write the mirror file");
+
+        // Session 2: a fresh registry reloads what the engine wrote.
+        let restarted = DownloadRegistry::default();
+        restarted.load_persisted_completed(tmp.path());
+        let kind = classify_completed_open(&restarted, apk.to_str().unwrap())
+            .expect("a persisted artifact is openable after a restart");
+        assert_eq!(kind, OpenKind::InstallApk);
+        let record = restarted
+            .completed_artifact_for_path(&apk)
+            .expect("record present");
+        assert_eq!(record.checksum_verified, Some(true));
+
+        // The mirror's records are engine-owned: a frontend can never
+        // insert one. A registry that never persisted stays empty no
+        // matter what the caller passes.
+        let clean = DownloadRegistry::default();
+        assert!(classify_completed_open(&clean, apk.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn the_persistence_mirror_ignores_records_whose_file_vanished() {
+        let tmp = TempDir::new("e2e-open-persist-gone");
+        let apk = tmp.path().join("gone.apk");
+        std::fs::write(&apk, vec![1u8; 32]).unwrap();
+        let registry = DownloadRegistry::default();
+        registry.set_persist_dir(tmp.path());
+        registry.record_completed_artifact(2, &apk, "https://example.com/gone.apk", None);
+        std::fs::remove_file(&apk).unwrap();
+
+        let restarted = DownloadRegistry::default();
+        restarted.load_persisted_completed(tmp.path());
+        assert!(
+            classify_completed_open(&restarted, apk.to_str().unwrap()).is_err(),
+            "a deleted artifact must not survive the restart as openable"
+        );
+    }
+
+    #[test]
+    fn the_persistence_mirror_tolerates_a_corrupt_file() {
+        let tmp = TempDir::new("e2e-open-persist-corrupt");
+        std::fs::write(tmp.path().join(PERSIST_FILE_NAME), "{ not json").unwrap();
+        let restarted = DownloadRegistry::default();
+        // Must not panic; the queue stays empty and the next commit
+        // rewrites the file.
+        restarted.load_persisted_completed(tmp.path());
+        assert_eq!(restarted.completed_len(), 0);
     }
 
     #[tokio::test]

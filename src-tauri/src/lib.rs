@@ -29,6 +29,8 @@ pub mod network_policy;
 // registration here is the coordination point between the download-engine
 // work and the URL/HTTP-client work (Agent 1's sections below are untouched).
 mod download_finalize;
+#[cfg(target_os = "android")]
+use download_finalize::{classify_completed_open, OpenKind};
 use download_finalize::{
     execute_with_retries, sanitize_filename, DownloadPlan, DownloadRegistry, DownloadSession,
     ErrorPayload, ProgressSink, CANCEL_SENTINEL,
@@ -901,6 +903,133 @@ async fn catch_unwind_result(
     }
 }
 
+// ---------------------------------------------------------------------------
+// open_path: the shared download-opening boundary (desktop open, Android
+// install/share through the scoped FileProvider)
+// ---------------------------------------------------------------------------
+
+/// The Kotlin side of the Android open flow (scripts/
+/// patch-android-fileprovider.mjs writes `FressFileOpenerPlugin.kt` into the
+/// generated Android project). `run_mobile_plugin` deserializes the plugin's
+/// `JSObject` response into this shape.
+#[cfg(target_os = "android")]
+#[derive(serde::Deserialize)]
+struct AndroidOpenResult {
+    status: String,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// Managed handle to the Android opener plugin. Registered once during
+/// startup (see [`fress_opener_plugin`]); commands reach it through the
+/// state store. The generic is concrete (`Wry`): the runtime IS `Wry` for
+/// this app, and a concrete type keeps every command signature simple.
+#[cfg(target_os = "android")]
+struct AndroidOpenerHandle(tauri::plugin::PluginHandle<tauri::Wry>);
+
+/// The in-app mobile plugin that carries the Android half of `open_path`.
+///
+/// Why a plugin: on Android, everything that touches the package installer
+/// or a FileProvider runs on the Java side, and Tauri's documented bridge
+/// from Rust into the app's own Kotlin classes is the mobile-plugin API
+/// (`register_android_plugin` + `run_mobile_plugin`). The Kotlin source is
+/// NOT tracked in git (src-tauri/gen is generated); the patch script in
+/// build.beforeBuildCommand re-creates it on every Android build, the same
+/// way the manifest and FileProvider resources are re-created.
+fn fress_opener_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("fress-file-opener")
+        .setup(|_app, api| {
+            // Desktop: nothing to register (the OS half of open_path is the
+            // opener plugin, already installed). Android: register the
+            // generated Kotlin plugin class below.
+            #[cfg(not(target_os = "android"))]
+            let _ = api;
+            #[cfg(target_os = "android")]
+            {
+                // The generated project's namespace IS the app identifier,
+                // so the plugin class lives at com.fress.app.
+                let handle =
+                    api.register_android_plugin("com.fress.app", "FressFileOpenerPlugin")?;
+                _app.manage(AndroidOpenerHandle(handle));
+            }
+            Ok(())
+        })
+        .build()
+}
+
+/// Opens a COMPLETED Fress download from the download manager.
+///
+/// This is the shared boundary the frontend's "Open file"/"Install" button
+/// goes through. The platform halves:
+///
+/// - Desktop: delegates to the opener plugin's `open_path` exactly as the
+///   frontend's previous direct plugin call did - behavior is unchanged,
+///   the indirection exists so the frontend has ONE opening command.
+///
+/// - Android: validates `path` against the download registry's
+///   completed-artifact records BEFORE anything touches Java
+///   ([`download_finalize::classify_completed_open`], the same rigor as the
+///   updater verifier: registry scope, no staging names, canonical
+///   stability, regular file, committed size). A registered `.apk` is then
+///   exposed through the scoped FileProvider
+///   (`content://<pkg>.fress.fileprovider/...`,
+///   `application/vnd.android.package-archive`,
+///   FLAG_GRANT_READ_URI_PERMISSION) and handed to Android's normal package
+///   installer via ACTION_VIEW - the OS owns the whole unknown-sources
+///   consent flow, and nothing here bypasses it. Any other registered file
+///   goes through ACTION_VIEW with its mapped MIME type, falling back to
+///   the share sheet when nothing can display it. An unregistered,
+///   missing, moved or resized path is refused with a generic error before
+///   the Java side is ever reached, so the command cannot become a
+///   filesystem probe.
+#[tauri::command]
+async fn open_path(app: AppHandle, path: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        // 1. Validate against the download registry. Runs before the plugin
+        //    call so a refused path never reaches the FileProvider.
+        let registry = app.state::<Arc<DownloadRegistry>>();
+        let kind = classify_completed_open(&registry, &path)?;
+        // 2. Hand the validated path to the Kotlin plugin on a blocking
+        //    thread: run_mobile_plugin waits for the activity-side response,
+        //    and the tokio worker must not sit on that.
+        let is_apk = kind == OpenKind::InstallApk;
+        let path_for_java = path.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), String> {
+            let handle = app.try_state::<AndroidOpenerHandle>().ok_or_else(|| {
+                "Android file opener is not ready; try again in a moment".to_string()
+            })?;
+            let result: AndroidOpenResult = handle
+                .0
+                .run_mobile_plugin(
+                    "open",
+                    serde_json::json!({ "path": path_for_java, "isApk": is_apk }),
+                )
+                .map_err(|e| format!("Cannot open the file on Android: {e}"))?;
+            match result.status.as_str() {
+                "ok" | "ok-shared" => Ok(()),
+                _ => Err(result
+                    .message
+                    .unwrap_or_else(|| "Could not open the file".to_string())),
+            }
+        })
+        .await
+        .map_err(|e| format!("Cannot open the file: {e}"))?
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        tokio::task::spawn_blocking(move || {
+            app.opener()
+                .open_path(path, None::<String>)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| format!("Cannot open the file: {e}"))?
+    }
+}
+
 #[tauri::command]
 async fn cancel_download(
     id: u32,
@@ -923,16 +1052,28 @@ fn default_download_dir(app: AppHandle) -> String {
 // Downloads folder (Windows FOLDERID_Downloads including OneDrive
 // redirection, macOS ~/Downloads, Linux XDG download dir). Android does not
 // let apps write a shared Downloads folder without storage permissions, so
-// the app's private directory is used instead; the UI explains this.
+// a private app directory is used instead; the UI explains this.
+//
+// Android detail that matters: the folder deliberately lives INSIDE
+// getFilesDir() (`<dataDir>/files/Download`, via app_data_dir() + "files"),
+// because that is exactly the path prefix the scoped FileProvider shares
+// (`<files-path name="fress_downloads" path="Download/" />` in the
+// generated res/xml/file_paths.xml - see scripts/patch-android-fileprovider
+// .mjs). Tauri's app_data_dir() resolves to the BASE private dir
+// (Context.getDataDir), one level ABOVE files/, which FileProvider's
+// files-path cannot reach - so the naive app_data_dir()/Download would
+// produce APKs the provider may never expose.
 fn platform_download_dir(app: &AppHandle) -> PathBuf {
     #[cfg(target_os = "android")]
     {
-        if let Ok(dir) = app.path().app_data_dir() {
-            let downloads = dir.join("Download");
+        if let Ok(data) = app.path().app_data_dir() {
+            let downloads = data.join("files").join("Download");
             if std::fs::create_dir_all(&downloads).is_ok() {
                 return downloads;
             }
-            return dir;
+            if std::fs::create_dir_all(&data).is_ok() {
+                return data;
+            }
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -949,11 +1090,33 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(fress_opener_plugin())
         .manage(Arc::new(DownloadRegistry::default()))
+        .setup(|app| {
+            // Desktop: no startup work (the session-scoped registry is the
+            // historical behavior; the persistence mirror is Android's).
+            #[cfg(not(target_os = "android"))]
+            let _ = app;
+            // Android: the open_path boundary must survive app restarts (a
+            // user installs a downloaded APK the day AFTER downloading it),
+            // so the engine's completed-artifact records are mirrored to
+            // the app's private data dir and reloaded at startup.
+            #[cfg(target_os = "android")]
+            {
+                let registry = app.state::<Arc<DownloadRegistry>>();
+                if let Ok(data_dir) = app.path().app_data_dir() {
+                    if std::fs::create_dir_all(&data_dir).is_ok() {
+                        registry.load_persisted_completed(&data_dir);
+                    }
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             start_download,
             cancel_download,
             default_download_dir,
+            open_path,
             fetch_latest_release,
             fetch_recent_releases,
             fetch_fdroid_package,

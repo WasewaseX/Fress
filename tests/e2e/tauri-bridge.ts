@@ -69,6 +69,8 @@ export interface FressTestBridge {
   /** URLs handed to the opener plugin (Workflow J: the releases page must
    * open instead of a direct download when no usable asset exists). */
   openedUrls: string[];
+  /** Paths handed to the open_path boundary (see the invoke case below). */
+  openedPaths: string[];
   nextId: number;
   hostArch: string;
   defaultDir: string;
@@ -126,6 +128,7 @@ const BRIDGE_BODY = String.raw`
     downloads: {},
     emits: [],
     openedUrls: [],
+    openedPaths: [],
     nextId: 1001,
     hostArch: HOST_ARCH,
     defaultDir: DEFAULT_DIR,
@@ -328,6 +331,14 @@ const BRIDGE_BODY = String.raw`
       case 'plugin:opener|open_url':
         if (args && typeof args.url === 'string') bridge.openedUrls.push(args.url);
         return null;
+      case 'open_path': {
+        // The shared download-opening boundary: desktop delegates to the
+        // opener plugin, Android validates against the download registry
+        // and routes APKs to the package installer. The bridge records the
+        // calls so tests can assert which path the UI handed over.
+        if (args && typeof args.path === 'string') bridge.openedPaths.push(args.path);
+        return null;
+      }
       case 'plugin:opener|open_path':
       case 'plugin:opener|reveal_item_in_dir':
         return null;

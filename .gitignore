@@ -29,3 +29,11 @@ scripts/perf/results/
 # Agent QA captures (screenshots + measurement reports) stay local;
 # the durable visual regression baselines live in tests/e2e/*-snapshots/.
 qa-shots/
+
+# Tauri generates src-tauri/gen (android studio project, schemas) per
+# machine and CI regenerates it on every release build (release.yml runs
+# `tauri android init`). The Android-native pieces this app needs at build
+# time (FileProvider scope, FressFileOpenerPlugin.kt) are re-applied after
+# generation by scripts/patch-android-fileprovider.mjs - see
+# docs/android-open-path-interface.md.
+/src-tauri/gen/

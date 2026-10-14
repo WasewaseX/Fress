@@ -19,7 +19,7 @@ import {
   Check,
   AlertTriangle,
 } from 'lucide-react';
-import { useDownloadState, useDownloadActions, formatBytes, formatSpeed, formatEta, isAndroidWebview } from '../lib/downloads';
+import { useDownloadState, useDownloadActions, formatBytes, formatSpeed, formatEta, isAndroidWebview, isAndroidApkArtifact } from '../lib/downloads';
 import { summarizeDownloadStates } from '../lib/downloadsAnnouncement';
 import { useI18n } from '../lib/i18n';
 
@@ -280,7 +280,10 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                   )}
                   {item.status === 'completed' && item.path && (
                     <>
-                      <PanelButton onClick={() => openFile(item.path!)} icon={<CheckCircle2 className="w-3 h-3" />} label={t('downloads.openFile')} primary />
+                      {/* On Android a completed .apk goes to the system
+                          package installer (the open_path boundary decides);
+                          the button says what will actually happen. */}
+                      <PanelButton onClick={() => openFile(item.path!)} icon={<CheckCircle2 className="w-3 h-3" />} label={isAndroidApkArtifact(item.name) ? t('downloads.installApk') : t('downloads.openFile')} primary />
                       {/* Android saves into app-private storage that no file
                           manager can browse, so only Open is offered there. */}
                       {!isAndroidWebview() && (

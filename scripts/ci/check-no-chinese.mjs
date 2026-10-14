@@ -199,15 +199,27 @@ function countCjkCodePoints(text) {
 }
 
 // PNG: parse chunks, decode the TEXT-bearing ones only (IDAT stays compressed
-// and is never regexed raw).
+// and is never regexed raw). A file must be STRUCTURALLY a PNG - IHDR first,
+// every chunk length in bounds, walk reaching IEND - before its text chunks
+// are trusted as the full story; a signature-only spoof returns null so the
+// payload falls through to the opaque printable-run scan (never a blind spot).
 function pngTextPayloads(buf) {
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (buf.length < 8 || !buf.subarray(0, 8).equals(sig)) return null; // not a PNG
+  // Structural gate 1: room for signature + a 13-byte IHDR chunk (12 + 13).
+  if (buf.length < 8 + 25) return null;
+  // Structural gate 2: the first chunk MUST be IHDR with its spec length 13.
+  if (buf.readUInt32BE(8) !== 13 || buf.toString('latin1', 12, 16) !== 'IHDR') return null;
   const out = [];
   let off = 8;
+  let reachedIend = false;
   while (off + 12 <= buf.length) {
     const len = buf.readUInt32BE(off);
     const type = buf.toString('latin1', off + 4, off + 8);
+    // Structural gate 3: every chunk must fit inside the buffer - a length
+    // that runs past EOF means the chain has desynced and the walk's silence
+    // would be a false "fully parsed" verdict.
+    if (off + 12 + len > buf.length) return null;
     const data = buf.subarray(off + 8, off + 8 + len);
     try {
       if (type === 'tEXt') {
@@ -245,8 +257,11 @@ function pngTextPayloads(buf) {
       }
     } catch { /* malformed chunk: move on */ }
     off += 12 + len;
-    if (type === 'IEND') break;
+    if (type === 'IEND') { reachedIend = true; break; }
   }
+  // Structural gate 4: a well-formed PNG terminates with IEND. If the walk
+  // ran off the end of the buffer first, the file is not a parseable PNG.
+  if (!reachedIend) return null;
   return out;
 }
 
@@ -256,13 +271,22 @@ function jpegTextPayloads(buf) {
   if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null; // not a JPEG
   const out = [];
   let off = 2;
-  while (off + 4 <= buf.length) {
+  let terminated = false;
+  // Markers are 2 bytes; segment LENGTHS need 4. Keeping the loop condition
+  // at +2 lets a tail EOI (last 2 bytes of the file) terminate the walk.
+  while (off + 2 <= buf.length) {
     if (buf[off] !== 0xff) { off += 1; continue; }
     const marker = buf[off + 1];
     if (marker === 0xff) { off += 1; continue; } // FF fill padding before a marker is not a segment: reading a length here desyncs the walk and silently skips the real COM/APPn that follows
     if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) { off += 2; continue; }
-    if (marker === 0xda || marker === 0xd9) break; // entropy-coded data starts
+    if (marker === 0xda || marker === 0xd9) { terminated = true; break; } // entropy-coded data starts / EOI
+    if (off + 4 > buf.length) return null; // segment header truncated: not a parseable JPEG
     const segLen = buf.readUInt16BE(off + 2);
+    // Structural gates: a segment length INCLUDES its own 2 bytes (so < 2 is
+    // impossible) and every segment must fit inside the buffer. Anything else
+    // means the walk has desynced - return null so the payload goes to the
+    // opaque printable-run scan instead of trusting a parsed verdict.
+    if (segLen < 2 || off + 2 + segLen > buf.length) return null;
     if (marker === 0xfe) {
       const raw = buf.subarray(off + 4, off + 2 + segLen);
       // COM is a declared textual segment: decode strict-UTF-8 first so
@@ -281,6 +305,7 @@ function jpegTextPayloads(buf) {
     }
     off += 2 + segLen;
   }
+  if (!terminated) return null; // ran off the end without SOS/EOI: not a parseable JPEG
   return out;
 }
 
@@ -552,7 +577,7 @@ let outArg = null;
 for (let i = 0; i < argv.length; i += 1) {
   if (argv[i] === '--out') {
     outArg = argv[i + 1];
-    if (!outArg) {
+    if (!outArg || outArg.startsWith('--')) {
       process.stderr.write('::error::check-no-chinese: --out requires a path argument (usage errors exit 2)\n');
       process.exit(2);
     }

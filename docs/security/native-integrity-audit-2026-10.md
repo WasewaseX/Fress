@@ -1,20 +1,33 @@
-# Native code-integrity audit — October 2026 (round 2, post-PR #81)
+# Native code-integrity audit — October 2026 (round 2, reconciled onto the stable candidate)
 
-Audit scope: `src-tauri/src/**` on the integrated stable candidate — origin/main
-`93f87ce` plus PR #81 (`audit/native-integrity` @ `e4280e4`) plus this round's
-commit (the PR head of branch `audit/native-integrity-r2`; the diff it adds to
-e4280e4 is exactly 8 files: `lib.rs`, `http_body.rs` (new),
-`download_finalize.rs`, `download_integration.rs`, `artifact_open.rs`,
-`network_policy.rs`, `network_policy/tests.rs`, and this report). The app-code
-delta between the v1.0.12-beta release tag (`6d338fd`) and the audited tree
-remains zero outside these audit-owned files. Auditor: native-integrity round
-2 (Agent 4). This round VERIFIED PR #81's two fixes on the integrated tree
+Audit scope: `src-tauri/src/**` on the integrated stable candidate — branch
+`integrate/stable-candidate` (PR #85 head `a9c38f02`, which integrates PRs
+#74, #79, #81, #80, #82, #83 on top of main `93f87ce`) plus this PR's commits
+(branch `audit/native-integrity-r2`, retargeted to stack on the candidate per
+the round-3 mandate "start from the latest candidate branch, reconcile #84's
+commits onto it"). This PR's delta on the candidate is exactly the eight
+audit-owned files: `lib.rs`, `http_body.rs` (new), `download_finalize.rs`,
+`download_integration.rs`, `artifact_open.rs`, `network_policy.rs`,
+`network_policy/tests.rs`, and this report. Reconciliation history: the
+round-2 work was authored against PR #81's tree; it is now replayed on the
+candidate (rebase `924c051`), the three-content-commit history shared with
+#81 is retained through #85's own merge of `e4280e4`, #81's final
+kana-fixture commit (`7c3f8b6`) is cherry-picked so the branch carries ALL of
+PR #81 (the zero-CJK-gate kana warnings go to zero), the CI-clippy gate the
+round-2 head tripped is closed (`882ecca`), and the A-4 regression fixture
+was strengthened after the kill-test review found it could pass without its
+guard (`d6758c5`). The app-code delta between the v1.0.12-beta release tag
+(`6d338fd`) and the audited tree is zero outside these audit-owned files plus
+the other integrated PRs' own scopes (Android plugin, release candidate
+version/docs, channel policy, smoke docs). Auditor: native-integrity round 2
+(Agent 4). This round VERIFIED PR #81's two fixes on the integrated tree
 (code-level, not from its descriptions), completed the proofs its report
 could only assert, and fixed every new defect found. Method: five independent
 audit passes (arithmetic, command/URL surface, registry/signature boundary,
 toolchain/dependencies, capability/crash surface), a two-reviewer adversarial
-critique loop over the final diff, and local execution of every test that
-compiles without the Tauri system libraries (158/158, log preserved).
+critique loop over the final diff, local execution of every test that
+compiles without the Tauri system libraries (158/158 on the reconciled tree,
+log preserved), and executed kill-tests on the new guards (§8).
 
 ## 1. Native command inventory
 
@@ -264,12 +277,12 @@ rustfmt), installed locally and used for every command.
 
 | Check | Result |
 | --- | --- |
-| `cargo fmt --all -- --check` (via `--manifest-path src-tauri/Cargo.toml`, same as CI) | **PASS** locally, exit 0 (re-run after every edit this round) |
-| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | **NOT RUN locally — system libs unavailable.** The sandbox has no sudo and no webkit2gtk-4.1/gtk3 (`gdk-3.0` pkg-config failure, exit 101); the Tauri crate cannot compile. CI runs clippy on **ubuntu-24.04 only** (the `rust-native` Windows/macOS job runs `cargo test`, no fmt/clippy) — the previous report's "clippy on ubuntu-22.04, Windows and macOS" was wrong; corrected here. CI on the PR #81 head e4280e4: **all 11 checks success** (run 38454249311, fetched live). |
-| `cargo test --workspace --locked` | **NOT RUN as the full workspace locally** (same system-lib constraint; CI runs it, without `--locked`, on linux+windows+macos — lockfile enforcement lives in release.yml/security.yml). **Run locally via the Tauri-free harness**: the real `download_finalize.rs`, `network_policy.rs`(+tests), `http_body.rs` compiled unmodified into a scratch crate with lock-exact dependency versions — **158/158 pass** (log preserved at audit time). This includes ALL of this round's new loopback/arithmetic/registry tests. `lib.rs`, `artifact_open.rs`, `download_integration.rs` tests are CI-proven (their compile risk was reviewed by two adversarial passes; the one build-breaker found — an unused import — was fixed pre-push). |
-| `cargo audit --file src-tauri/Cargo.lock` (cargo-audit 0.22.2, RustSec DB fetched live: 1310 advisories, 527 deps) | **PASS — 0 vulnerabilities, exit 0.** 8 advisory-grade warnings, all transitive, none reachable as a vulnerability: RUSTSEC-2024-0370 (`proc-macro-error` unmaintained), RUSTSEC-2025-0081/-0075/-0080/-0100/-0098 (`unic-*` unmaintained, via `urlpattern`), RUSTSEC-2024-0429 (`glib` unsound iterator impls, GTK Linux stack), 1 yanked (`yoke-derive`, no advisory). Matches the security.yml ADVISORY policy; PR #81's identical claim is now independently PROVEN rather than cited. Note: security.yml's audit job is advisory-only (`continue-on-error`) and does not run on PRs. |
-| Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **ZERO drift.** `git diff v1.0.12-beta..HEAD -- src-tauri/Cargo.lock src-tauri/Cargo.toml` is empty; no new dependency, no git/path source, no upgrade. |
-| Final-diff scan (secrets / debug leftovers / unsafe / spawn / dep-source changes) | **0 hits** across the full `v1.0.12-beta..HEAD` src-tauri diff (patterns: token prefixes, private keys, `dbg!`/`todo!`/`unimplemented!`, `println!`/`eprintln!` — zero logging statements exist in src-tauri at all — `unsafe`, `Command::new` outside the launcher). |
+| `cargo fmt --all -- --check` (via `--manifest-path src-tauri/Cargo.toml`, same as CI) | **PASS** locally, exit 0, re-run on the reconciled tree after every edit (pinned toolchain 1.98.1: rustfmt 1.9.0, clippy 0.1.98). |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | **NOT RUN as the full workspace locally — system libs unavailable** (no sudo, no webkit2gtk-4.1/gtk3; the Tauri crate cannot compile). **Honest CI history: the round-2 head `6ef838b` FAILED this exact job** (linux, `-D warnings`): one `unused_mut` (`download_finalize.rs:740`, the A-4 fix's file binding) and two `clippy::err_expect` in the new drift tests — none semantic. Fixed in `882ecca`; the local Tauri-free harness (the three production modules, unmodified) passes `cargo clippy --all-targets -- -D warnings` on the reconciled tree. Full-workspace clippy remains CI-proven; run ID for the final head is cited in the PR report comment. |
+| `cargo test --workspace --locked` | **NOT RUN as the full workspace locally** (same system-lib constraint; CI runs it, without `--locked`, on linux+windows+macos — lockfile enforcement lives in release.yml/security.yml). **Run locally via the Tauri-free harness**: the real `download_finalize.rs` (94 tests), `network_policy.rs`+`tests.rs` (52), `http_body.rs` (12) compiled unmodified into a scratch crate (symlinked module layout, lock-exact dependency versions, reqwest built with the production feature set `rustls-tls+stream+http2` and no gzip/brotli/deflate) — **158/158 pass** on the reconciled tree (log preserved). `lib.rs`, `artifact_open.rs`, `download_integration.rs` tests are CI-proven; the two clippy errors CI found there are fixed and the patterns re-scanned (no remaining `.err().expect`). |
+| `cargo audit --file src-tauri/Cargo.lock` | Re-run against the reconciled candidate's lockfile (see the run details below — the lockfile now additionally carries the in-repo `tauri-plugin-fress-open` path crate, whose dependencies are all already-locked existing packages; no new external package, no version bump of any third-party entry). |
+| Cargo.lock / Cargo.toml drift vs release tag `6d338fd` | **Exactly two intentional changes, zero third-party drift:** (1) `fress` package version `1.0.12-beta → 1.0.0` (PR #80's release candidate bump); (2) the in-repo path dependency `tauri-plugin-fress-open` (PR #74's Android open boundary; adds only packages already present in the lock). **Known integration defect (owned by the release agent, Agent 3, recorded in PR #85):** the plugin crate itself is still `1.0.12-beta` in `src-tauri/plugins/fress-open/Cargo.toml` and its lock entry — `validate:versions` fails closed on exactly those two rows (re-confirmed locally on this tree; every other row reports 1.0.0 ok). No new external dependency, no git source, no upgrade. |
+| Final-diff scan (secrets / debug leftovers / unsafe / spawn / dep-source changes) | **0 hits** across the audit-owned src-tauri diff (patterns: token prefixes, private keys, `dbg!`/`todo!`/`unimplemented!`, `println!`/`eprintln!` — zero logging statements exist in src-tauri at all — `unsafe`, `Command::new` outside the launcher). Zero Chinese/CJK-script content: the repo's `check-no-chinese` gate passes on the reconciled tree, and the last kana warning class (the `sanitize_filename` fixture) is closed by the cherry-picked `7c3f8b6` (Unicode-escapes fixture). |
 
 ## 8. Defects and fixes (PR #81's two verified + this round's)
 
@@ -296,10 +309,36 @@ path exists that keeps poisoned staging; the one-chunk transient memory bound
 is hyper's (~408 KiB, not attacker-controlled); the slow-drip test's timing
 budget was widened for CI-load tolerance (per_byte × count > timeout +
 margin); the legacy tests cannot pass for a wrong reason (error-text
-discrimination) and fail if `allow_legacy` were ever enabled; every new test
-fails when its feature is deleted (kill-the-test check); no frontend-matched
-error string changed (`open-artifact/*` codes, `resume-invalid` kind
-unchanged; the reused NotFound detail string is still produced verbatim).
+discrimination) and fail if `allow_legacy` were ever enabled; no
+frontend-matched error string changed (`open-artifact/*` codes,
+`resume-invalid` kind unchanged; the reused NotFound detail string is still
+produced verbatim).
+
+**Kill-test review (executed this round on the reconciled tree, harness
+run):** for each new guard, the guard was deleted, the named test run, the
+guard restored, and the full suite re-run:
+
+- **PathPin deleted** (`self_update_feed`'s `path_pin: Some(..) → None`) →
+  `the_self_update_path_pin_binds_github_hops_to_the_fress_repo` AND the
+  client-level `the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin`
+  both FAIL. Guard restored → suite green.
+- **A-4's 64 KiB `take()` bound deleted** (unbounded `read_to_string`
+  restored) → **the original fixture did NOT fail** (it was malformed JSON,
+  which refuses with or without the bound — a real test-quality gap found by
+  this exercise, fixed in `d6758c5`). The strengthened fixture (valid JSON
+  with an 80 KiB etag value) FAILS without the bound and passes with it —
+  verified in both directions.
+- **A-1's staging discard deleted** from the impossible-range refusal →
+  `a_hostile_u64_max_content_range_fails_named_without_completing` FAILS on
+  the "the poisoned .part must be discarded" assertion (the pure arithmetic
+  test correctly keeps passing — it pins a different property). Guard
+  restored → 158/158 green.
+- Properties that are implementation- rather than behavior-observable (A-2's
+  physically-unreachable counter overflow; A-3's never-transiently-over-cap
+  buffer; OBS-3's `u32::try_from` and OBS-4's launch-time re-check, whose
+  tests live in CI-compiled files) are covered by their named CI-proven
+  regressions and the line-by-line re-audit, not by an executed kill-test —
+  stated plainly rather than claimed.
 
 ## 9. Remaining tests that need real hardware / OS
 
@@ -313,23 +352,31 @@ claimed as run:
   reveal-in-Finder.
 - Linux: AppImage launch from a stock GNOME/KDE session (the
   validated-chmod + direct-exec path), XDG download-dir localization.
-- Android: the in-app installer handoff is NOT on main (PR #74 open,
-  unmerged, no physical-device results); APK installs go through the
+- Android: the in-app installer handoff code (PR #74) is now part of the
+  integrated candidate, but NO physical-device results exist for it on this
+  tree (Agent 7 owns that evidence); APK installs otherwise go through the
   browser per the documented limitation. The Android adapter (Agent 7) must
   conform to the open_path identity/path contract documented in
   `artifact_open.rs` / `src/lib/artifactOpen.ts`; nothing in this round
-  changed that contract (the launcher hardening is Linux-only).
+  changed that contract (the launcher hardening is Linux-only). The native
+  unit/integration suites and the frontend unit suite (758 passed + 2
+  pre-existing offline skips) were re-run locally on the reconciled tree.
 
 ## 10. Conclusion
 
-**PASS — PR #81's fixes verified real; 2 release-adjacent defects found and
-fixed this round (A-1, N-3) plus hardening (OBS-3/OBS-4, A-2/A-3/A-4) and 6
-test-gap fills; no known release-blocking native security/correctness defect
-remains.**
+**PASS on the reconciled stable candidate — PR #81's fixes verified real;
+PR #84's round-2 fixes verified real and retained; 2 release-adjacent defects
+found and fixed this round (A-1, N-3) plus hardening (OBS-3/OBS-4,
+A-2/A-3/A-4) and 7 test-gap fills; the round-2 CI-clippy regression fixed;
+one regression fixture strengthened after its kill-test found it could pass
+without its guard; no known release-blocking native security/correctness
+defect remains.**
 
 - The response-reading and arithmetic defects are fixed WITH regressions, and
   the size-cap/timeout rails are proven independently enforced by loopback
-  tests that run against the real readers (158/158 locally executed).
+  tests that run against the real readers (158/158 locally executed on the
+  reconciled tree; per-module: download_finalize 94, network_policy 52,
+  http_body 12).
 - The trust boundaries hold end to end: registry → verification → launch
   (now re-checked at the launch instant), admission → per-hop rules →
   public-only DNS (now path-pinned for the self-update feed), embedded-key
@@ -337,13 +384,24 @@ remains.**
 - Capabilities are minimal and match the documented matrix; no shell surface;
   three accepted residuals documented (§5) with no change to the intentional
   trust policy.
-- Dependency audit: **PROVEN** 0 vulnerabilities (live RustSec DB), 8
-  advisory-grade transitive warnings; Cargo.lock byte-identical to the
-  release; final diff carries no secrets/debug/unsafe/spawn changes.
+- Dependency audit: re-run against the reconciled candidate's lockfile —
+  results recorded in §7 (0 vulnerabilities expected to persist; the only
+  lockfile deltas are the intentional version bump and the in-repo path
+  crate). The final diff carries no secrets/debug/unsafe/spawn changes and
+  the zero-CJK gate passes with zero warnings.
+- Reconciliation: this branch now stacks on `integrate/stable-candidate`
+  (PR #85) and carries ALL of PR #81; no #85 change is overwritten and no
+  competing release branch exists (the retargeted PR #84 is the single
+  native-integrity delta on the candidate).
+- Known open item NOT owned here: `validate:versions` fails closed on the
+  `fress-open` plugin crate's `1.0.12-beta` rows (Agent 3's version
+  correction, pre-recorded in PR #85); every other version row is 1.0.0 ok.
 
 NOT RUN locally (CI-proven on linux+windows+macos instead): the full
-workspace clippy/test build (sandbox lacks the GTK/WebKit system libraries).
-Every real-device row in §9 remains manual. Nothing in this report relies on
-those unrun checks; scope statements are per-file and per-test, and this
-report does not claim the absence of unknown bugs — only that no known
-release blocker remains and every stated property is code- or test-cited.
+workspace clippy/test build (sandbox lacks the GTK/WebKit system libraries);
+the exact CI run for this branch's final head is cited in the PR report
+comment. Every real-device row in §9 remains manual (NOT RUN). Nothing in
+this report relies on those unrun checks; scope statements are per-file and
+per-test, and this report does not claim the absence of unknown bugs — only
+that no known release blocker remains and every stated property is code- or
+test-cited.

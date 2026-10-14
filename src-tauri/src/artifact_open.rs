@@ -758,8 +758,8 @@ mod tests {
         let app = dir.path().join("drift.AppImage");
         write(&app, b"elf-bytes");
         let canonical = std::fs::canonicalize(&app).unwrap();
-        let err = launch_app_image(&app, 999, &canonical)
-            .expect_err("a size drift must be refused");
+        let err =
+            launch_app_image(&app, 999, &canonical).expect_err("a size drift must be refused");
         assert_eq!(err, OpenRejection::ReplacedOnDisk);
     }
 

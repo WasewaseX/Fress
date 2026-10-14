@@ -19,10 +19,12 @@
  *   9 -> test 9b  10 -> test 10  11 -> tests 7, 13b  12 -> tests 8, 9
  *  13 -> tests 11, 12, 12c, 12d  14 -> test 9 (12b proves kana warning routing)
  *
- * Critique-round additions (Agent 2 audit wave 2): 12c-12g prove Korean
- * script is never classified as Chinese; 15/15b/16/16b prove byte-level
- * parser correctness; 17/17b/17c/17d prove determinism, safe --out
- * behavior, strict flag validation and honest history reporting.
+ * Critique-round additions (Agent 2 audit wave 2): 20a-20e prove Korean
+ * script is never classified as Chinese; 15/15b/21a/21b prove byte-level
+ * parser correctness incl. signature-spoof and truncated-container labs;
+ * 16/16b prove locale pairing and astral columns/context; 17/17b/17c/21c
+ * prove determinism, safe --out behavior and strict flag validation; 17d
+ * proves honest history reporting.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -344,7 +346,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
   // exploited as a false positive. Every fixture below is code-point-built.
   // ---------------------------------------------------------------------
 
-  it('12c. Hangul syllables (Korean) are exit-neutral warnings, never blocking Chinese hits', () => {
+  it('20a. Hangul syllables (Korean) are exit-neutral warnings, never blocking Chinese hits', () => {
     const root = makeRepo();
     // U+C5EC U+BCF4 U+C138 U+C694 - a Korean word, built from code points.
     const HANGUL_WORD = String.fromCodePoint(0xc5ec, 0xbcf4, 0xc138, 0xc694);
@@ -361,7 +363,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     }
   });
 
-  it('12d. Hangul compatibility jamo (U+3130-318F) are warnings, not Chinese hits', () => {
+  it('20b. Hangul compatibility jamo (U+3130-318F) are warnings, not Chinese hits', () => {
     const root = makeRepo();
     const JAMO = String.fromCodePoint(0x3131, 0x3134, 0x3137);
     writeFileSync(join(root, 'jamo.txt'), `jamo: ${JAMO}\n`);
@@ -374,7 +376,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(rep.warnings[0].category).toContain('Hangul compatibility jamo');
   });
 
-  it('12e. halfwidth Hangul (U+FFA0-FFDC) is a declared warning, not invisible', () => {
+  it('20c. halfwidth Hangul (U+FFA0-FFDC) is a declared warning, not invisible', () => {
     const root = makeRepo();
     const HALF_HANGUL = String.fromCodePoint(0xffa1, 0xffa2, 0xffa3);
     writeFileSync(join(root, 'halfwidth.txt'), `half: ${HALF_HANGUL}\n`);
@@ -387,8 +389,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(rep.warnings[0].category).toContain('Halfwidth Hangul');
   });
 
-  it('12f. halfwidth kana (U+FF65-FF9F) is a warning; halfwidth ideographic punctuation blocks', () => {
-    const root = makeRepo();
+  it('20d. halfwidth kana (U+FF65-FF9F) is a warning; halfwidth ideographic punctuation blocks', () => {
     const HALF_KANA = String.fromCodePoint(0xff71, 0xff72); // halfwidth katakana
     const HALF_PUNCT = String.fromCodePoint(0xff61); // halfwidth ideographic full stop
     const rootA = makeRepo();
@@ -407,7 +408,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(repB.hits[0].codepoint).toBe(`U+${0xff61.toString(16).toUpperCase()}`);
   });
 
-  it('12g. mixed Han + Hangul + kana: only the Han code points block', () => {
+  it('20e. mixed Han + Hangul + kana: only the Han code points block', () => {
     const root = makeRepo();
     const HANGUL_WORD = String.fromCodePoint(0xc5ec, 0xbcf4);
     writeFileSync(join(root, 'mixed.txt'), `note: ${HANChar}${HANChar2} ${HANGUL_WORD} ${KANA_A}\n`);
@@ -739,26 +740,28 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(localeHits.map((h) => h.category)).toContain(`Chinese locale identifier "${YUE_ROOT}-Hant"`);
   });
 
-  it('16b. astral-plane Han (Extension B) reports a true code-point column and context', () => {
+  it('16b. astral Han after a >24-code-point astral prefix: true columns AND an intact context window', () => {
     const root = makeRepo();
-    const EXT_B = String.fromCodePoint(0x20000); // astral Han, 2 UTF-16 units
-    // "A" (1) + EXT_B (2) + HANChar (3): BOTH astral and BMP Han block, and
-    // the columns must be true CODE-POINT columns (2 and 3 - a UTF-16-indexed
-    // scan would have reported 4 for the second hit), and the context window
-    // of the second hit must start at the real line start.
-    writeFileSync(join(root, 'astral.txt'), `A${EXT_B}${HANChar}\n`);
+    // 30 astral Han code points precede the BMP hit: the context window is
+    // code-point-sliced, so it must STILL end at the hit. A UTF-16 slice
+    // (the pre-hardening bug) shifts the window into the middle of a
+    // surrogate pair and LOSES the hit character entirely - so the
+    // endsWith assertion below is discriminating between old and new.
+    const PREFIX = Array.from({ length: 30 }, (_, i) => String.fromCodePoint(0x20000 + i)).join('');
+    writeFileSync(join(root, 'astral.txt'), `${PREFIX}${HANChar}\n`);
     commitAll(root);
     const r = runChecker(root);
     expect(r.status).toBe(1);
     const rep = r.report();
-    expect(rep.hits).toHaveLength(2);
-    expect(rep.hits[0].codepoint).toBe(`U+${0x20000.toString(16).toUpperCase()}`);
-    expect(rep.hits[0].col).toBe(2);
-    expect(rep.hits[1].codepoint).toBe(`U+${0x62a5.toString(16).toUpperCase()}`);
-    expect(rep.hits[1].col).toBe(3);
-    // The context of the BMP hit begins at the line start, astral char intact
-    // (escapeForDisplay: ASCII stays literal, astral becomes \Uxxxxxxxx).
-    expect(rep.hits[1].context_escaped.startsWith(`A\\U${0x20000.toString(16).padStart(8, '0')}\\u62a5`)).toBe(true);
+    expect(rep.hits).toHaveLength(31); // 30 astral Han + 1 BMP Han, all blocking
+    const bmp = rep.hits[rep.hits.length - 1];
+    expect(bmp.codepoint).toBe(`U+${0x62a5.toString(16).toUpperCase()}`);
+    expect(bmp.col).toBe(31); // true CODE-POINT column
+    // The context window still ends WITH the hit after 30 astral chars.
+    expect(bmp.context_escaped.endsWith('\\u62a5')).toBe(true);
+    // And it begins with a whole astral escape, not a lone surrogate: the
+    // window starts 24 code points before the hit, i.e. at U+20006.
+    expect(bmp.context_escaped.startsWith('\\U00020006\\U00020007')).toBe(true);
   });
 
   it('17. the JSON report is byte-deterministic across runs', () => {
@@ -795,6 +798,47 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     const r2 = runChecker(root, ['--out']);
     expect(r2.status).toBe(2);
     expect(r2.stderr).toContain('--out requires a path');
+  });
+
+  it('21a. a signature-spoofed PNG (magic bytes, no real chunks) still gets the opaque run scan', () => {
+    const root = makeRepo();
+    const evil = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), // valid PNG signature
+      Buffer.alloc(32, 0x00), // then NULs: no IHDR, no chunk chain
+      Buffer.from(`secret ${HANChar}${HANChar}${HANChar} tail`, 'utf8'), // 3-CJK run
+    ]);
+    writeFileSync(join(root, 'evil.png'), evil);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1); // the magic bytes alone must not buy trust
+    const hits = r.report().hits.filter((h) => h.path === 'evil.png');
+    expect(hits.length).toBe(3);
+    expect(hits[0].source).toBe('binary printable-run');
+  });
+
+  it('21b. a truncated-but-signed JPEG (no SOS/EOI) still gets the opaque run scan', () => {
+    const root = makeRepo();
+    const evil = Buffer.concat([
+      Buffer.from([0xff, 0xd8]), // SOI
+      Buffer.from(`stashed ${HANChar}${HANChar}${HANChar} payload`, 'utf8'), // no valid segment chain, no EOI
+      Buffer.alloc(16, 0x00), // NULs make it binary so the container path applies
+    ]);
+    writeFileSync(join(root, 'evil.jpg'), evil);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const hits = r.report().hits.filter((h) => h.path === 'evil.jpg');
+    expect(hits.length).toBe(3);
+    expect(hits[0].source).toBe('binary printable-run');
+  });
+
+  it('21c. --out followed by another flag is a usage error (exit 2)', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'ok.txt'), 'clean\n');
+    commitAll(root);
+    const r = runChecker(root, ['--out', '--json']);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('--out requires a path');
   });
 
   it('17d. the history report declares every skip class and labels the touching commit', () => {

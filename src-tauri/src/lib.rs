@@ -213,6 +213,13 @@ fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
 // Resolver hosts the official download resolvers may read are defined (and
 // enforced per redirect hop) in `network_policy::RESOLVER_ALLOWED_HOSTS`.
 
+// The bounded response-body readers (caps + the TextFetch document shape)
+// live in their own Tauri-free module so their loopback regression tests
+// compile and run everywhere - see the module docs for the two-rail design
+// (size cap + request timeout) and its test matrix.
+mod http_body;
+use http_body::{read_capped_api_text, read_capped_text, TextFetch};
+
 /// Reads a small text document (manifest, directory index, YAML feed) from a
 /// vendor host. Returns the final URL after redirects so callers that only
 /// need the redirect TARGET (Zotero's dl endpoint) can skip parsing entirely.
@@ -223,103 +230,6 @@ fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
 /// cap is NOT read - the caller gets the final URL and the content length
 /// instead, which is exactly what a redirect-to-file endpoint requires
 /// without ever pulling a 200 MB installer into memory.
-#[derive(Serialize, Clone)]
-struct TextFetch {
-    status: u16,
-    final_url: String,
-    content_length: Option<u64>,
-    body: String,
-    truncated: bool,
-}
-
-const FETCH_TEXT_BODY_CAP: u64 = 2 * 1024 * 1024;
-
-/// Whole-body cap for the JSON API commands (`fetch_latest_release`,
-/// `fetch_recent_releases`, `fetch_fdroid_package`). Generous by design: a
-/// `per_page=30` release list is order-of-megabytes, so the cap can only be
-/// hit by a hostile or broken pinned host. Unlike the text commands (which
-/// truncate and report), these bodies are parsed as JSON, so a truncation
-/// could never be interpreted - past the cap the response is refused with a
-/// named error instead of being read into memory without bound (an unbounded
-/// `resp.text()` on a pinned host would let a multi-gigabyte body balloon
-/// the app's RSS until the process dies).
-const API_BODY_CAP: u64 = 10 * 1024 * 1024;
-
-/// Streams a JSON API response body under `cap`. An oversized advertised
-/// content-length refuses the body outright; a body that grows past the cap
-/// mid-stream is refused the moment it crosses the line. Named so callers
-/// can surface the reason instead of a confusing JSON parse failure.
-async fn read_capped_api_text_with_cap(
-    mut resp: reqwest::Response,
-    cap: u64,
-) -> Result<String, String> {
-    if resp.content_length().is_some_and(|n| n > cap) {
-        return Err("Response body too large".to_string());
-    }
-    let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| format!("Bad response: {}", e))?
-    {
-        if buf.len() as u64 + chunk.len() as u64 > cap {
-            return Err("Response body too large".to_string());
-        }
-        buf.extend_from_slice(&chunk);
-    }
-    // API JSON is UTF-8 by RFC 8259; a body that is not is a broken answer
-    // (reqwest's text() would silently replace invalid bytes, moving the
-    // failure into a less explicable JSON parse error).
-    String::from_utf8(buf).map_err(|_| "Response body is not UTF-8".to_string())
-}
-
-/// Production cap for [`read_capped_api_text_with_cap`].
-async fn read_capped_api_text(resp: reqwest::Response) -> Result<String, String> {
-    read_capped_api_text_with_cap(resp, API_BODY_CAP).await
-}
-
-/// Streams a response body into a `TextFetch` under the shared 2 MiB cap:
-/// an oversized content-length refuses the body outright, and a body that
-/// grows past the cap mid-stream is truncated and reported. Shared by every
-/// text-fetching command (`fetch_text`, `fetch_self_update_text`) so the
-/// cap cannot drift between them.
-async fn read_capped_text(mut resp: reqwest::Response) -> Result<TextFetch, String> {
-    let status = resp.status().as_u16();
-    let final_url = resp.url().to_string();
-    let content_length = resp.content_length();
-    let mut truncated = false;
-    let body = if content_length.is_some_and(|n| n > FETCH_TEXT_BODY_CAP) {
-        truncated = true;
-        String::new()
-    } else {
-        // Stream at most the cap even without a content-length header.
-        // resp.chunk() is reqwest's own streaming API - no extra dep needed.
-        let mut buf: Vec<u8> = Vec::new();
-        loop {
-            match resp.chunk().await {
-                Ok(Some(chunk)) => {
-                    buf.extend_from_slice(&chunk);
-                    if buf.len() as u64 > FETCH_TEXT_BODY_CAP {
-                        buf.truncate(FETCH_TEXT_BODY_CAP as usize);
-                        truncated = true;
-                        break;
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => return Err(format!("Bad response: {}", e)),
-            }
-        }
-        String::from_utf8_lossy(&buf).into_owned()
-    };
-    Ok(TextFetch {
-        status,
-        final_url,
-        content_length,
-        body,
-        truncated,
-    })
-}
-
 #[tauri::command]
 async fn fetch_text(url: String) -> Result<TextFetch, String> {
     let policy = network_policy::UrlPolicy::resolver_manifest();
@@ -335,6 +245,27 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
     read_capped_text(resp).await
 }
 
+/// The self-update repo pin: the only github.com documents the self-update
+/// flow may read are this repository's atom feed and release assets. Shared
+/// by the command and its admission tests so the tests drive the PRODUCTION
+/// gate, not a copy of it (a regression in the gate must fail the tests).
+/// The asset-CDN hosts have opaque token paths, so the pin applies to the
+/// github.com origin only; redirect hops are pinned separately by the
+/// policy's `PathPin`.
+pub(crate) fn check_self_update_repo_path(url: &reqwest::Url) -> Result<(), String> {
+    const REPO_PATH_PREFIX: &str = "/WasewaseX/Fress/";
+    if url.host_str() == Some("github.com")
+        && !url.path().starts_with(REPO_PATH_PREFIX)
+        && url.path() != "/WasewaseX/Fress"
+    {
+        return Err(format!(
+            "Only WasewaseX/Fress release documents are allowed, not {}",
+            url.path()
+        ));
+    }
+    Ok(())
+}
+
 /// Reads one small text document from Fress's own GitHub release feed:
 /// `releases.atom` (the rate-limit-proof update-check fallback) and
 /// `SHA256SUMS.txt` (the checksum reference the self-update verification
@@ -347,30 +278,18 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
 /// reads through the native layer fixes that without loosening anything.
 ///
 /// Admission is deliberately NARROWER than the other text command:
-///   - the `self_update_feed` policy pins the host to the two GitHub-owned
+///   - the `self_update_feed` policy pins the host to the three GitHub-owned
 ///     names (every redirect hop re-checked) and refuses private addresses;
-///   - the path on `github.com` is pinned here to the Fress repository, so
-///     the command cannot be turned into a general github.com reader even
-///     from a compromised WebView;
+///   - the path on `github.com` is pinned here to the Fress repository (and
+///     to the same repository on every redirect hop, via the policy's
+///     `PathPin`), so the command cannot be turned into a general github.com
+///     reader even from a compromised WebView;
 ///   - the 2 MiB body cap shared with `fetch_text` bounds the response.
 #[tauri::command]
 async fn fetch_self_update_text(url: String) -> Result<TextFetch, String> {
-    const REPO_PATH_PREFIX: &str = "/WasewaseX/Fress/";
     let policy = network_policy::UrlPolicy::self_update_feed();
     let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
-    // Repo pin: the only github.com documents the self-update flow ever
-    // needs are this repository's atom feed and release assets. The asset
-    // CDN hosts have opaque token paths, so the pin applies to the
-    // github.com origin only.
-    if parsed.raw().host_str() == Some("github.com")
-        && !parsed.raw().path().starts_with(REPO_PATH_PREFIX)
-        && parsed.raw().path() != "/WasewaseX/Fress"
-    {
-        return Err(format!(
-            "Only WasewaseX/Fress release documents are allowed, not {}",
-            parsed.raw().path()
-        ));
-    }
+    check_self_update_repo_path(parsed.raw())?;
     let client = policy.http_client()?;
     let resp = client
         .get(parsed.raw().clone())
@@ -1251,18 +1170,9 @@ mod self_update_text_tests {
     use super::*;
 
     fn admit(url: &str) -> Result<reqwest::Url, String> {
-        const REPO_PATH_PREFIX: &str = "/WasewaseX/Fress/";
         let policy = network_policy::UrlPolicy::self_update_feed();
         let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
-        if parsed.raw().host_str() == Some("github.com")
-            && !parsed.raw().path().starts_with(REPO_PATH_PREFIX)
-            && parsed.raw().path() != "/WasewaseX/Fress"
-        {
-            return Err(format!(
-                "Only WasewaseX/Fress release documents are allowed, not {}",
-                parsed.raw().path()
-            ));
-        }
+        check_self_update_repo_path(parsed.raw())?;
         Ok(parsed.raw().clone())
     }
 
@@ -1286,6 +1196,34 @@ mod self_update_text_tests {
         ] {
             assert!(admit(url).is_err(), "must refuse {url}");
         }
+    }
+
+    #[test]
+    fn refuses_github_paths_that_normalize_outside_the_repository() {
+        // The pin compares the PARSED path, so shapes that normalize to a
+        // path outside the repository are refused like any other. Pinned
+        // one by one because each bypass was plausible on paper (audit
+        // round 2026-10, N-7): what the url crate actually does with dot
+        // segments and encoded slashes is load-bearing here.
+        for url in [
+            // Dot segments resolve during parsing: the prefix is lost.
+            "https://github.com/WasewaseX/Fress/../evil/releases.atom",
+            // An encoded slash stays encoded, so the literal prefix does
+            // not match.
+            "https://github.com/WasewaseX/Fress%2F..%2Fevil/releases.atom",
+            // A double-slash prefix makes the path start "//WasewaseX",
+            // which is not the pinned prefix.
+            "https://github.com//WasewaseX/Fress/releases.atom",
+            // The path is case-sensitive; a case variant of the repo pin
+            // is refused (fail-closed).
+            "https://github.com/wasewasex/fress/releases.atom",
+        ] {
+            assert!(admit(url).is_err(), "must refuse {url}");
+        }
+        // Positive control: a query or fragment on an in-repo document is
+        // still the pinned path and stays admitted.
+        admit("https://github.com/WasewaseX/Fress/releases.atom?cache=bust")
+            .expect("a query on the pinned path must not refuse");
     }
 
     #[test]
@@ -1334,8 +1272,43 @@ mod self_update_signature_tests {
     /// `tauri signer sign` output over FIXTURE_PAYLOAD with the fixture key.
     pub(crate) const FIXTURE_SIG_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRVG9Fdzk0SHVXV1phVkViOUhjM2dJTjNsR0VsTzhURTZZWlZTUGcyaXdSNGdPcVUzK0hXbk9TTWkwbGFlTk9LREUrMlRMMEdvS3VNbmhxQjF3SVVGMUFZVWpyU1VqQlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNzQ3NjUzCWZpbGU6cGF5bG9hZC5iaW4KRis3Wkp1d1kyS1U4NTF3MFlSRTBaUFp6VHU3UnJHVlExNmRsajNMNkhDRlFNWmVicEVlRWhVNFNTcFQyNXJvY2JkaTFBU1p1VXpNMUJyb0dqMEVWQnc9PQo=";
 
-    /// The key id published in CODE_SIGNING.md and on every release page.
+    /// The key id published in `docs/release-readiness.md` (and identical
+    /// to the key embedded in `tauri.conf.json`).
     const PUBLISHED_KEY_ID: &str = "5638C68123FB633B";
+
+    #[test]
+    fn a_legacy_algorithm_tagged_signature_is_refused_not_accepted() {
+        // The legacy (non-prehashed) minisign algorithm must be refused by
+        // the boundary, never accepted. The refusal lives inside
+        // minisign-verify itself (`verify(_, _, false)` returns
+        // UnexpectedAlgorithm for the legacy "Ed" tag; `verify_stream`
+        // refuses with UnsupportedLegacyMode), so a dependency upgrade or
+        // an accidental allow-legacy could weaken the gate unnoticed.
+        // Regression: the genuine fixture signature's prehashed "ED"
+        // algorithm tag is flipped to the legacy "Ed" tag (bytes 0..2 of
+        // the signature box) - the document stays structurally valid and
+        // key-id-correct, and the boundary must still refuse it.
+        use base64::Engine as _;
+        let document = decode_document_b64(FIXTURE_SIG_B64).expect("fixture signature decodes");
+        let lines: Vec<&str> = document.lines().collect();
+        assert_eq!(lines.len(), 4, "unexpected fixture shape: {document:?}");
+        let (untrusted, box_b64, trusted, global) = (lines[0], lines[1], lines[2], lines[3]);
+        assert!(trusted.starts_with("trusted comment: "));
+        let mut box_bytes = base64::engine::general_purpose::STANDARD
+            .decode(box_b64.trim())
+            .expect("the signature box decodes");
+        assert_eq!(&box_bytes[0..2], b"ED", "the fixture must be prehashed");
+        box_bytes[1] = b'd'; // "ED" -> "Ed": the legacy algorithm tag
+        let legacy_box = base64::engine::general_purpose::STANDARD.encode(&box_bytes);
+        let legacy_b64 = base64::engine::general_purpose::STANDARD
+            .encode(format!("{untrusted}\n{legacy_box}\n{trusted}\n{global}\n").as_bytes());
+        let err = verify_signature_document(FIXTURE_KEY_DOC_B64, &legacy_b64, FIXTURE_PAYLOAD)
+            .expect_err("a legacy-tagged signature must be refused");
+        assert!(
+            err.contains("verification failed") && err.contains("algorithm"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn the_embedded_public_key_is_the_published_fress_key() {
@@ -1575,6 +1548,50 @@ mod verification_boundary_tests {
         let err = boundary_verify(&registry, meta.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
             .expect_err("a .part.meta file must be refused");
         assert!(err.contains(super::VERIFICATION_SCOPE_REFUSAL), "{err}");
+
+        // A .sig sidecar is refused through the registry scope (no record
+        // can ever exist for it - the engine only records committed
+        // destinations), which is the same uniform refusal. Pinned so the
+        // launcher's name gate and the verifier's scope stay aligned on the
+        // full staging-shape set.
+        let sig = dir.0.join("Fress-setup.exe.sig");
+        std::fs::write(&sig, FIXTURE_SIG_B64).unwrap();
+        let err = boundary_verify(&registry, sig.to_string_lossy().as_ref(), FIXTURE_SIG_B64)
+            .expect_err("a .sig sidecar must be refused");
+        assert!(err.contains(super::VERIFICATION_SCOPE_REFUSAL), "{err}");
+    }
+
+    #[test]
+    fn a_legacy_algorithm_signature_fails_the_production_streaming_path() {
+        // The byte-slice test in self_update_signature_tests proves the
+        // non-streaming refusal ("Unexpected signature algorithm"); the
+        // PRODUCTION gate is the streaming verifier, whose legacy refusal
+        // is a DIFFERENT error on a different code path (verify_stream
+        // returns UnsupportedLegacyMode before any byte is hashed). Pin
+        // that path too: a structurally valid, key-id-correct document
+        // tagged with the legacy "Ed" algorithm must be refused by the
+        // registry-bound streaming verifier.
+        use base64::Engine as _;
+        let dir = TempDir::new("legacy-stream");
+        let (registry, path) = registered_artifact(&dir, "Fress-setup.exe");
+        let document = decode_document_b64(FIXTURE_SIG_B64).expect("fixture signature decodes");
+        let lines: Vec<&str> = document.lines().collect();
+        assert_eq!(lines.len(), 4, "unexpected fixture shape: {document:?}");
+        let mut box_bytes = base64::engine::general_purpose::STANDARD
+            .decode(lines[1].trim())
+            .expect("the signature box decodes");
+        assert_eq!(&box_bytes[0..2], b"ED", "the fixture must be prehashed");
+        box_bytes[1] = b'd'; // "ED" -> "Ed": the legacy algorithm tag
+        let legacy_box = base64::engine::general_purpose::STANDARD.encode(&box_bytes);
+        let legacy_b64 = base64::engine::general_purpose::STANDARD.encode(
+            format!("{}\n{}\n{}\n{}\n", lines[0], legacy_box, lines[2], lines[3]).as_bytes(),
+        );
+        let err = boundary_verify(&registry, path.to_string_lossy().as_ref(), &legacy_b64)
+            .expect_err("the streaming verifier must refuse a legacy-tagged signature");
+        assert!(
+            err.contains("Cannot start updater signature verification"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

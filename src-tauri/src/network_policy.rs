@@ -43,7 +43,8 @@
 //! ONLY policy that may read the release's artifact-signature documents
 //! (the `.sig` sidecars verified by `verify_self_update_signature`): they
 //! are release assets like SHA256SUMS.txt, so they ride the same
-//! two-host allowlist and per-hop checks rather than growing a new client.
+//! three-host allowlist and per-hop checks (including the github.com
+//! repo-path pin) rather than growing a new client.
 //!
 //! # Ports
 //!
@@ -273,6 +274,28 @@ enum RedirectHostRule {
     AnyHttps,
 }
 
+/// A path pin re-checked on every redirect hop whose destination is the
+/// pinned host. The command layer pins the self-update feed's github.com
+/// path to this repository at admission; without the hop-side twin, a
+/// redirect chain that re-enters `github.com` OUTSIDE the pinned path would
+/// pass the host allowlist and return a document the admission pin refuses.
+#[derive(Debug, Clone, Copy)]
+struct PathPin {
+    host: &'static str,
+    /// Paths on `host` must start with this prefix...
+    prefix: &'static str,
+    /// ...or be exactly this (the bare repository root).
+    bare: &'static str,
+}
+
+impl PathPin {
+    fn admits(&self, url: &Url) -> bool {
+        url.host_str().map(|h| h.to_ascii_lowercase()).as_deref() != Some(self.host)
+            || url.path().starts_with(self.prefix)
+            || url.path() == self.bare
+    }
+}
+
 /// Per-redirect-hop rules plus the hop budget.
 #[derive(Debug, Clone, Copy)]
 struct RedirectRules {
@@ -285,6 +308,10 @@ struct RedirectRules {
     /// `https://169.254.169.254/` fails with a precise reason at the hop
     /// decision instead of surfacing as a DNS/connect failure afterwards.
     block_private_literals: bool,
+    /// When set, every hop landing on the pinned host must stay inside the
+    /// pinned path (mirrors an admission-time pin that lives in the command
+    /// layer). `None` for every policy that has no path-scoped admission.
+    path_pin: Option<PathPin>,
 }
 
 /// The request classes Fress's native layer makes, each with its own rules.
@@ -327,6 +354,7 @@ impl UrlPolicy {
                 max_hops: 5,
                 host_rule: RedirectHostRule::AnyHttps,
                 block_private_literals: false,
+                path_pin: None,
             },
             block_private_addrs: false,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -347,6 +375,7 @@ impl UrlPolicy {
                 max_hops: 3,
                 host_rule: RedirectHostRule::PinToOrigin,
                 block_private_literals: true,
+                path_pin: None,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -364,6 +393,7 @@ impl UrlPolicy {
                 max_hops: 3,
                 host_rule: RedirectHostRule::PinToOrigin,
                 block_private_literals: true,
+                path_pin: None,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -383,6 +413,7 @@ impl UrlPolicy {
                 max_hops: 5,
                 host_rule: RedirectHostRule::Allowlist(RESOLVER_ALLOWED_HOSTS),
                 block_private_literals: true,
+                path_pin: None,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -396,18 +427,23 @@ impl UrlPolicy {
     /// blocking layer) and the reads are routed through this native command
     /// instead.
     ///
-    /// The allowlist is exactly the two GitHub-owned hosts the feed can
+    /// The allowlist is exactly the three GitHub-owned hosts the feed can
     /// touch: the request starts on `github.com` and the release-asset
     /// redirect lands on `release-assets.githubusercontent.com`
     /// (`objects.githubusercontent.com` is the older asset host, kept so a
     /// historic manifest shape cannot fail closed into an unverified
-    /// update). Every hop is re-checked against the same two hosts, so the
+    /// update). Every hop is re-checked against the same three hosts, so the
     /// fetch can never be bounced anywhere else. Request bodies are capped
-    /// by the caller (2 MiB, like `fetch_text`); the command additionally
-    /// pins the github.com path to the Fress repository. The repo pin and
-    /// the command live in `lib.rs` (Agent 5); this policy constructor is
-    /// the only addition to Agent 3's module - flagged for review in the
-    /// bridge-contract notes of PR quality/platform-updater.
+    /// by the caller (2 MiB, like `fetch_text`).
+    ///
+    /// The github.com PATH is pinned to this repository - at admission by
+    /// the command (`lib.rs`), and on every hop by the [`PathPin`] below, so
+    /// even a redirect chain that leaves and re-enters `github.com` outside
+    /// `/WasewaseX/Fress/` is refused. Asset-CDN hosts keep opaque token
+    /// paths, so the pin binds the `github.com` origin only. As with every
+    /// policy, the port is not part of the host decision (see the module
+    /// "Ports" note): a pinned-path hop on github.com:8443 is admitted by
+    /// the pin and by the allowlist - TLS, not the port, pins identity.
     pub fn self_update_feed() -> Self {
         const SELF_UPDATE_ALLOWED_HOSTS: &[&str] = &[
             "github.com",
@@ -428,6 +464,15 @@ impl UrlPolicy {
                 // hostname hops stay guarded by the allowlist plus the
                 // connect-time resolver.
                 block_private_literals: true,
+                // The command layer pins the github.com path at admission;
+                // the hop-side twin keeps a redirect that re-enters
+                // github.com outside the repository from slipping past the
+                // host allowlist (N-3, native-integrity audit 2026-10).
+                path_pin: Some(PathPin {
+                    host: "github.com",
+                    prefix: "/WasewaseX/Fress/",
+                    bare: "/WasewaseX/Fress",
+                }),
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -451,6 +496,7 @@ impl UrlPolicy {
                 max_hops: 8,
                 host_rule: RedirectHostRule::AnyHttps,
                 block_private_literals: true,
+                path_pin: None,
             },
             block_private_addrs: true,
             request_timeout: None,
@@ -645,6 +691,18 @@ fn evaluate_redirect_hop(
         RedirectHostRule::AnyHttps => {}
     }
 
+    // Path pin for the policies that scope one host to one path: the host
+    // allowlist alone would let a redirect chain leave the pinned path and
+    // re-enter the same host somewhere else (see [`PathPin`]).
+    if let Some(pin) = rules.path_pin {
+        if !pin.admits(next) {
+            return Err(RedirectRejection::OffPinnedPath {
+                host: next.host_str().unwrap_or("").to_string(),
+                path: next.path().to_string(),
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -672,6 +730,7 @@ enum RedirectRejection {
     HostMismatch { host: String },
     LeftAllowlist { host: String },
     PrivateDestination { host: String },
+    OffPinnedPath { host: String, path: String },
 }
 
 impl RedirectRejection {
@@ -695,6 +754,9 @@ impl RedirectRejection {
             }
             RedirectRejection::PrivateDestination { host } => {
                 format!("Redirect to a private or local address ({host}) is not allowed")
+            }
+            RedirectRejection::OffPinnedPath { host, path } => {
+                format!("Redirect left the pinned repository path on {host} ({path})")
             }
         }
     }

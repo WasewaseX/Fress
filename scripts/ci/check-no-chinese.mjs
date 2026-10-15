@@ -17,6 +17,10 @@
 //   2. every untracked, non-ignored file (would enter the release commit)
 //   3. with --include-dist: the generated frontend build tree (dist/) that
 //      the release packages
+//   4. with --extra-dir <path> (repeatable): any explicitly requested tree,
+//      e.g. an extracted package (APK assets). Unlike a missing dist/ (which
+//      only warns), a MISSING --extra-dir is a hard exit-2 failure: an
+//      explicitly requested scan target must never be silently skipped.
 //   plus every FILE NAME in those scopes.
 //
 // HOW (fail-closed rules):
@@ -47,9 +51,14 @@
 // The scan needs no dependencies and no network; stock Node in CI is enough.
 //
 // Usage: node scripts/ci/check-no-chinese.mjs [--out <path>] [--include-dist]
-//                                          [--history] [--json] [--help]
+//                                          [--extra-dir <path>] [--history]
+//                                          [--json] [--help]
 //   --out <path>    write report JSON to <path> (same base, .md for summary)
 //   --include-dist  also scan the generated dist/ build tree
+//   --extra-dir <path>  also scan an explicitly added tree (repeatable); a
+//      missing/unreadable requested target exits 2. Hit paths are prefixed
+//      with the directory's basename (disambiguated -2, -3, ... in CLI
+//      order when basenames collide) so findings stay attributable.
 //   --history       additionally scan all reachable history blobs
 //                   (report-only; reports history-only findings separately)
 //   --json          print the machine-readable report to stdout
@@ -309,7 +318,7 @@ function jpegTextPayloads(buf) {
   return out;
 }
 
-const SUMMARY = { tracked: 0, untracked: 0, dist: 0, textScanned: 0, binarySkipped: 0, fontSkipped: 0,
+const SUMMARY = { tracked: 0, untracked: 0, dist: 0, extra: 0, textScanned: 0, binarySkipped: 0, fontSkipped: 0,
   pngMetadata: 0, jpegMetadata: 0, binaryStringScans: 0, historyBlobs: 0,
   historyNonBlobObjects: 0, historySkippedOversize: 0, historySkippedEmpty: 0, historySkippedUndecodable: 0 };
 
@@ -566,14 +575,15 @@ function walkFiles(root, base, acc = []) {
 // -- argument parsing --------------------------------------------------------
 const argv = process.argv.slice(2);
 if (argv.includes('--help')) {
-  process.stdout.write(`usage: node scripts/ci/check-no-chinese.mjs [--out <path>] [--include-dist] [--history] [--json]\n\nScans tracked + untracked files (and optionally dist/) for Chinese/CJK-language\ncontent and Chinese locale identifiers. Exit 0 = zero hits, 1 = hits found,\n2 = scan could not run. No dependencies, no network.\n`);
+  process.stdout.write(`usage: node scripts/ci/check-no-chinese.mjs [--out <path>] [--include-dist]\n                          [--extra-dir <path>] [--history] [--json]\n\nScans tracked + untracked files (and optionally dist/ and --extra-dir trees)\nfor Chinese/CJK-language content and Chinese locale identifiers.\nExit 0 = zero hits, 1 = hits found, 2 = scan could not run.\nNo dependencies, no network.\n`);
   process.exit(0);
 }
 // Strict argument validation: the header documents "usage errors exit 2",
 // so unknown flags and a valueless --out must fail loudly instead of being
 // silently ignored (a silently ignored --include-dist would weaken the gate).
-const KNOWN_FLAGS = new Set(['--help', '--out', '--include-dist', '--history', '--json']);
+const KNOWN_FLAGS = new Set(['--help', '--out', '--include-dist', '--extra-dir', '--history', '--json']);
 let outArg = null;
+const extraDirsRaw = [];
 for (let i = 0; i < argv.length; i += 1) {
   if (argv[i] === '--out') {
     outArg = argv[i + 1];
@@ -581,6 +591,16 @@ for (let i = 0; i < argv.length; i += 1) {
       process.stderr.write('::error::check-no-chinese: --out requires a path argument (usage errors exit 2)\n');
       process.exit(2);
     }
+    i += 1;
+    continue;
+  }
+  if (argv[i] === '--extra-dir') {
+    const val = argv[i + 1];
+    if (!val || val.startsWith('--')) {
+      process.stderr.write('::error::check-no-chinese: --extra-dir requires a path argument (usage errors exit 2)\n');
+      process.exit(2);
+    }
+    extraDirsRaw.push(val);
     i += 1;
     continue;
   }
@@ -592,6 +612,24 @@ for (let i = 0; i < argv.length; i += 1) {
 const includeDist = argv.includes('--include-dist');
 const historyMode = argv.includes('--history');
 const jsonStdout = argv.includes('--json');
+// Resolve extra dirs against the INVOCATION cwd (the chdir below moves to the
+// repo top; a caller extracting a package into a temp dir passes absolute or
+// invocation-relative paths, never repo-relative ones).
+const extraDirs = extraDirsRaw.map((p) => resolve(p));
+// Deterministic, unique report prefixes: first dir with a basename wins the
+// plain name; later collisions get -2, -3, ... in CLI order.
+const usedExtraPrefixes = new Map();
+const extraScopes = extraDirs.map((dir) => {
+  let prefix = basename(dir) || 'extra';
+  if (usedExtraPrefixes.has(prefix)) {
+    const n = usedExtraPrefixes.get(prefix) + 1;
+    usedExtraPrefixes.set(prefix, n);
+    prefix = `${prefix}-${n}`;
+  } else {
+    usedExtraPrefixes.set(prefix, 1);
+  }
+  return { dir, prefix };
+});
 
 const repoTop = git(['rev-parse', '--show-toplevel']).toString().trim();
 const headSha = git(['rev-parse', 'HEAD'], { allowFail: true }).toString().trim() || null;
@@ -622,6 +660,31 @@ if (includeDist) {
     }
   } else {
     process.stderr.write('::warning::--include-dist requested but dist/ does not exist (run the production build first)\n');
+  }
+}
+
+// -- scope 3b (optional): explicitly requested extra trees -------------------
+// Package-extraction primitive: a release job may unzip an artifact (e.g. an
+// APK's assets/) and hand the tree here. Fail-closed rules:
+//   - a requested dir that does not exist or is not a directory -> exit 2
+//     (unlike a missing dist/, an EXPLICITLY passed target is a requirement,
+//     and a silently skipped requirement would fake a clean gate)
+//   - walk/read failures propagate to the uncaughtException handler (exit 2)
+//   - every file is scanned with the SAME policy as the repo scopes
+//     (declared-textual at 1-char sensitivity, binaries via parsed metadata
+//     or the RUN_CJK_MIN printable-run bar) - no special treatment.
+if (extraScopes.length > 0) {
+  for (const { dir, prefix } of extraScopes) {
+    let st = null;
+    try { st = statSync(dir); } catch { /* missing -> fail closed below */ }
+    if (!st || !st.isDirectory()) {
+      process.stderr.write(`::error::check-no-chinese: --extra-dir "${dir}" does not exist or is not a directory - an explicitly requested scan target is missing, refusing to report a clean scan\n`);
+      process.exit(2);
+    }
+    for (const [abs, rel] of walkFiles(dir, prefix)) {
+      SUMMARY.extra += 1;
+      scanTextFile('content', 'extra-dir', abs, rel);
+    }
   }
 }
 
@@ -738,6 +801,7 @@ const report = {
     tracked_files: SUMMARY.tracked,
     untracked_files_included: SUMMARY.untracked,
     dist_files: includeDist ? SUMMARY.dist : null,
+    extra_dir_files: extraScopes.length > 0 ? SUMMARY.extra : null,
     text_files_scanned: SUMMARY.textScanned,
     binary_files_skipped_from_text_scan: SUMMARY.binarySkipped,
     font_binaries_skipped_glyph_coverage_not_text: SUMMARY.fontSkipped,
@@ -773,6 +837,7 @@ md.push('|---|---|');
 md.push(`| tracked files | ${SUMMARY.tracked} |`);
 md.push(`| untracked (release-commit candidates) | ${SUMMARY.untracked} |`);
 md.push(`| generated dist/ files${includeDist ? '' : ' (not requested)'} | ${includeDist ? SUMMARY.dist : '-'} |`);
+md.push(`| extra-dir files (--extra-dir)${extraScopes.length > 0 ? '' : ' (not requested)'} | ${extraScopes.length > 0 ? SUMMARY.extra : '-'} |`);
 md.push(`| text files decoded + scanned | ${SUMMARY.textScanned} |`);
 md.push(`| binary files (no raw-text scan) | ${SUMMARY.binarySkipped} |`);
 md.push(`| - font binaries skipped (glyph coverage is not UI copy) | ${SUMMARY.fontSkipped} |`);

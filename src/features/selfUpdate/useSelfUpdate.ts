@@ -124,12 +124,29 @@ export function useSelfUpdate(
   const checkEpochRef = useRef(0);
   const recheckAfterStaleRef = useRef(false);
   const checkingRef = useRef(false);
-  // The version of the update a DELIVERY (or its failure states) refers to.
-  // A channel switch clears ownUpdate - the DETECTED update of the old
-  // channel is stale - but a delivery already in flight for that release is
-  // not: its pill label must keep naming the version actually being
-  // downloaded and verified instead of interpolating an empty {v}.
+  // The version the CURRENT delivery-lifecycle state describes. Pinned when
+  // a delivery is started from the pill; a detection that arrives while a
+  // delivery is underway (or after one finished) must NOT re-seed it, or a
+  // newer release would relabel the old transfer - "Downloading v1.0.14"
+  // while 1.0.13-beta transfers, or a "Ready v1.0.14" for bytes that were
+  // never verified. A channel switch also clears ownUpdate - the DETECTED
+  // update of the old channel is stale - while the delivery in flight for
+  // that release is not: its pill label keeps naming the version actually
+  // being downloaded and verified instead of interpolating an empty {v}.
   const deliveredVersionRef = useRef('');
+  // Set for the lifetime of the mounted hook. A check that lands after
+  // unmount applies no state and fires no announcement: the component is
+  // gone, and a late "update available" toast from a dead instance is
+  // stale news by definition (React would silently no-op the setState -
+  // the side effects are the part that needs the guard).
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Delivery lifecycle: subscribe for the pill, translate module toasts,
   // and mirror the download manager's items so terminal download events
@@ -141,9 +158,15 @@ export function useSelfUpdate(
     setDeliveryTranslator(t);
   }, [t]);
 
+  // Seed (never re-seed over a delivery) the delivered-version pin: while
+  // the delivery lifecycle is idle, a detection describes the update the
+  // pill would deliver; once a delivery exists, its version stays pinned
+  // until a NEW delivery replaces it (pinned again at its own start).
   useEffect(() => {
-    if (ownUpdate) deliveredVersionRef.current = ownUpdate.release.version;
-  }, [ownUpdate]);
+    if (ownUpdate && deliveryState.phase === 'idle') {
+      deliveredVersionRef.current = ownUpdate.release.version;
+    }
+  }, [ownUpdate, deliveryState]);
 
   useEffect(() => {
     syncDeliveryItems(
@@ -195,11 +218,18 @@ export function useSelfUpdate(
       // requested, must not fire either - "update available" for a channel
       // the user just left is exactly the stale-news lie this guard is
       // here to prevent). If the switch asked for a refresh, run it now
-      // under the new channel.
-      if (recheckAfterStaleRef.current) {
+      // under the new channel - a mounted hook only; a dead instance
+      // fetches nothing.
+      if (mountedRef.current && recheckAfterStaleRef.current) {
         recheckAfterStaleRef.current = false;
         return runUpdateCheck(false);
       }
+      return res;
+    }
+    if (!mountedRef.current) {
+      // The component went away while the check ran: apply no state and
+      // fire no announcement (the branches below). The promise still
+      // resolves so the startup throttle can stamp the completed check.
       return res;
     }
     setOwnUpdate(res.kind === 'available' ? { release: res.release, asset: res.asset, expectedSha256: res.expectedSha256 } : null);
@@ -280,18 +310,34 @@ export function useSelfUpdate(
 
   const handleHeaderUpdateClick = () => {
     if (!ownUpdate) return;
-    if (deliveryState.phase === 'verified') {
+    // The delivery-lifecycle state describes ONE pinned version (the one
+    // its delivery was started for). Only the VERIFIED reveal is bound to
+    // that version: clicking "Update v1.0.14" must never reveal the file a
+    // finished 1.0.13-beta delivery verified - the reveal must come from a
+    // pill whose update IS the delivered release. Everything else falls
+    // through to the guards below / a fresh (or retried) start.
+    const deliveryIsForThisUpdate =
+      deliveryState.phase !== 'idle' && deliveredVersionRef.current === ownUpdate.release.version;
+    if (deliveryIsForThisUpdate && deliveryState.phase === 'verified') {
       // Reveal - never auto-launch. Verification established trust in the
       // bytes; the user decides when (and whether) to run the installer.
       void revealItemInDir(deliveryState.path);
       return;
     }
     if (isDelivering()) {
+      // ANY in-flight transfer blocks a new start (the delivery module
+      // enforces the same guard). This must run BEFORE the version pin
+      // below: a refused start must not re-pin the pill's version to the
+      // new release while the old transfer keeps running.
       toast.info(t('update.alreadyInProgress'), {
         description: t('update.alreadyInProgressHint'),
       });
       return;
     }
+    // The version this delivery (or its retry) names - pinned BEFORE the
+    // async start so every pill label from here on interpolates the real
+    // release even if a channel switch clears ownUpdate mid-transfer.
+    deliveredVersionRef.current = ownUpdate.release.version;
     // One delivery entry point for the pill: runs the shared three-gate
     // plan (asset + checksum + signature sidecar), fetches the signature
     // document for real, and hands the asset to the download manager. A
@@ -307,6 +353,20 @@ export function useSelfUpdate(
     );
   };
 
+  // The lifecycle override describes the DELIVERY, so it may only label
+  // the update it was started for: a delivery pinned to version A must
+  // never render its phases ("Downloading"/"Verifying"/"Ready"/"Retry")
+  // under a NEWER detection B - that would announce progress for bytes
+  // the transfer knows nothing about, or "Ready" for a release that was
+  // never verified (a false success pill). With no delivery underway the
+  // mapping is null anyway; with one underway and no current detection
+  // (channel switched mid-transfer), the pinned version keeps naming
+  // itself instead of interpolating an empty {v}.
+  const deliveredVersion = deliveredVersionRef.current;
+  const overrideActive =
+    deliveryState.phase !== 'idle' &&
+    deliveredVersion !== '' &&
+    (!ownUpdate || ownUpdate.release.version === deliveredVersion);
   return {
     ownUpdate,
     updateChecking,
@@ -314,10 +374,6 @@ export function useSelfUpdate(
     handleUpdateChannelChange,
     runUpdateCheck,
     handleHeaderUpdateClick,
-    updatePillStatus: pillStatusFor(
-      deliveryState,
-      ownUpdate ? ownUpdate.release.version : deliveredVersionRef.current,
-      t
-    ),
+    updatePillStatus: overrideActive ? pillStatusFor(deliveryState, deliveredVersion, t) : null,
   };
 }

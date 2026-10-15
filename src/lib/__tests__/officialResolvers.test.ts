@@ -395,6 +395,16 @@ describe('fetch_text truncated manifests are refused, never parsed as complete',
       (c) => c[0] === 'fetch_text' && (c[1] as { url?: string })?.url === BLENDER_ROOT
     );
     expect(rootCalls.length).toBe(2);
+    // The failure sits in the bounded FAILURE cache, not the success cache:
+    // a follow-up resolve inside the failure TTL returns the same null
+    // WITHOUT re-fetching (the next real retry re-fetches; see the next
+    // test), and nothing about 2.93.9 was ever persisted as a resolution.
+    const again = await resolveOfficialDownload(blender, 'windows');
+    expect(again).toBeNull();
+    const rootCallsAfter = invokeMock.mock.calls.filter(
+      (c) => c[0] === 'fetch_text' && (c[1] as { url?: string })?.url === BLENDER_ROOT
+    );
+    expect(rootCallsAfter.length).toBe(2);
   });
 
   it('a transient truncation is retried for real and the complete page resolves the NEWEST version', async () => {
@@ -421,5 +431,77 @@ describe('fetch_text truncated manifests are refused, never parsed as complete',
     expect(hit?.version).toBe('4.5.3');
     expect(hit?.filename).toBe('blender-4.5.3-windows-x64.msi');
     expect(rootReads).toBe(2);
+  });
+
+  it('an over-cap response (EMPTY body with truncated:true) is refused like any truncation', async () => {
+    // The native reader reports the length-over-cap case with an EMPTY body
+    // and truncated:true. An empty body would parse as "no releases" (a
+    // silent no-update) if it were treated as a complete 200 - so the flag
+    // alone must refuse it, exactly like a cut listing.
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        return { status: 200, final_url: url, content_length: 9_999_999, body: '', truncated: true };
+      }
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
+    const rootCalls = invokeMock.mock.calls.filter(
+      (c) => c[0] === 'fetch_text' && (c[1] as { url?: string })?.url === BLENDER_ROOT
+    );
+    // Refused twice (attempt + transient retry), never parsed.
+    expect(rootCalls.length).toBe(2);
+  });
+
+  it('a server error is retried once and then resolves null (never a cached success)', async () => {
+    let rootReads = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        rootReads += 1;
+        return { status: 500, final_url: url, content_length: 0, body: '', truncated: false };
+      }
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
+    expect(rootReads).toBe(2);
+  });
+
+  it('a 404 is NOT retried (retrying cannot help) and resolves null', async () => {
+    let rootReads = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        rootReads += 1;
+        return { status: 404, final_url: url, content_length: 0, body: '', truncated: false };
+      }
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
+    expect(rootReads).toBe(1);
+  });
+
+  it('a complete but unparsable body resolves null (no guess, no cached success)', async () => {
+    // A full 200 body with no usable release links is a schema failure:
+    // newestVersion finds nothing and the resolver returns null instead of
+    // inventing a pick.
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) return textFetch(url, '<html><body><p>maintenance page</p></body></html>', false);
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
   });
 });

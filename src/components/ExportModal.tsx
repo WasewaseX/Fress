@@ -310,10 +310,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             >
               <Download className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
               <span>
-                {t('export.download').replace(
-                  '{fmt}',
-                  format === 'markdown' ? 'README.md' : format.toUpperCase()
-                )}
+                {/* formatMessage (split/join): the file name travels through
+                    the same literal-insertion path as every other
+                    interpolation, so the label stays safe by construction
+                    rather than by the current constants alone. */}
+                {formatMessage(t('export.download'), {
+                  fmt: format === 'markdown' ? 'README.md' : format.toUpperCase(),
+                })}
               </span>
             </button>
           </div>

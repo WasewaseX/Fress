@@ -9,15 +9,7 @@ import {
   FilterState
 } from '../types';
 import { useI18n } from '../lib/i18n';
-import {
-  Bookmark,
-  FolderPlus,
-  RotateCcw,
-  Award,
-  Flame,
-  Smartphone,
-  SlidersHorizontal
-} from 'lucide-react';
+import { Bookmark, FolderPlus, RotateCcw, Award, Flame, Smartphone } from 'lucide-react';
 
 interface FilterBarProps {
   filters: FilterState;

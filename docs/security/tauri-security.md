@@ -19,10 +19,23 @@ the traced frontend call sites:
 | `core:path:allow-dirname` | falling back to opening the parent folder when "reveal in folder" fails | `dirname()` in `src/lib/downloads.tsx` |
 | `dialog:allow-open` | the "Choose download folder" picker (directory mode) | `openDialog()` in `src/lib/downloads.tsx` |
 | `opener:allow-open-url` (scoped `https://**`) | opening official vendor websites | `openUrl()` in `src/lib/external.ts` |
-| `opener:allow-open-path` | "Open file" / "Open folder" on completed downloads | `openPath()` in `src/lib/downloads.tsx` |
-| `opener:allow-reveal-item-in-dir` | "Show in folder" reveals a download in the platform file manager | `revealItemInDir()` in `src/lib/downloads.tsx` |
 
 Deliberately NOT granted (each verified unused by the frontend):
+
+- **`opener:allow-open-path` / `opener:allow-reveal-item-in-dir`** — the
+  opener plugin's JS bindings for local paths are unrestricted (no path
+  scope exists), so a compromised frontend could open or execute ANY file
+  with the system handler. Opening and revealing downloaded files instead
+  runs through the native `open_download_file` / `reveal_download_file`
+  commands (src-tauri/src/download_open.rs), which admit only paths inside
+  download-engine folders: the platform default download dir plus the
+  persisted ledger of folders a download actually ran in (or the user
+  picked in the native dialog, recorded via `record_download_directory`).
+  Residual risk, stated honestly: a frontend that can start downloads can
+  direct the engine at a folder of its choosing (the URL policy constrains
+  where downloads come FROM, not where they land), so the effective blast
+  radius is "files inside download folders" — pre-existing local files
+  outside those folders can no longer be touched from the webview at all.
 
 - **`core:default`** expands to nine module defaults (`app`, `event`, `image`,
   `menu`, `path`, `resources`, `tray`, `webview`, `window`). Only `event`
@@ -110,8 +123,9 @@ restrict:
   the `fetch_latest_release` / `fetch_recent_releases` / `fetch_fdroid_package`
   / `fetch_text` commands — governed by the Rust-side URL policy in
   `src-tauri/src/` (see the native network policy module);
-- files opened or revealed through the opener plugin (governed by the
-  capability scopes above);
+- files opened or revealed through the native open/reveal boundary
+  (`open_download_file` / `reveal_download_file` — validated against the
+  download-engine folder set, see the capability matrix above);
 - the updater plugin, when it gets wired (governed by its own endpoint
   configuration).
 

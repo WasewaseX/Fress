@@ -153,8 +153,8 @@ test.describe('Workflow I: valid release fixture', () => {
       .toBe(1);
     const b2 = (await bridge(page))!;
     const verify = b2.calls.find((c) => c.cmd === 'verify_self_update_signature');
-    expect(verify?.args.filePath).toBe(finalPath);
-    expect(verify?.args.signatureBase64).toBe(OWN_SIG_TXT);
+    expect(verify?.args?.filePath).toBe(finalPath);
+    expect(verify?.args?.signatureBase64).toBe(OWN_SIG_TXT);
 
     // Only now does the app render the verified outcome: the success toast
     // names the verified state, and the pill flips to its ready label.
@@ -176,7 +176,6 @@ test.describe('Workflow I: valid release fixture', () => {
     await checkForUpdates(page);
     await drainToasts(page);
 
-    const b0 = (await bridge(page))!;
     await page.evaluate(() =>
       window.__fressTest!.setFailVerify('Updater signature verification failed')
     );

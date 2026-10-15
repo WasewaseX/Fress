@@ -91,7 +91,6 @@ test.describe('Workflow A: catalog discovery', () => {
 
   test('grid/table view switch renders the same catalog in both views and persists', async ({ gotoApp, page }) => {
     await gotoApp();
-    const d = DICTS.en;
 
     const gridCount = await page.locator(`${sel.grid} article`).count();
     expect(gridCount).toBeGreaterThan(0);

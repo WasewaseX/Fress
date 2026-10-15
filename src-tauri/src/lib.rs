@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures_util::FutureExt;
@@ -33,6 +33,12 @@ use download_finalize::{
     execute_with_retries, sanitize_filename, DownloadPlan, DownloadRegistry, DownloadSession,
     ErrorPayload, ProgressSink, CANCEL_SENTINEL,
 };
+
+// The validated open/reveal boundary for downloaded artifacts: replaces the
+// opener plugin's unrestricted openPath/revealItemInDir grants with native
+// commands that only admit paths inside download-engine folders (default
+// download dir + the persisted ledger of folders downloads actually used).
+mod download_open;
 
 #[derive(Serialize, Clone)]
 struct GhAsset {
@@ -632,12 +638,28 @@ async fn verify_self_update_signature(
     .map_err(|e| format!("Signature verification task failed: {e}"))?
 }
 
+/// F-Droid package ids are ASCII letters, digits, dots and underscores only
+/// (the store's own grammar). The id is interpolated into two URLs below -
+/// the index API call and the repo APK link - so anything else must be
+/// refused at this boundary rather than smuggled into a pinned-host path:
+/// a crafted id like `../../repo` would otherwise rewrite the path of the
+/// API URL instead of naming a package.
+fn valid_fdroid_pkg(pkg: &str) -> bool {
+    !pkg.is_empty()
+        && pkg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+}
+
 /// Resolves the suggested stable package version from the F-Droid index.
 #[tauri::command]
 async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
     let pkg = pkg.trim().to_string();
     if pkg.is_empty() {
         return Err("No F-Droid package configured".into());
+    }
+    if !valid_fdroid_pkg(&pkg) {
+        return Err("Invalid F-Droid package id".into());
     }
     let url = format!("https://f-droid.org/api/v1/packages/{}", pkg);
     let policy = network_policy::UrlPolicy::api_fdroid();
@@ -798,6 +820,10 @@ async fn start_download(
         _ => platform_download_dir(&app),
     };
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create download folder: {}", e))?;
+    // The folder this download will live in joins the open/reveal admission
+    // set (best-effort ledger write): the completed artifact's "Open" and
+    // "Show in folder" buttons must work, and nothing else may.
+    let _ = record_download_dir(&app, &dir);
 
     // Direct untrusted names to safe names
     let requested_name = filename.map(|n| sanitize_filename(&n));
@@ -919,6 +945,82 @@ fn default_download_dir(app: AppHandle) -> String {
     platform_download_dir(&app).to_string_lossy().to_string()
 }
 
+// ---------------------------------------------------------------------------
+// The open/reveal boundary. The opener plugin's JS bindings (openPath /
+// revealItemInDir) are capability-unrestricted: any frontend code could open
+// or execute ANY file with the system handler. These three commands replace
+// that grant. Admission is `download_open::OpenAdmission`: the path must
+// exist and live inside the platform default download dir or a directory the
+// engine recorded (this session's downloads, or the persisted ledger that
+// keeps the panel's restored entries working across restarts).
+// ---------------------------------------------------------------------------
+
+fn ledger_base(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok()
+}
+
+fn canonical_default_download_dir(app: &AppHandle) -> Option<PathBuf> {
+    platform_download_dir(app).canonicalize().ok()
+}
+
+fn record_download_dir(app: &AppHandle, dir: &Path) -> Result<(), String> {
+    let base = ledger_base(app).ok_or_else(|| "No app data directory".to_string())?;
+    std::fs::create_dir_all(&base).map_err(|e| format!("Cannot open app data: {e}"))?;
+    let default_dir = platform_download_dir(app);
+    download_open::record_dir(&base, dir, &default_dir);
+    Ok(())
+}
+
+fn admit_download_path(app: &AppHandle, path: &Path) -> Result<(), String> {
+    let ledger = ledger_base(app)
+        .map(|b| download_open::read_ledger(&b))
+        .unwrap_or_default();
+    let admission = download_open::OpenAdmission::build(
+        canonical_default_download_dir(app).as_deref(),
+        &ledger,
+    );
+    admission.admit(path)
+}
+
+/// Opens a completed download with the system default handler. Refused for
+/// anything that is not a file inside a download-engine folder.
+#[tauri::command]
+fn open_download_file(app: AppHandle, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    admit_download_path(&app, &p)?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Reveals a completed download in the platform file manager. Same admission
+/// contract as `open_download_file`.
+#[tauri::command]
+fn reveal_download_file(app: AppHandle, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    admit_download_path(&app, &p)?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(&p)
+        .map_err(|e| e.to_string())
+}
+
+/// The frontend calls this right after the native folder picker accepts a
+/// directory, so "Open folder" works before the first download lands there.
+/// (The engine records every download's directory itself as well.)
+#[tauri::command]
+fn record_download_directory(app: AppHandle, dir: String) -> Result<(), String> {
+    let d = PathBuf::from(&dir);
+    if !d.is_absolute() {
+        return Err("Download folder must be an absolute path".into());
+    }
+    if !d.is_dir() {
+        return Err("Download folder does not exist".into());
+    }
+    record_download_dir(&app, &d)
+}
+
 // Per-OS default download location. Desktop platforms get the user's real
 // Downloads folder (Windows FOLDERID_Downloads including OneDrive
 // redirection, macOS ~/Downloads, Linux XDG download dir). Android does not
@@ -954,6 +1056,9 @@ pub fn run() {
             start_download,
             cancel_download,
             default_download_dir,
+            open_download_file,
+            reveal_download_file,
+            record_download_directory,
             fetch_latest_release,
             fetch_recent_releases,
             fetch_fdroid_package,
@@ -1038,6 +1143,43 @@ mod self_update_text_tests {
             "https://release-assets.githubusercontent.com.evil.example/x",
         ] {
             assert!(admit(url).is_err(), "must refuse {url}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod fdroid_pkg_gate {
+    // The id lands in two interpolated URLs (index API + repo APK link), so
+    // the boundary admits exactly the F-Droid grammar and nothing else.
+
+    use super::*;
+
+    #[test]
+    fn admits_real_fdroid_package_ids() {
+        for id in [
+            "org.fdroid.fdroid",
+            "org.schabi.newpipe",
+            "com.aurora.store",
+            "dev.imranr.obtainium",
+            "A1", // single short id, still pure grammar
+        ] {
+            assert!(valid_fdroid_pkg(id), "{id} must be admitted");
+        }
+    }
+
+    #[test]
+    fn refuses_empty_and_path_rewriting_ids() {
+        for id in [
+            "",
+            "   ",
+            "../../repo",
+            "org.fdroid/fdroid",
+            "org.fdroid\\fdroid",
+            "a b",
+            "%2e%2e",
+            "идентификатор",
+        ] {
+            assert!(!valid_fdroid_pkg(id), "{id} must be refused");
         }
     }
 }

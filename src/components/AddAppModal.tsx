@@ -242,7 +242,9 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       // as "no website", while "#" used to survive those guards and render
       // a dead Official Website button.
       websiteUrl: websiteUrl.trim() || githubUrl.trim() || '',
-      githubUrl: githubUrl.trim() || undefined,
+      // Empty string, never undefined: the AppItem contract is a required
+      // string, and every consumer treats a falsy URL as "no link".
+      githubUrl: githubUrl.trim(),
       gitlabUrl: gitlabUrl.trim() || undefined,
       category,
       platforms,

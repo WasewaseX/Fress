@@ -47,7 +47,7 @@ import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
-import { toast } from 'sonner';
+
 
 /** Device-aware download section: pick your platform, get real targets. */
 function detectUserPlatform(): Platform {
@@ -137,7 +137,6 @@ function translateDownloadLabel(t: (key: string) => string, label: string): stri
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { startDownload, recordExternalOpen } = useDownloadActions();
   const { t } = useI18n();
-  const tx = useAppText(app);
   const inApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const preferred = (() => {
     const guess = detectUserPlatform();

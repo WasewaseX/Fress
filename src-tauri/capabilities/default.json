@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main window: download-manager events and path lookups, the folder picker, and scoped external-URL / file-open / reveal handling. Every entry maps to a traced frontend call site - see docs/security/tauri-security.md for the permission matrix.",
+  "description": "Default capability for the main window: download-manager events and path lookups, the folder picker, and scoped external-URL handling. Opening and revealing downloaded files runs through the native open_download_file / reveal_download_file commands (validated against download-engine folders), so the opener plugin's unrestricted open-path / reveal-item-in-dir grants are intentionally ABSENT. Every entry maps to a traced frontend call site - see docs/security/tauri-security.md for the permission matrix.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
@@ -11,8 +11,6 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://**" }]
-    },
-    "opener:allow-open-path",
-    "opener:allow-reveal-item-in-dir"
+    }
   ]
 }

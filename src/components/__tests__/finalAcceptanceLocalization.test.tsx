@@ -14,7 +14,6 @@
 //    translateLicenseDisplay mapping instead of rendering the stored
 //    English data value (same contract as the detail modal and matrix).
 
-import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

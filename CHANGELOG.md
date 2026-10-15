@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — the stable-hardening round
+
+Every finding from the deep code review that had been reported but not yet fixed is now fixed, the opener plugin's last unrestricted webview primitive is gone, and TypeScript compiles under full `strict` mode. All evidence in `docs/testing/stable-hardening-2026-10-15.md`.
+
+### Native engine and boundaries
+- **All-dots and Windows trailing-dot filenames can no longer break finalize.** A server-supplied name like `...` survived the sanitizer (only `.` and `..` were caught) and reached `CreateFile`, which refuses or mangles dot-runs; trailing dots/spaces are dropped by Windows when it materializes a name, so a recorded path could disagree with the file on disk. The sanitizer now strips trailing dots/spaces and collapses every dot-run to the safe default, keeping the registry honest about what was written.
+- **Opening and revealing downloads is a validated native boundary.** The capability grants `opener:allow-open-path` / `opener:allow-reveal-item-in-dir` had no path scope — a compromised webview could open or execute ANY local file with the system handler. New native commands `open_download_file` / `reveal_download_file` admit only paths inside download-engine folders (the platform default download dir plus an app-owned, restart-proof ledger of folders a download actually ran in or the user picked via `record_download_directory`), and the two blanket grants are removed from the capability file. Residual risk is stated in the security docs.
+- **F-Droid package ids are validated at the boundary.** The id is interpolated into two pinned-host URLs; anything outside the store's own grammar (ASCII letters, digits, dots, underscores) is refused instead of being smuggled into a path.
+- **A persisted resolver failure stays a failure.** The persisted-cache read path cast a `null` hit through an `as` and could hand a failure entry to the digest revalidator; it now returns `null` (a known-failed lookup that Retry purges) instead of `undefined` ("nothing recorded").
+
+### Download manager
+- **Cancelling one queued download can no longer evict its sibling.** Cancel and promotion matched by URL; the same file legitimately queued for two folders made cancelling one row remove the other's queue entry too, leaving a permanently "queued" row with nothing behind it. Queue entries now carry the panel row's identity (`localId`) and match on it.
+
+### Resolver cache
+- **The Retry contract's eviction guard now matches its documentation.** `evictFailedLookups` awaited a promise and then deleted by key alone — a fresh lookup stored under the same key while the await was in flight would be dropped instead of the stale failure. The guard now compares the exact promise it inspected.
+
+### Frontend
+- **TypeScript compiles under `strict`, `noUnusedLocals` and `noImplicitReturns`.** Fifty-four latent findings fixed, including a required `githubUrl` field that could actually receive `undefined` from the Add-App form, an unreachable-variable slug in the export preview, and dead imports/locals across the app. The type-level contract is now enforced on every future PR, not aspirational.
+- The palette's "alternative to" subtitle interpolates through a narrowed local; the compare modal's unrated-app cell renders the same blank it always did, with a real guard.
+
 ## 1.0.10-beta (2026-10-12): the contrast-acceptance release
 
 Four quality threads (native engine tests, updater delivery truth, audit honesty, i18n/a11y acceptance) merged and were then re-verified as one integrated candidate by a fresh visual acceptance round — 46 harness tests and 67 screenshots across both themes at every supported width. Every fix below was reproduced on the rendered app before it was coded, and every re-capture is kept as evidence.

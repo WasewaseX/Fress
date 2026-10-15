@@ -69,7 +69,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     md += `- [Contributing](#contributing)\n\n`;
 
     for (const cat of categories) {
-      const anchor = cat.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       md += `## ${cat}\n\n`;
       md += `| Application | Description | Replaces | Platforms | License | Stars |\n`;
       md += `| :--- | :--- | :--- | :--- | :--- | :--- |\n`;

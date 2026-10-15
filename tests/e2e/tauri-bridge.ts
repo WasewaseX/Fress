@@ -69,6 +69,9 @@ export interface FressTestBridge {
   /** URLs handed to the opener plugin (Workflow J: the releases page must
    * open instead of a direct download when no usable asset exists). */
   openedUrls: string[];
+  /** Paths handed to the native open/reveal boundary (open_download_file /
+   * reveal_download_file) - the validated download-folder commands. */
+  openedPaths: string[];
   nextId: number;
   hostArch: string;
   defaultDir: string;
@@ -126,6 +129,7 @@ const BRIDGE_BODY = String.raw`
     downloads: {},
     emits: [],
     openedUrls: [],
+    openedPaths: [],
     nextId: 1001,
     hostArch: HOST_ARCH,
     defaultDir: DEFAULT_DIR,
@@ -235,6 +239,12 @@ const BRIDGE_BODY = String.raw`
         return HOST_ARCH;
       case 'default_download_dir':
         return DEFAULT_DIR;
+      case 'open_download_file':
+      case 'reveal_download_file':
+        if (args && typeof args.path === 'string') bridge.openedPaths.push(args.path);
+        return null;
+      case 'record_download_directory':
+        return null;
       case 'fetch_latest_release': {
         var repo1 = String((args && args.repo) || '');
         if (bridge.resolverMode === 'rate-limit') throw 'GitHub rate limit reached';
@@ -330,6 +340,10 @@ const BRIDGE_BODY = String.raw`
         return null;
       case 'plugin:opener|open_path':
       case 'plugin:opener|reveal_item_in_dir':
+        // The capability grants for these were removed on purpose; if a
+        // future change reintroduces them in src/, this bridge still
+        // records the attempt so the audit specs can flag it.
+        if (args && typeof args.path === 'string') bridge.openedPaths.push('UNSCOPED:' + args.path);
         return null;
       default:
         // Unknown command: resolve null (plugins in this app tolerate it).

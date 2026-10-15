@@ -7,7 +7,6 @@ import { AppItem, Platform } from '../types';
 import { isTauri } from './downloads';
 import { attachTrustedDigests, failClosedConflictingDigests } from './release/digests';
 import {
-  ReleaseAsset,
   ResolvedDownload,
   scoreAsset,
   assetCompatibleWithDevice,
@@ -187,10 +186,6 @@ function basename(url: string): string {
   } catch {
     return url.split('/').pop() || url;
   }
-}
-
-function toAssets(items: { name: string; url: string; size?: number }[]): ReleaseAsset[] {
-  return items.map((i) => ({ name: i.name, url: i.url, downloadUrl: i.url, size: i.size ?? 0 }));
 }
 
 /**
@@ -829,6 +824,7 @@ async function resolveSumatra(platform: Platform, arch: string | undefined, _app
     .map((m) => ({ version: m[1], variant: (m[2] as string).toLowerCase(), href: m[0] }));
   if (!links.length) return null;
   const latest = newestVersion(links.map((l) => l.version));
+  if (!latest) return null;
   const candidates = links.filter((l) => l.version === latest);
   const variant = arch === 'aarch64' ? '-arm64' : arch === 'x86' || arch === 'i686' ? '' : '-64';
   const chosen =

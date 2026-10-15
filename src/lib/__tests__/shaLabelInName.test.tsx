@@ -31,11 +31,6 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
-vi.mock('@tauri-apps/plugin-opener', () => ({
-  openPath: vi.fn(async () => undefined),
-  revealItemInDir: vi.fn(async () => undefined),
-}));
-
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), info: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));

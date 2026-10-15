@@ -554,10 +554,17 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
         })
         .collect();
     let trimmed = cleaned.trim_matches('_').trim().to_string();
-    // "." and ".." survive the character filter (dots are legal name
-    // characters) but would make dir.join() walk up the directory tree, so
-    // they collapse to the safe default like any other empty result.
-    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+    // Windows filename parity: the OS drops trailing dots and spaces when it
+    // materializes a name ("readme." and "readme. " both land as "readme"),
+    // so a recorded path that still carried them would not describe the file
+    // actually on disk (and CreateFile can refuse "..." outright). Stripping
+    // here keeps the finalize path honest about what was written; an
+    // all-dots name - "." ".." "..." and every longer dot-run - strips to
+    // nothing and collapses to the safe default like any other empty result
+    // (the old code only caught the two-dot forms, so a server-supplied
+    // "..." finalized as a broken Windows name).
+    let stripped = trimmed.trim_end_matches(['.', ' ']);
+    if stripped.is_empty() {
         return "download.bin".to_string();
     }
     // Windows reserve device names: "CON", "NUL", "COM1".."COM9",
@@ -565,7 +572,11 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     // to the FIRST dot ("NUL.tar.gz" is reserved just like "NUL"), and a
     // server-supplied Content-Disposition must never be able to trigger a
     // finalize-time failure, so they collapse to the safe default too.
-    let first_segment = trimmed.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let first_segment = stripped
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
     let reserved = matches!(
         first_segment.as_str(),
         "CON"
@@ -594,7 +605,7 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     if reserved {
         return "download.bin".to_string();
     }
-    trimmed
+    stripped.to_string()
 }
 
 pub(crate) fn filename_from_headers(
@@ -605,7 +616,8 @@ pub(crate) fn filename_from_headers(
     // the value is joined onto the download directory, so a server-supplied
     // name like "../../something" (or its percent-encoded form - the RFC
     // 5987 branch decodes first) must never be able to escape the folder.
-    // sanitize_filename also collapses "."/".."/empty to a safe name.
+    // sanitize_filename also collapses empty/all-dots names (and Windows
+    // trailing-dot forms) to a safe name.
     if let Some(cd) = headers.get(reqwest::header::CONTENT_DISPOSITION) {
         let cd = cd.to_str().ok()?;
         // attachment; filename="app.apk" or filename*=UTF-8''app.apk

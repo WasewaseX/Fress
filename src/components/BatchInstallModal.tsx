@@ -7,18 +7,7 @@ import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
 import { sanitizeInstallCommand, PkgManager } from '../lib/installCommands';
 import { useI18n } from '../lib/i18n';
-import { 
-  Terminal, 
-  Copy, 
-  Check, 
-  Download, 
-  X, 
-  ShieldCheck,
-  AlertTriangle,
-  Laptop,
-  Apple,
-  Cpu
-} from 'lucide-react';
+import { Terminal, Copy, Check, Download, X, ShieldCheck, AlertTriangle } from 'lucide-react';
 
 interface BatchInstallModalProps {
   isOpen: boolean;

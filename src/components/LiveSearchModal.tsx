@@ -7,20 +7,7 @@ import { keepFocusInside } from '../lib/modalFocus';
 import { useI18n, CATEGORY_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { translateAppTextDefault } from '../lib/appText';
 import { openExternal } from '../lib/external';
-import { 
-  Search, 
-  X, 
-  Loader2, 
-  Plus, 
-  Check, 
-  ExternalLink, 
-  Star, 
-  FolderGit2, 
-  Sparkles,
-  Smartphone,
-  Terminal,
-  Layers
-} from 'lucide-react';
+import { Search, X, Loader2, Plus, Check, ExternalLink, Star, FolderGit2, Sparkles, Smartphone } from 'lucide-react';
 import { AppItem, Platform, Category } from '../types';
 import { formatStarCount } from '../lib/starFetch';
 

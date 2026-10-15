@@ -5,28 +5,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { useI18n } from '../lib/i18n';
-import { AppItem, Category, Platform } from '../types';
+import { AppItem, Category } from '../types';
 import { formatStarCount } from '../lib/starFetch';
-import {
-  Search,
-  Terminal,
-  Check,
-  Copy,
-  ExternalLink,
-  Bookmark,
-  Columns,
-  Layers,
-  Download,
-  X,
-  Code2,
-  FileText
-} from 'lucide-react';
+import { Search, Terminal, Check, Copy, X, Code2 } from 'lucide-react';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
   apps: AppItem[];
-  favorites: string[];
   onToggleFavorite: (id: string) => void;
   onOpenAppDetail: (app: AppItem) => void;
   onSelectCategory: (cat: Category) => void;
@@ -78,7 +64,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
   apps,
-  favorites,
   onToggleFavorite,
   onOpenAppDetail,
   onSelectCategory,
@@ -180,7 +165,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     // Match apps by name, alternative (e.g. "photoshop"), tag, or category
     for (const app of apps) {
       const matchName = app.name.toLowerCase().includes(q);
-      const matchAlt = app.proprietaryAlternative?.toLowerCase().includes(q);
+      // A local const of the optional property: the guard narrows it for
+      // the subtitle template below (property narrowing through an aliased
+      // condition does not survive the object literal).
+      const proprietary = app.proprietaryAlternative;
+      const matchAlt = proprietary !== undefined && proprietary.toLowerCase().includes(q);
       const matchTag = app.tags.some((t) => t.toLowerCase().includes(q));
       const matchDesc = app.description.toLowerCase().includes(q);
       const matchCategory = app.category.toLowerCase().includes(q);
@@ -192,9 +181,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           id: app.id,
           title: app.name,
           subtitle: matchAlt
-            ? t('palette.alternativeTo').replace('{alt}', app.proprietaryAlternative).replace('{tagline}', app.tagline)
+            ? t('palette.alternativeTo').replace('{alt}', proprietary).replace('{tagline}', app.tagline)
             : app.tagline,
-          alt: app.proprietaryAlternative
+          alt: proprietary
         });
       }
     }
@@ -415,7 +404,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               }
 
               const app = item.app!;
-              const isFav = favorites.includes(app.id);
 
               return (
                 <li key={app.id} role="presentation" className="relative list-none">

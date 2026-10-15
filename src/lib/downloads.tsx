@@ -7,7 +7,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { dirname } from '@tauri-apps/api/path';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
 import { formatBytes, formatSpeed, formatEta } from './format';
 import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
@@ -309,7 +308,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           if (!next) break;
           // The queued placeholder item (negative local id) is replaced by
           // the real item startDownload creates for the Rust transfer.
-          setItems((prev) => prev.filter((it) => !(it.status === 'queued' && it.url === next.url)));
+          // Matched by identity: a sibling row may share this URL (the same
+          // file queued for two folders) and must stay in the line.
+          setItems((prev) =>
+            prev.filter((it) => !(it.status === 'queued' && it.id === next.localId))
+          );
           await startTauriDownload(next.url, next.name, next.opts);
         }
       } finally {
@@ -574,11 +577,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         } catch {
           guessedName = nameHint || undefined;
         }
-        const payload: QueuedDownload = { url, name: nameHint, opts };
+        // The panel row and the queue payload share one local id, so cancel
+        // and promotion address exactly this waiting download.
+        const localId = makeLocalItemId();
+        const payload: QueuedDownload = { url, name: nameHint, opts, localId };
         if (queueRef.current.push(payload)) {
           setItems((prev) => [
             {
-              id: makeLocalItemId(),
+              id: localId,
               url,
               name: guessedName || tRef.current('downloads.toast.downloadFallback'),
               dir: 'Queued',
@@ -614,8 +620,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const cancel = useCallback((id: number) => {
     const item = itemsRef.current.find((it) => it.id === id);
     if (item && item.status === 'queued') {
-      // Still waiting: no Rust transfer exists yet. Drop it from the line.
-      queueRef.current.removeWhere((q) => q.url === item.url);
+      // Still waiting: no Rust transfer exists yet. Drop exactly this row's
+      // queue entry - identity, not URL: a sibling may wait for the same
+      // file in another folder and must keep its place in the line.
+      queueRef.current.removeById(id);
       setItems((prev) => prev.filter((it) => it.id !== id));
       return;
     }
@@ -667,7 +675,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
 
   const openFile = useCallback((path: string) => {
     if (isTauri()) {
-      openPath(path).catch(() => toast.error(tRef.current('downloads.toast.openFileFailed')));
+      // Native open/reveal boundary: only completed-download paths inside
+      // download-engine folders are admitted (docs/security/tauri-security.md).
+      invoke('open_download_file', { path }).catch(() => toast.error(tRef.current('downloads.toast.openFileFailed')));
     }
   }, []);
 
@@ -686,16 +696,16 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       // builds without the explorer integration), fall back to opening the
       // file's CONTAINING folder - the old fallback opened `path` itself,
       // which just launched the downloaded file instead of showing where
-      // it lives.
-      revealItemInDir(path).catch(async () => {
+      // it lives. Both go through the native admission boundary.
+      invoke('reveal_download_file', { path }).catch(async () => {
         try {
-          await openPath(await dirname(path));
+          await invoke('open_download_file', { path: await dirname(path) });
         } catch {
           toast.error(tRef.current('downloads.toast.openFolderFailed'));
         }
       });
     } else {
-      openPath(target).catch(() => toast.error(tRef.current('downloads.toast.openFolderFailed')));
+      invoke('open_download_file', { path: target }).catch(() => toast.error(tRef.current('downloads.toast.openFolderFailed')));
     }
   }, []);
 
@@ -712,6 +722,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // ignore
       }
+      // Admit the folder for open/reveal now, before the first download
+      // lands there (the engine also records every download's directory).
+      invoke('record_download_directory', { dir: selected }).catch(() => undefined);
       toast.success(tRef.current('downloads.toast.folderUpdated'), { description: selected });
     }
   }, []);

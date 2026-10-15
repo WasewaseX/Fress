@@ -837,3 +837,121 @@ test.describe('Workflow K: Android artifact surface', () => {
     expect(pageErrors).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Workflow K2 - page-only results and the deliberate browser handoff  */
+/* (release qualification)                                             */
+/* ------------------------------------------------------------------ */
+/* Two boundary contracts the stable-release qualification pins:
+ *   K-P1: a genuine no-match (the resolver found the project's release
+ *     but no artifact for this platform) is represented as the honest
+ *     "no ready-made file" state plus the LABELLED official-page option -
+ *     opening that page is a recorded browser handoff, never an in-app
+ *     transfer and never a fabricated download row.
+ *   K-P2: in a plain browser (the web preview), starting a download is a
+ *     DELIBERATE browser handoff: exactly one window.open of the artifact
+ *     URL, a panel row labelled "Opened in browser", no progress bar and
+ *     no verification claim - the preview never pretends to be the
+ *     native engine.
+ * Both read recorded traffic (openedUrls / a window.open spy), never
+ * labels alone. */
+
+test.describe('Workflow K2: a genuine no-match is a labelled page handoff, not a transfer', () => {
+  test('K-P1 - no artifact for this platform: honest none state, the labelled releases option, one recorded handoff', async ({ gotoApp, page }) => {
+    await gotoApp();
+    const pageErrors = collectPageErrors(page);
+
+    // The release exists but ships NOTHING the resolver may hand a
+    // Windows desktop: only a macOS disk image. A genuine no-match.
+    await seedSingleAssetRelease(page, 'FixtureApp-1.0.0-x64.dmg');
+    await page.locator('#app-title-localsend').click();
+    const box = page.locator(sel.detailDownloadBox);
+    await expect(box).toBeVisible();
+    await box.getByRole('button', { name: 'Windows' }).click();
+
+    // The honest none state - NOT a download button, NOT an error.
+    await expect(box.getByText(d['detail.noAutoDownload'])).toBeVisible({ timeout: 15_000 });
+    await expect(box.getByRole('button', { name: /FixtureApp-1\.0\.0-x64\.dmg/ })).toHaveCount(0);
+    await expect(box.getByText(d['detail.checkingStable'])).toHaveCount(0);
+
+    // The labelled official-page options remain and are the DELIBERATE
+    // handoff: one recorded open of the project's OWN download page - not
+    // a resolver pick, not a transfer. (The GitHub all-releases option is
+    // cut by the dialog's top-two secondary slice for this app; the
+    // official download page is the page-kind option that renders.)
+    const pageOption = box.getByRole('button', { name: 'Official download page' });
+    await expect(pageOption).toBeVisible();
+    await pageOption.click();
+
+    await expect
+      .poll(async () => (await openerTraffic(page)).open, { timeout: 10_000 })
+      .toHaveLength(0);
+    await expect
+      .poll(async () => (await bridge(page))!.openedUrls, { timeout: 10_000 })
+      .toEqual(['https://localsend.org/download']);
+
+    // The handoff is recorded as a PAGE entry in the panel - a labelled
+    // record of what was opened, never a transfer with progress/verify.
+    await page.keyboard.press('Escape');
+    await expect(box).toHaveCount(0);
+    await openDownloads(page);
+    const pageRow = page.locator(sel.downloadRow('page')).first();
+    await expect(pageRow).toBeVisible();
+    await expect(pageRow).toContainText('LocalSend');
+    await expect(pageRow.getByRole('progressbar')).toHaveCount(0);
+    await expect(pageRow).not.toContainText(d['downloads.verified']);
+    expect(Object.keys((await bridge(page))!.downloads)).toHaveLength(0);
+    expect(pageErrors).toEqual([]);
+  });
+});
+
+test.describe('Workflow K2: the browser preview performs a deliberate browser handoff', () => {
+  test.use({ tauriMode: false });
+
+  test('K-P2 - starting a download in the web preview opens the artifact in a new tab and never claims native progress', async ({ gotoApp, page }) => {
+    // Spy BEFORE any app script runs: record every window.open and let no
+    // real navigation happen - the handoff REQUEST is the contract here.
+    await page.context().addInitScript(() => {
+      const recorded: string[] = [];
+      (window as unknown as { __fressBrowserOpens: string[] }).__fressBrowserOpens = recorded;
+      const original = window.open.bind(window);
+      window.open = ((url?: string | URL, target?: string, features?: string) => {
+        recorded.push(String(url ?? ''));
+        void target; void features;
+        return null;
+      }) as typeof window.open;
+      void original;
+    });
+
+    await gotoApp();
+    await page.locator('#app-title-localsend').click();
+    const box = page.locator(sel.detailDownloadBox);
+    await expect(box).toBeVisible();
+    await box.getByRole('button', { name: 'Windows' }).click();
+    const asset = box.getByRole('button', { name: /LocalSend-1\.17\.0-windows-x64\.exe/ });
+    await expect(asset).toBeVisible({ timeout: 15_000 });
+
+    // Exactly ONE deliberate handoff of the artifact URL. The preview
+    // never navigates itself away and never starts a transfer.
+    await asset.click();
+    await expect
+      .poll(async () => page.evaluate(() => (window as unknown as { __fressBrowserOpens: string[] }).__fressBrowserOpens), { timeout: 10_000 })
+      .toEqual(['https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x64.exe']);
+    expect(page.url()).not.toContain('localsend');
+
+    await drainToasts(page);
+
+    // The panel records the handoff as what it is: "Opened in browser" -
+    // no progress bar, no completion, no verification claim.
+    await page.keyboard.press('Escape');
+    await expect(box).toHaveCount(0);
+    await openDownloads(page);
+    const browserRow = page.locator(sel.downloadRow('browser')).first();
+    await expect(browserRow).toBeVisible();
+    await expect(browserRow).toContainText(d['downloads.openedInBrowser']);
+    await expect(browserRow).toContainText('LocalSend-1.17.0-windows-x64.exe');
+    await expect(browserRow.getByRole('progressbar')).toHaveCount(0);
+    await expect(browserRow).not.toContainText(d['downloads.verified']);
+    await expect(browserRow).not.toContainText(d['downloads.completed']);
+  });
+});

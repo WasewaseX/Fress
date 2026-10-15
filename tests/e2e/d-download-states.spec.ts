@@ -58,6 +58,14 @@ async function registeredDownloadIds(page: Page): Promise<number[]> {
   return Object.keys(b.downloads).map(Number);
 }
 
+/** Lets the toast queue drain: toasts float top-right and would intercept
+ * the next click (Workflow D/K convention). */
+async function drainToasts(page: Page): Promise<void> {
+  await expect
+    .poll(async () => page.locator('[data-sonner-toast]').count(), { timeout: 15_000 })
+    .toBe(0);
+}
+
 test.describe('Workflow D: download state integration', () => {
   test('active transfer shows progress values from the native payloads, then verified completion', async ({ gotoApp, page }) => {
     await gotoApp();
@@ -278,5 +286,232 @@ test.describe('Workflow D: download state integration', () => {
     await page.locator(sel.downloadRow('queued')).first().getByRole('button', { name: d['downloads.cancel'] }).click();
     await expect(page.locator(sel.downloadRow('queued'))).toHaveCount(0);
     expect(((await bridge(page))!.calls).filter((c) => c.cmd === 'cancel_download').length).toBe(cancelsBefore);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Workflow D2 - the native identity boundary (release qualification)  */
+/* ------------------------------------------------------------------ */
+/* The contracts the stable-release qualification pins on top of
+ * Workflow D above, all reading the bridge's RECORDED traffic rather
+ * than labels alone:
+ *   - the direct-artifact path is native end to end: start_download is
+ *     the ONLY dispatch, and the browser/opener boundaries stay silent;
+ *   - a rapid double-click on the same resolved pick starts exactly ONE
+ *     transfer (the detail dialog's re-entry guard);
+ *   - a native start failure is truthful (typed toast, no row, no
+ *     browser fallback) and remains retryable once the engine recovers;
+ *   - a restored download-history row is honoured as a record but can
+ *     only ever act through the same opener boundary - it never starts
+ *     a transfer and never fakes success when the OS refuses;
+ *   - a platform switch and a modal dismissal can never apply a stale
+ *     resolver result: superseded picks disappear and no transfer is
+ *     dispatched from an old key.
+ * This suite runs against the mocked bridge (tauri-bridge.ts) in a
+ * desktop Chromium: it proves the FRONTEND contract, not a real
+ * installer launching - that remains the packaged-app smoke matrix. */
+
+test.describe('Workflow D2: the native identity boundary', () => {
+  test('D2-1 - a valid direct artifact is dispatched natively; the browser and opener boundaries stay silent', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await startFromDetail(page, 'localsend', 'LocalSend-1.17.0-windows-x64.exe', 1);
+    await openDownloads(page);
+
+    // The engine received exactly one dispatch for the resolved asset...
+    const b = (await bridge(page))!;
+    const starts = b.calls.filter((c) => c.cmd === 'start_download');
+    expect(starts).toHaveLength(1);
+    expect((starts[0].args as { url?: string }).url).toBe(
+      'https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x64.exe'
+    );
+
+    // ...and NOTHING else: no external-page handoff, no opener traffic -
+    // an installed Tauri runtime never routes a direct download through
+    // window.open / openExternal / the file opener.
+    expect(b.openedUrls, 'a direct download must never open the browser').toEqual([]);
+    expect(b.openedPaths).toHaveLength(0);
+    expect(b.revealedPaths).toHaveLength(0);
+
+    // The boundary stays silent while the transfer progresses.
+    const [id] = Object.keys(b.downloads).map(Number);
+    await page.evaluate((did) => window.__fressTest!.emitProgress(did, 12_582_912, 25_165_824, 4_194_304, 3), id);
+    const row = page.locator(sel.downloadRow('active')).first();
+    await expect(row.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(((await bridge(page))!).openedUrls).toEqual([]);
+  });
+
+  test('D2-2 - a rapid double-click on the same resolved pick starts exactly one transfer', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await page.locator('#app-title-localsend').click();
+    const box = page.locator(sel.detailDownloadBox);
+    await expect(box).toBeVisible();
+    await box.getByRole('button', { name: 'Windows' }).click();
+    const asset = box.getByRole('button', { name: /LocalSend-1\.17\.0-windows-x64\.exe/ });
+    await expect(asset).toBeVisible({ timeout: 15_000 });
+
+    // Two activations inside the re-entry window (1500 ms): the second is
+    // a no-op by contract - one URL, one transfer.
+    await asset.click();
+    await asset.click();
+    await page.keyboard.press('Escape');
+    await expect(box).toHaveCount(0);
+    await drainToasts(page);
+
+    await expect
+      .poll(async () => (await bridge(page))!.calls.filter((c) => c.cmd === 'start_download').length, { timeout: 10_000 })
+      .toBe(1);
+    expect(Object.keys((await bridge(page))!.downloads)).toHaveLength(1);
+  });
+
+  test('D2-3 - a native start failure is truthful: typed error, no row, no browser fallback, and it stays retryable', async ({ gotoApp, page }) => {
+    await gotoApp();
+    const pageErrors: string[] = [];
+    page.on('pageerror', (e) => pageErrors.push(String((e as Error)?.message ?? e)));
+    await page.locator('#app-title-localsend').click();
+    const box = page.locator(sel.detailDownloadBox);
+    await expect(box).toBeVisible();
+    await box.getByRole('button', { name: 'Windows' }).click();
+    const asset = box.getByRole('button', { name: /LocalSend-1\.17\.0-windows-x64\.exe/ });
+    await expect(asset).toBeVisible({ timeout: 15_000 });
+
+    // The engine refuses the dispatch: the user learns the truth (the
+    // typed toast carries the engine's own message), no row is inserted,
+    // and the failure never degrades into "open the page in a browser".
+    await page.evaluate(() => window.__fressTest!.setFailStart('engine: disk I/O failed'));
+    await asset.click();
+    const failureToast = page.locator('[data-sonner-toast]').first();
+    await expect(failureToast).toBeVisible();
+    await expect(failureToast).toContainText(d['downloads.toast.startFailed']);
+    await expect(failureToast).toContainText('engine: disk I/O failed');
+
+    const b = (await bridge(page))!;
+    expect(Object.keys(b.downloads)).toHaveLength(0);
+    expect(b.openedUrls, 'a failed start must not fall back to the browser').toEqual([]);
+
+    // The rejection was a handled promise, and the panel shows no row.
+    await drainToasts(page);
+    expect(pageErrors).toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(page.locator(sel.detailDownloadBox)).toHaveCount(0);
+    await openDownloads(page);
+    await expect(page.locator(sel.downloadRow('active'))).toHaveCount(0);
+    await expect(page.locator(sel.downloadRow('error'))).toHaveCount(0);
+
+    // Once the engine recovers, the SAME pick starts - the failure was a
+    // dead end, not a disabled button (past the 1500 ms re-entry window).
+    await page.evaluate(() => window.__fressTest!.setFailStart(null));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1_600);
+    await page.locator('#app-title-localsend').click();
+    const box2 = page.locator(sel.detailDownloadBox);
+    await expect(box2).toBeVisible();
+    await box2.getByRole('button', { name: 'Windows' }).click();
+    const asset2 = box2.getByRole('button', { name: /LocalSend-1\.17\.0-windows-x64\.exe/ });
+    await expect(asset2).toBeVisible({ timeout: 15_000 });
+    await asset2.click();
+    await expect
+      .poll(async () => Object.keys((await bridge(page))!.downloads).length, { timeout: 10_000 })
+      .toBe(1);
+    const started = ((await bridge(page))!.calls.filter((c) => c.cmd === 'start_download').pop()!.args) as { url?: string };
+    expect(started.url).toBe('https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x64.exe');
+  });
+
+  test('D2-4 - a restored download-history row acts only through the opener boundary and never fakes success', async ({ gotoApp, page }) => {
+    // A history row the running app never produced: whoever (or whatever)
+    // wrote it into the persisted store, the restored panel may only ever
+    // act on it through the same recorded boundary as any other row - no
+    // transfer restart, no fabricated success when the OS refuses.
+    const FORGED_PATH = '/home/test/Downloads/LocalSend-1.17.0-windows-x64.exe';
+    const FORGED_ROW = [
+      {
+        url: 'https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x64.exe',
+        name: 'LocalSend-1.17.0-windows-x64.exe',
+        dir: '/home/test/Downloads',
+        bytes: 25_165_824,
+        total: 25_165_824,
+        status: 'completed',
+        path: FORGED_PATH,
+        sha256: 'c'.repeat(64),
+        verified: true,
+        startedAt: 1_700_000_000_000,
+      },
+    ];
+    await page.context().addInitScript((rows) => {
+      localStorage.setItem('fress.downloadItems.v1', JSON.stringify(rows));
+    }, FORGED_ROW);
+
+    await gotoApp();
+    await openDownloads(page);
+    const row = page.locator(sel.downloadRow('completed')).first();
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('LocalSend-1.17.0-windows-x64.exe');
+
+    // The OS refuses the open: the restored row reports the failure
+    // honestly and stays a record - it cannot conjure a success.
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath('Permission denied'));
+    await row.getByRole('button', { name: d['downloads.openFile'] }).click();
+    await expect(page.getByText(d['downloads.toast.openFileFailed'])).toBeVisible();
+
+    // Exactly ONE boundary invocation with the row's OWN path as a value,
+    // and nothing else: no browser handoff, no transfer restart.
+    const traffic = page.evaluate(() => ({
+      open: window.__fressTest!.openedPaths,
+      urls: window.__fressTest!.openedUrls,
+    }));
+    expect((await traffic).open).toHaveLength(1);
+    expect((await traffic).open[0].path).toBe(FORGED_PATH);
+    expect((await traffic).urls).toEqual([]);
+    expect(Object.keys((await bridge(page))!.downloads)).toHaveLength(0);
+
+    // When the OS allows it, the same single boundary call carries the
+    // same exact path - the restored record never gains any other route.
+    await drainToasts(page);
+    await page.evaluate(() => window.__fressTest!.setFailOpenPath(null));
+    await row.getByRole('button', { name: d['downloads.openFile'] }).click();
+    await expect
+      .poll(async () => (await page.evaluate(() => window.__fressTest!.openedPaths)).length, { timeout: 10_000 })
+      .toBe(2);
+    expect((await page.evaluate(() => window.__fressTest!.openedPaths))[1].path).toBe(FORGED_PATH);
+    expect(Object.keys((await bridge(page))!.downloads)).toHaveLength(0);
+  });
+
+  test('D2-5 - a platform switch and a modal dismissal can never apply a stale resolver result', async ({ gotoApp, page }) => {
+    await gotoApp();
+    await page.locator('#app-title-localsend').click();
+    const box = page.locator(sel.detailDownloadBox);
+    await expect(box).toBeVisible();
+    await box.getByRole('button', { name: 'Windows' }).click();
+    await expect(box.getByText('LocalSend-1.17.0-windows-x64.exe', { exact: false })).toBeVisible({ timeout: 15_000 });
+
+    // Switch to macOS: the Windows pick is superseded. Its button must be
+    // GONE (a stale result can neither stay clickable nor start), and the
+    // fixture's macOS side honestly reports no ready-made file.
+    await box.getByRole('button', { name: 'macOS' }).click();
+    await expect(box.getByText('LocalSend-1.17.0-windows-x64.exe', { exact: false })).toHaveCount(0, { timeout: 15_000 });
+    await expect(box.getByRole('button', { name: /LocalSend-1\.17\.0-windows-x64\.exe/ })).toHaveCount(0);
+
+    // Dismiss the dialog mid-resolution and reopen on the original
+    // platform: a fresh resolve answers, the pick is the same asset, and
+    // the whole journey so far dispatched nothing.
+    await page.keyboard.press('Escape');
+    await expect(box).toHaveCount(0);
+    await page.locator('#app-title-localsend').click();
+    const box2 = page.locator(sel.detailDownloadBox);
+    await expect(box2).toBeVisible();
+    await box2.getByRole('button', { name: 'Windows' }).click();
+    const asset = box2.getByRole('button', { name: /LocalSend-1\.17\.0-windows-x64\.exe/ });
+    await expect(asset).toBeVisible({ timeout: 15_000 });
+
+    const b0 = (await bridge(page))!;
+    expect(b0.calls.filter((c) => c.cmd === 'start_download'), 'no stale dispatch during switches').toHaveLength(0);
+    expect(b0.openedUrls).toEqual([]);
+
+    // The pick that finally starts is the freshly resolved one.
+    await asset.click();
+    await expect
+      .poll(async () => Object.keys((await bridge(page))!.downloads).length, { timeout: 10_000 })
+      .toBe(1);
+    const started = ((await bridge(page))!.calls.filter((c) => c.cmd === 'start_download').pop()!.args) as { url?: string };
+    expect(started.url).toBe('https://github.com/localsend/localsend/releases/download/v1.17.0/LocalSend-1.17.0-windows-x64.exe');
   });
 });

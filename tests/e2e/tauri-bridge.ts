@@ -113,6 +113,13 @@ export interface FressTestBridge {
   setFailStart(msg: string | null): void;
   failCancel: string | null;
   setFailCancel(msg: string | null): void;
+  /** When true, `fetch_self_update_text` answers the NATIVE truncation
+   * shape: { status: 200, body: '', truncated: true } - the exact contract
+   * the Rust reader produces when the advertised body exceeds the 2 MiB
+   * cap (Workflow J: a truncated checksum manifest must fail closed, never
+   * parse as a complete one). */
+  truncatedText: boolean;
+  setTruncatedText(value: boolean): void;
   /** When set, `verify_self_update_signature` rejects with this error
    * (Workflow I: a tampered/foreign-key artifact must never verify). */
   failVerify: string | null;
@@ -190,6 +197,8 @@ const BRIDGE_BODY = String.raw`
     setFailDialog: function (msg) { this.failDialog = msg; },
     failStart: null,
     setFailStart: function (msg) { this.failStart = msg; },
+    truncatedText: false,
+    setTruncatedText: function (value) { this.truncatedText = value; },
     failCancel: null,
     setFailCancel: function (msg) { this.failCancel = msg; },
     failVerify: null,
@@ -368,6 +377,12 @@ const BRIDGE_BODY = String.raw`
         var su = String((args && args.url) || '');
         var suResp = await fetch(su);
         var suBody = await suResp.text();
+        if (bridge.truncatedText) {
+          // The native reader's truncation contract: empty body, the flag
+          // set. The TypeScript side must treat this exactly like a failed
+          // fetch (fail closed), never parse '' as a complete manifest.
+          return { status: suResp.status, body: '', truncated: true };
+        }
         return {
           status: suResp.status,
           body: suBody,

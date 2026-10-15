@@ -254,6 +254,32 @@ from those bytes, not from local build outputs.
 | r3.24 | `npm run test:e2e` | 90/90 passed locally on `78d5e8f` in spec batches (i-self-update 11, d-download-states 4 + download-open 24, d-download-open 13 + c-resolver-failure 5, a/b/e 10, f/g/h 23) + PASS via CI run #303 on the same SHA | 0 | first attempt failed on a sandbox browser-binary mismatch (Playwright 1.64 needs chromium_headless_shell-1248; cache had -1200) — an infrastructure defect, not a test defect; after `npx playwright install chromium` every spec passes |
 | r3.25 | Rust fmt/clippy/test, Android build | UNAVAILABLE locally (no GTK/WebKit headers, no Android SDK/NDK) — PASS via CI: run #303 (Rust ×3 platforms) and run #43 (all builds) on the same SHA | PASS (CI) | honest split, unchanged from r2.13–r2.16 |
 
+### Section 0-r4. Release-qualification round on the published release (2026-10-15, PR #93 head `4605089`)
+
+Executed after the release went public, on the qualification branch
+`qual/stable-release-qualification` (= tag `78d5e8f` + the r3 documentation
+commit `e7b0e55` + this round's test commit `4605089`). Two goals: (a)
+re-prove the artifact verdicts from a FRESH download of the published bytes
+in a new directory (never transfer a beta verdict, and never re-use r3's
+download), and (b) close the E2E gaps the stable-release spec requires
+(failure-vs-no-match, native boundary under re-entry/failure, updater
+fail-closed classification). Nothing here moves the tag or the release.
+
+| # | Check (exact) | Result | Exit | Notes |
+|---|---|---|---|---|
+| r4.1 | post-tag git state | tag `v1.0.0` = `main` = `78d5e8f` (main NOT ahead); run #43 = success; PRs #92 (`1f767b9`), #93 (`e7b0e55`→`4605089`), #94 (`cf27c20`), #95 (`f2c95ed6`) all OPEN, none merged; `main..` each PR head confirms none is in the tag | 0 | the published binary is unchanged by any pending PR |
+| r4.2 | fresh download of all 22 published assets (new directory, parallel fetch, per-asset API digest cross-check) | 22/22 files on disk; every file's SHA-256 equals the GitHub API `sha256:` digest; 0 failures | 0 | bytes dir `v100-stable-audit/bytes`, manifest archived as `download_manifest.json` |
+| r4.3 | `scripts/ci/verify-release-artifacts.py <fresh-bytes> v1.0.0 1.0.0 WasewaseX/Fress` (from a worktree at the tag) | FINAL ARTIFACT AUDIT PASSED — 21/21 re-hashes, latest.json 8/8, 5/5 signatures | 0 | same verdict as r3.16, on a fresh transfer |
+| r4.4 | independent 7-point verification (pure-Python RFC 8032 Ed25519 + BLAKE2b-512, self-checked; NOT the repo's verifier) | (1) inventory 22/22 exact; (2) SHA256SUMS 21/21 both directions, 0 orphans; (3) 5/5 minisign vs production key, key id `5638C68123FB633B` (LE display `3b63fb2381c63856`), embedded == key-file; (4) latest.json version `1.0.0`, 8 platform entries, every URL resolves to a real asset, embedded signatures byte-identical to sidecars; (5) Authenticode absent (both setup exes' PE cert tables empty, MSI has no signature stream); (6) 5/5 APKs carry `APK Sig Block 42`; (7) negative control: one flipped bit in `x64-setup.exe` REJECTED | 0 | report archived as `independent_verification.json` |
+| r4.5 | E2E boundary expansion (this round's commit `4605089`, 5 files) | 14 NEW tests, all green: Workflow C2 ×5 (failure never becomes a browser handoff; persistent outage stays honest across re-queries; recovery starts the CORRECT transfer with real progress; rate-limit Retry survives a repeated 403 and recovers in-app; repeated HTTP 500 never opens a browser), Workflow D2 ×5 (direct artifact dispatches natively with browser/opener boundaries silent; double-click dedupe; native start failure truthful + retryable; restored untrusted history row acts only through the recorded opener boundary and never fakes success; platform switch/modal dismissal cannot apply stale resolver results), Workflow I2/J2 ×2 (Alpha classification accuracy; TRUNCATED checksum manifest fails closed like a missing one — bridge gains `setTruncatedText` to mirror the native truncation contract), Workflow K2 ×2 (genuine no-match = labelled page handoff, one recorded openExternal, page row, no transfer; browser preview = deliberate `window.open` handoff labelled "Opened in browser", no progress/verify claims) | 0 | all driven against RECORDED bridge traffic (openedUrls / start_download calls / download registry), not labels |
+| r4.6 | `npm run test:e2e` on PR #93 head `4605089` | **104/104 passed** (90 pre-existing on the tag + the 14 new) + **24/24 visual** — exact same counts as the tag's "114/114 E2E" annotation plus this round's additions | 0 | run in spec batches (workers=2 in a constrained sandbox); the earlier `90/90` row (r3.24) is hereby confirmed exact |
+| r4.7 | `npm test` | 810 passed / 2 skipped | 0 | unchanged from r3.9 |
+| r4.8 | `npm run typecheck` / `npm run build` / `validate:versions` (dev + `--release-tag v1.0.0`) / `validate:catalog` / `validate:security` / `test:perf` / `perf:catalog` / `check-no-chinese.mjs` (source + `--include-dist`) / `python3 -m unittest discover scripts/ci` | ALL PASS (89 python CI tests; 8 authoritative version fields agree on 1.0.0) | 0 | full battery re-run on the exact PR #93 head |
+| r4.9 | post-tag PR integration matrix (defects fixed AFTER the tag) | PR #92 (Agent 5 round-2: strict beta/rc stage gate, stale-channel check guard, truncated-manifest refusal, literal interpolation — the in-app resolver side) and PR #95 (deep-review hardening: opener-grant removal + native `download_open.rs` gating, `sanitize_filename` dot-run edge, F-Droid id validation, queue cancel/promote by row identity, resolver-cache eviction race, TS strict) both fix defects that exist IN THE PUBLISHED v1.0.0 binaries; PR #94 adds native test pins only; **none is merged into main or the tag; the published bytes are unchanged** | n/a | recommendation: merge #92 → #94 → #95 (after #95 rebases — see r4.10), then cut a v1.0.1 stable patch release carrying them; do NOT move the v1.0.0 tag or replace its assets |
+| r4.10 | PR #95 mergeability | `mergeable=false` (`mergeable_state=dirty`): the branch was cut from `6a3aa23` (pre-integration, 2026-10-13) so its diff still contains pre-stable fixture/test states (hardcoded `1.0.8-beta`-era fixtures, `latestToast` expectations that predate track-migration, deletions of specs that did not exist yet at its base). The FIXES are wanted; the branch needs a rebase onto current `main` before merge | n/a | routed to PR #95's owner; my tests/e2e additions are additive and rebase-friendly |
+| r4.11 | packaged/physical rows (Sections 1–7) | **NOT RUN** — unchanged; this sandbox has no Windows/macOS/Android environment. The Windows x64 setup the manual matrix must eventually use is pinned below | n/a | `Fress_1.0.0_x64-setup.exe`, SHA-256 `6930f1c513bb615092ae17edd1fa3994b306ca2f7954ebde5e0a3b757ef73e75` (from the audited download, cross-checked against the release's SHA256SUMS.txt entry; re-verify at test time with `sha256sum -c`) |
+
+
 ---
 
 ## Section 1. Desktop clean install & first startup
@@ -680,16 +706,16 @@ record can be called complete.
 
 | Area | Automated evidence | Packaged/physical evidence |
 |---|---|---|
-| Frontend journeys (catalog, palette, downloads, open, themes, navigation) | executed on main @ 93f87ce (114 E2E + 707 unit + 24 visual) AND re-executed green on the candidate (r2.3: 758 unit; r2.10: 90 E2E; r2.9: 24 visual) | NOT RUN |
+| Frontend journeys (catalog, palette, downloads, open, themes, navigation) | executed on main @ 93f87ce AND re-executed green on the candidate (r2/r3: 90 E2E + 24 visual) AND on PR #93 head `4605089` (r4.6: **104 E2E + 24 visual = 128**, incl. the 14 new boundary tests) | NOT RUN |
 | Stable-channel policy + stable-track fixtures (#80/#82) | suites EXECUTED green on the candidate (r2.3 unit incl. stableChannelPolicy, r2.10 E2E incl. i-self-update) | PASS (mocked evidence) — packaged verification pending publication |
 | Android open handoff contract (#74) | mocked contract tests executed green on the candidate (unit r2.3: downloadOpenFlow + artifactOpen suites; E2E r2.10: the D2 Android journey) | NOT RUN (build evidence is not installer evidence; device rows blank) |
 | Native engine + verifier | Rust CI green on 3 OSes on BOTH main-era (run 38421837523) and the candidate (run 38486865438: fmt+clippy+test linux, tests windows-latest + macos-latest) | NOT RUN |
-| Released bytes vs manifest vs signatures | proven for v1.0.12-beta (21/21 checksums, 5/5 minisign, latest.json 8/8) | v1.0.0 bytes do not exist — Section 8 re-runs everything |
+| Released bytes vs manifest vs signatures | **DONE for v1.0.0 (r3.14–r3.21, re-proven r4.2–r4.4):** all 22 published assets downloaded TWICE (once 2026-10-14, once fresh 2026-10-15); repo verifier exit 0 both times; independent 7-point verification (incl. tamper negative control) PASSED | PASS (published-bytes evidence class; the only remaining gap is 8.9: a packaged updater checking the live feed — NOT RUN) |
 | Windows installer UX (SmartScreen, MSI, portable) | none possible | NOT RUN |
 | macOS Gatekeeper | none possible | NOT RUN |
 | Linux handlers (AppImage/deb/rpm/missing-handler) | none possible | NOT RUN |
 | Beta→stable installer transitions | SemVer/channel/data-retention design pinned in tests + source review | NOT RUN (every prediction is 'expected (hypothesis)') |
-| Publication gate | pipeline design pinned (workflow-contract tests) | NOT RUN (release does not exist) |
+| Publication gate | pipeline executed end to end: run #43 success (version → no-Chinese → builds → updater-manifest → checksums → verify-release on fresh bytes → draft flip); release `draft=false, prerelease=false`, 22 assets (r3.21, r4.1) | 8.1–8.8 equivalents EXECUTED via Section 0-r3/r4; 8.9 (packaged updater vs live feed) NOT RUN |
 
 **Blocking prerequisites before this record can be completed:**
 
@@ -698,8 +724,10 @@ record can be called complete.
    suite re-run green on the candidate tree (`7dcfceea`) — records 0.19/0-r2.
 2. DEFECT D6-1 fixed by the release agent (fress-open crate + lock entry to
    `1.0.0`) — then row r2.6/0.19f re-runs green.
-3. The `v1.0.0` tag build producing the `Fress_1.0.0_*` artifacts and Agent 3's
-   publication (draft → verify-release → flip) — then Section 8 executes.
+3. ✅ DONE: the `v1.0.0` tag build produced the `Fress_1.0.0_*` artifacts and
+   the release is PUBLISHED (run #43 success; draft=false, prerelease=false,
+   22 assets). Section 8's byte-audit rows executed via Section 0-r3/r4; only
+   8.9 (packaged updater vs the live feed) remains NOT RUN.
 4. A Windows, a macOS, a Linux and an Android environment for the packaged and
    physical rows. None were attached to the qualification environment; every
    such row stays honestly NOT RUN until a human executes it.
@@ -751,3 +779,4 @@ identified; blank = not verified on that class.
 | r1 | 2026-10-14 | initial v1.0.0 qualification record on integrate/stable-candidate e771423 |
 | r2 | 2026-10-14 | candidate execution recorded (Section 0-r2): full frontend+E2E+visual+perf green on tree 7dcfceea; DEFECT 1 fixed; channel-pin fix; D6-1 recorded; Section 6 reconciled with transition-qualification (T2 dual hypothesis, W-3 decisive); 27 mock/mocked-e2e/unit rows carry the candidate execution |
 | r3 | 2026-10-14 | critique round applied: green evidence re-executed and archived on the final tip 50c4365 (command-matrix-final-tree.log, test-visual-final.log, five E2E chunk logs, 90/90); Rust rows re-cited to CI run 38486865438 (fmt/clippy/test green on linux+windows+macOS); favorites-gap (2.13) and offline (5.19) rows restored to honest non-PASS states; stale execution-gap actuals refreshed; §6 shared-facts survival claim rewritten per F-3/F-4; candidate-of-record updated to the tip. Current record totals: ~90 PASS rows (55 original automated/byte-audit + 35 rows upgraded by the candidate execution and CI run 38486865438), 68 NOT RUN (every packaged-os/physical-device row), 3 UNAVAILABLE (minisign CLI, local cargo-audit, local Rust toolchain — all CI-covered), 1 FAIL (validate:versions = D6-1, release-agent-owned), 1 OPEN GAP (favorites-restart automated test) |
+| r4 | 2026-10-15 | publication confirmed and re-proven: run #43 success, release live (draft=false, prerelease=false, 22 assets); fresh-download artifact re-verification (repo verifier exit 0 + independent 7-point verification incl. tamper negative control); E2E boundary expansion (14 new tests: C2 failure/handoff boundary, D2 native identity boundary, I2/J2 updater fail-closed classification incl. truncated-manifest, K2 page-handoff + browser preview) — 104 E2E + 24 visual green on PR #93 head `4605089`; full validation battery green; post-tag PR matrix recorded (#92/#94/#95 unmerged, published binary unchanged; v1.0.1 patch recommended after #95 rebases); every packaged/physical row stays NOT RUN |

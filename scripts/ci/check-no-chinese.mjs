@@ -778,7 +778,16 @@ if (historyMode) {
         if (Number.isFinite(cp) && text.includes(String.fromCodePoint(cp))) return true;
       } else if (f.kind === 'locale-identifier') {
         const m = /"([^"]+)"/.exec(f.category || '');
-        if (m && text.includes(m[1])) return true;
+        if (m) {
+          // Boundary-delimited presence test mirroring the scan's own locale
+          // matching: an id embedded inside a longer alphanumeric token (the
+          // test suite plants decoys like x-z-h-C-N-x to prove the scan does
+          // not false-positive) is NOT a live locale registration, so it must
+          // not be reported as "still present". A boundary-free includes()
+          // here produced a false STILL PRESENT attribution (round-5 audit).
+          const esc = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          if (new RegExp(`(?:^|[^A-Za-z0-9])${esc}(?![A-Za-z0-9])`).test(text)) return true;
+        }
       }
     }
     return false;

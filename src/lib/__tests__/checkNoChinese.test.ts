@@ -1118,4 +1118,39 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(fn).toBeTruthy();
     expect(fn?.codepoint).toBe('U+30001');
   });
+
+  it('26. history still-present attribution respects locale-id boundaries (decoys are not live ids)', () => {
+    // Round-5 audit finding: the locale-identifier branch of the history
+    // still-present check used a boundary-free substring test, so a historical
+    // banned id was reported STILL PRESENT whenever the current tree contained
+    // the same characters inside a longer token - e.g. this suite's own
+    // negative-control decoy planted to prove the scan ignores such decoys.
+    // Live-id fixtures are built from code points so this test file can never
+    // match itself; the decoy stays literal because an alnum-embedded id is
+    // unmatchable by the scan's own boundary contract.
+    const ZH_CN = `${String.fromCodePoint(0x7a)}${String.fromCodePoint(0x68)}-CN`;
+    // Negative control: id existed in history; the current tree only embeds
+    // it in a longer token, so still_present must be false (and exit 0).
+    const root = makeRepo();
+    writeFileSync(join(root, 'hist.txt'), `old: "${ZH_CN}" literal fixture\n`);
+    commitAll(root);
+    writeFileSync(join(root, 'hist.txt'), "Buffer.from('xzh-CNx', 'latin1'); // decoy, not a locale id\n");
+    commitAll(root);
+    const r = runChecker(root, ['--history']);
+    expect(r.status).toBe(0);
+    const rec = (r.report() as unknown as { history_hits: Array<{ path: string; still_present: boolean }> })
+      .history_hits.find((h) => h.path === 'hist.txt');
+    expect(rec).toBeTruthy();
+    expect(rec?.still_present).toBe(false);
+    // Positive control: the same id still live in the current tree -> the
+    // history record says still_present=true and the scan exits 1.
+    const root2 = makeRepo();
+    writeFileSync(join(root2, 'live.txt'), `still registered: "${ZH_CN}"\n`);
+    commitAll(root2);
+    const r2 = runChecker(root2, ['--history']);
+    expect(r2.status).toBe(1);
+    const rec2 = (r2.report() as unknown as { history_hits: Array<{ path: string; still_present: boolean }> })
+      .history_hits.find((h) => h.path === 'live.txt');
+    expect(rec2?.still_present).toBe(true);
+  });
 });

@@ -10,8 +10,17 @@
  * REPLACEMENT value: replace('{name}', 'a$&b') renders "a{name}b" because
  * $& means "the matched token". App names, repository names and vendor
  * names are data (user-added apps type them freely), so every owned call
- * site was moved to the shared split/join formatter formatMessage - the
- * value is inserted literally, every occurrence replaced.
+ * site was moved to the shared formatter formatMessage - the value is
+ * inserted literally, every occurrence replaced.
+ *
+ * The formatter itself was hardened twice: the first version (split/join
+ * per token) dodged the $-patterns but re-scanned text inserted by an
+ * earlier pass with the later tokens' patterns - a custom app named
+ * "X {host} Y" rendered through a {name}/{host} template had its literal
+ * "{host}" swapped for the real host. The current implementation scans the
+ * template once and inserts every value through a function replacer (a
+ * literal insertion by specification), so NO inserted text is ever
+ * re-scanned.
  *
  * Two layers are pinned:
  *   1. the primitive itself, against every hostile value class the spec
@@ -24,7 +33,10 @@
  * t(key).replace('{token}', value) makes the component assertions below
  * fail immediately - the label renders "a{name}b" (the matched token
  * substituted for $&) instead of the literal app name. The primitive
- * assertions fail against a naive replace-based reimplementation too.
+ * assertions fail against a naive replace-based reimplementation too, and
+ * the no-re-scan block below fails against the old per-token split/join
+ * implementation (its later passes substitute tokens inside earlier
+ * values).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
@@ -40,7 +52,7 @@ import { TableView } from '../../components/TableView';
 /* Layer 1: the shared primitive                                       */
 /* ------------------------------------------------------------------ */
 
-describe('formatMessage inserts every value literally (split/join semantics)', () => {
+describe('formatMessage inserts every value literally (single-pass semantics)', () => {
   const template = 'Do {name} now ({name})';
 
   it.each([
@@ -71,6 +83,63 @@ describe('formatMessage inserts every value literally (split/join semantics)', (
     // next to a placeholder must keep both intact after a plain value pass.
     const out = formatMessage('Use {v} ($& means matched text) {v}', { v: '1.0' });
     expect(out).toBe('Use 1.0 ($& means matched text) 1.0');
+  });
+
+  it('no values means the template passes through untouched', () => {
+    expect(formatMessage('plain {name} template', {})).toBe('plain {name} template');
+  });
+});
+
+describe('formatMessage never re-scans inserted values (single pass over all tokens)', () => {
+  it('a value containing a LATER token of the same call stays literal', () => {
+    // The split/join implementation ran one pass per token: the {name}
+    // pass inserted "X {host} Y", then the {host} pass substituted the
+    // text the NAME contributed. A custom app name is user data - the
+    // rendered label must carry it verbatim.
+    const out = formatMessage('A {name} B {host}', { name: 'X {host} Y', host: 'example.com' });
+    expect(out).toBe('A X {host} Y B example.com');
+  });
+
+  it('a value containing its OWN token stays literal (no self-substitution)', () => {
+    expect(formatMessage('Remove {name}?', { name: '{name}' })).toBe('Remove {name}?');
+  });
+
+  it('a value carrying several tokens of the template stays verbatim', () => {
+    const out = formatMessage('{name} vs {host}', {
+      name: 'app {host} and {name}',
+      host: 'gitlab.com',
+    });
+    expect(out).toBe('app {host} and {name} vs gitlab.com');
+  });
+
+  it('prefix-overlapping token names substitute exactly themselves', () => {
+    // {v} is a prefix of {version}: the combined single scan must not let
+    // {v} consume the opening of {version} (both are brace-anchored).
+    const out = formatMessage('{v} then {version}', { v: '1.0', version: '2.0' });
+    expect(out).toBe('1.0 then 2.0');
+  });
+
+  it('the real TableView multi-token site renders a token-shaped app name verbatim', () => {
+    // End-to-end shape of the defect: card.source.aria carries {name} AND
+    // {host}; a user app literally named "{host}" must reach the aria-label
+    // as the name, not be replaced by the host label. The oracle builds the
+    // expectation with a sentinel so the NAME contribution is never
+    // re-scanned (a naive split/join oracle would itself corrupt it).
+    const appName = '{host}';
+    const sentinel = '@@APPNAME@@';
+    const en = DICTS.en;
+    const expected = en['card.source.aria']
+      .split('{name}')
+      .join(sentinel)
+      .split('{host}')
+      .join('GitHub')
+      .split(sentinel)
+      .join(appName);
+    expect(expected).toContain('GitHub');
+    expect(expected).toContain('{host}');
+    expect(
+      formatMessage(en['card.source.aria'], { name: appName, host: 'GitHub' })
+    ).toBe(expected);
   });
 });
 

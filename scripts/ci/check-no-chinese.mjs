@@ -93,7 +93,10 @@ const HAN_RANGES = [
   [0xffe0, 0xffef, 'Fullwidth signs'],
   [0x20000, 0x2a6df, 'CJK Unified Ideographs Extension B (Han)'],
   [0x2a700, 0x2ebef, 'CJK Unified Ideographs Extensions C-F (Han)'],
+  [0x2ebf0, 0x2ee5d, 'CJK Unified Ideographs Extension I (Han)'],
   [0x2f800, 0x2fa1f, 'CJK Compatibility Ideographs Supplement (Han)'],
+  [0x30000, 0x3134a, 'CJK Unified Ideographs Extension G (Han)'],
+  [0x31350, 0x323af, 'CJK Unified Ideographs Extension H (Han)'],
 ];
 
 // Chinese locale identifiers (BCP-47 and common filesystem forms). Built

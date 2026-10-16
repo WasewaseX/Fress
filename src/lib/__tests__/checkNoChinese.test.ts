@@ -1079,4 +1079,43 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(hit).toBeTruthy();
     expect(hit?.kind).toBe('binary-string');
   });
+
+  it('25e. Han extensions I/G/H (newer supplementary-plane blocks) are blocking hits', () => {
+    const root = makeRepo();
+    // Round-4 audit finding: HAN_RANGES ended at Extension F (0x2EBEF) and had
+    // nothing at or above 0x30000; a planted Ext I/G/H ideograph passed silently.
+    // All fixtures constructed from numeric code points.
+    const EXT_I = String.fromCodePoint(0x2ebf0); // Extension I (Unicode 15.1)
+    const EXT_G = String.fromCodePoint(0x30000); // Extension G (Unicode 13.0)
+    const EXT_H = String.fromCodePoint(0x31350); // Extension H (Unicode 15.0)
+    writeFileSync(join(root, 'ext-ghi.txt'), `supplementary ${EXT_I}${EXT_G}${EXT_H}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const cps = r.report().hits.map((h) => h.codepoint);
+    expect(cps).toContain('U+2EBF0');
+    expect(cps).toContain('U+30000');
+    expect(cps).toContain('U+31350');
+    // Negative control: adjacent NON-Han astral scripts stay clean (exit 0) -
+    // proves the new blocks are discriminating, not an over-broad astral sweep.
+    const root2 = makeRepo();
+    const MUSICAL = String.fromCodePoint(0x1d10c); // Musical symbol (U+1D10C)
+    const LINEAR_B = String.fromCodePoint(0x10000); // Linear B syllable (U+10000)
+    const EGYPTIAN = String.fromCodePoint(0x13000); // Egyptian hieroglyph (U+13000)
+    writeFileSync(join(root2, 'astral-clean.txt'), `${MUSICAL}${LINEAR_B}${EGYPTIAN} ok\n`);
+    commitAll(root2);
+    const r2 = runChecker(root2);
+    expect(r2.status).toBe(0);
+  });
+
+  it('25f. an Extension G ideograph in a FILE NAME is a blocking finding', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, `x${String.fromCodePoint(0x30001)}.txt`), 'clean\n');
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const fn = r.report().hits.find((h) => h.kind === 'filename');
+    expect(fn).toBeTruthy();
+    expect(fn?.codepoint).toBe('U+30001');
+  });
 });

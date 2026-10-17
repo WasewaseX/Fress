@@ -44,10 +44,12 @@
 //!   cancellation channel is re-checked (drained) at the last possible point
 //!   before the transfer body is declared complete, and a cancelled task
 //!   returns immediately without running verification or finalization.
-//! - Cancellation is honored while bytes are streaming and through every
-//!   retryable outcome (short transfer, stalled connection). Only when the
-//!   body is fully received AND its byte count is verified against the
-//!   response's promise does the download enter Verifying, from where it
+//! - Cancellation is honored while the attempt waits for the server's
+//!   response, while bytes are streaming, and through every retryable
+//!   outcome (short transfer, stalled connection, silent server). Only
+//!   when the body is fully received AND its byte count is verified
+//!   against the response's promise does the download enter Verifying,
+//!   from where it
 //!   always runs to a terminal state: the bytes are already on disk, and
 //!   deleting a fully received, hash-checked artifact would only waste the
 //!   transfer. A cancel signalled during Verifying is therefore ignored by
@@ -88,7 +90,9 @@
 //! | checksum mismatch | deleted | no |
 //! | resume-invalid (416, bad Content-Range) | deleted | no |
 //! | disk write failure (ENOSPC, permissions) | kept, resumable | no (final) |
+//! | transient server status (429, 502, 503, 504) | untouched - never written to | yes, fresh attempt |
 //! | protocol violation (bad status/headers) | untouched - never written to | no |
+//! | refused redirect (downgrade/loop/allowlist) | untouched - never written to | no |
 //!
 //! A disk write failure keeps the staging file because a full disk is a
 //! recoverable condition: the user frees space and hits Resume, and the
@@ -1063,10 +1067,20 @@ pub(crate) fn evaluate_response(
                 }
             }
         }
-        other => ResponsePlan::Fail {
-            message: format!("Server returned HTTP {}", other),
-            kind: None,
-        },
+        other => {
+            // Transient server-side conditions: the same request answers
+            // differently seconds later, and the retry loop exists for
+            // exactly these. Nothing was written yet (this gate precedes
+            // the staging reservation), so the fresh attempt simply
+            // re-requests. Every other status is deterministic (404,
+            // 403, 500, ...) and stays final: retrying it can only
+            // reproduce it.
+            let kind = matches!(other, 429 | 502 | 503 | 504).then(|| "network".to_string());
+            ResponsePlan::Fail {
+                message: format!("Server returned HTTP {}", other),
+                kind,
+            }
+        }
     }
 }
 
@@ -1314,6 +1328,39 @@ pub(crate) async fn commit_no_clobber_limited(
 // Download engine
 // ---------------------------------------------------------------------------
 
+/// How long one attempt may wait for the server to ANSWER (response line
+/// plus headers on an established connection). The policy client's connect
+/// timeout bounds TCP/TLS setup; this bounds the silent wait after it.
+/// Without it, a server that accepted and never replied held the download
+/// in `Downloading` forever, and cancellation - which was only observed in
+/// the body loop and the retry backoff - could not stop it. Same policy as
+/// the body stall window, applied one phase earlier.
+const FIRST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long one attempt may stream no body bytes before the connection is
+/// declared dead and the attempt fails as a retryable network stall.
+const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Classify one initial-send failure.
+///
+/// Redirect-policy refusals (scheme downgrade, allowlist miss, loop, hop
+/// budget, credentials on a hop) are DETERMINISTIC: the same redirect
+/// chain fails the same way on every attempt, so burning the automatic
+/// retry budget on them only delays the honest error - and the old
+/// "Connection failed" wording misread a security refusal as a network
+/// blip. They are final, and the message names the refusal. Everything
+/// else (DNS, connect, TLS, reset while waiting) stays transient.
+fn classify_send_error(e: reqwest::Error) -> (String, Option<String>) {
+    if e.is_redirect() {
+        (format!("Insecure redirect refused: {}", e), None)
+    } else {
+        (
+            format!("Connection failed: {}", e),
+            Some("network".to_string()),
+        )
+    }
+}
+
 /// Event outlet the engine reports through. The Tauri layer maps these to
 /// the `download-progress` / `download-retrying` events; tests collect
 /// them in memory. Keeping emission behind this trait is what makes the
@@ -1364,10 +1411,13 @@ pub(crate) struct DownloadPlan {
 /// deterministically (see `DiskFullAfter` in the test module).
 ///
 /// Error kinds returned in the `(message, kind)` pair:
-/// - `Some("network")` - transient, the retry loop may re-attempt;
+/// - `Some("network")` - transient, the retry loop may re-attempt
+///   (connection failures, a silent server, stalls, short transfers, and
+///   the transient server statuses 429/502/503/504);
 /// - `Some("checksum")` / `Some("resume-invalid")` - final, staging bytes
 ///   were discarded, never retried automatically;
-/// - `None` - final (disk, protocol, or server-status errors);
+/// - `None` - final (disk, protocol, refused-redirect, or deterministic
+///   server-status errors);
 /// - the [`CANCEL_SENTINEL`] message - cancelled, staging bytes kept.
 async fn run_download_on<E: ProgressSink, S: StagingSink>(
     events: &E,
@@ -1480,12 +1530,33 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
             }
         }
     }
-    let first = request.send().await.map_err(|e| {
-        (
-            format!("Connection failed: {}", e),
-            Some("network".to_string()),
-        )
-    })?;
+    // The wait for the response is cancellable and bounded. The policy
+    // client's connect timeout bounds TCP/TLS setup, but the wait for the
+    // response line + headers on an established connection used to be
+    // unbounded: a server that accepted and never answered held the
+    // download in Downloading forever, and cancellation - observed only in
+    // the body loop and the retry backoff - could not stop it. The window
+    // is the same 60 s policy as the body stall below, one phase earlier.
+    let first: reqwest::Response = tokio::select! {
+        biased;
+        _ = cancel_rx.recv() => {
+            // Deliberate stop before a single byte moved: the response
+            // gate precedes the staging reservation, so there is nothing
+            // on disk to clean up.
+            let _ = session.advance(DownloadState::Cancelled).await;
+            return Err((CANCEL_SENTINEL.to_string(), None));
+        }
+        answer = tokio::time::timeout(FIRST_RESPONSE_TIMEOUT, request.send()) => match answer {
+            Ok(result) => result.map_err(classify_send_error)?,
+            Err(_) => {
+                return Err((
+                    "No response from the server for 60s; the connection was given up"
+                        .to_string(),
+                    Some("network".to_string()),
+                ))
+            }
+        },
+    };
 
     // Protocol gate: only 200 (full body) and 206 (verified range) are
     // acceptable answers. Everything else - other 2xx codes without a
@@ -1630,17 +1701,28 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
         biased;
         _ = cancel_rx.recv() => {
             // Deliberate stop: keep the .part file so the user can resume
-            // instead of restarting from zero.
+            // instead of restarting from zero. The bytes this attempt
+            // accepted are flushed FIRST: the sink buffers, and a
+            // background drop-flush could still be pending when the next
+            // attempt (or the user's Resume) measures the file - a resume
+            // from a stale length would duplicate or drop bytes nothing
+            // can account for. Same invariant as the disk-error path.
+            let _ = file.flush().await;
             drop(file);
             let _ = session.advance(DownloadState::Cancelled).await;
             return Err((CANCEL_SENTINEL.to_string(), None));
         }
-        chunk = tokio::time::timeout(Duration::from_secs(60), stream.next()) => {
+        chunk = tokio::time::timeout(STALL_TIMEOUT, stream.next()) => {
             match chunk {
                 Ok(c) => c,
                 Err(_) => {
                     // No bytes for a full minute: treat the connection as
-                    // dead. The .part stays on disk for the Resume button.
+                    // dead. The .part stays on disk for the Resume button
+                    // - and for the automatic retry that follows within
+                    // seconds, so the accepted bytes are flushed before
+                    // this attempt reports the stall (same invariant as
+                    // the disk-error path).
+                    let _ = file.flush().await;
                     drop(file);
                     return Err((
                         "Connection stalled (no data for 60s)".to_string(),
@@ -1653,6 +1735,11 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
         let bytes = match chunk {
             Ok(b) => b,
             Err(e) => {
+                // The connection died mid-body; the transfer continues on
+                // the next attempt from the .part file. Flush the accepted
+                // bytes first so the retry's resume probe reads the true
+                // received length (same invariant as the disk-error path).
+                let _ = file.flush().await;
                 drop(file);
                 return Err((
                     format!("Download interrupted: {}", e),
@@ -1732,6 +1819,10 @@ async fn run_download_on<E: ProgressSink, S: StagingSink>(
     // Past this point the transfer keeps running to a terminal state (see
     // the module invariants).
     if cancel_rx.try_recv().is_ok() {
+        // Cancellation wins the completion decision; the accepted bytes
+        // are flushed so the .part the user will Resume from holds the
+        // full received length (same invariant as the other stop paths).
+        let _ = file.flush().await;
         drop(file);
         let _ = session.advance(DownloadState::Cancelled).await;
         return Err((CANCEL_SENTINEL.to_string(), None));
@@ -2403,14 +2494,42 @@ mod tests {
     #[test]
     fn evaluate_only_200_and_206_are_accepted() {
         // 204 carries no body: without this gate it would finalize an
-        // empty file. Every other status must fail as well.
-        for status in [201, 202, 203, 204, 205, 226, 301, 302, 403, 404, 500, 503] {
+        // empty file. Every other status must fail as well. (429/502/503/
+        // 504 also fail the ATTEMPT, but as RETRYABLE failures - see
+        // transient_server_statuses_are_retryable.)
+        for status in [201, 202, 203, 204, 205, 226, 301, 302, 403, 404, 500, 501] {
             match evaluate_response(status, None, 0) {
                 ResponsePlan::Fail { message, kind } => {
                     assert_eq!(message, format!("Server returned HTTP {}", status));
                     assert_eq!(kind, None);
                 }
                 other => panic!("expected Fail for {}, got {:?}", status, other),
+            }
+        }
+    }
+
+    #[test]
+    fn transient_server_statuses_are_retryable_and_deterministic_ones_are_not() {
+        // 429 and the 5xx gateway/overload family answer differently
+        // seconds later: the retry loop exists for exactly these, so the
+        // failure must carry kind "network". Every other status is
+        // deterministic and stays final - retrying a 404 can only
+        // reproduce it.
+        for status in [429u16, 502, 503, 504] {
+            match evaluate_response(status, None, 0) {
+                ResponsePlan::Fail { message, kind } => {
+                    assert_eq!(message, format!("Server returned HTTP {}", status));
+                    assert_eq!(kind, Some("network".to_string()));
+                }
+                other => panic!("expected retryable Fail for {}, got {:?}", status, other),
+            }
+        }
+        for status in [400u16, 403, 404, 408, 410, 418, 500, 501, 505] {
+            match evaluate_response(status, None, 0) {
+                ResponsePlan::Fail { kind, .. } => {
+                    assert_eq!(kind, None, "{} must stay final", status);
+                }
+                other => panic!("expected final Fail for {}, got {:?}", status, other),
             }
         }
     }
@@ -2991,20 +3110,28 @@ mod tests {
     struct MockServer {
         url: String,
         requests: Arc<StdMutex<Vec<String>>>,
+        /// Number of responses fully written onto the wire. The request
+        /// log alone does not prove the response bytes left the server:
+        /// paused-clock tests must wait for this counter BEFORE advancing
+        /// virtual time, or a response-window deadline can outrun the
+        /// real-time socket write.
+        served: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     fn spawn_mock(replies: Vec<MockReply>) -> MockServer {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let addr = listener.local_addr().expect("local addr");
         let requests: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let req_log = Arc::clone(&requests);
+        let served_log = Arc::clone(&served);
         std::thread::spawn(move || {
             for reply in replies {
                 let (stream, _) = match listener.accept() {
                     Ok(x) => x,
                     Err(_) => return,
                 };
-                serve_one(stream, &reply, &req_log);
+                serve_one(stream, &reply, &req_log, &served_log);
             }
             // Script exhausted: absorb any further connections so an
             // unexpected extra attempt fails fast instead of hanging.
@@ -3015,6 +3142,7 @@ mod tests {
         MockServer {
             url: format!("http://{}/payload.bin", addr),
             requests,
+            served,
         }
     }
 
@@ -3022,6 +3150,7 @@ mod tests {
         mut stream: std::net::TcpStream,
         reply: &MockReply,
         req_log: &StdMutex<Vec<String>>,
+        served: &std::sync::atomic::AtomicUsize,
     ) {
         // Drain the request head (GET has no body).
         let mut buf: Vec<u8> = Vec::new();
@@ -3078,6 +3207,10 @@ mod tests {
             .min(effective.body.len());
         let _ = stream.write_all(&effective.body[..limit]);
         let _ = stream.flush();
+        // The response bytes are on the wire. Paused-clock tests wait for
+        // this marker before they advance virtual time (see
+        // wait_until_served).
+        served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if effective.hold_ms > 0 {
             std::thread::sleep(Duration::from_millis(effective.hold_ms));
         }
@@ -3107,6 +3240,41 @@ mod tests {
     /// (hyper writes header names in lowercase on the wire).
     fn request_head(server: &MockServer, n: usize) -> String {
         server.requests.lock().unwrap()[n].to_ascii_lowercase()
+    }
+
+    /// Wait (in REAL time, via scheduler yields) until the mock has fully
+    /// written `n` responses onto the wire. A paused-clock test must call
+    /// this before it advances virtual time: once the response bytes sit
+    /// in the client's socket buffer, send() completes on its next poll
+    /// and no response-window deadline can outrun them - the clock only
+    /// governs timers, never the socket data already delivered.
+    async fn wait_until_served(server: &MockServer, n: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while server.served.load(std::sync::atomic::Ordering::SeqCst) < n {
+            assert!(
+                Instant::now() < deadline,
+                "mock did not write {n} responses in real time"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// A loopback server that accepts connections and NEVER answers: the
+    /// pure hung-server shape the response window and the cancellable
+    /// initial request exist for. Each connection is held open in a
+    /// background thread; the threads die with the test process.
+    fn spawn_silent_server() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        std::thread::spawn(move || {
+            while let Ok((stream, _)) = listener.accept() {
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(120));
+                    drop(stream);
+                });
+            }
+        });
+        format!("http://{}/silent.bin", addr)
     }
 
     // -----------------------------------------------------------------------
@@ -3821,10 +3989,12 @@ mod tests {
             execute_with_retries(&task_log, &task_session, 1, plan, cancel_rx, test_backoff()).await
         });
 
-        // Cross the stall window: the 60s body timeout fires, attempt 1
-        // fails as retryable, the backoff elapses on the paused clock, the
-        // retry runs against the exhausted mock and fails, and the loop
-        // reaches its terminal state.
+        // The response (head + 1 KiB of body) must be on the wire before
+        // the clock starts: the attempt registers its 60s windows when it
+        // is first polled, and virtual time must not outrun the real
+        // socket write. After the stall window fires, the retries run to
+        // their final state against the exhausted mock.
+        wait_until_served(&server, 1).await;
         tokio::time::advance(Duration::from_secs(61)).await;
         for _ in 0..4000 {
             tokio::time::advance(Duration::from_millis(50)).await;
@@ -3851,6 +4021,212 @@ mod tests {
             "the staging file must survive a stall (resumable)"
         );
         assert!(!tmp.path().join("stall.bin").exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_server_is_abandoned_after_the_response_window_and_retried() {
+        // A server that accepts the connection but never sends a response
+        // must not wedge the download: the wait for the response head is
+        // bounded by the same 60 s policy as the body stall. On the paused
+        // clock every attempt burns exactly one window, so all three
+        // attempts fail as RETRYABLE network timeouts and the download
+        // lands in Failed with the named reason - never a hang, never a
+        // partial file (the response gate precedes the staging
+        // reservation, so nothing was ever written).
+        let tmp = TempDir::new("e2e-response-window");
+        let silent = spawn_silent_server();
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let task_session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = Arc::new(EventLog::default());
+        let task_log = Arc::clone(&log);
+        let plan = plan_for(&silent, tmp.path(), Some("silent.bin"));
+
+        let task = tokio::spawn(async move {
+            execute_with_retries(&task_log, &task_session, 1, plan, cancel_rx, test_backoff()).await
+        });
+
+        // Cross the first response window, then keep advancing: each
+        // retry burns one more 60 s window before the budget is spent.
+        tokio::time::advance(Duration::from_secs(61)).await;
+        for _ in 0..8000 {
+            tokio::time::advance(Duration::from_millis(50)).await;
+            if task.is_finished() {
+                break;
+            }
+        }
+        let result = task.await.expect("retry loop must finish");
+        assert!(result.is_err(), "a silent server must never complete");
+        assert_eq!(result.unwrap_err().1.as_deref(), Some("network"));
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+
+        let retries = log.retries.lock().unwrap();
+        assert_eq!(
+            retries.len(),
+            2,
+            "both automatic retries must fire against the silent server"
+        );
+        assert!(
+            retries[0].message.contains("No response from the server"),
+            "the retry must name the silent server, got: {}",
+            retries[0].message
+        );
+        // Nothing was ever written: the response gate precedes the
+        // staging reservation.
+        assert!(!tmp.path().join("silent.bin.part").exists());
+        assert!(!tmp.path().join("silent.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_while_waiting_for_the_response_stops_the_download() {
+        // Cancellation used to be observed only once the body started
+        // streaming; a cancel signalled while the attempt was still
+        // waiting for the response was invisible (and against a hung
+        // server it was invisible FOREVER). The wait is now a select arm:
+        // a signal latched before the request even starts must win
+        // without the response ever arriving.
+        let tmp = TempDir::new("e2e-cancel-silent-server");
+        let silent = spawn_silent_server();
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        registry.request_cancel(id).await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = EventLog::default();
+        let plan = plan_for(&silent, tmp.path(), Some("silent.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, id, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a cancelled download must not complete");
+        assert_eq!(message, CANCEL_SENTINEL);
+        assert_eq!(kind, None);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Cancelled));
+        assert!(!tmp.path().join("silent.bin").exists());
+        assert!(!tmp.path().join("silent.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_transient_503_is_retried_and_the_download_completes() {
+        // 502/503/504/429 are transient server-side conditions: the
+        // engine's retry loop exists for exactly these. Two overload
+        // answers followed by the real body must complete the download -
+        // they used to be final failures the user had to retry by hand.
+        let tmp = TempDir::new("e2e-503-retry");
+        let body = pattern(2_000);
+        let unavailable = || {
+            MockReply::raw(
+                "HTTP/1.1 503 Service Unavailable",
+                vec![("Content-Length", "0".to_string())],
+                Vec::new(),
+            )
+        };
+        let server = spawn_mock(vec![
+            unavailable(),
+            unavailable(),
+            MockReply::full_200(&body),
+        ]);
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("flaky.bin"));
+
+        let payload = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+            .await
+            .expect("transient 503s must be retried, not fatal");
+        assert_eq!(payload.bytes, body.len() as u64);
+        assert_eq!(
+            tokio::fs::read(tmp.path().join("flaky.bin")).await.unwrap(),
+            body
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Completed));
+        let retries = log.retries.lock().unwrap();
+        assert_eq!(retries.len(), 2);
+        assert!(
+            retries[0].message.contains("503"),
+            "the retry must name the server status, got: {}",
+            retries[0].message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_deterministic_404_is_never_retried() {
+        // The transient-status classification must not leak into
+        // deterministic statuses: a 404 answers identically on every
+        // attempt, so the retry budget must not be burned on it.
+        let tmp = TempDir::new("e2e-404-final");
+        let server = spawn_mock(vec![MockReply::raw(
+            "HTTP/1.1 404 Not Found",
+            vec![("Content-Length", "0".to_string())],
+            Vec::new(),
+        )]);
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("gone.bin"));
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a 404 is deterministic and final");
+        assert_eq!(kind, None);
+        assert!(message.contains("404"));
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            1,
+            "a deterministic status must not burn retry attempts"
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+        assert!(!tmp.path().join("gone.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn a_redirect_policy_refusal_is_final_and_named_not_retried() {
+        // The download client's redirect policy refuses hops with
+        // attempt.error(...) (network_policy's decisions), which reqwest
+        // surfaces as an error with is_redirect() == true. The refusal is
+        // DETERMINISTIC - the same chain fails the same way every time -
+        // so the attempt must fail FINALLY (no retry budget burned, no
+        // second request) and the message must name the redirect refusal
+        // instead of the generic "Connection failed" of a network blip.
+        let tmp = TempDir::new("e2e-redirect-refusal");
+        let server = spawn_mock(vec![MockReply::raw(
+            "HTTP/1.1 302 Found",
+            vec![
+                ("Location", "http://127.0.0.1:9/elsewhere.bin".to_string()),
+                ("Content-Length", "0".to_string()),
+            ],
+            Vec::new(),
+        )]);
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let mut plan = plan_for(&server.url, tmp.path(), Some("hop.bin"));
+        plan.client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                attempt.error(std::io::Error::other(
+                    "redirect downgraded to non-https scheme \"http\"",
+                ))
+            }))
+            .build()
+            .expect("test client builds");
+
+        let (message, kind) =
+            execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff())
+                .await
+                .expect_err("a refused redirect must fail the attempt");
+        assert_eq!(
+            kind, None,
+            "a deterministic refusal must not be classified as transient"
+        );
+        assert!(
+            message.contains("redirect"),
+            "the message must name the redirect refusal, got: {message}"
+        );
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            1,
+            "a refused redirect must not be retried"
+        );
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
     }
 
     #[tokio::test]
@@ -4205,6 +4581,67 @@ mod tests {
         }
     }
 
+    /// Test-only staging sink that models exactly what the flush
+    /// invariant is about: a writer whose accepted bytes are NOT on disk
+    /// until flush() runs. tokio::fs::File behaves the same way (it
+    /// buffers, and its drop-flush runs asynchronously in the
+    /// background), so this sink turns "the next attempt must read the
+    /// true received length" into a deterministic assertion: whatever the
+    /// engine accepted is visible in the .part file right after the
+    /// failure returns, or the invariant is broken.
+    struct DeferredFlushSink;
+
+    struct DeferredWriter {
+        inner: tokio::fs::File,
+        pending: Vec<u8>,
+    }
+
+    impl PartWriter for DeferredWriter {
+        async fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+            self.pending.extend_from_slice(bytes);
+            Ok(())
+        }
+        async fn flush(&mut self) -> io::Result<()> {
+            if !self.pending.is_empty() {
+                // Qualified: PartWriter is also implemented for File in
+                // this module, which would make the plain call ambiguous.
+                tokio::io::AsyncWriteExt::write_all(&mut self.inner, &self.pending).await?;
+                self.pending.clear();
+            }
+            tokio::io::AsyncWriteExt::flush(&mut self.inner).await
+        }
+        async fn sync_all(&mut self) -> io::Result<()> {
+            self.flush().await?;
+            tokio::fs::File::sync_all(&self.inner).await
+        }
+    }
+
+    impl StagingSink for DeferredFlushSink {
+        type Writer = DeferredWriter;
+        async fn open(&self, part: &Path, mode: StagingOpenMode) -> io::Result<Self::Writer> {
+            let inner = match mode {
+                StagingOpenMode::Append => {
+                    tokio::fs::OpenOptions::new()
+                        .append(true)
+                        .open(part)
+                        .await?
+                }
+                StagingOpenMode::Truncate => tokio::fs::File::create(part).await?,
+                StagingOpenMode::CreateNew => {
+                    tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(part)
+                        .await?
+                }
+            };
+            Ok(DeferredWriter {
+                inner,
+                pending: Vec::new(),
+            })
+        }
+    }
+
     #[tokio::test]
     async fn a_disk_full_failure_is_final_never_retryable_and_leaves_a_resumable_partial() {
         // The staging writer accepts exactly 400 of the promised 1000
@@ -4283,6 +4720,116 @@ mod tests {
         assert_eq!(
             tokio::fs::read(tmp.path().join("full.bin")).await.unwrap(),
             body
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The bytes-accepted-are-on-disk invariant on every stop path
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn an_interrupted_transfer_flushes_its_accepted_bytes_before_returning() {
+        // The mock promises 2000 bytes and closes the connection after
+        // 512 (a mid-body reset). The attempt fails as a retryable
+        // network error, and - because the automatic retry re-probes the
+        // .part within seconds - every byte the engine ACCEPTED must
+        // already be on disk when the error returns. With a buffering
+        // writer this is directly observable: a missing flush loses
+        // exactly the buffered tail, and a resume from the stale length
+        // would duplicate or drop bytes nothing can account for.
+        let tmp = TempDir::new("e2e-flush-interrupt");
+        let body = pattern(2_000);
+        let mut first = MockReply::full_200(&body);
+        first.send_body_bytes = Some(512);
+        // The retry attempts find an exhausted mock and fail fast; what
+        // they must NOT find is a staging file that lies about its length.
+        let server = spawn_mock(vec![first]);
+
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("flushed.bin"));
+
+        let (_message, kind) = execute_with_retries_on(
+            &log,
+            &session,
+            1,
+            plan,
+            cancel_rx,
+            test_backoff(),
+            &DeferredFlushSink,
+        )
+        .await
+        .expect_err("a mid-body reset must fail the attempt");
+        assert_eq!(kind, Some("network".to_string()));
+
+        let part = tokio::fs::read(tmp.path().join("flushed.bin.part"))
+            .await
+            .unwrap();
+        assert_eq!(
+            part,
+            body[..512],
+            "the staging file must hold exactly the bytes the engine accepted"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_transfer_flushes_its_accepted_bytes_before_returning() {
+        // Same invariant as the interrupted variant, driven through the
+        // stall path: the mock delivers 1 KiB and then holds the socket.
+        // The 60s stall window fires on the paused clock, the attempt
+        // fails as a retryable network stall, and the accepted bytes must
+        // be on disk before the error is reported.
+        let tmp = TempDir::new("e2e-flush-stall");
+        let body = pattern(100_000);
+        let mut first = MockReply::full_200(&body);
+        first.send_body_bytes = Some(1024);
+        first.hold_ms = 30_000; // real-time hold; the paused clock is ours
+        let server = spawn_mock(vec![first]);
+
+        let registry = Arc::new(DownloadRegistry::default());
+        let (id, cancel_rx) = registry.register().await;
+        let session = DownloadSession::new(Arc::clone(&registry), id);
+        let task_session = DownloadSession::new(Arc::clone(&registry), id);
+        let log = EventLog::default();
+        let plan = plan_for(&server.url, tmp.path(), Some("stalled.bin"));
+
+        let task = tokio::spawn(async move {
+            execute_with_retries_on(
+                &log,
+                &task_session,
+                1,
+                plan,
+                cancel_rx,
+                test_backoff(),
+                &DeferredFlushSink,
+            )
+            .await
+        });
+
+        // The response (head + 1 KiB) must be on the wire before the
+        // clock starts, so the stall - not the response window - is what
+        // fires. After the stall window, the retries run to their final
+        // state (each retry fails fast against the exhausted mock).
+        wait_until_served(&server, 1).await;
+        tokio::time::advance(Duration::from_secs(61)).await;
+        for _ in 0..4000 {
+            tokio::time::advance(Duration::from_millis(50)).await;
+            if task.is_finished() {
+                break;
+            }
+        }
+        let result = task.await.expect("retry loop must finish");
+        assert!(result.is_err(), "a stalled download must never complete");
+        assert_eq!(result.unwrap_err().1.as_deref(), Some("network"));
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+
+        let part = tokio::fs::read(tmp.path().join("stalled.bin.part"))
+            .await
+            .unwrap();
+        assert_eq!(
+            part,
+            body[..1024],
+            "the staging file must hold exactly the bytes the engine accepted"
         );
     }
 
@@ -4443,14 +4990,17 @@ mod tests {
         let session = DownloadSession::new(Arc::clone(&registry), id);
         let log = Arc::new(EventLog::default());
 
-        // The retry event is emitted only after the backoff completes and
-        // the next attempt has started, so seeing one retry event proves
-        // attempt 2's request is the one in flight.
-        let watcher_log = Arc::clone(&log);
+        // The watcher cancels only when the RETRY REQUEST is provably in
+        // flight: the server thread records every request head before it
+        // answers, so seeing 2 recorded requests means attempt 2's GET
+        // has been sent (its response holds the connection open). The
+        // cancel must interrupt THAT attempt - whether the engine observes
+        // it while waiting for the response or while the tail streams.
         let watcher_registry = Arc::clone(&registry);
+        let watcher_requests = Arc::clone(&server.requests);
         tokio::spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while watcher_log.retries.lock().unwrap().is_empty() {
+            while watcher_requests.lock().unwrap().len() < 2 {
                 if Instant::now() > deadline {
                     break;
                 }

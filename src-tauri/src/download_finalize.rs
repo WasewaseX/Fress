@@ -3259,6 +3259,29 @@ mod tests {
         }
     }
 
+    /// Wait (in REAL time, via scheduler yields) until `path` exists.
+    /// Companion to `wait_until_served`: bytes on the wire still need the
+    /// engine to be POLLED before they turn into a response + a staging
+    /// file, and on a slower scheduler (macOS arm64 runners) the paused
+    /// clock can fire the response window before those polls happen -
+    /// the attempt then fails as no-response with nothing on disk, which
+    /// is a different shape than the test under the pause intends to
+    /// exercise. Waiting for the staging open pins the ordering every
+    /// file-level assertion below assumes.
+    async fn wait_until_exists(path: &std::path::Path) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if tokio::fs::metadata(path).await.is_ok() {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{path:?} never appeared in real time"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
     /// A loopback server that accepts connections and NEVER answers: the
     /// pure hung-server shape the response window and the cancellable
     /// initial request exist for. Each connection is held open in a
@@ -4811,6 +4834,12 @@ mod tests {
         // fires. After the stall window, the retries run to their final
         // state (each retry fails fast against the exhausted mock).
         wait_until_served(&server, 1).await;
+        // The engine must have consumed the response and opened the
+        // staging file BEFORE the clock moves: on a slow scheduler the
+        // paused clock could otherwise fire the response window first and
+        // the attempt would die as no-response with nothing on disk -
+        // a different shape than the stall path this test exercises.
+        wait_until_exists(&tmp.path().join("stalled.bin.part")).await;
         tokio::time::advance(Duration::from_secs(61)).await;
         for _ in 0..4000 {
             tokio::time::advance(Duration::from_millis(50)).await;

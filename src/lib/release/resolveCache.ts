@@ -194,8 +194,11 @@ export function loadPersisted(key: string): ResolvedDownload | null | undefined 
     // Digests that were persisted by an older build (or hand-edited
     // storage) must not re-enter the engine looking trusted: malformed
     // values are dropped here, with a diagnostic (revalidatePersisted-
-    // Digests). A hit without digests is returned unchanged.
-    return revalidatePersistedDigests(e.hit, key) as ResolvedDownload | null;
+    // Digests). A hit without digests is returned unchanged. A persisted
+    // FAILURE entry (hit === null) stays null: a known-failed lookup that
+    // Retry must purge, never undefined (which means "nothing recorded").
+    if (e.hit === null) return null;
+    return revalidatePersistedDigests(e.hit, key);
   } catch {
     return undefined;
   }
@@ -257,23 +260,24 @@ export async function evictFailedLookups(
   cache: Map<string, Promise<ResolvedDownload | null>>,
   prefix: string
 ): Promise<void> {
-  const doomed: string[] = [];
+  const doomed: Array<{ key: string; promise: Promise<ResolvedDownload | null> }> = [];
   for (const [key, p] of Array.from(cache.entries())) {
     if (!key.startsWith(prefix)) continue;
     await p.then(
       (r) => {
-        if (r === null) doomed.push(key);
+        if (r === null) doomed.push({ key, promise: p });
       },
       () => {
         // A rejected memo entry is a failure by definition.
-        doomed.push(key);
+        doomed.push({ key, promise: p });
       }
     );
   }
-  for (const key of doomed) {
-    // Another caller may have replaced the entry meanwhile; only drop what
-    // is still the promise we inspected.
-    cache.delete(key);
+  for (const { key, promise } of doomed) {
+    // Another caller may have replaced the entry meanwhile (cacheSet of a
+    // fresh lookup); only drop the promise we actually inspected, never
+    // its replacement.
+    if (cache.get(key) === promise) cache.delete(key);
   }
 }
 

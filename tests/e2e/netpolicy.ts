@@ -20,7 +20,7 @@ import type { Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { INITIAL_APPS } from '../../src/data/appsData';
 import { ALL_EXTRA_APPS } from '../../src/data/appsDataExtra';
-import { RELEASES_LOCALSEND, SIGNAL_LATEST_YML, OWN_SUMS_TXT, type GhReleaseFixture } from './fixtures/data';
+import { RELEASES_LOCALSEND, SIGNAL_LATEST_YML, type GhReleaseFixture } from './fixtures/data';
 
 export const STAR_COUNT = 1234;
 

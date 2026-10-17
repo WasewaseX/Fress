@@ -14,7 +14,6 @@
 //    exactly one option carries aria-selected="true" (the SR announcement
 //    contract for keyboard-driven active-option changes).
 
-import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -55,7 +54,6 @@ function renderPalette(isOpen: boolean, onClose = vi.fn()) {
         isOpen={isOpen}
         onClose={onClose}
         apps={APPS}
-        favorites={[]}
         onToggleFavorite={() => {}}
         onOpenAppDetail={() => {}}
         onSelectCategory={() => {}}
@@ -105,7 +103,6 @@ describe('palette clipboard feedback', () => {
           isOpen
           onClose={onClose}
           apps={APPS}
-          favorites={[]}
           onToggleFavorite={() => {}}
           onOpenAppDetail={onOpenAppDetail}
           onSelectCategory={() => {}}
@@ -142,8 +139,7 @@ describe('palette clipboard feedback', () => {
           isOpen
           onClose={onClose}
           apps={APPS}
-          favorites={[]}
-          onToggleFavorite={() => {}}
+            onToggleFavorite={() => {}}
           onOpenAppDetail={onOpenAppDetail}
           onSelectCategory={() => {}}
           onToggleViewMode={() => {}}
@@ -186,7 +182,6 @@ describe('palette clipboard feedback', () => {
           isOpen={false}
           onClose={onClose}
           apps={APPS}
-          favorites={[]}
           onToggleFavorite={() => {}}
           onOpenAppDetail={() => {}}
           onSelectCategory={() => {}}
@@ -206,7 +201,6 @@ describe('palette clipboard feedback', () => {
           isOpen
           onClose={onClose}
           apps={APPS}
-          favorites={[]}
           onToggleFavorite={() => {}}
           onOpenAppDetail={() => {}}
           onSelectCategory={() => {}}
@@ -267,7 +261,6 @@ describe('active option follows the keyboard selection', () => {
           isOpen
           onClose={() => {}}
           apps={[]}
-          favorites={[]}
           onToggleFavorite={() => {}}
           onOpenAppDetail={() => {}}
           onSelectCategory={() => {}}

@@ -1,4 +1,4 @@
-# Native code-integrity audit — October 2026 (round 2, reconciled onto the stable candidate)
+# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9 + handoff re-execution at the pushed head, §10.10)
 
 Audit scope: `src-tauri/src/**` on the integrated stable candidate — branch
 `integrate/stable-candidate` (PR #85 head `a9c38f02`, which integrates PRs
@@ -33,14 +33,28 @@ critique loop over the final diff, local execution of every test that
 compiles without the Tauri system libraries (158/158 on the reconciled tree,
 log preserved), and executed kill-tests on the new guards (§8).
 
+An INDEPENDENT re-verification round (Agent 6, after the `v1.0.0` tag) then
+re-audited the tagged tree from scratch — fresh toolchain install, fresh test
+execution, executed kill-tests of every executable guard, a live RustSec
+scan, and its own defect hunt. That round is recorded in §10 and found one
+test-quality gap (a byte-identity regression that survived guard removal),
+closed with a new production-path test; no production defect was found.
+A second independent pass (§10.9) re-executed every §10 claim on the PR
+branch head itself — fresh sandbox, all five kill-tests re-run by hand,
+CI evidence re-verified on the exact head — and confirmed the record with
+one reporting correction (a harness-only clippy allowance, disclosed there).
+
 ## 1. Native command inventory
 
-All 11 commands registered in `src-tauri/src/lib.rs`
-(`tauri::generate_handler!`, lib.rs ~:1009), re-verified against the code and
+All 12 commands registered in `src-tauri/src/lib.rs`
+(`tauri::generate_handler!`, lib.rs ~:1140), re-verified against the code and
 the frontend's `invoke(...)` call sites this round (no command unregistered,
 no invoke of an unregistered command; the only extra name seen,
 `open_downloaded_artifact` in `tests/e2e/tauri-bridge.ts:410`, is a test-only
-mock hook):
+mock hook). Count and line reconciled in the §10.10 handoff round: the table
+below predates the Android open-boundary integration (PR #74), which added
+`open_downloaded_file` as the twelfth command — its row is now recorded here
+rather than only in §10.2.
 
 | Command | Frontend call site | Input validation (native) | Authority | Privileged operation | Failure behavior | Tests |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -53,6 +67,7 @@ mock hook):
 | `fetch_text` | `src/lib/officialResolvers.ts:54` | `resolver_manifest()`: HTTPS-only, 21-host allowlist, credentials refused, private literals refused, EVERY hop re-checked; 2 MiB cap, truncate-and-report (`truncated: true`) | Network to allowlisted vendor hosts | None | Named redirect refusals; truncation reported as data | `fetch_text_enforces_https_and_the_host_allowlist_before_any_request` + 52 policy tests |
 | `fetch_self_update_text` | `src/lib/selfUpdate.ts:48` | Narrower: 3 GitHub-owned hosts + repo-path pin at admission (`check_self_update_repo_path`, now a shared fn the tests drive) AND on every redirect hop (new `PathPin`, §3/N-3); 2 MiB cap | Network to `github.com` + 2 asset-CDN hosts | None | same as fetch_text | 5 command-layer admission tests (incl. normalization matrix) + policy tests |
 | `verify_self_update_signature` | `src/features/selfUpdate/updateDelivery.ts:271` | Registry-scoped: staging-name gate → live engine record → canonical stability → open-handle metadata (regular file, committed size) → streamed minisign verdict against the compile-time-embedded key | Filesystem READ of one registered artifact; verify-only | None | Uniform `VERIFICATION_SCOPE_REFUSAL` for every unregistered path (anti-probe) | 12 boundary + 7 fixture + 8 legacy/staging tests (incl. new legacy-algorithm refusals on both verifier paths) |
+| `open_downloaded_file` | `src/lib/artifactOpen.ts` (`openCompletedArtifact` policy binds it as the Android `openPath` dep) | `resolve_completed_artifact` (lib.rs:504): staging-name gates before ANY fs touch, session-scoped registry record for the EXACT path, canonical stability, regular file + committed size; every out-of-scope path gets ONE uniform refusal (anti-probe) | Filesystem open of ONE registered completed artifact | Android: FileProvider `content://` install/open intent through `tauri-plugin-fress-open` (temporary READ grant only; APK → system package installer, everything else → viewer/share fallback); desktop: opener plugin `open_path` of the validated canonical path | Uniform typed `open-artifact/not-registered` for every unregistered path; restored (persisted) rows have no record and fail closed | lib.rs open-boundary matrix over the shared `resolve_completed_artifact` (staging/traversal/replacement/eviction/cross-wiring) + the Android adapter crate's own tests (Agent 7's scope) |
 | `host_arch` | `src/lib/release/hostArch.ts:32` | none | Reads CPU arch (Windows: `GetNativeSystemInfo`) | Fallback to compile-time `ARCH` | Infallible | cfg'd; CI-proven on Windows |
 | `launch_app_image_artifact` | `downloads.tsx:812` | Name gates (`.part`/`.part.meta`/`.sig`/empty/`..`) before ANY fs touch; `symlink_metadata` regular-file; AppImage-only; registry + id (now `u32::try_from`-gated) + canonical + committed-size match; plan-time AND launch-time re-checks (new, §5) | `chmod +x` on THAT validated file only, then argv-only `Command::new(path)` (no shell, no args) | Launches the one AppImage | Typed `open-artifact/<code>` rejections | 22 boundary tests (traversal, staging, symlink, restored rows, cross-wiring, cap eviction, Unicode, non-AppImage, out-of-range id, plan/launch drift) |
 
@@ -377,7 +392,357 @@ claimed as run:
   unit/integration suites and the frontend unit suite (758 passed + 2
   pre-existing offline skips) were re-run locally on the reconciled tree.
 
-## 10. Conclusion
+## 10. Independent re-verification of the tagged stable candidate (Agent 6, post-tag)
+
+A fresh, independent audit round re-verified every conclusion above on the
+ACTUAL tagged tree and searched for additional defects at the filesystem,
+HTTP, download-completion, updater and privileged-IPC boundaries. It did not
+repeat round 2's prose; it re-executed the evidence.
+
+### 10.1 Tested source (exact refs)
+
+| Ref | SHA |
+| --- | --- |
+| `main` | `78d5e8ff8e1bc38ca8789539da005fdea4b15613` |
+| `v1.0.0` (tag) | `78d5e8ff8e1bc38ca8789539da005fdea4b15613` (same commit — the tag is ON main HEAD) |
+| Base for this round's changes | the same `78d5e8ff`, branch `agent6/native-audit-round2` |
+
+Every command and test below ran against that exact SHA. The production
+files audited in full this round (`wc -l`): `http_body.rs` (460 L),
+`network_policy.rs` (928 L) + `network_policy/tests.rs` (1374 L),
+`artifact_open.rs` (780 L), `download_finalize.rs` (5606 L incl. tests),
+`lib.rs` (2037 L incl. tests), `download_integration.rs` (426 L),
+`main.rs` (10 L), plus `plugins/fress-open` (review-only, Agent 7's).
+
+### 10.2 Audit map re-derived (Part A)
+
+Every native entry point that accepts a URL, an id, a path, a caller-supplied
+size, a manifest body or an open/launch request, with its production
+boundary — re-traced caller→callee, not taken from the prior table:
+
+- URLs: `fetch_latest_release` / `fetch_recent_releases` (`api_github`
+  admission → policy client → `read_capped_api_text`), `fetch_text`
+  (`resolver_manifest`), `fetch_self_update_text` (`self_update_feed`
+  admission + `check_self_update_repo_path` production gate at lib.rs:255),
+  `fetch_fdroid_package` (`api_fdroid`), `start_download`
+  (`executable_download` before ANY filesystem side effect).
+- Ids: `cancel_download(id: u32)` (wire type rejects out-of-range before the
+  command body), `launch_app_image_artifact(id: i64)` → `u32::try_from` gate
+  in `plan_open` (artifact_open.rs:238).
+- Paths: `open_downloaded_file` → `resolve_completed_artifact` (lib.rs:504,
+  shared by the signature boundary), `launch_app_image_artifact` →
+  `plan_open` → `launch_app_image`, `verify_self_update_signature` →
+  `resolve_completed_artifact` → `verify_signature_over_open_file`.
+- Caller-supplied sizes: download byte accounting (checked_add on the
+  running counter, on `already_have + range_len`, saturating display total),
+  Content-Range validation (`validate_resume_content_range`), the 64 KiB
+  sidecar bound (`read_part_meta`), asset `size` fields (display only).
+- Manifest bodies: `read_capped_api_text` (10 MiB, refuse) and
+  `read_capped_text` (2 MiB, truncate-and-report) — the ONLY body readers;
+  zero `.text()`/`.bytes()`/`.json()` call sites remain in production code
+  (re-swept this round, including the plugin crate).
+
+### 10.3 Executed checks and results (pinned toolchain, exact SHA)
+
+The sandbox has no WebKit/GTK development libraries (no root), so the full
+Tauri workspace cannot compile locally — the same constraint round 2
+recorded. The three Tauri-free production modules were re-run through the
+unmodified-source harness with LOCK-EXACT dependencies (reqwest 0.12.28
+`rustls-tls+stream+http2`, serde 1.0.229, serde_json 1.0.151, sha2 0.10.9,
+tokio 1.53.1, futures-util 0.3.34) and the repo-pinned toolchain
+(`rust-toolchain.toml` → 1.98.1; installed fresh this round: cargo/rustc
+1.98.1, rustfmt 1.9.0, clippy 0.1.98):
+
+| Check | Result on `78d5e8ff` |
+| --- | --- |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` (pinned 1.98.1) | **PASS**, exit 0 — re-run after this round's test addition |
+| Harness `cargo test` (real `download_finalize.rs` + `network_policy.rs`/`tests.rs` + `http_body.rs`, unmodified) | **162/162 PASS** (round 2 finished at 161; +1 new test this round). Per-module: download_finalize **96**, network_policy **52**, http_body **14** |
+| Harness `cargo clippy --all-targets -- -D warnings` | **PASS**, exit 0, zero findings |
+| CI run **38595199247** on the exact SHA (the run the repo's own CI produced for this commit) | `Rust fmt, clippy, tests (linux)` **success** (fmt + `clippy --all-targets -D warnings` + full `cargo test`), `Rust tests (windows-latest)` **success**, `Rust tests (macos-latest)` **success** — this is the CI-backed proof for the Tauri-coupled files this sandbox cannot compile (`lib.rs`, `artifact_open.rs`, `download_integration.rs`) |
+| CI run **38597496640** (Release, same SHA) | all build/checksum/verify-release jobs **success** (the shipped v1.0.0 artifacts were produced and verified from this tree) |
+| NOT RUN locally | full-workspace clippy/test build (no webkit2gtk-4.1 dev headers, no root) — CI-proven per the row above; all §9 device rows remain NOT RUN |
+
+### 10.4 Executed kill-tests (guard deleted → named test run → guard restored)
+
+This round EXECUTED the kill-test discipline on every guard reachable
+without the Tauri system libraries, rather than asserting it:
+
+| # | Guard killed (file:function) | Kill shape | Named test after the kill | Verdict |
+| --- | --- | --- | --- | --- |
+| KT-1 | `validate_resume_content_range` checked arithmetic (download_finalize.rs:936) | `(end - start).checked_add(1)` → wrapping `end - start + 1` | `a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked` | **FAILS** (u64::MAX range wraps/overflows exactly as the test forbids) — guard verified |
+| KT-2 | `self_update_feed` `path_pin: Some(..)` → `None` (network_policy.rs:471) | pin removed | `the_self_update_path_pin_binds_github_hops_to_the_fress_repo` AND `the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin` | **BOTH FAIL** — guard verified |
+| KT-3 | `read_part_meta` 64 KiB `take()` (download_finalize.rs:742) | unbounded `read_to_string` restored | `an_oversized_part_meta_sidecar_reads_as_no_validators` | **FAILS** (the strengthened valid-JSON 80 KiB fixture parses unbounded and yields validators) — guard verified |
+| KT-4 | A-1 discard in the impossible-range refusal (download_finalize.rs:1750) | `discard_staging(&part)` deleted from the checked_add-overflow branch | `a_hostile_u64_max_content_range_fails_named_without_completing` | **FAILS** on the filesystem-side-effect assertion — guard verified |
+| KT-5 | byte-identity rule (download_finalize.rs, `planned_resume_len > 0 && resume_validator.is_none() && !checksum_will_verify`) | rule disabled (`if false &&`) | `validator_less_staging_is_discarded_on_resume` | **STILL PASSES** — test-quality GAP found by this execution (details in §10.5) |
+
+KT-1–KT-4 confirm the round-2 kill-test claims independently. KT-5 is the
+round's finding: the named regression exercises the 200-answer shape, where
+the truncate path removes the unprovable prefix TOO — so the discard guard
+and the truncate path are indistinguishable to that test and removing the
+guard changes nothing it observes. The DANGEROUS shape (a server answering
+the resume's `Range` with a 206, gluing the unprovable prefix to a hostile
+tail) was unpinned.
+
+### 10.5 Gap closed: the byte-identity rule now has a guard-sensitive pin
+
+New regression (download_finalize.rs tests, production-path e2e):
+`a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail`.
+
+- Scenario: validator-less staging (valid sidecar JSON, no ETag/Last-Modified)
+  + a hostile origin that answers ANY request with `206 bytes 5-14/15` — the
+  glue shape a full-200 server cannot produce.
+- Assertions (side effects, not error strings): the download is refused; the
+  `.part` AND `.part.meta` are gone BEFORE the request (the rule discards
+  pre-request); the ONE request the server received carries NO `Range`
+  header; no destination file exists (the poisoned hybrid was never
+  committed); the completed-artifact registry holds zero records; the
+  session state is `Failed`.
+- Kill-proof EXECUTED this round: with the byte-identity rule disabled, this
+  test **FAILS** (the Range request goes out, the 206 is accepted, the
+  `12345` prefix + hostile tail hybrid is committed and recorded) while the
+  old test keeps passing; with the rule restored it passes. The guard now
+  has a regression that cannot survive its removal.
+- Suite after the addition: 162/162, `cargo fmt --check` clean, harness
+  clippy `-D warnings` clean.
+
+### 10.6 Independent defect hunt — results
+
+A full re-read of all owned files plus a pattern sweep over `src-tauri/**`
+(production, not tests) found NO new production defect:
+
+- Unbounded reads: zero `.text()` / `.bytes()` / `.json()` call sites in
+  production code; the only `read_to_string` is the 64 KiB-bounded sidecar
+  reader (KT-3-verified).
+- `unsafe`: exactly one block (lib.rs `windows_machine_arch`,
+  `GetNativeSystemInfo` — documented, no memory risk surface).
+- Process spawning: exactly one `Command::new` (artifact_open.rs:305, direct
+  argv, stdio nulled, behind the full identity boundary); no shell
+  interpolation anywhere.
+- Arithmetic: every server-reachable sum is `checked_add`/`saturating_add`
+  (running counter, `already_have + range_len`, `remote_len +
+  already_have`; display totals saturate); `end - start + 1` guarded
+  (KT-1).
+- Staging lifecycle: `DiscardAndFail` deletes `.part` + `.part.meta` on
+  416/invalid-range/impossible-range/checksum-mismatch paths; the
+  byte-identity rule discards pre-request (now pinned, §10.5); commit is
+  atomic hard-link (create_new fallback), never clobbering; registry
+  records only after a successful commit with fresh metadata.
+- Identity boundaries: restored rows (negative ids) refused; wide ids
+  refused by `u32::try_from` (CI-proven test); canonical stability +
+  committed size re-checked at plan time AND at launch time; `.sig` /
+  `.part` / `.part.meta` names refused by every boundary; the signature
+  boundary's uniform out-of-scope refusal is unchanged.
+- Redirect/host policy: admission + per-hop rules + public-only resolver
+  re-verified line by line; the trailing-slash prefix `/WasewaseX/Fress/`
+  admits no sibling-prefix string (`/WasewaseX/Fress-evil/` refuses);
+  IDN/homoglyph hosts normalize to punycode and fail the exact host match;
+  IPv4-mapped IPv6, NAT64, 6to4, Teredo, zone-ids all refuse (matrix tests
+  green in the harness run).
+- The `start_download` `directory` residual (round-2 N-4, accepted
+  residual 3) was re-reviewed: the bounded-impact rationale still holds
+  (sanitized single-component names, no-clobber creates only, opener
+  permissions already unscoped). Disposition unchanged; any tightening of
+  picker provenance remains a lib.rs owner decision.
+
+### 10.7 Dependency audit re-run (independent, this round)
+
+| Item | Result |
+| --- | --- |
+| Tool | cargo-audit 0.22.2 (installed fresh from crates.io `--locked`), advisory DB fetched live 2026-10-15: **1329 advisories** |
+| Scope | `src-tauri/Cargo.lock` as committed at `78d5e8ff` (528 crate dependencies) |
+| Vulnerabilities | **0** — exit 0 |
+| Advisory-grade warnings | **7**, all transitive, classified: 6 × unmaintained (`proc-macro-error` RUSTSEC-2024-0370; `unic-char-property` -0081, `unic-char-range` -0075, `unic-common` -0080, `unic-ucd-ident` -0100, `unic-ucd-version` -0098 — via `urlpattern`) + 1 × unsound (`glib` 0.18.5 RUSTSEC-2024-0429, Linux GTK stack). Same set round 2 recorded; none is a vulnerability; all are accepted, documented residuals |
+| Yanked pins | **0** findings in the scan output |
+| Lock delta vs the beta tag `6d338fd` | re-verified byte-level: exactly the three documented changes (`fress` 1.0.12-beta → 1.0.0; `rustls` 0.23.45 → 0.23.46; `yoke-derive` 0.8.3 → 0.8.4) plus the in-repo `tauri-plugin-fress-open` package — zero unexplained drift |
+| Policy note (unchanged) | `.github/workflows/security.yml` runs this scan weekly/advisory-only (`continue-on-error: true`, never on PRs); a zero-vulnerability result is NOT proof of zero dependency risk — the seven warnings above ARE the current accepted risk, and the advisory lag argument in §7 still applies |
+
+### 10.8 Verdict of the re-verification round
+
+**PASS.** Every round-2/round-3 claim this round could execute was
+re-executed and held (fmt, harness tests, clippy, four executable guards,
+dependency scan); the CI record on the exact SHA covers the rest; one
+test-quality gap was found in the byte-identity regression and closed with
+a guard-sensitive production-path test whose kill-proof was executed; no
+new production defect was found; the dependency baseline is unchanged
+(0 vulnerabilities, 7 classified advisory warnings, 0 yanked). The release
+itself was not touched this round: no tag moved, no release metadata
+changed, and the audit delta is the new test plus this report.
+
+### 10.9 Finish-the-PR round: independent re-execution on the branch head (Agent 6)
+
+A second, independent pass (a fresh sandbox: new rustup install, empty
+cargo cache, cargo-audit installed fresh) re-executed the claims of §10.3–§10.7
+against the PR branch head rather than the base, and re-ran every kill-test
+with its own hands. The PR's diff against `78d5e8ff` is exactly two files
+(this report's §10 + the §10.5 regression test in `download_finalize.rs`);
+no production code changed, so the production conclusions of §10.6 carry
+over unchanged to the head.
+
+Tested source:
+
+| Ref | SHA |
+| --- | --- |
+| `main` / `v1.0.0` tag | `78d5e8ff8e1bc38ca8789539da005fdea4b15613` |
+| This PR's head | `cf27c20c0fc4133e9609702756e5228d5343c029` (branch `agent6/native-audit-round2`, base = the SHA above) |
+
+Executed checks (pinned toolchain 1.98.1 — rustc/cargo 1.98.1, rustfmt
+1.9.x, clippy 0.1.98 — installed fresh this round):
+
+| Check | Result on `cf27c20` |
+| --- | --- |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | **PASS**, exit 0 |
+| Tauri-free harness `cargo test` (real `download_finalize.rs` + `network_policy.rs`/`tests.rs` + `http_body.rs` as UNMODIFIED symlinks; direct deps locked-exact: reqwest 0.12.28 rustls-tls+stream+http2, serde 1.0.229, serde_json 1.0.151, sha2 0.10.9, tokio 1.53.1, futures-util 0.3.34) | **162/162 PASS** (per-module re-count: download_finalize **96**, network_policy **52**, http_body **14**) |
+| Harness `cargo clippy --all-targets -- -D warnings` | **PASS** with a disclosed harness-level allowance — see the correction below |
+| Full-crate `cargo check --manifest-path src-tauri/Cargo.toml` | **FAILS in this sandbox** at `gdk-sys` (no `gdk-3.0.pc` / webkit2gtk-4.1 dev headers; no root to install) — the same documented constraint as §10.3; CI-backed proof on the exact head covers the full workspace |
+| `cargo audit --file src-tauri/Cargo.lock` (cargo-audit 0.22.2 fresh from crates.io, live advisory DB) | **exit 0 — 0 vulnerabilities; 7 advisory warnings; 0 yanked**, all classified below |
+| CI run **38648622950** on `cf27c20` (verified via the GitHub API this round) | **all 10 jobs success**, including `Rust fmt, clippy, tests (linux)`, `Rust tests (windows-latest)`, `Rust tests (macos-latest)` — the Tauri-coupled modules (`lib.rs`, `artifact_open.rs` and its 23 boundary tests, `download_integration.rs`) and the new test compile and pass on all three desktop platforms |
+| CI run **38595199247** on `78d5e8ff` + Release run **38597496640** | re-verified success via the API (all jobs; the shipped v1.0.0 artifacts came from this tree) |
+
+Reporting correction (found while re-executing, not a production issue):
+§10.3's "harness clippy … zero findings" was optimistic. The three modules
+contain a `pub(crate)` surface whose PRODUCTION consumer is `lib.rs`
+(`read_capped_api_text`, the wire payload structs, the registry
+constructors); a harness that compiles the subset without `lib.rs` makes
+those items dead code, and `clippy -D warnings` refuses the build until the
+harness crate root carries `#![allow(dead_code)]` (harness-only; the real
+crate's CI clippy runs WITHOUT any allowance and is green on the exact
+head). This round's record states the allowance explicitly instead of
+silencing it silently; with it, the harness clippy result is exit 0.
+
+Executed kill-tests, round-finish edition (each kill applied to the working
+tree, named test run, tree restored to clean — `git status` verified between
+runs; kill shapes named so they are repeatable):
+
+| # | Guard killed (file:line at `cf27c20`) | Kill shape | Named test after the kill | Verdict |
+| --- | --- | --- | --- | --- |
+| KT-1 | `validate_resume_content_range` checked arithmetic (download_finalize.rs:936) | `.checked_add(1)` → `wrapping_sub/wrapping_add` | `a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked` | **FAILS** with `a u64::MAX range must be refused: 0` — the silent wrap-to-0 the guard forbids, observed live |
+| KT-2 | `self_update_feed` PathPin (network_policy.rs:471) | `path_pin: Some(..)` → `None` | `the_self_update_path_pin_binds_github_hops_to_the_fress_repo` AND `the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin` | **BOTH FAIL** (the off-allowlist hop test still passes — the host rule alone, exactly the N-3 gap) |
+| KT-3 | `read_part_meta` 64 KiB `take()` (download_finalize.rs:742) | unbounded `read_to_string` restored (plus the `mut` the non-`take` form needs) | `an_oversized_part_meta_sidecar_reads_as_no_validators` | **FAILS** — the oversized valid-JSON sidecar parses unbounded and yields validators |
+| KT-4 | impossible-range discard (download_finalize.rs:1750) | `discard_staging(&part)` commented out of the `checked_add`-overflow branch | `a_hostile_u64_max_content_range_fails_named_without_completing` | **FAILS on the filesystem-side-effect assertion** (`the poisoned .part must be discarded`) — not on an error string |
+| KT-5 | byte-identity rule (download_finalize.rs:1423) | `if planned_resume_len > 0 && …` → `if false && …` | `a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail` (new) + sibling `validator_less_staging_is_discarded_on_resume` | **NEW TEST FAILS** (the hostile 206 glue is accepted, the hybrid would commit) while **the sibling STILL PASSES** — re-proving this round that the old regression cannot detect the kill and the new one can; guard restored → new test passes |
+
+Dependency audit re-run (this round, live DB): **0 vulnerabilities**, 7
+advisory warnings — 6 × unmaintained (`proc-macro-error`
+RUSTSEC-2024-0370; `unic-char-property` -0081, `unic-char-range` -0075,
+`unic-common` -0080, `unic-ucd-ident` -0100, `unic-ucd-version` -0098, via
+`urlpattern`) + 1 × unsound (`glib` 0.18.5 RUSTSEC-2024-0429, Linux GTK
+stack) — **0 yanked pins**, and NO ignore/suppression config exists in the
+repo, so all seven findings are live reports, not filtered ones. Same set
+§10.7 recorded; none is a vulnerability; the classification and policy
+notes there carry over verbatim.
+
+Defect hunt re-run: the full re-read of all owned production files
+(`http_body.rs` 460 L, `network_policy.rs` 928 L, `artifact_open.rs` 780 L,
+`download_finalize.rs` 5606 L, `download_integration.rs` 426 L,
+`main.rs` 10 L) plus the command wiring in `lib.rs` (2037 L, read-only)
+re-confirmed §10.6 line by line: zero unbounded body readers remain (the
+only `read_to_string` is the KT-3-verified 64 KiB sidecar take), exactly
+one `unsafe` block (`windows_machine_arch`, documented), exactly one
+`Command::new` (direct argv, stdio nulled, behind the full identity
+boundary), every server-reachable sum checked or saturating, staging
+discard paths intact on every refusal branch, registry records only after
+byte-count + canonical + integrity + commit pass, restored rows and
+cross-wired ids refused at both open boundaries. **No new production
+defect; the PR stays narrowly scoped (two files, no production change).**
+
+Verdict of this round: **PASS** — the PR head is ready as the audit record;
+nothing needs to be added to the diff, and no release artifact, tag or
+release metadata was touched.
+
+### 10.10 Handoff round: independent re-execution at the pushed head `202d002` (Agent 6, fresh sandbox, REST-backed CI evidence)
+
+A further independent pass — a different machine, fresh rustup, empty cargo
+cache, cargo-audit installed from crates.io minutes before use — re-executed
+the §10.3–§10.9 claims against the PR's ACTUAL pushed head. Motivation: the
+PR head had moved one commit past the SHA §10.9 tested (`cf27c20` →
+`202d002`), and the standing rule is that verification results are never
+copied forward to a different SHA. The move is docs-only (an empty
+`git diff cf27c20..202d002 -- src-tauri/`), so every code conclusion carries
+over by construction — this round re-proved the load-bearing ones by
+execution anyway.
+
+Tested source:
+
+| Ref | SHA |
+| --- | --- |
+| `main` / `v1.0.0` tag | `78d5e8ff8e1bc38ca8789539da005fdea4b15613` (re-fetched this round; the tag is ON main HEAD) |
+| PR #94 base | `78d5e8ff…` (merge-base of the PR head and main — the claimed base is exact) |
+| PR #94 head | `202d0020a765d518c5e62ff677c57339058205bd` (branch `agent6/native-audit-round2`; code-identical to `cf27c20`) |
+
+Environment: rustup 1.29.1 fresh; toolchain from `rust-toolchain.toml`
+(1.98.1: rustc/cargo 1.98.1, rustfmt 1.9.0, clippy 0.1.98 — component
+versions match §10.3's record exactly). Harness rebuilt from scratch on this
+machine: the three Tauri-free production modules as UNMODIFIED symlinks,
+direct dependencies pinned `=` to the `src-tauri/Cargo.lock` versions
+(reqwest 0.12.28 `rustls-tls+stream+http2` default-features-off, serde
+1.0.229, serde_json 1.0.151, sha2 0.10.9, tokio 1.53.1, futures-util
+0.3.34), `#![allow(dead_code)]` in the harness root only (the §10.9
+disclosure). One harness-only delta from §10.9's harness description, for
+completeness: two engine tests declare `#[tokio::test(flavor =
+"multi_thread")]`, so the harness's tokio features must include
+`rt-multi-thread` (in the real crate the feature arrives transitively
+through the Tauri dependency graph; the harness must name it explicitly).
+No source file was modified to build the harness.
+
+| Check | Result on head `202d002` |
+| --- | --- |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | **PASS**, exit 0 |
+| Harness `cargo test` (unmodified sources) | **162/162 PASS** (per-module re-count: download_finalize **96**, network_policy **52**, http_body **14** — matches §10.9) |
+| Harness `cargo clippy --all-targets -- -D warnings` | **PASS**, exit 0 (with the harness-root dead_code allowance) |
+| `cargo audit --file src-tauri/Cargo.lock` (cargo-audit 0.22.2, live advisory DB fetched this round) | **exit 0 — 0 vulnerabilities, 7 advisory warnings, 0 yanked findings**: 6 × unmaintained (`proc-macro-error` RUSTSEC-2024-0370; `unic-char-property` -0081, `unic-char-range` -0075, `unic-common` -0080, `unic-ucd-ident` -0100, `unic-ucd-version` -0098, via `urlpattern`) + 1 × unsound (`glib` 0.18.5 RUSTSEC-2024-0429). Same classification as §10.7/§10.9, independently reproduced |
+| Production-read sweeps (re-run, not copied): `.text()`/`.bytes()`/`.json()`/`read_to_string`, `unsafe`, `Command::new`, unchecked `+=` | same as §10.6 — the only `read_to_string` is the 64 KiB-bounded sidecar take (download_finalize.rs:742); the only `unsafe` is `windows_machine_arch` (lib.rs:912-915); the only `Command::new` is the AppImage launcher (artifact_open.rs:305, argv-only, stdio nulled); every server-reachable sum checked/saturating (:937, :1584, :1658, :1734, :1785) — the two plain-`+=` hits in the sweep are both inside `mod tests` |
+| Key guard sites re-read at their claimed lines | byte-identity rule (download_finalize.rs:1423, discards pre-request), `checked_add(1)` in `validate_resume_content_range` (:936-941), impossible-range `discard_staging` (:1750), `u32::try_from` id gate (artifact_open.rs:238), launch-time re-check (artifact_open.rs:289-295), `PathPin` (network_policy.rs:471) + hop ordering (pin evaluated LAST, after host rule) + `is_publicly_routable` v4/v6 tables + the admission-side repo pin (`check_self_update_repo_path`, lib.rs:255) — all present exactly as documented |
+| Deeper reads this round (health pass) | `download_integration.rs` (426 L, test-only — all assertions sound), the lib.rs command surface (all 12 registrations traced, §1 below), `capabilities/default.json` (matches the documented permission set exactly), `main.rs` (10 L, trivial), and a review-only read of Agent 7's `plugins/fress-open` Kotlin adapter (READ-only URI grants on every intent, no exec/delete/write-grant surface, correct layering behind the Rust boundary) |
+
+Kill-tests EXECUTED by hand this round (edit → named test → observe →
+`git checkout` restore → clean-tree re-run; `git status` verified between
+runs):
+
+| # | Guard killed | Named test after the kill | Observed verdict |
+| --- | --- | --- | --- |
+| KT-1 | `(end - start).checked_add(1)` → `wrapping_sub/wrapping_add` (download_finalize.rs:936) | `a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked` | **FAILS** — guard verified |
+| KT-2 | `self_update_feed` `path_pin: Some(..)` → `None` (network_policy.rs:471) | `the_self_update_path_pin_binds_github_hops_to_the_fress_repo` AND `the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin` | **BOTH FAIL** (the sibling off-allowlist-hop test keeps passing — the host rule alone, exactly the N-3 gap) — guard verified |
+| KT-3 | `read_part_meta` `take(64 KiB)` → unbounded `read_to_string` (download_finalize.rs:740-742) | `an_oversized_part_meta_sidecar_reads_as_no_validators` | **FAILS** — the oversized sidecar parses unbounded and yields validators — guard verified |
+| KT-4 | `discard_staging(&part)` removed from the impossible-range branch (download_finalize.rs:1750) | `a_hostile_u64_max_content_range_fails_named_without_completing` | **FAILS on the filesystem assertion** — "the poisoned .part must be discarded" — not on an error string — guard verified |
+| KT-5 | byte-identity rule disabled (`if false && …`, download_finalize.rs:1423) | `a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail` + sibling `validator_less_staging_is_discarded_on_resume` | **NEW TEST FAILS while the SIBLING STILL PASSES** — re-proving the §10.5 discriminator claim by execution; guard restored → both pass |
+
+After all kills were restored: full harness re-run **162/162 PASS**, working
+tree clean against the head.
+
+CI evidence, re-verified this round through the REST API with a live
+maintainer token (the token available to the previous handoff attempt had
+been revoked — `401 Bad credentials` — forcing HTML-page evidence there;
+this round's checks below are API responses, not page scrapes):
+
+| Commit | Check runs | Result |
+| --- | --- | --- |
+| `202d002` (PR #94 head) | 12 of 12 | **success** — including `Rust fmt, clippy, tests (linux)`, `Rust tests (windows-latest)`, `Rust tests (macos-latest)`, version consistency, No-Chinese zero-hit scan, typecheck/build, E2E + visual, perf invariants, release-artifact verifier, Ubuntu 26 canary, both author guards |
+| `cf27c20` (§10.9's tested head) | 12 of 12 | **success** — same shape; the earlier round's claim re-verified via API |
+| `78d5e8ff` (main = v1.0.0) | 26 of 26 | **success** — the CI-backed proof for the Tauri-coupled files at the exact base |
+| PR #94 mergeability | `mergeable: true`, `mergeable_state: clean` | the branch merges into main without conflict |
+
+One record-accuracy finding (doc-only, fixed in this commit): §1's command
+inventory still said "All 11 commands" with a `lib.rs ~:1009` registration
+line — both stale since the Android open-boundary integration added
+`open_downloaded_file` as the twelfth registered command (registration now
+at ~:1140). §10.2 already covered the command's boundary; the missing §1
+table row has been added, and the count/line reconciled. No production
+change; no code finding was involved.
+
+Defect hunt: the pattern sweeps, the deeper reads above, and the full re-read
+of the owned production files found **no new production defect**; nothing in
+this round required a code change, and the PR's diff remains exactly the two
+files (the §10.5 regression test + this report). Per §10.9's correction, the
+statement of scope stands: the Tauri-free harness proves the
+engine/policy/body modules; `lib.rs`, `artifact_open.rs` and
+`download_integration.rs` remain CI-proven, and §9's hardware rows remain
+NOT RUN.
+
+Verdict of this round: **PASS** — every executable claim of §10.3–§10.9 was
+re-executed on the pushed head `202d002` and held; the audit record is
+accurate as it stands, now with the §1 inventory reconciled.
+
+## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified
 real; PR #84's round-2 fixes verified real and retained; 2 release-adjacent
@@ -432,3 +797,11 @@ this report relies on those unrun checks; scope statements are per-file and
 per-test, and this report does not claim the absence of unknown bugs — only
 that no known release blocker remains and every stated property is code- or
 test-cited.
+
+The independent post-tag re-verification (§10) re-executed every executable
+claim of this conclusion on the tagged tree (`78d5e8ff` = `v1.0.0`), found
+the conclusion's evidence intact, and closed the one test-quality gap its
+executed kill-tests uncovered. The acceptance disposition above is
+therefore re-confirmed at the tagged SHA: still PASS, still zero known
+native integrity defects, with the byte-identity rule now pinned by a test
+that fails when the guard is removed.

@@ -50,7 +50,6 @@ function toReleaseInfo(r: RawRel) {
 }
 
 const ARCHES: Array<string | undefined> = [undefined, 'x86_64', 'aarch64'];
-const DESKTOP: Platform[] = ['windows', 'mac', 'linux'];
 
 describe.skipIf(!PROBE)('LIVE catalog download probe', () => {
   it('resolves every catalog app against the real APIs', { timeout: 900_000 }, async () => {
@@ -161,6 +160,3 @@ describe.skipIf(!PROBE)('LIVE catalog download probe', () => {
   });
 });
 
-function platform0(app: { platforms: Platform[] }): Platform {
-  return app.platforms[0] || 'windows';
-}

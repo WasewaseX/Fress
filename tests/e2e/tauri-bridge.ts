@@ -113,6 +113,13 @@ export interface FressTestBridge {
   setFailStart(msg: string | null): void;
   failCancel: string | null;
   setFailCancel(msg: string | null): void;
+  /** When true, `fetch_self_update_text` answers the NATIVE truncation
+   * shape: { status: 200, body: '', truncated: true } - the exact contract
+   * the Rust reader produces when the advertised body exceeds the 2 MiB
+   * cap (Workflow J: a truncated checksum manifest must fail closed, never
+   * parse as a complete one). */
+  truncatedText: boolean;
+  setTruncatedText(value: boolean): void;
   /** When set, `verify_self_update_signature` rejects with this error
    * (Workflow I: a tampered/foreign-key artifact must never verify). */
   failVerify: string | null;
@@ -190,6 +197,8 @@ const BRIDGE_BODY = String.raw`
     setFailDialog: function (msg) { this.failDialog = msg; },
     failStart: null,
     setFailStart: function (msg) { this.failStart = msg; },
+    truncatedText: false,
+    setTruncatedText: function (value) { this.truncatedText = value; },
     failCancel: null,
     setFailCancel: function (msg) { this.failCancel = msg; },
     failVerify: null,
@@ -368,6 +377,12 @@ const BRIDGE_BODY = String.raw`
         var su = String((args && args.url) || '');
         var suResp = await fetch(su);
         var suBody = await suResp.text();
+        if (bridge.truncatedText) {
+          // The native reader's truncation contract: empty body, the flag
+          // set. The TypeScript side must treat this exactly like a failed
+          // fetch (fail closed), never parse '' as a complete manifest.
+          return { status: suResp.status, body: '', truncated: true };
+        }
         return {
           status: suResp.status,
           body: suBody,
@@ -428,17 +443,44 @@ const BRIDGE_BODY = String.raw`
         return null;
       }
       case 'open_downloaded_file': {
-        // The Android adapter of the same boundary (the registry-validated
-        // command the provider's openPath dep binds to on Android webviews):
-        // recorded into the SAME openedPaths array so D2's Android journey
-        // asserts one uniform open stream. The native half behind this
-        // command (FileProvider handoff, system installer) is the real
-        // binary's business and is deliberately NOT mocked here.
+        // The open boundary's native dispatch (the registry-validated
+        // command the provider's openPath dep binds to on EVERY platform:
+        // desktop and Android alike). Recorded into the SAME openedPaths
+        // array so desktop and Android journeys assert one uniform open
+        // stream. The native half behind this command (registry admission,
+        // FileProvider handoff, system installer, OS-default open) is the
+        // real binary's business and is deliberately NOT mocked here.
         var od = args || {};
         bridge.recordOpen('open_downloaded_file', Number(od.id) || 0, String(od.path || ''), null);
         if (bridge.failOpenPath) throw bridge.failOpenPath;
+        if (bridge.holdOpenPath) {
+          return new Promise(function (resolve) { bridge.openWaiters.push(resolve); });
+        }
         return null;
       }
+      case 'reveal_download_file': {
+        // The boundary's registry-validated reveal dispatch (Show in
+        // folder). Recorded in the SAME shape the opener-level reveal used
+        // so existing reveal assertions read one stream.
+        var rd = args || {};
+        bridge.revealedPaths.push({ paths: [String(rd.path || '')] });
+        if (bridge.failReveal) throw bridge.failReveal;
+        return null;
+      }
+      case 'open_download_dir': {
+        // The boundary's folder admission (containing-folder fallback and
+        // the configured-directory open). Same open stream, id 0.
+        var oaDir = args || {};
+        bridge.recordOpen('open_download_dir', 0, String(oaDir.dir || ''), null);
+        if (bridge.failOpenPath) throw bridge.failOpenPath;
+        return null;
+      }
+      case 'record_download_directory':
+        // Session admission after a successful folder pick (the picker is
+        // the only way a folder enters the admission set before its first
+        // download lands). The real binary canonicalizes and LRU-caps; the
+        // mock just records so specs can assert the pick was reported.
+        return null;
       case 'plugin:dialog|open': {
         if (bridge.failDialog) throw bridge.failDialog;
         return bridge.dialogDir;
@@ -457,28 +499,21 @@ const BRIDGE_BODY = String.raw`
       case 'plugin:opener|open_url':
         if (args && typeof args.url === 'string') bridge.openedUrls.push(args.url);
         return null;
-      case 'plugin:opener|open_path': {
-        // Record FIRST (the frontend's request is the contract), then honor
-        // the fault/hold gates the test set. The record carries the opener
-        // identity (cmd, id 0 - the opener API has no download id) so
-        // command-level and opener-level assertions read one array.
+      case 'plugin:opener|open_path':
+      case 'plugin:opener|reveal_item_in_dir':
+        // The capability grants for these were removed on purpose: the
+        // real binary refuses them at the ACL layer. If a future change
+        // reintroduces a plugin path call in src/, this bridge reproduces
+        // that refusal (after recording the attempt) so the E2E suite
+        // fails loudly instead of silently passing against a grant the
+        // capability file does not carry.
         bridge.recordOpen(
-          'plugin:opener|open_path',
+          cmd,
           0,
-          args && typeof args.path === 'string' ? args.path : '',
-          args && args.with !== undefined && args.with !== null ? String(args.with) : null
+          args && typeof args.path === 'string' ? args.path : 'UNSCOPED',
+          null
         );
-        if (bridge.failOpenPath) throw bridge.failOpenPath;
-        if (bridge.holdOpenPath) {
-          return new Promise(function (resolve) { bridge.openWaiters.push(resolve); });
-        }
-        return null;
-      }
-      case 'plugin:opener|reveal_item_in_dir': {
-        bridge.revealedPaths.push({ paths: (args && args.paths) || [] });
-        if (bridge.failReveal) throw bridge.failReveal;
-        return null;
-      }
+        throw 'tauri: opener path capability not configured (opener:allow-open-path / opener:allow-reveal-item-in-dir are intentionally absent)';
       default:
         // Unknown command: resolve null (plugins in this app tolerate it).
         return null;

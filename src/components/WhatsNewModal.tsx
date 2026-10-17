@@ -4,11 +4,11 @@
 //
 import React, { useEffect, useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 import { X, Check, Sparkles, ExternalLink, Wrench, RefreshCw, Minus, ChevronDown } from 'lucide-react';
 import { BrandMark } from './Header';
 import { notesForVersion } from '../lib/releaseNotes';
-import { CHANGELOG_ENTRIES, changelogForVersion, earlierChangelog, ChangelogSection } from '../lib/changelog';
+import { changelogForVersion, earlierChangelog, ChangelogSection } from '../lib/changelog';
 import { openExternal } from '../lib/external';
 import pkg from '../../package.json';
 
@@ -131,7 +131,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
             </>
           ) : (
             <p className="text-[13px] text-slate-300 leading-relaxed">
-              {t('wn.fallbackBody').replace('{v}', pkg.version)}
+              {formatMessage(t('wn.fallbackBody'), { v: pkg.version })}
             </p>
           )}
 
@@ -188,7 +188,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({ isOpen, onClose })
                 aria-controls="whats-new-earlier"
                 className="w-full flex items-center justify-between gap-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors py-1.5"
               >
-                <span>{t('wn.earlier').replace('{n}', String(earlier.length))}</span>
+                <span>{formatMessage(t('wn.earlier'), { n: earlier.length })}</span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showEarlier ? 'rotate-180' : ''}`} aria-hidden="true" />
               </button>
 

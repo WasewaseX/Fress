@@ -320,7 +320,7 @@ export const DownloadManager: React.FC<{ isOpen: boolean; onClose: () => void }>
                         <PanelButton
                           onClick={() => {
                             if (revealBusy.has(item.id)) return;
-                            void openFolder({ id: item.id, path: item.path, name: item.name, url: item.url });
+                            void openFolder({ id: item.id, path: item.path ?? '', name: item.name, url: item.url });
                           }}
                           icon={<FolderOpen className="w-3 h-3" />}
                           label={t('downloads.showFolder')}

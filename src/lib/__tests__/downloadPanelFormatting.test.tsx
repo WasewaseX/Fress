@@ -31,7 +31,6 @@
 // an id, native events land through the mocked listen bridge) - the same
 // harness discipline as artifactOpen.test.tsx.
 
-import React from 'react';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -95,13 +94,23 @@ function emit(name: string, payload: unknown): void {
   });
 }
 
-/** Literal token interpolation for EXPECTATIONS only: same semantics the
- * production formatMessage must deliver, spelled without String.replace so
- * `$`-patterns inside values can never sneak into the expected value. */
+/** Literal token interpolation for EXPECTATIONS only: the exact semantics
+ * the production formatMessage must deliver - every value inserted
+ * LITERALLY, every occurrence replaced, and NO pass ever re-scans text
+ * inserted for another token (the reconnecting-toast case below pins that:
+ * a file named "x{attempt}y$&.exe" must keep its literal "{attempt}").
+ * The sentinel two-phase shape keeps the oracle independent of the
+ * implementation while forbidding the sequential re-scan. */
 function literal(template: string, values: Record<string, string | number>): string {
   let out = template;
+  const stashed: Array<[string, string]> = [];
   for (const [token, value] of Object.entries(values)) {
-    out = out.split(`{${token}}`).join(String(value));
+    const sentinel = `\u0000${token}\u0000`;
+    out = out.split(`{${token}}`).join(sentinel);
+    stashed.push([sentinel, String(value)]);
+  }
+  for (const [sentinel, value] of stashed) {
+    out = out.split(sentinel).join(value);
   }
   return out;
 }
@@ -197,6 +206,10 @@ describe('completion/reconnect toast interpolation', () => {
 
     expect(h.toastInfo).toHaveBeenCalledTimes(1);
     const [title] = h.toastInfo.mock.calls[0];
+    // The name survives VERBATIM - its own "{attempt}" text is user data,
+    // not a token of this call (the old sequential oracle asserted the
+    // corrupted "x3y$&.exe", contradicting this test's stated intent).
+    expect(String(title)).toContain('x{attempt}y$&.exe');
     expect(title).toBe(
       literal(DICTS.en['downloads.toast.reconnectingTitle'], { name: HOSTILE_NAME, attempt: 3 })
     );

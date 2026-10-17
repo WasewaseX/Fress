@@ -56,7 +56,6 @@ test('detail modal settles on a real resolver answer', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => (document.getElementById('apps-catalog-grid')?.querySelectorAll('article').length ?? 0) > 0, undefined, { timeout: 60_000 });
   await page.locator('#app-title-localsend').click();
-  const box = page.locator('#detail-download-box');
   // LocalSend ships real Windows installers on GitHub Releases; the resolver
   // should surface a confident pick (or the honest none/rate-limit state).
   await expect

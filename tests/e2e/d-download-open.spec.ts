@@ -19,9 +19,10 @@
  *     rendered ONLY for completed items carrying a path; never disabled
  *   - Show in folder: i18n 'downloads.showFolder' ("Show in folder"),
  *     rendered on completed rows except under isAndroidWebview()
- *   - native boundary: plugin:opener|open_path {path} for Open;
- *     plugin:opener|reveal_item_in_dir {paths:[path]} for Show in folder,
- *     falling back to openPath(plugin:path|dirname) when the reveal rejects
+ *   - native boundary: open_downloaded_file {path} for Open;
+ *     reveal_download_file {path} for Show in folder, falling back to
+ *     open_download_dir {dir} (the file's CONTAINING folder) when the
+ *     reveal rejects; the opener plugin's path APIs are never called
  *   - feedback: failure toasts 'Could not open the file' / 'Could not open
  *     the folder'; a SUCCESSFUL open is silent by design (the OS taking
  *     over is not something the webview can truthfully confirm)
@@ -185,7 +186,8 @@ async function settle(page: Page): Promise<void> {
   );
 }
 
-/** Paths handed to plugin:opener|open_path, in call order. The shared
+/** Paths handed to the native open boundary (open_downloaded_file /
+ * open_download_dir), in call order. The shared
  * bridge records the unified { cmd, id, path, with } tuple (one array for
  * the opener boundary AND the validated AppImage launcher); D2's
  * assertions read the flat path values, so project them here. */
@@ -194,8 +196,9 @@ async function openCalls(page: Page): Promise<string[]> {
   return b.openedPaths.map((r) => r.path);
 }
 
-/** Paths handed to plugin:opener|reveal_item_in_dir, in call order
- * (each reveal record carries the paths array it was invoked with). */
+/** Paths handed to the native reveal boundary (reveal_download_file), in
+ * call order (each reveal record carries the paths array it was invoked
+ * with). */
 async function revealCalls(page: Page): Promise<string[]> {
   const b = (await bridge(page))!;
   return b.revealedPaths.map((r) => r.paths).flat();
@@ -524,14 +527,14 @@ test.describe('Workflow D2: download-to-open', () => {
     // fallback open; no other opener traffic exists.
     const b = (await bridge(page))!;
     const seq = b.calls
-      .filter((c) => c.cmd === 'plugin:opener|reveal_item_in_dir' || c.cmd === 'plugin:opener|open_path')
+      .filter((c) => c.cmd === 'reveal_download_file' || c.cmd === 'open_download_dir')
       .map((c) => c.cmd);
     expect(seq).toEqual([
-      'plugin:opener|reveal_item_in_dir',
-      'plugin:opener|reveal_item_in_dir',
-      'plugin:opener|open_path',
-      'plugin:opener|reveal_item_in_dir',
-      'plugin:opener|open_path',
+      'reveal_download_file',
+      'reveal_download_file',
+      'open_download_dir',
+      'reveal_download_file',
+      'open_download_dir',
     ]);
     expect(pageErrors).toEqual([]);
   });
@@ -619,10 +622,10 @@ test.describe('Workflow D2: download-to-open', () => {
     await openBtnOf(unverifiedRow).click();
     expect(await openCalls(page)).toEqual([PATH]);
 
-    // Exactly one opener attempt in this whole scenario: the unverified
+    // Exactly one boundary attempt in this whole scenario: the unverified
     // open. The two invalid payloads produced none.
     const b = (await bridge(page))!;
-    expect(b.calls.filter((c) => c.cmd === 'plugin:opener|open_path')).toHaveLength(1);
+    expect(b.calls.filter((c) => c.cmd === 'open_downloaded_file')).toHaveLength(1);
   });
 
   // -------------------------------------------------------------------------
@@ -987,7 +990,7 @@ test.describe('Workflow D2: download-to-open', () => {
 
     // Exactly one attempt per stage - no retry loop behind the refusal.
     const b = (await bridge(page))!;
-    expect(b.calls.filter((c) => c.cmd === 'plugin:opener|open_path')).toHaveLength(1);
+    expect(b.calls.filter((c) => c.cmd === 'open_downloaded_file')).toHaveLength(1);
     expect(b.calls.filter((c) => c.cmd === 'launch_app_image_artifact')).toHaveLength(1);
     expect(await toastLog(page)).toEqual([expect.stringContaining(OPEN_CROSSWIRED_DESC)]);
 

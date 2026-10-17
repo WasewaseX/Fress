@@ -35,7 +35,7 @@ import { APP_DESCRIPTIONS } from '../src/data/appDescriptions';
 import { APP_ICONS } from '../src/data/appIcons';
 import { sanitizeInstallCommand, PkgManager } from '../src/lib/installCommands';
 import { compileSafePattern } from '../src/lib/patternSafety';
-import type { AppItem, Category, Platform } from '../src/types';
+import type { Category, Platform } from '../src/types';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');

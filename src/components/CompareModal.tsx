@@ -4,21 +4,10 @@
 //
 import React, { useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n, CATEGORY_I18N_KEYS, RATING_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
+import { formatMessage, useI18n, CATEGORY_I18N_KEYS, RATING_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
-import {
-  Columns,
-  X,
-  Check,
-  Minus,
-  ExternalLink,
-  Star,
-  ShieldCheck,
-  HardDrive,
-  Cpu,
-  Terminal
-} from 'lucide-react';
+import { Columns, X, Check, Minus, ExternalLink, Star } from 'lucide-react';
 
 interface CompareModalProps {
   isOpen: boolean;
@@ -114,7 +103,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                     onClick={() => onAddAppToCompare(app.id)}
                     className="text-xs px-2.5 py-1 rounded bg-slate-950/[0.05] dark:bg-white/[0.05] hover:bg-slate-950/[0.08] dark:hover:bg-white/[0.1] text-sky-300 border border-slate-950/10 dark:border-white/[0.08]"
                   >
-                    {t('cmp.addApp').replace('{name}', app.name)}
+                    {formatMessage(t('cmp.addApp'), { name: app.name })}
                   </button>
                 ))}
               </div>
@@ -287,7 +276,11 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   <div className="font-semibold text-slate-400">{t('cmp.rowCurve')}</div>
                   {appsToCompare.map((app) => (
                     <div key={app.id} className="px-3 text-slate-300">
-                      {t(RATING_I18N_KEYS[app.beginnerRating] ?? app.beginnerRating)}
+                      {/* Unrated apps render blank, exactly as before strict
+                          typing; the optional field just gets a real guard. */}
+                      {app.beginnerRating
+                        ? t(RATING_I18N_KEYS[app.beginnerRating] ?? app.beginnerRating)
+                        : ''}
                     </div>
                   ))}
                 </div>
@@ -317,7 +310,7 @@ export const CompareModal: React.FC<CompareModalProps> = ({
             labelled select exceed the 320px panel in de/fr. */}
         <div className="px-5 py-3 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="text-xs text-slate-400">
-            {(appsToCompare.length === 1 ? t('cmp.comparingOne') : t('cmp.comparingMany')).replace('{n}', String(appsToCompare.length))}
+            {formatMessage(appsToCompare.length === 1 ? t('cmp.comparingOne') : t('cmp.comparingMany'), { n: appsToCompare.length })}
           </div>
           {appsToCompare.length < 4 && (
             <div className="flex items-center gap-2">

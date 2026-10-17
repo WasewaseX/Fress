@@ -6,7 +6,7 @@ import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { AppItem } from '../types';
 import { sanitizeInstallCommand, PkgManager } from '../lib/installCommands';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 import { 
   Terminal, 
   Copy, 
@@ -15,9 +15,6 @@ import {
   X, 
   ShieldCheck,
   AlertTriangle,
-  Laptop,
-  Apple,
-  Cpu
 } from 'lucide-react';
 
 interface BatchInstallModalProps {
@@ -107,7 +104,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
 
     const skipNote =
       skippedCount > 0
-        ? `${t('bs.scriptSkipLine').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}\n\n`
+        ? `${formatMessage(t('bs.scriptSkipLine'), { s: skippedCount, m: selectedApps.length, mgr: tabLabel })}\n\n`
         : '';
 
     if (scriptType === 'winget-ps') {
@@ -347,7 +344,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
         <div
           className="px-5 py-2.5 bg-slate-900 border-b border-slate-950/10 dark:border-white/[0.04] flex items-center gap-1.5 overflow-x-auto text-xs"
           tabIndex={0}
-          aria-label={t('bs.selected').replace('{n}', String(selectedApps.length))}
+          aria-label={formatMessage(t('bs.selected'), { n: selectedApps.length })}
         >
           <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider me-1 shrink-0">
             {t('bs.selected')} ({selectedApps.length}):
@@ -403,7 +400,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   <span>
-                    {t('bs.skipNote').replace('{s}', String(skippedCount)).replace('{m}', String(selectedApps.length)).replace('{mgr}', tabLabel)}
+                    {formatMessage(t('bs.skipNote'), { s: skippedCount, m: selectedApps.length, mgr: tabLabel })}
                   </span>
                 </div>
                 {/* Per-item visibility: the count alone never said WHICH

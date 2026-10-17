@@ -186,18 +186,6 @@ async function idleWait(page: Page): Promise<void> {
   }));
 }
 
-async function openCatalog(page: Page): Promise<void> {
-  await page.context().addInitScript(storageSeeds, { appVersion: APP_VERSION, starSeed: buildStarSeed() });
-  await page.context().addInitScript({ content: PERF_INSTRUMENTATION_SOURCE });
-  await page.context().addInitScript({ content: bridgeSource({
-    hostArch: 'x86_64',
-    defaultDir: '/home/test/Downloads',
-    releases: { 'localsend/localsend': RELEASES_LOCALSEND },
-  }) });
-  await installNetworkPolicy(page);
-  await page.goto(BASE_URL);
-}
-
 // ------------------------------------------------------------ measurement
 
 async function main(): Promise<void> {

@@ -47,11 +47,6 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@tauri-apps/api/path', () => ({ dirname: vi.fn(async (p: string) => p) }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
-vi.mock('@tauri-apps/plugin-opener', () => ({
-  openPath: vi.fn(async () => undefined),
-  revealItemInDir: vi.fn(async () => undefined),
-}));
-
 const toastMock = vi.hoisted(() => ({
   success: vi.fn(),
   info: vi.fn(),

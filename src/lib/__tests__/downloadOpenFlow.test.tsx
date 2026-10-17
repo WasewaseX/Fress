@@ -14,8 +14,8 @@
 //      openPath dep to the registry-validated native adapter command
 //      (`open_downloaded_file`) - the exact completed path crosses as ONE
 //      value and the opener plugin is never touched.
-//   2. On desktop the same policy keeps the opener plugin (no Android
-//      command traffic - the platforms never cross).
+//   2. On desktop the SAME command runs (the webview holds no opener
+//      path capability at all); only the native dispatch differs.
 //   3. The adapter's typed `open-artifact/<code>` refusals classify through
 //      the SAME taxonomy the desktop boundary uses, and the toast stays the
 //      generic title with the localized reason.
@@ -24,7 +24,6 @@
 //      keep the affordance - the adapter refuses them honestly with
 //      `not-registered`.
 
-import React from 'react';
 import { act } from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
@@ -65,9 +64,16 @@ const h = vi.hoisted(() => {
   const listeners = new Map<string, Array<(e: { payload: unknown }) => void>>();
   return {
     listeners,
-    openPath: vi.fn(async () => undefined),
-    revealItemInDir: vi.fn(async () => undefined),
-    invoke: vi.fn(async (..._: unknown[]) => null as unknown),
+    openPath: vi.fn(async (_path?: string): Promise<void> => undefined),
+    revealItemInDir: vi.fn(async (_path?: string): Promise<void> => undefined),
+    invoke: vi.fn(async (cmd?: unknown, args?: unknown) => {
+      const c = typeof cmd === 'string' ? cmd : '';
+      const a = (args ?? {}) as Record<string, unknown>;
+      if (c === 'open_downloaded_file') return h.openPath(String(a.path ?? ''));
+      if (c === 'reveal_download_file') return h.revealItemInDir(String(a.path ?? ''));
+      if (c === 'open_download_dir') return h.openPath(String(a.dir ?? ''));
+      return null as unknown;
+    }),
     toastError: vi.fn(),
     toastSuccess: vi.fn(),
     toastInfo: vi.fn(),
@@ -90,11 +96,6 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@tauri-apps/api/path', () => ({ dirname: vi.fn(async (p: string) => p + '/..') }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
-
-vi.mock('@tauri-apps/plugin-opener', () => ({
-  openPath: h.openPath,
-  revealItemInDir: h.revealItemInDir,
-}));
 
 vi.mock('sonner', () => ({
   toast: {
@@ -125,13 +126,18 @@ afterEach(() => {
   h.listeners.clear();
   vi.unstubAllGlobals();
   vi.resetAllMocks();
-  h.invoke.mockImplementation(async (cmd?: string) =>
-    cmd === 'default_download_dir'
+  h.invoke.mockImplementation(async (cmd?: unknown, args?: unknown) => {
+    const c = typeof cmd === 'string' ? cmd : '';
+    const a = (args ?? {}) as Record<string, unknown>;
+    if (c === 'open_downloaded_file') return h.openPath(String(a.path ?? ''));
+    if (c === 'reveal_download_file') return h.revealItemInDir(String(a.path ?? ''));
+    if (c === 'open_download_dir') return h.openPath(String(a.dir ?? ''));
+    return c === 'default_download_dir'
       ? (DOWNLOADS_DIR as unknown)
-      : cmd === 'start_download'
+      : c === 'start_download'
         ? (7 as unknown)
-        : (null as unknown)
-  );
+        : (null as unknown);
+  });
   h.openPath.mockImplementation(async () => undefined);
   setTauriMode(false);
 });
@@ -176,17 +182,20 @@ describe('the Android adapter binding', () => {
     const [cmd, args] = adapterCalls()[0];
     expect(cmd).toBe('open_downloaded_file');
     expect(args).toEqual({ path: APK.path });
-    // The opener plugin is never touched on Android.
-    expect(h.openPath).not.toHaveBeenCalled();
+    // The opener plugin's open_path is never part of the stream: the only
+    // open identity the webview can produce is the validated command.
+    expect(adapterCalls().every(([c]) => c === 'open_downloaded_file')).toBe(true);
   });
 
-  it('keeps the opener plugin on desktop: no Android adapter traffic', async () => {
+  it('routes desktop opens through the SAME registry-validated command', async () => {
     stubUserAgent(DESKTOP_UA);
     const actions = await mountActions();
     const outcome = await actions.openFile(APK);
     expect(outcome).toMatchObject({ ok: true });
     expect(h.openPath).toHaveBeenCalledWith(APK.path);
-    expect(adapterCalls()).toHaveLength(0);
+    // One uniform command stream on every platform; the webview holds no
+    // opener path capability, so the platform dispatch is native-side.
+    expect(h.invoke).toHaveBeenCalledWith('open_downloaded_file', { path: APK.path });
   });
 
   it('classifies adapter refusals through the shared typed taxonomy', async () => {
@@ -194,7 +203,7 @@ describe('the Android adapter binding', () => {
     const actions = await mountActions();
     // The Rust adapter's uniform refusal for every out-of-registry path.
     h.invoke.mockImplementationOnce(
-      async (cmd?: string) =>
+      async (cmd?: unknown) =>
         cmd === 'open_downloaded_file'
           ? await Promise.reject('open-artifact/not-registered')
           : (null as unknown)

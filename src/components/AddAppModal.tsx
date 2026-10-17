@@ -4,7 +4,7 @@
 //
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
+import { formatMessage, useI18n, CATEGORY_I18N_KEYS } from '../lib/i18n';
 import { AppItem, Category, Platform } from '../types';
 import { X, Plus, AlertCircle, RefreshCw, Check } from 'lucide-react';
 import { fetchLiveStarCount } from '../lib/starFetch';
@@ -185,7 +185,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
 
       const res = await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}`);
       if (!res.ok) {
-        throw new Error(t('add.githubApiStatus').replace('{status}', String(res.status)));
+        throw new Error(formatMessage(t('add.githubApiStatus'), { status: res.status }));
       }
 
       const data = await res.json();
@@ -206,7 +206,7 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
         setTags(data.topics.slice(0, 5).join(', '));
       }
 
-      setInspectSuccessMsg(t('add.inspectSuccess').replace('{name}', data.name || cleanRepo));
+      setInspectSuccessMsg(formatMessage(t('add.inspectSuccess'), { name: data.name || cleanRepo }));
     } catch (err: any) {
       // Only our own validation throws carry translated messages; a raw
       // network failure (TypeError) leaked browser-locale English like
@@ -260,7 +260,6 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       const nameKey = name.trim().toLowerCase();
       const repoKey = githubUrl.trim().toLowerCase().replace(/\/$/, '');
       const duplicate = existingApps.some((a) => {
-        if (a.id === initialApp?.id) return false;
         if (a.name.trim().toLowerCase() === nameKey) return true;
         return !!repoKey && (a.githubUrl || '').trim().toLowerCase().replace(/\/$/, '') === repoKey;
       });

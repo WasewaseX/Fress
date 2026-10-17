@@ -20,7 +20,17 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  
   {
+    version: '1.0.1',
+    date: '2026-10-17',
+    title: 'The verified-boundary release',
+    items: [
+      'Open and "Show in folder" work again on every desktop. The first stable release narrowed the webview\'s file-opening powers to a validated native boundary, but the desktop buttons still asked for a permission the app had deliberately removed; they now cross the same registry-validated native command the Android installer handoff uses - the exact completed file, admitted by the session registry, OS asked only from the Rust side.',
+      'Queued downloads can no longer evict a sibling that queued the same file for a different folder (queue entries match the panel row\'s identity now), and one failed start can no longer strand the rest of the line: the promotion pump survives errors instead of dying with an unhandled rejection.',
+      'The update pill is pinned to the release it actually delivers, failed official lookups stay honest and retryable without ever opening a browser, and TypeScript strict mode (unused code, implicit returns) is now enforced on every future change.',
+    ],
+  },{
     version: '1.0.12-beta',
     date: '2026-10-13',
     title: 'The frontend-quality release',

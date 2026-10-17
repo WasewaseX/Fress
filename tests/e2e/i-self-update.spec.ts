@@ -161,8 +161,8 @@ test.describe('Workflow I: valid release fixture', () => {
       .toBe(1);
     const b2 = (await bridge(page))!;
     const verify = b2.calls.find((c) => c.cmd === 'verify_self_update_signature');
-    expect(verify?.args.filePath).toBe(finalPath);
-    expect(verify?.args.signatureBase64).toBe(OWN_SIG_TXT);
+    expect(verify?.args?.filePath).toBe(finalPath);
+    expect(verify?.args?.signatureBase64).toBe(OWN_SIG_TXT);
 
     // Only now does the app render the verified outcome: the success toast
     // names the verified state, and the pill flips to its ready label.
@@ -184,7 +184,6 @@ test.describe('Workflow I: valid release fixture', () => {
     await checkForUpdates(page);
     await drainToasts(page);
 
-    const b0 = (await bridge(page))!;
     await page.evaluate(() =>
       window.__fressTest!.setFailVerify('Updater signature verification failed')
     );
@@ -584,5 +583,69 @@ test.describe('Workflow J: unsigned platform artifact (no signature sidecar)', (
     await expect(page.locator('#header-update-pill')).not.toContainText(
       d['header.updatePill'].replace('{v}', NEXT_VERSION)
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Workflow I2/J2 - release-qualification channel & manifest contracts */
+/* ------------------------------------------------------------------ */
+/* Two pins the stable-release qualification adds:
+ *   I2: Alpha's classification stays accurate - a prerelease IS offered
+ *     on the Alpha channel (while Workflow I above proves Stable hides
+ *     the same feed). Channel policy is a real classification, not a
+ *     global filter.
+ *   J2: a TRUNCATED checksum manifest (the native reader's truncation
+ *     contract: empty body, truncated=true) fails closed exactly like a
+ *     missing one - the update can never become "verified" from a
+ *     manifest the app could not fully read. */
+
+test.describe('Workflow I2: channel classification stays accurate', () => {
+  test.use({ ownReleases: { list: OWN_RELEASES_CHANNEL }, updateChannel: 'alpha' });
+
+  test('Alpha sees the prerelease candidate; the older stable filler is never offered', async ({ gotoApp, page }) => {
+    await gotoApp();
+
+    // On Alpha the same feed yields the prerelease candidate: the
+    // classification offered it because it IS a prerelease on a channel
+    // that accepts them - not because the filter is absent.
+    await checkForUpdates(page);
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(d['update.availableToast'].replace('{version}', CHANNEL_CANDIDATE_VERSION));
+    await expect(page.locator('#header-update-pill')).toBeVisible();
+    await expect(page.locator('#header-update-pill')).toContainText(CHANNEL_CANDIDATE_VERSION);
+  });
+});
+
+test.describe('Workflow J2: truncated checksum manifest (native truncation contract)', () => {
+  test.use({ ownReleases: { list: OWN_RELEASES_VALID } });
+
+  test('a truncated SHA256SUMS.txt fails closed: releases page, no in-app download, never verified', async ({ gotoApp, page }) => {
+    await gotoApp();
+
+    // The native text reader reports the truncation (empty body + the
+    // flag). The updater must treat it exactly like a failed fetch.
+    await page.evaluate(() => window.__fressTest!.setTruncatedText(true));
+
+    await checkForUpdates(page);
+    await expect(page.locator('#header-update-pill')).toBeVisible();
+    await drainToasts(page);
+
+    // The refusal opens the release's own page (the deliberate fallback)
+    // and starts no download.
+    await page.locator('#header-update-pill').click();
+    await expect
+      .poll(async () => (await bridge(page))!.openedUrls, { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
+    expect(Object.keys((await bridge(page))!.downloads)).toHaveLength(0);
+
+    // The toast explains WHY: unverifiable against the published manifest.
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(d['update.releasesPage']);
+    await expect(toast).toContainText(d['update.unverifiableHint']);
+
+    // And the pill names the honest action, never a deliverable.
+    await expect(page.locator('#header-update-pill')).toContainText(d['header.updatePillSeeReleases']);
   });
 });

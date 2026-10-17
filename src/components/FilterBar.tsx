@@ -8,7 +8,7 @@ import {
   Platform,
   FilterState
 } from '../types';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 import {
   Bookmark,
   FolderPlus,
@@ -16,7 +16,6 @@ import {
   Award,
   Flame,
   Smartphone,
-  SlidersHorizontal
 } from 'lucide-react';
 
 interface FilterBarProps {
@@ -363,7 +362,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
       {/* Screen-reader mirror of the language-neutral visible counter. */}
       <div className="sr-only" role="status" aria-live="polite">
-        {t('filter.resultsAnnounce').replace('{visible}', String(announcedVisible)).replace('{total}', String(totalAll))}
+        {formatMessage(t('filter.resultsAnnounce'), { visible: announcedVisible, total: totalAll })}
       </div>
     </div>
   );

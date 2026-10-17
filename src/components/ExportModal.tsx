@@ -4,7 +4,7 @@
 //
 import React, { useState, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
-import { useI18n } from '../lib/i18n';
+import { formatMessage, useI18n } from '../lib/i18n';
 import { AppItem } from '../types';
 import { 
   Download, 
@@ -73,7 +73,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     md += `- [Contributing](#contributing)\n\n`;
 
     for (const cat of categories) {
-      const anchor = cat.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       md += `## ${cat}\n\n`;
       md += `| Application | Description | Replaces | Platforms | License | Stars |\n`;
       md += `| :--- | :--- | :--- | :--- | :--- | :--- |\n`;
@@ -278,7 +277,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             clipped by the panel's overflow-hidden. */}
         <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-950/10 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <span className="text-xs text-slate-400 font-mono">
-            {t('export.readyCount').replace('{n}', String(apps.length))}
+            {formatMessage(t('export.readyCount'), { n: apps.length })}
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -310,10 +309,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             >
               <Download className="w-3.5 h-3.5 text-slate-100" aria-hidden="true" />
               <span>
-                {t('export.download').replace(
-                  '{fmt}',
-                  format === 'markdown' ? 'README.md' : format.toUpperCase()
-                )}
+                {/* formatMessage (split/join): the file name travels through
+                    the same literal-insertion path as every other
+                    interpolation, so the label stays safe by construction
+                    rather than by the current constants alone. */}
+                {formatMessage(t('export.download'), {
+                  fmt: format === 'markdown' ? 'README.md' : format.toUpperCase(),
+                })}
               </span>
             </button>
           </div>

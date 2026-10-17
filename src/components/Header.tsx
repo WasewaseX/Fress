@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import { useDownloadState, useDownloadActions, isAndroidWebview } from '../lib/downloads';
-import { LANGUAGES, useI18n } from '../lib/i18n';
+import { formatMessage, LANGUAGES, useI18n } from '../lib/i18n';
 import { PALETTE_KEY } from '../lib/utils';
 import { toast } from 'sonner';
 import pkg from '../../package.json';
@@ -308,7 +308,7 @@ export const Header: React.FC<HeaderProps> = ({
                   title={t('header.batchTitle')}
                 >
                   <Terminal className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>{t('header.batchPill').replace('{n}', String(batchCount))}</span>
+                  <span>{formatMessage(t('header.batchPill'), { n: batchCount })}</span>
                 </button>
               )}
 
@@ -321,7 +321,7 @@ export const Header: React.FC<HeaderProps> = ({
                   title={t('header.compareTitle')}
                 >
                   <Columns className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>{t('header.comparePill').replace('{n}', String(compareCount))}</span>
+                  <span>{formatMessage(t('header.comparePill'), { n: compareCount })}</span>
                 </button>
               )}
             </div>
@@ -733,7 +733,7 @@ export const Header: React.FC<HeaderProps> = ({
                 This region always exists, so the '' -> label transition is
                 announced; later phase flips are announced by the pill. */}
             <span role="status" className="sr-only">
-              {updateVersion ? t('header.updatePill').replace('{v}', updateVersion) : ''}
+              {updateVersion ? formatMessage(t('header.updatePill'), { v: updateVersion }) : ''}
             </span>
             {updateVersion && (
               <button
@@ -752,7 +752,7 @@ export const Header: React.FC<HeaderProps> = ({
                    * see-releases label on a refused update. */
                   updatePillStatus
                     ? updatePillStatus.label
-                    : t('header.updatePillTitle').replace('{v}', updateVersion)
+                    : formatMessage(t('header.updatePillTitle'), { v: updateVersion })
                 }
               >
                 <Download className="w-3 h-3" aria-hidden="true" />
@@ -763,7 +763,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <span aria-live="polite">
                   {updatePillStatus
                     ? updatePillStatus.label
-                    : t('header.updatePill').replace('{v}', updateVersion)}
+                    : formatMessage(t('header.updatePill'), { v: updateVersion })}
                 </span>
               </button>
             )}

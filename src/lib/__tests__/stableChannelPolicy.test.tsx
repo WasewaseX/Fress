@@ -46,7 +46,7 @@ vi.mock('../../lib/external', () => ({
 }));
 
 import { DownloadsProvider } from '../../lib/downloads';
-import { I18nProvider, formatMessage } from '../i18n';
+import { DICTS, I18nProvider, formatMessage } from '../i18n';
 import {
   checkForUpdate,
   compareVersions,
@@ -60,18 +60,11 @@ import {
   setUpdateChannel,
   signatureSidecarFor,
 } from '../selfUpdate';
-import type { OwnRelease } from '../selfUpdate';
+import type { UpdateState } from '../selfUpdate';
+import { getDeliveryState, resetDeliveryForTest } from '../../features/selfUpdate/updateDelivery';
 import { useSelfUpdate } from '../../features/selfUpdate/useSelfUpdate';
 
 const CHANNEL_KEY = 'fress.updateChannel';
-
-const release = (tag: string, prereleaseFlag = false): OwnRelease => ({
-  tag,
-  version: tag.replace(/^v/i, ''),
-  publishedAt: '2026-10-01T00:00:00Z',
-  htmlUrl: `https://github.com/WasewaseX/Fress/releases/tag/${tag}`,
-  assets: [],
-});
 
 /** Derive a version RELATIVE to the running build instead of hard-coding
  * release numbers (the spec's rule: only the intentional v1.0.0 / 1.0.12-beta
@@ -815,5 +808,394 @@ describe('spec §5: channel selection feeds the SAME fail-closed delivery gate',
     // pair that could be mistaken for a deliverable update.
     expect(res.channelVersion).toBe('1.0.0');
     expect(res.release.assets).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Invariant 12: stale async results from an OLD channel can never     */
+/* overwrite the state of a newer channel selection.                   */
+/* ------------------------------------------------------------------ */
+describe('spec §6 (invariant 12): stale results from an old channel are discarded', () => {
+  /** Raw GitHub list body for a deferred fetch stub. */
+  const ghBody = (entries: Array<{ tag: string; prerelease: boolean }>): Response =>
+    new Response(
+      JSON.stringify(
+        entries.map((e) => ({
+          tag_name: e.tag,
+          name: e.tag,
+          draft: false,
+          prerelease: e.prerelease,
+          published_at: '2026-10-01T00:00:00Z',
+          html_url: `https://github.com/WasewaseX/Fress/releases/tag/${e.tag}`,
+          assets: [],
+        }))
+      ),
+      { status: 200 }
+    );
+
+  it('a check in flight under the old channel is discarded after a channel switch, and the re-check runs under the new one', async () => {
+    // KILL-TEST REVIEW: this case pins the epoch guard in useSelfUpdate's
+    // runUpdateCheck. Without it (the pre-fix shape: land the result, then
+    // setOwnUpdate unconditionally), the in-flight Beta check below would
+    // resolve AFTER the user switched to Stable and (a) repopulate the pill
+    // with the abandoned channel's release and (b) fire "update available"
+    // for a channel the user just left - both assertions fail. Removing the
+    // immediate setOwnUpdate(null) on channel change also fails the
+    // right-after-switch assertion below.
+    setUpdateChannel('beta');
+
+    // Phase 1: the mount-time check resolves immediately; a Beta update is
+    // detected and the pill is live.
+    vi.stubGlobal('fetch', apiWith([{ tag: 'v1.0.13-beta', prerelease: true }]) as unknown as typeof fetch);
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-id');
+    const startDownload = vi.fn();
+    const { result } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.updateChecking).toBe(false));
+    expect(result.current.ownUpdate?.release.version).toBe('1.0.13-beta');
+    infoSpy.mockClear();
+
+    // Phase 2: a manual ANNOUNCED check whose response is deferred, so the
+    // channel switch can land while it is in flight.
+    const resolvers: Array<(r: Response) => void> = [];
+    const deferred = vi.fn((_url: string | URL | Request) => {
+      return new Promise<Response>((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+    vi.stubGlobal('fetch', deferred as unknown as typeof fetch);
+
+    let manualPromise: Promise<UpdateState | null> = Promise.resolve(null);
+    act(() => {
+      manualPromise = result.current.runUpdateCheck(true) ?? Promise.resolve(null);
+    });
+    await waitFor(() => expect(resolvers.length).toBe(1));
+
+    // The user switches to Stable while the check is in flight:
+    act(() => {
+      result.current.handleUpdateChannelChange('stable');
+    });
+    // ...the stale pill is cleared IMMEDIATELY (it must not linger until
+    // the in-flight check lands) ...
+    expect(result.current.ownUpdate).toBeNull();
+    expect(result.current.updateChannel).toBe('stable');
+    // ...and the only announcement so far is the channel-set toast.
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+
+    // The in-flight check now lands with an even NEWER beta release. Under
+    // the abandoned channel this is "update available"; under Stable it is
+    // stale news from a channel the user just left.
+    await act(async () => {
+      resolvers[0](ghBody([{ tag: 'v1.0.14-beta', prerelease: true }]));
+    });
+    // The stale result was DISCARDED: no pill, no "update available" toast.
+    // (updateChecking may still read true here: the discarded check hands
+    // straight off to the requested re-check, so no idle frame is rendered
+    // in between - the next wait targets that re-check's fetch instead.)
+    expect(result.current.ownUpdate).toBeNull();
+    expect(infoSpy).toHaveBeenCalledTimes(1); // channel-set only; no available toast
+
+    // The switch requested a fresh quiet check under the NEW channel - it
+    // starts once the stale check was discarded.
+    await waitFor(() => expect(resolvers.length).toBe(2));
+    await act(async () => {
+      resolvers[1](ghBody([{ tag: 'v1.0.13', prerelease: false }]));
+    });
+    // The NEW channel's result IS applied: v1.0.13 stable is newer than the
+    // running 1.0.12-beta build and eligible on Stable.
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13'));
+    // The outer manual check resolves with the RE-CHECK's result (the
+    // stale one was replaced, not reported).
+    const res = await manualPromise;
+    expect(res?.kind).toBe('available');
+    if (res?.kind === 'available') expect(res.release.version).toBe('1.0.13');
+    // No delivery was started by any of this - checking never delivers.
+    expect(startDownload).not.toHaveBeenCalled();
+  });
+
+  it('a channel switch never leaves the previous channel\'s pill on screen even without any check in flight', async () => {
+    // Same contract, no in-flight check: the clearing is unconditional.
+    setUpdateChannel('beta');
+    vi.stubGlobal('fetch', apiWith([{ tag: 'v1.0.13-beta', prerelease: true }]) as unknown as typeof fetch);
+    const startDownload = vi.fn();
+    const { result } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13-beta'));
+
+    // Switch to Alpha (the new feed would also carry the beta release, but
+    // the OLD result still describes a check that never ran under Alpha).
+    act(() => {
+      result.current.handleUpdateChannelChange('alpha');
+    });
+    expect(result.current.ownUpdate).toBeNull();
+    // And the fresh quiet check re-detects the release under the new channel.
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13-beta'));
+    expect(startDownload).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The pill during a REAL delivery: version binding under channel       */
+/* switches, unmount and failed re-checks.                              */
+/*                                                                      */
+/* These cases drive the actual delivery entry point (three-gate plan + */
+/* sidecar fetch + verified download hand-off), so the pill's lifecycle */
+/* labels are exercised against the module state a real transfer        */
+/* produces, not a synthetic one.                                       */
+/* ------------------------------------------------------------------ */
+describe('spec §6 (invariant 12b): a delivery underway names its own version', () => {
+  const GOOD_SHA = 'e7de715cd4a309dc8c6fe72c93ad8f2b9e3d3c1b4a1d5f2c8e6b0a9d7c3f5e1b';
+  const DELIVERED = '1.0.13-beta';
+  const ASSET = `Fress_${DELIVERED}_x64-setup.exe`;
+
+  /** A well-formed outer-base64 minisign signature document for `asset`
+   * (the exact shape fetchOwnAssetSignature's gate accepts). */
+  const sidecarDocument = (asset: string): string => {
+    const doc = [
+      'untrusted comment: signature from tauri secret key',
+      Buffer.concat([Buffer.from('ED'), Buffer.alloc(72, 7)]).toString('base64'),
+      'trusted comment: timestamp:1791744131\tfile:' + asset,
+      Buffer.alloc(64, 9).toString('base64'),
+    ].join('\n');
+    return Buffer.from(doc, 'utf8').toString('base64');
+  };
+
+  /** The beta release with the FULL delivery plumbing attached: a
+   * platform-matched installer (Windows UA stub below), its published
+   * SHA-256 entry and its signature sidecar. */
+  const deliverableEntry = () => ({
+    tag: `v${DELIVERED}`,
+    prerelease: true,
+    assets: [
+      { name: ASSET, size: 21_000_000, browser_download_url: `https://github.com/WasewaseX/Fress/releases/download/v${DELIVERED}/${ASSET}` },
+      { name: 'SHA256SUMS.txt', size: 300, browser_download_url: `https://github.com/WasewaseX/Fress/releases/download/v${DELIVERED}/SHA256SUMS.txt` },
+      { name: `${ASSET}.sig`, size: 420, browser_download_url: `https://github.com/WasewaseX/Fress/releases/download/v${DELIVERED}/${ASSET}.sig` },
+    ],
+  });
+
+  /** Fetch stub that serves the GitHub list AND the delivery documents the
+   * plan gates read (SHA256SUMS.txt entry + the .sig sidecar). */
+  const deliveryFeed = (entries: Parameters<typeof apiWith>[0]) =>
+    vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('api.github.com')) {
+        return new Response(
+          JSON.stringify(
+            entries.map((e) => ({
+              tag_name: e.tag,
+              name: e.tag,
+              draft: e.draft ?? false,
+              prerelease: e.prerelease,
+              published_at: '2026-10-01T00:00:00Z',
+              html_url: `https://github.com/WasewaseX/Fress/releases/tag/${e.tag}`,
+              assets: e.assets ?? [],
+            }))
+          ),
+          { status: 200 }
+        );
+      }
+      if (u.endsWith('.sig')) {
+        const asset = decodeURIComponent(u.split('/').pop() ?? '').replace(/\.sig$/, '');
+        return new Response(sidecarDocument(asset), { status: 200 });
+      }
+      if (/sha256sums\.txt$/i.test(u)) {
+        return new Response(`${GOOD_SHA}  ${ASSET}\n`, { status: 200 });
+      }
+      return new Response('unexpected', { status: 404 });
+    });
+
+  /** Windows UA so pickOwnAsset deterministically selects the x64 setup. */
+  const stubWindowsUa = () => {
+    vi.stubGlobal(
+      'navigator',
+      {
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        language: 'en-US',
+        languages: ['en-US'],
+      } as unknown as Navigator
+    );
+  };
+
+  /** Mounts the hook under the deliverable beta feed and starts the real
+   * delivery from the pill; resolves once the transfer phase is live. */
+  const mountAndStartDelivery = async () => {
+    stubWindowsUa();
+    vi.stubGlobal('open', vi.fn());
+    vi.stubGlobal('fetch', deliveryFeed([deliverableEntry()]) as unknown as typeof fetch);
+    const startDownload = vi.fn(async () => undefined); // transfer never completes
+    const { result, rerender } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe(DELIVERED));
+    expect(result.current.ownUpdate?.asset?.name).toBe(ASSET);
+    expect(result.current.ownUpdate?.expectedSha256).toBe(GOOD_SHA);
+    act(() => {
+      result.current.handleHeaderUpdateClick();
+    });
+    await waitFor(() => expect(result.current.updatePillStatus?.busy).toBe(true));
+    expect(result.current.updatePillStatus?.label).toContain(DELIVERED);
+    return { result, rerender };
+  };
+
+  beforeEach(() => {
+    resetDeliveryForTest();
+  });
+
+  afterEach(() => {
+    resetDeliveryForTest();
+  });
+
+  it('a channel switch mid-transfer keeps the pill naming the version actually being delivered', async () => {
+    // KILL-TEST REVIEW: pre-fix, the version fed to pillStatusFor was
+    // `ownUpdate ? ... : ''` - the channel switch below clears ownUpdate
+    // and the busy label interpolated an EMPTY {v} ("Downloading v").
+    // The delivered-version pin is what this case pins.
+    const { result } = await mountAndStartDelivery();
+
+    // Defer the fetch so the post-switch quiet check stays in flight.
+    const resolvers: Array<(r: Response) => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string | URL | Request) => new Promise<Response>((resolve) => resolvers.push(resolve))) as unknown as typeof fetch
+    );
+
+    act(() => {
+      result.current.handleUpdateChannelChange('stable');
+    });
+    // The detected update of the OLD channel is gone immediately...
+    expect(result.current.ownUpdate).toBeNull();
+    // ...but the transfer is real and its pill keeps naming ITS version.
+    expect(result.current.updatePillStatus?.busy).toBe(true);
+    expect(result.current.updatePillStatus?.label).toContain(DELIVERED);
+
+    // The quiet re-check finds the newest stable OLDER than the running
+    // build (v1.0.0 vs 1.0.12-beta): an honest track-migration, no pill
+    // update - and the busy label still names the delivered version, not
+    // the channel's release.
+    await waitFor(() => expect(resolvers.length).toBe(1));
+    await act(async () => {
+      resolvers[0](new Response(JSON.stringify([{ tag_name: 'v1.0.0', name: 'v1.0.0', draft: false, prerelease: false, published_at: '2026-10-01T00:00:00Z', html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.0', assets: [] }]), { status: 200 }));
+    });
+    expect(result.current.ownUpdate).toBeNull();
+    expect(result.current.updatePillStatus?.label).toContain(DELIVERED);
+    expect(result.current.updatePillStatus?.label).not.toContain('v1.0.0');
+  });
+
+  it('a newer detection on the new channel never borrows the old transfer\'s lifecycle label', async () => {
+    // KILL-TEST REVIEW: with the version fed from ownUpdate, the re-check
+    // below repopulates the pill with v1.0.13 while the TRANSFER is still
+    // fetching 1.0.13-beta - the pill claimed "Downloading v1.0.13" for
+    // bytes it knew nothing about. The lifecycle override may only label
+    // the release its delivery was started for.
+    const { result, rerender } = await mountAndStartDelivery();
+
+    const resolvers: Array<(r: Response) => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string | URL | Request) => new Promise<Response>((resolve) => resolvers.push(resolve))) as unknown as typeof fetch
+    );
+    act(() => {
+      result.current.handleUpdateChannelChange('stable');
+    });
+    expect(result.current.ownUpdate).toBeNull();
+
+    // The quiet re-check detects a DIFFERENT, newer stable release.
+    await waitFor(() => expect(resolvers.length).toBe(1));
+    await act(async () => {
+      resolvers[0](new Response(JSON.stringify([{ tag_name: 'v1.0.13', name: 'v1.0.13', draft: false, prerelease: false, published_at: '2026-10-01T00:00:00Z', html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.13', assets: [] }]), { status: 200 }));
+    });
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe('1.0.13'));
+    // No lifecycle override for v1.0.13: the transfer in flight belongs to
+    // 1.0.13-beta. The plain available label describes the new detection.
+    expect(result.current.updatePillStatus).toBeNull();
+    // The old transfer is still honestly tracked by the delivery module.
+    expect(getDeliveryState().phase).toBe('downloading');
+
+    // Clicking the new release's pill must not reveal (or relabel) the old
+    // transfer, and must not re-pin the pill's version to v1.0.13 while the
+    // module refuses a concurrent start: the honest "already in progress"
+    // answer, override still suppressed.
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-id');
+    act(() => {
+      result.current.handleHeaderUpdateClick();
+    });
+    expect(infoSpy).toHaveBeenCalledWith(
+      DICTS.en['update.alreadyInProgress'],
+      expect.objectContaining({ description: DICTS.en['update.alreadyInProgressHint'] })
+    );
+    // A re-render recomputes the override from the (unchanged) pin: had the
+    // refused start re-pinned the version to v1.0.13, the busy transfer
+    // would suddenly be labeled "Downloading v1.0.13" here.
+    act(() => {
+      rerender();
+    });
+    expect(result.current.updatePillStatus).toBeNull();
+  });
+
+  it('a check landing after unmount applies no state and fires no announcement', async () => {
+    // The unmount guard: a dead hook instance must not announce (or apply)
+    // anything when its in-flight check lands. React would no-op the
+    // setState on its own - the ANNOUNCE side effect is what needs the
+    // explicit guard, and a late "update available" toast from an unmounted
+    // instance is stale news by definition.
+    stubWindowsUa();
+    setUpdateChannel('beta');
+    // The STARTUP check resolves immediately, so the deferred stub below is
+    // reserved for the manual ANNOUNCED check - the one that must land on a
+    // dead instance.
+    vi.stubGlobal('fetch', apiWith([{ tag: 'v1.0.12-beta', prerelease: true }]) as unknown as typeof fetch);
+    const startDownload = vi.fn();
+    const { result, unmount } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.updateChecking).toBe(false));
+
+    const resolvers: Array<(r: Response) => void> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string | URL | Request) => new Promise<Response>((resolve) => resolvers.push(resolve))) as unknown as typeof fetch
+    );
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-id');
+    const successSpy = vi.spyOn(toast, 'success').mockImplementation(() => 'toast-id');
+
+    let manualPromise: Promise<UpdateState | null> = Promise.resolve(null);
+    act(() => {
+      manualPromise = result.current.runUpdateCheck(true) ?? Promise.resolve(null);
+    });
+    await waitFor(() => expect(resolvers.length).toBe(1));
+
+    unmount();
+    await act(async () => {
+      resolvers[0](new Response(JSON.stringify([{ tag_name: 'v1.0.13-beta', name: 'v1.0.13-beta', draft: false, prerelease: true, published_at: '2026-10-01T00:00:00Z', html_url: 'https://github.com/WasewaseX/Fress/releases/tag/v1.0.13-beta', assets: [] }]), { status: 200 }));
+    });
+    // The promise still resolves (the caller may use the value), but no
+    // announcement fired and nothing threw.
+    const res = await manualPromise;
+    expect(res?.kind).toBe('available');
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(successSpy).not.toHaveBeenCalled();
+  });
+
+  it('a failed re-check clears the pill honestly (no available/success claim, quiet note only)', async () => {
+    // A network failure must not leave a pill that claims anything: the
+    // previously detected update is unconfirmed, so the override goes and
+    // the only announcement is the quiet offline note - never an
+    // "available" toast and never "up to date".
+    stubWindowsUa();
+    setUpdateChannel('beta');
+    vi.stubGlobal('fetch', deliveryFeed([deliverableEntry()]) as unknown as typeof fetch);
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-id');
+    const successSpy = vi.spyOn(toast, 'success').mockImplementation(() => 'toast-id');
+    const startDownload = vi.fn();
+    const { result } = renderHook(() => useSelfUpdate(startDownload), { wrapper });
+    await waitFor(() => expect(result.current.ownUpdate?.release.version).toBe(DELIVERED));
+    infoSpy.mockClear();
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })) as unknown as typeof fetch);
+    let res: UpdateState | null = null;
+    await act(async () => {
+      res = await result.current.runUpdateCheck(true);
+    });
+    expect((res as UpdateState | null)?.kind).toBe('error');
+    expect(result.current.ownUpdate).toBeNull();
+    expect(result.current.updatePillStatus).toBeNull();
+    // Exactly the quiet note - no available toast, no "up to date".
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith(DICTS.en['update.unavailable'], expect.objectContaining({ description: DICTS.en['update.unavailableHint'] }));
+    expect(successSpy).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,7 @@
 import { useMemo } from 'react';
 import { AppItem } from '../types';
 import { APP_DESCRIPTIONS, LocalizedAppText } from '../data/appDescriptions';
-import { useI18n } from './i18n';
+import { formatMessage, useI18n } from './i18n';
 
 export interface AppText {
   tagline: string;
@@ -48,8 +48,11 @@ function translateDefault(t: (key: string) => string, text: string): string {
     const m = match.exec(text);
     if (m) {
       const translated = t(key);
-      // Only the stars template carries a capture group.
-      return m[1] !== undefined ? translated.replace('{stars}', m[1]) : translated;
+      // Only the stars template carries a capture group; the shared
+      // split/join formatter inserts it literally (the captured value is
+      // digits/punctuation today, and the primitive keeps it that way by
+      // construction even if the pattern ever widens).
+      return m[1] !== undefined ? formatMessage(translated, { stars: m[1] }) : translated;
     }
   }
   return text;

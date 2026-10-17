@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WasewaseX and Fress contributors
 // SPDX-License-Identifier: MIT
 //
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   hrefs,
   parseVersion,
@@ -16,9 +16,25 @@ import {
   base64ToHex,
   TOR_MANIFESTS,
   officialSupported,
+  resolveOfficialDownload,
+  retryOfficialResolve,
 } from '../officialResolvers';
+import type { AppItem } from '../../types';
 import { peekDigestDiagnostics } from '../release/digests';
 import { INITIAL_APPS } from '../../data/appsData';
+
+/* ------------------------------------------------------------------ */
+/* Native seams for the end-to-end resolver tests below. The pure      */
+/* helper tests never touch these; mocking the two modules keeps the   */
+/* whole import graph happy in the plain node environment.             */
+/* ------------------------------------------------------------------ */
+const invokeMock = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+vi.mock('../downloads', () => ({
+  isTauri: () => true,
+}));
 
 describe('parseVersion', () => {
   it('splits numeric versions', () => {
@@ -302,5 +318,190 @@ describe('officialSupported', () => {
     expect(officialSupported(byId.get('kdenlive')!, 'linux')).toBe(true);
     expect(officialSupported(byId.get('libreoffice')!, 'linux')).toBe(true);
     expect(officialSupported(byId.get('inkscape')!, 'windows')).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Truncated official manifests (the native `truncated` contract)      */
+/*                                                                     */
+/* The native fetch_text command reads vendor documents under a size   */
+/* cap and reports a body cut at the cap with truncated:true (and an   */
+/* EMPTY body when the advertised content-length already exceeded the  */
+/* cap). The resolver must NEVER parse a truncated document as a       */
+/* complete manifest: a directory index cut before the newest entry    */
+/* would resolve an OLD version as "latest" and hand it to users as    */
+/* the vendor's current release.                                       */
+/* ------------------------------------------------------------------ */
+
+const BLENDER_ROOT = 'https://download.blender.org/release/';
+
+const blender = { id: 'blender' } as unknown as AppItem;
+
+/** A TextFetch-shaped native response for the given body. */
+const textFetch = (url: string, body: string, truncated = false) => ({
+  status: 200,
+  final_url: url,
+  content_length: body.length,
+  body,
+  truncated,
+});
+
+const dirPage = (dir: string, file: string): string =>
+  `<html><body><a href="blender-${dir}/">Blender${dir}/</a>` +
+  `<a href="${file}">${file}</a></body></html>`;
+
+/** Full root listing: every Blender release directory, oldest first, so a
+ * TRUNCATED root (only the first entry) is exactly the "cut before the
+ * newest entry" case. */
+const FULL_ROOT =
+  '<html><body>' +
+  ['2.93', '3.6', '4.5'].map((d) => `<a href="Blender${d}/">Blender${d}/</a>`).join('') +
+  '</body></html>';
+const TRUNCATED_ROOT = '<html><body><a href="Blender2.93/">Blender2.93/</a>';
+
+describe('fetch_text truncated manifests are refused, never parsed as complete', () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) return textFetch(url, TRUNCATED_ROOT, true);
+      if (url.includes('Blender2.93/')) return textFetch(url, dirPage('2.93', 'blender-2.93.9-windows-x64.msi'));
+      if (url.includes('Blender4.5/')) return textFetch(url, dirPage('4.5', 'blender-4.5.3-windows-x64.msi'));
+      return textFetch(url, FULL_ROOT, false);
+    });
+  });
+
+  afterEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it('a truncated directory index resolves to NOTHING (never to an old version)', async () => {
+    // KILL-TEST REVIEW: this case fails if fetchTextOnce ever drops the
+    // `truncated` gate again (the pre-fix shape returned the partial body
+    // as a complete 200 response). Without the gate the resolver parses
+    // the cut listing, sees only Blender2.93/, picks it as the newest
+    // directory and RESOLVES blender-2.93.9-windows-x64.msi as the vendor's
+    // current Windows release - a wrong-version download presented as a
+    // confident official pick. With the gate, the truncated root is refused
+    // (named 'Response truncated'), retried once, refused again, and the
+    // resolver returns null.
+    const hit = await resolveOfficialDownload(blender, 'windows');
+    expect(hit).toBeNull();
+    // The refusal came from the real fetch path (root fetched twice: the
+    // original attempt plus the transient retry), not from an early exit.
+    const rootCalls = invokeMock.mock.calls.filter(
+      (c) => c[0] === 'fetch_text' && (c[1] as { url?: string })?.url === BLENDER_ROOT
+    );
+    expect(rootCalls.length).toBe(2);
+    // The failure sits in the bounded FAILURE cache, not the success cache:
+    // a follow-up resolve inside the failure TTL returns the same null
+    // WITHOUT re-fetching (the next real retry re-fetches; see the next
+    // test), and nothing about 2.93.9 was ever persisted as a resolution.
+    const again = await resolveOfficialDownload(blender, 'windows');
+    expect(again).toBeNull();
+    const rootCallsAfter = invokeMock.mock.calls.filter(
+      (c) => c[0] === 'fetch_text' && (c[1] as { url?: string })?.url === BLENDER_ROOT
+    );
+    expect(rootCallsAfter.length).toBe(2);
+  });
+
+  it('a transient truncation is retried for real and the complete page resolves the NEWEST version', async () => {
+    // First root read truncated, the retry (a REAL re-fetch) complete.
+    let rootReads = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        rootReads += 1;
+        return rootReads === 1
+          ? textFetch(url, TRUNCATED_ROOT, true)
+          : textFetch(url, FULL_ROOT, false);
+      }
+      if (url.includes('Blender4.5/')) return textFetch(url, dirPage('4.5', 'blender-4.5.3-windows-x64.msi'));
+      return textFetch(url, FULL_ROOT, false);
+    });
+    // The explicit retry entry point (the detail modal's Retry) evicts the
+    // failed memo entry the previous test left behind, so this exercises a
+    // fresh resolve - successes would stay cached, failures must not.
+    const hit = await retryOfficialResolve(blender, 'windows');
+    expect(hit).not.toBeNull();
+    expect(hit?.version).toBe('4.5.3');
+    expect(hit?.filename).toBe('blender-4.5.3-windows-x64.msi');
+    expect(rootReads).toBe(2);
+  });
+
+  it('an over-cap response (EMPTY body with truncated:true) is refused like any truncation', async () => {
+    // The native reader reports the length-over-cap case with an EMPTY body
+    // and truncated:true. An empty body would parse as "no releases" (a
+    // silent no-update) if it were treated as a complete 200 - so the flag
+    // alone must refuse it, exactly like a cut listing.
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        return { status: 200, final_url: url, content_length: 9_999_999, body: '', truncated: true };
+      }
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
+    const rootCalls = invokeMock.mock.calls.filter(
+      (c) => c[0] === 'fetch_text' && (c[1] as { url?: string })?.url === BLENDER_ROOT
+    );
+    // Refused twice (attempt + transient retry), never parsed.
+    expect(rootCalls.length).toBe(2);
+  });
+
+  it('a server error is retried once and then resolves null (never a cached success)', async () => {
+    let rootReads = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        rootReads += 1;
+        return { status: 500, final_url: url, content_length: 0, body: '', truncated: false };
+      }
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
+    expect(rootReads).toBe(2);
+  });
+
+  it('a 404 is NOT retried (retrying cannot help) and resolves null', async () => {
+    let rootReads = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) {
+        rootReads += 1;
+        return { status: 404, final_url: url, content_length: 0, body: '', truncated: false };
+      }
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
+    expect(rootReads).toBe(1);
+  });
+
+  it('a complete but unparsable body resolves null (no guess, no cached success)', async () => {
+    // A full 200 body with no usable release links is a schema failure:
+    // newestVersion finds nothing and the resolver returns null instead of
+    // inventing a pick.
+    invokeMock.mockImplementation(async (cmd: string, args?: { url?: string }) => {
+      if (cmd === 'host_arch') return 'x86_64';
+      if (cmd !== 'fetch_text') return '';
+      const url = args?.url ?? '';
+      if (url === BLENDER_ROOT) return textFetch(url, '<html><body><p>maintenance page</p></body></html>', false);
+      return textFetch(url, FULL_ROOT, false);
+    });
+    const hit = await retryOfficialResolve(blender, 'linux');
+    expect(hit).toBeNull();
   });
 });

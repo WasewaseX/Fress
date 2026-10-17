@@ -278,7 +278,6 @@ describe('optional Android parsers', () => {
   });
 
   it('validateVersions: a delegating build.gradle.kts is verified through its tauri.properties', () => {
-    const files = coherentFiles();
     const gradle = [
       'import java.util.Properties',
       'val tauriProperties = Properties().apply {',
@@ -1095,7 +1094,6 @@ describe('loadVersionFiles + the real npm script', () => {
   });
 
   it('unknown CLI arguments exit 2 with usage', () => {
-    const root = makeFixtureRoot('1.0.10-beta');
     const run = spawnSync('npm', ['run', '--silent', 'validate:versions', '--', '--nonsense'], {
       cwd: resolve(process.cwd()),
       encoding: 'utf8',

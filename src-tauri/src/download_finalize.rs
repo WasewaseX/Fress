@@ -464,6 +464,26 @@ impl DownloadRegistry {
         completed.iter().find(|a| a.canonical == canonical).cloned()
     }
 
+    /// Directories that hold at least one completed artifact this session,
+    /// canonicalized and deduplicated. The open boundary admits a DIRECTORY
+    /// target when it is the platform default download folder, one of these
+    /// parents, or a folder the user picked in the native dialog this
+    /// session - the three cases where "Show in folder" / "Open folder" is
+    /// legitimately the user acting on their own downloaded content.
+    pub(crate) fn completed_parent_dirs(&self) -> Vec<PathBuf> {
+        let completed = self
+            .completed
+            .lock()
+            .expect("completed-artifact registry poisoned");
+        let mut dirs: Vec<PathBuf> = completed
+            .iter()
+            .filter_map(|a| a.canonical.parent().map(|p| p.to_path_buf()))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs
+    }
+
     /// Test-only view of the completed queue length (cap regression tests,
     /// and the registry-immutability assertion in lib.rs's boundary tests).
     #[cfg(test)]
@@ -554,10 +574,17 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
         })
         .collect();
     let trimmed = cleaned.trim_matches('_').trim().to_string();
-    // "." and ".." survive the character filter (dots are legal name
-    // characters) but would make dir.join() walk up the directory tree, so
-    // they collapse to the safe default like any other empty result.
-    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+    // Windows filename parity: the OS drops trailing dots and spaces when it
+    // materializes a name ("readme." and "readme. " both land as "readme"),
+    // so a recorded path that still carried them would not describe the file
+    // actually on disk (and CreateFile can refuse "..." outright). Stripping
+    // here keeps the finalize path honest about what was written; an
+    // all-dots name - "." ".." "..." and every longer dot-run - strips to
+    // nothing and collapses to the safe default like any other empty result
+    // (the old code only caught the two-dot forms, so a server-supplied
+    // "..." finalized as a broken Windows name).
+    let stripped = trimmed.trim_end_matches(['.', ' ']);
+    if stripped.is_empty() {
         return "download.bin".to_string();
     }
     // Windows reserve device names: "CON", "NUL", "COM1".."COM9",
@@ -565,7 +592,11 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     // to the FIRST dot ("NUL.tar.gz" is reserved just like "NUL"), and a
     // server-supplied Content-Disposition must never be able to trigger a
     // finalize-time failure, so they collapse to the safe default too.
-    let first_segment = trimmed.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let first_segment = stripped
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
     let reserved = matches!(
         first_segment.as_str(),
         "CON"
@@ -594,7 +625,7 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
     if reserved {
         return "download.bin".to_string();
     }
-    trimmed
+    stripped.to_string()
 }
 
 pub(crate) fn filename_from_headers(
@@ -605,7 +636,8 @@ pub(crate) fn filename_from_headers(
     // the value is joined onto the download directory, so a server-supplied
     // name like "../../something" (or its percent-encoded form - the RFC
     // 5987 branch decodes first) must never be able to escape the folder.
-    // sanitize_filename also collapses "."/".."/empty to a safe name.
+    // sanitize_filename also collapses empty/all-dots names (and Windows
+    // trailing-dot forms) to a safe name.
     if let Some(cd) = headers.get(reqwest::header::CONTENT_DISPOSITION) {
         let cd = cd.to_str().ok()?;
         // attachment; filename="app.apk" or filename*=UTF-8''app.apk
@@ -2606,6 +2638,69 @@ mod tests {
         assert!(!part.exists(), "validator-less staging must be discarded");
         assert!(!meta_path_for(&part).exists());
         assert_eq!(session.snapshot().await, Some(DownloadState::Completed));
+    }
+
+    #[tokio::test]
+    async fn a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail() {
+        // Kill-test closure for the byte-identity rule (round 3 audit). The
+        // sibling test above drives the 200-answer shape, where the truncate
+        // path ALSO removes the unprovable prefix - so disabling the rule
+        // does NOT fail that test (found by executing the kill-test this
+        // round: the guard was deleted and the named test still passed). The
+        // dangerous shape is a server that answers the resume's `Range` with
+        // a 206: only the rule's discard-BEFORE-request prevents an
+        // unprovable prefix from being glued to a hostile tail and
+        // finalized. This test pins that exact ordering: after the discard,
+        // the request must go out with NO Range header, the 206 must be
+        // refused as a partial body for a range-less request, and the
+        // poisoned hybrid must exist nowhere - not as a staging file, not as
+        // a completed artifact, not as a registry record.
+        let tmp = TempDir::new("no-validator-206");
+        let part = tmp.path().join("file.bin.part");
+        tokio::fs::write(&part, b"12345").await.unwrap();
+        let headers = reqwest::header::HeaderMap::new(); // no validators
+        write_part_meta(&part, "https://example.com/file.bin", &headers).await;
+        assert!(read_part_meta(&part).await.is_some());
+
+        // Hostile/broken origin: answers ANY request with a 206 continuing
+        // exactly from the staged length (5) - the glue shape a full-200
+        // server can never produce.
+        let server = spawn_mock(vec![MockReply::partial_206("bytes 5-14/15", &pattern(10))]);
+        let plan = DownloadPlan {
+            resume: true,
+            ..plan_for(&server.url, tmp.path(), Some("file.bin"))
+        };
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let result = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff()).await;
+
+        // Fail closed: the 206 is refused (a partial body for a request
+        // that asked for no range).
+        assert!(
+            result.is_err(),
+            "a 206 to a range-less request must be refused"
+        );
+        // The discard happened BEFORE the request: no staging byte or
+        // sidecar survived.
+        assert!(
+            !part.exists(),
+            "validator-less staging must be discarded before the resume request"
+        );
+        assert!(!meta_path_for(&part).exists());
+        // The poisoned hybrid never reached a completed file...
+        assert!(
+            !tmp.path().join("file.bin").exists(),
+            "an unprovable prefix plus a hostile tail must never be committed"
+        );
+        // ...and the one request the server saw carried NO Range header.
+        let head = request_head(&server, 0);
+        assert!(
+            !head.contains("range:"),
+            "the request must not carry a Range header after the discard: {head:?}"
+        );
+        // No completed-artifact record for a download that never committed.
+        assert_eq!(session.registry.completed_len(), 0);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
     }
 
     // -----------------------------------------------------------------------

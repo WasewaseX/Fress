@@ -5,28 +5,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { keepFocusInside } from '../lib/modalFocus';
 import { formatMessage, useI18n } from '../lib/i18n';
-import { AppItem, Category, Platform } from '../types';
+import { AppItem, Category } from '../types';
 import { formatStarCount } from '../lib/starFetch';
-import {
-  Search,
-  Terminal,
-  Check,
-  Copy,
-  ExternalLink,
-  Bookmark,
-  Columns,
-  Layers,
-  Download,
-  X,
-  Code2,
-  FileText
-} from 'lucide-react';
+import { Search, Terminal, Check, Copy, X, Code2 } from 'lucide-react';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
   apps: AppItem[];
-  favorites: string[];
   onToggleFavorite: (id: string) => void;
   onOpenAppDetail: (app: AppItem) => void;
   onSelectCategory: (cat: Category) => void;
@@ -78,7 +64,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
   apps,
-  favorites,
   onToggleFavorite,
   onOpenAppDetail,
   onSelectCategory,
@@ -160,16 +145,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       const haystacks = [t(action.aliasesKey), t(action.titleKey), t(action.subKey)];
       for (const extra of action.extraTextKeys ?? []) haystacks.push(t(extra));
       const viewTitle = action.id === 'act-view'
-        ? t(action.titleKey)
-            .replace('{mode}', viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'))
-            .toLowerCase()
+        ? formatMessage(t(action.titleKey), {
+            mode: viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'),
+          }).toLowerCase()
         : null;
       if (haystacks.some((h) => h.toLowerCase().includes(q)) || (viewTitle !== null && viewTitle.includes(q))) {
         matches.push({
           type: 'action',
           id: action.id,
           title: action.id === 'act-view'
-            ? t(action.titleKey).replace('{mode}', viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'))
+            ? formatMessage(t(action.titleKey), {
+                mode: viewMode === 'grid' ? t('common.viewGrid') : t('common.viewTable'),
+              })
             : t(action.titleKey),
           subtitle: t(action.subKey),
           action: () => {
@@ -451,7 +438,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               }
 
               const app = item.app!;
-              const isFav = favorites.includes(app.id);
 
               return (
                 <li key={app.id} role="presentation" className="relative list-none">

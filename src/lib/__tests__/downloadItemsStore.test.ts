@@ -73,6 +73,21 @@ describe('downloadItemsStore — the panel survives an app restart', () => {
     expect(restored[1].expectedSha512).toBeUndefined();
   });
 
+  it('the wire filename hint survives the restart; an absent hint stays absent', () => {
+    // Retry after a restart must re-send what the ORIGINAL start sent to
+    // Rust - not the display fallback word, which would rename the retried
+    // file on disk (a requested name outranks Content-Disposition there).
+    const restored = deserializeItems(
+      serializeItems([
+        item({ status: 'error', canResume: true, name: 'Setup.exe', filename: 'Setup.exe' }),
+        // Absent must round-trip as absent, never as an empty-string hint.
+        item({ status: 'error', canResume: true, name: 'Download' }),
+      ])
+    );
+    expect(restored[0].filename).toBe('Setup.exe');
+    expect(restored[1].filename).toBeUndefined();
+  });
+
   it('a corrupted store degrades to an empty panel, never a crash', () => {
     expect(deserializeItems('not json at all')).toEqual([]);
     expect(deserializeItems('{"url": "oops"}')).toEqual([]);

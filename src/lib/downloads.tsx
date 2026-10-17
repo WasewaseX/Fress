@@ -30,6 +30,15 @@ export interface DownloadItem {
   id: number;
   url: string;
   name: string;
+  /** The exact filename hint this transfer's start carried to Rust (the
+   * `filename` argument of the start_download invoke). Absent = Rust
+   * derives the name from the response itself. Retry re-sends THIS, never
+   * the display name: the display name falls back to a localized
+   * placeholder word when nothing could be guessed, and Rust lets a
+   * requested name outrank Content-Disposition - a retry that passed the
+   * placeholder word would save the file under a literal "Download"
+   * instead of the server-provided name. */
+  filename?: string;
   dir: string;
   bytes: number;
   total: number;
@@ -312,12 +321,39 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   /** Re-entrancy guard: promotions run from event handlers; while one
    * promotion is dispatching, the others must wait their turn. */
   const promotingRef = useRef(false);
-  /** Authoritative count of in-flight Rust transfers. itemsRef can be stale
-   * between two rapid startDownload calls (React has not committed yet),
-   * which would let a batch overshoot the limit; this counter is updated at
-   * the exact moments a slot is taken (start succeeded) and freed (Rust
-   * reported completion/error/cancel). */
-  const activeSlotsRef = useRef(0);
+  /** Slot ownership for the concurrency gate, keyed by the Rust download id.
+   * A plain counter raced the event channel: a fast-completing transfer can
+   * deliver download-complete BEFORE start_download's invoke resolves (the
+   * pendingEvents buffer below exists for exactly that timing), so the
+   * handler's decrement hit a count the start had not raised yet - the
+   * later increment then leaked the slot, the gate read permanently high
+   * and the queue stalled with free capacity. Per-id ownership is
+   * order-proof: whichever of {start resolved, terminal observed} lands
+   * first records the id, the other signal clears it, and a repeated
+   * terminal event cannot free a second slot. itemsRef staleness between
+   * rapid startDownload calls (React has not committed yet) does not
+   * matter here: this set is updated at the exact moments a slot is taken
+   * (start resolved) and freed (Rust reported completion/error/cancel). */
+  const activeSlotIdsRef = useRef<Set<number>>(new Set());
+  /** Terminal events that arrived for an id whose start had not resolved
+   * yet (so its slot was never taken). Consumed by the start path, which
+   * would otherwise resurrect the slot after the fact. */
+  const terminalBeforeStartRef = useRef<Set<number>>(new Set());
+  /** A queued row the user cancelled while its entry was already shifted
+   * out of the line and its Rust transfer was still starting. The pump
+   * consumes the marker the moment the real id is known and cancels the
+   * transfer, instead of letting a "cancelled" download run on unnamed. */
+  const cancelledWhileStartingRef = useRef<Set<number>>(new Set());
+  /** The transfer takes its slot exactly once, at whichever of the two
+   * signals arrives first. */
+  const noteSlotTaken = (id: number): void => {
+    if (!terminalBeforeStartRef.current.delete(id)) activeSlotIdsRef.current.add(id);
+  };
+  /** The terminal event gives the slot back exactly once, no matter how
+   * the start/terminal ordering played out. */
+  const noteSlotReleased = (id: number): void => {
+    if (!activeSlotIdsRef.current.delete(id)) terminalBeforeStartRef.current.add(id);
+  };
   /** Events that arrived for a download whose item was not inserted yet
    * (the file can finish before start_download's invoke resolves). Keyed
    * by id, drained by startDownload right after the item is inserted. */
@@ -394,7 +430,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [persistence]);
 
   /** How many Rust downloads are transferring right now. */
-  const activeTauriCount = (): number => activeSlotsRef.current;
+  const activeTauriCount = (): number => activeSlotIdsRef.current.size;
 
   /** Start the next queued download(s) while slots are free. Called after
    * every state change that can free a slot: completion, error, cancel,
@@ -414,14 +450,23 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           setItems((prev) =>
             prev.filter((it) => !(it.status === 'queued' && it.id === next.localId))
           );
+          let startedId: number | null = null;
           try {
-            await startTauriDownload(next.url, next.name, next.opts);
+            startedId = await startTauriDownload(next.url, next.name, next.opts);
           } catch {
             // startTauriDownload already showed the error toast and did not
             // take a slot. The pump itself must survive: letting this
             // rejection escape killed the whole promotion loop with an
             // unhandled rejection and left every later queued entry stuck
             // until some unrelated event happened to fire promoteQueued.
+          }
+          // Consume the cancel marker for THIS entry whether or not the
+          // start succeeded: with a transfer running, the marker means
+          // cancel_download for the fresh id (the terminal event then moves
+          // the row into the cancelled state the user asked for); without
+          // one, the marker is simply retired.
+          if (cancelledWhileStartingRef.current.delete(next.localId) && startedId !== null) {
+            void invoke('cancel_download', { id: startedId }).catch(() => undefined);
           }
         }
       } finally {
@@ -482,7 +527,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       const p = event.payload;
       applyItemUpdate(p.id, (it) => ({ ...it, status: 'completed', path: p.path, bytes: p.bytes, sha256: p.sha256, verified: p.verified === true ? true : undefined, total: p.bytes, speed: 0, eta: 0, canResume: false }));
       const item = itemsRef.current.find((it) => it.id === p.id);
-      activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
+      noteSlotReleased(p.id);
       const tt = tRef.current;
       // formatMessage, not .replace: a value is inserted LITERALLY, so a
       // name or a Windows path carrying `$&`/`$$`-style replacement
@@ -527,8 +572,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     listen<{ id: number; message: string; kind?: string }>('download-error', (event) => {
       const p = event.payload;
       // Every terminal Rust state (cancelled, failed, checksum-mismatch)
-      // frees the slot this transfer occupied.
-      activeSlotsRef.current = Math.max(0, activeSlotsRef.current - 1);
+      // releases the slot this transfer occupied - exactly once, and in a
+      // race-proof order (see noteSlotReleased): a terminal event that
+      // beats the start's invoke resolution must not free a slot the start
+      // would later take.
+      noteSlotReleased(p.id);
       const tt = tRef.current;
       if (p.message === 'Cancelled') {
         applyItemUpdate(p.id, (it) => ({ ...it, status: 'cancelled', canResume: true }));
@@ -584,9 +632,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [items]);
 
   /** The direct invoke path: hand one download to Rust and insert its item.
-   * No queue logic here - callers above decide WHEN this may run. */
+   * No queue logic here - callers above decide WHEN this may run. Returns
+   * the Rust id on success; a rejected start has already shown the error
+   * toast and resolves to nothing (throws) without ever taking a slot. */
   const startTauriDownload = useCallback(
-    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null }): Promise<void> => {
+    async (url: string, nameHint?: string, opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null }): Promise<number> => {
       // A malformed %-escape (e.g. a URL containing a bare "%") makes
       // decodeURIComponent throw - BEFORE the invoke try-block below is
       // entered, so startDownload would reject with a raw URIError instead
@@ -623,12 +673,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           expectedSha512: opts?.expectedSha512 || null,
           resume: opts?.resume || false,
         });
-        activeSlotsRef.current += 1;
+        noteSlotTaken(id);
         setItems((prev) => [
           {
             id,
             url,
             name: guessedName || tRef.current('downloads.toast.downloadFallback'),
+            // Remember what was actually sent to Rust, so a retry re-sends
+            // the SAME hint (or none) instead of the display fallback word.
+            filename: guessedName || undefined,
             dir: dir || '',
             bytes: 0,
             total: 0,
@@ -641,6 +694,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           },
           ...prev,
         ]);
+        return id;
       } catch (e) {
         toast.error(tRef.current('downloads.toast.startFailed'), { description: String(e) });
         throw e;
@@ -713,6 +767,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
               id: localId,
               url,
               name: guessedName || tRef.current('downloads.toast.downloadFallback'),
+              filename: nameHint || undefined,
               dir: 'Queued',
               bytes: 0,
               total: 0,
@@ -748,9 +803,15 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (item && item.status === 'queued') {
       // Still waiting: no Rust transfer exists yet. Drop it from the line
       // by the row's identity - a URL match would evict a sibling row that
-      // queued the same file for a different folder.
-      queueRef.current.removeById(id);
+      // queued the same file for a different folder. removeById returning
+      // zero means the entry is mid-promotion: the pump already shifted it
+      // and its start_download is in flight, while this row still reads
+      // 'queued'. The marker makes the pump cancel the transfer the moment
+      // the real id is known - without it, a download the user cancelled
+      // silently ran to completion in the background.
+      const removed = queueRef.current.removeById(id);
       setItems((prev) => prev.filter((it) => it.id !== id));
+      if (removed === 0) cancelledWhileStartingRef.current.add(id);
       return;
     }
     invoke('cancel_download', { id })
@@ -761,18 +822,27 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const retry = useCallback(
     (id: number, resume?: boolean) => {
       const item = itemsRef.current.find((it) => it.id === id);
-      if (item) {
-        setItems((prev) => prev.filter((it) => it.id !== id));
-        void startDownload(item.url, item.name, {
-          expectedSha256: item.expectedSha256,
-          expectedSha512: item.expectedSha512,
-          resume: resume || false,
-          // Retry the SAME download: it belongs to the folder it started
-          // in. Resume without this would hunt for the .part file in the
-          // currently selected folder and silently start over.
-          dir: item.dir || undefined,
-        });
-      }
+      if (!item) return;
+      // Retry is a terminal-state action. A live transfer is cancel(), not
+      // retry(): removing an active row would orphan a transfer that keeps
+      // downloading with no panel entry while a duplicate starts, and
+      // removing a queued row would race the promotion pump.
+      if (item.status === 'active' || item.status === 'queued') return;
+      setItems((prev) => prev.filter((it) => it.id !== id));
+      // The WIRE hint (item.filename), not the display name: the display
+      // name falls back to a localized placeholder word when nothing was
+      // guessable, and a requested name outranks Content-Disposition on
+      // the Rust side - passing the placeholder would save the retried
+      // file under a literal "Download" instead of the server's name.
+      void startDownload(item.url, item.filename, {
+        expectedSha256: item.expectedSha256,
+        expectedSha512: item.expectedSha512,
+        resume: resume || false,
+        // Retry the SAME download: it belongs to the folder it started
+        // in. Resume without this would hunt for the .part file in the
+        // currently selected folder and silently start over.
+        dir: item.dir || undefined,
+      });
     },
     [startDownload]
   );

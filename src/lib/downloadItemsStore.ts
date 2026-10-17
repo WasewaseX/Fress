@@ -43,6 +43,10 @@ export function serializeItems(items: DownloadItem[], limit: number = MAX_PERSIS
     .map((it) => ({
       url: it.url,
       name: it.name,
+      // The wire hint rides along so a retry after a restart re-sends what
+      // the original start sent - not the display fallback word, which
+      // would rename the retried file on disk.
+      filename: it.filename,
       dir: it.dir,
       bytes: it.bytes,
       total: it.total,
@@ -88,6 +92,7 @@ export function deserializeItems(raw: string | null): Array<Omit<DownloadItem, '
       .map((it) => ({
         url: it.url as string,
         name: it.name as string,
+        filename: typeof it.filename === 'string' && it.filename ? it.filename : undefined,
         dir: typeof it.dir === 'string' ? it.dir : '',
         bytes: typeof it.bytes === 'number' ? it.bytes : 0,
         total: typeof it.total === 'number' ? it.total : 0,

@@ -842,8 +842,8 @@ fn record_download_directory(
     if trimmed.is_empty() {
         return Err(OPEN_NOT_REGISTERED_REFUSAL.to_string());
     }
-    let canon = std::fs::canonicalize(trimmed)
-        .map_err(|_| OPEN_NOT_REGISTERED_REFUSAL.to_string())?;
+    let canon =
+        std::fs::canonicalize(trimmed).map_err(|_| OPEN_NOT_REGISTERED_REFUSAL.to_string())?;
     let mut dirs = session.0.lock().expect("session dirs poisoned");
     dirs.retain(|d| d != &canon);
     dirs.insert(0, canon);
@@ -879,10 +879,7 @@ fn open_download_dir(
     let platform_dir = platform_download_dir(&app);
     let default_dir = std::fs::canonicalize(&platform_dir).unwrap_or(platform_dir);
     let admitted = canon == default_dir
-        || registry
-            .completed_parent_dirs()
-            .iter()
-            .any(|d| d == &canon)
+        || registry.completed_parent_dirs().iter().any(|d| d == &canon)
         || session
             .0
             .lock()

@@ -15,9 +15,9 @@
  * The binding contract asserted here (docs/download-lifecycle.md + the
  * DownloadManager implementation):
  *   - Open ("Open file") exists ONLY on a completed row with a non-empty
- *     path, and calls plugin:opener|open_path with { path: <exact value>,
+ *     path, and calls open_downloaded_file with { path: <exact value>,
  *     with: null } - the OS default app, never a shell string.
- *   - Show in folder ("Show in folder") calls plugin:opener|reveal_item_in_dir
+ *   - Show in folder ("Show in folder") calls reveal_download_file
  *     with { paths: [<exact completed file>] }, and degrades to opening the
  *     CONTAINING folder when the reveal is refused, then to an honest error.
  *   - No queued/active/verifying/retrying/failed/cancelled row exposes any
@@ -166,7 +166,7 @@ function openButton(row: Locator): Locator {
 }
 
 /** The shipped open contract (round-28 rewrite): EVERY artifact class is
- * handed to plugin:opener|open_path on the first press - the OS association
+ * handed to open_downloaded_file on the first press - the OS association
  * is the authority, and the only native fallback (the validated AppImage
  * launcher) fires BELOW that boundary, only after open_path refuses and
  * only where the launcher exists. There is no confirm step in the UI; the
@@ -717,7 +717,7 @@ test.describe('Workflow K: the download-to-open journey', () => {
     await expect
       .poll(async () => (await openerTraffic(page)).open)
       .toEqual([
-        { cmd: 'plugin:opener|open_path', id: 0, path: destination, with: null },
+        { cmd: 'open_downloaded_file', id: 0, path: destination, with: null },
         { cmd: 'launch_app_image_artifact', id, path: destination, with: null },
       ]);
 
@@ -732,8 +732,8 @@ test.describe('Workflow K: the download-to-open journey', () => {
     await openButton(done).click();
     await expect(page.getByText(d['downloads.toast.openFileFailed'])).toBeVisible();
     const traffic = (await openerTraffic(page)).open;
-    expect(traffic).toHaveLength(4); // two attempts: open_path + launcher each
-    expect(traffic[2]).toEqual({ cmd: 'plugin:opener|open_path', id: 0, path: destination, with: null });
+    expect(traffic).toHaveLength(4); // two attempts: validated open + launcher each
+    expect(traffic[2]).toEqual({ cmd: 'open_downloaded_file', id: 0, path: destination, with: null });
     expect(traffic[3]).toEqual({ cmd: 'launch_app_image_artifact', id, path: destination, with: null });
 
     // The row stays completed and the failure was a handled promise.

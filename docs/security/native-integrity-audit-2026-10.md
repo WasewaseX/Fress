@@ -1,4 +1,4 @@
-# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9 + handoff re-execution at the pushed head, §10.10)
+# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9 + handoff re-execution at the pushed head, §10.10 + full-coverage read at the final head §10.11)
 
 Audit scope: `src-tauri/src/**` on the integrated stable candidate — branch
 `integrate/stable-candidate` (PR #85 head `a9c38f02`, which integrates PRs
@@ -742,6 +742,232 @@ Verdict of this round: **PASS** — every executable claim of §10.3–§10.9 wa
 re-executed on the pushed head `202d002` and held; the audit record is
 accurate as it stands, now with the §1 inventory reconciled.
 
+### 10.11 Full-coverage read round: CI completed at `2075038`, every owned file read end to end (Agent 6, fresh token round)
+
+This round closed the two items §10.10 left open — the CI runs that were
+still in flight when that round pushed, and the targeted-read shape of the
+source review — after the environment was reset again (the sandbox lost the
+cargo PATH between turns; `~/.cargo/bin` and the pinned 1.98.1 toolchain
+survived, and a fresh fine-grained token supplied by the repository owner
+replaced the revoked one for git + REST access).
+
+**CI completion at the final PR head `2075038`.** The §10.10 table showed
+4 of 12 checks green within 45 s of the push. With the new token the REST
+check-run query at the same SHA now reports **12 of 12 `success`**,
+including `Rust fmt, clippy, tests (linux)`, `Rust tests (windows-latest)`,
+`Rust tests (macos-latest)`, and both author guards. The docs-only delta
+`202d002..2075038` is exactly the §10.10 report (105 lines in this file,
+zero source lines), so the §10.3–§10.9 evidence at `202d002` transfers to
+the pushed head unchanged.
+
+**Gates re-run on the current tree (= PR head `2075038`).** Harness
+**162/162** (`96 + 52 + 14`, 30.1 s), harness clippy `-D warnings` PASS,
+`cargo fmt --check` PASS in `src-tauri`, and `cargo audit` (0.22.2, live
+advisory DB re-fetched this round) exit 0 with the same 7 known warnings
+and **0 vulnerabilities** — no new advisory published since §10.4.
+
+**First complete line-coverage read of every owned file.** Earlier rounds
+verified the security-critical regions by targeted reads plus kill-tests;
+this round read the full production surface at the pushed head:
+
+| File (lines read) | Focus of the read | Verdict |
+| --- | --- | --- |
+| `http_body.rs` (460, all) | Both cap rails: check-before-extend in u64; `room` subtraction cannot underflow (loop invariant `buf.len() ≤ cap`); JSON-refuses / text-truncates contrast; exactly-at-cap boundary pins; slow-drip time-rail pin | CLEAN |
+| `network_policy.rs` (928, all) | Admission (https-only, credentials, exact-host post-normalization), hop evaluation order with the path pin LAST (:697), v4 table completeness (`b[0] < 224` tail), v6 `2000::/3` gate — confirmed `2001:db8::/32` is NOT shadowed by the `/23` check (`0x0db8 & 0xfe00 = 0x0c00 ≠ 0`, both rows load-bearing), IPv4-mapped/NAT64/Teredo refused by the native-unicast gate, `PathPin` prefix ends with `/` (defeats `FressEvil` siblings), resolver never caches | CLEAN |
+| `download_finalize.rs` (1–2012 production, all) | State-machine table = documented spec; registry cap FIFO + replace-by-canonical; `percent_decode` bounds; `sanitize_filename` keeps no separators, collapses `.`/`..`/reserved names; `validate_resume_content_range` checked arithmetic; `evaluate_response` 200/206/416 matrix; link-refused fallback set (unix 1\|2\|13\|18\|30\|38\|95, windows 1\|5\|17\|50); reservation-copy cleans a failed commit; streaming loop cancel + 60 s stall + checked counter; flush+sync before commit; record only after commit | CLEAN |
+| `artifact_open.rs` (780, all) | Name gates (staging/sidecar/`.sig` case-insensitive, `..` components, no file-name), `symlink_metadata` shape gate, AppImage-only routing, negative-id and `u32::try_from` gates (:238), id binding, canonical + size stability at plan AND launch time, argv-only spawn with nulled stdio, `0o100` chmod restricted to the validated file; 20 unit tests pin every gate | CLEAN |
+| `network_policy/tests.rs` (1374, all) | 52 tests: per-class admission, credential/userinfo disguises, v4/v6 boundary rows, IDN/punycode/trailing-dot look-alikes, zone ids, redirect decisions incl. loops/budget/allowlist/pin, strict-policy drift guard, scripted resolver (mixed / all-private / rebinding re-check / lookup failure), literals-skip-DNS pin, self-update 3-host allowlist + `.sig` rides the same policy + path-pin matrix incl. the dot-segment escape; spot-read the rebinding and path-pin bodies — both assert what their names claim | CLEAN, no material coverage gap |
+
+**Cross-file boundary check (read-only, `lib.rs` not owned).** The one
+unverified ingress into the engine's filename handling was
+`DownloadPlan.requested_name`: inside `download_finalize.rs` only header- and
+URL-derived names pass through `sanitize_filename`, so a pass-through of the
+frontend-supplied name would have allowed `dir.join()` traversal. Verified
+closed: `start_download` (lib.rs:942) is the ONLY production plan-construction
+site, it sanitizes at lib.rs:980 (`filename.map(|n| sanitize_filename(&n))`)
+AFTER the URL has been admitted and BEFORE any filesystem side effect, and the
+spawned task wraps the engine in `catch_unwind` with an unconditional
+`session.release()` — matching the module invariant that no failure path can
+leave an active-set entry behind. No change needed.
+
+Defect hunt result of this round: **no new production defect**; the PR diff
+remains exactly the two files it has been since `202d002`. Scope statement
+unchanged: the Tauri-free harness proves the engine/policy/body modules;
+`lib.rs`, `artifact_open.rs` and `download_integration.rs` remain CI-proven;
+§9's hardware rows remain NOT RUN.
+
+Verdict of this round: **PASS** — CI evidence is now complete at the pushed
+head, and the audit's source-review claim can be upgraded from
+"security-critical regions verified" to "every owned production file read in
+full at the pushed head, with the one cross-file ingress boundary verified
+closed".
+
+### 10.12 Round 4: the v1.0.1 stable boundary — independent re-verification after the open/reveal redesign (Agent 6, fresh sandbox)
+
+Why a fourth round: after §10.10/§10.11 closed on the audited tree
+(`2075038`), main kept moving and **shipped two stable releases**. PR #95
+("close every reported defect, gate open/reveal natively, enforce TS
+strict") rebuilt exactly the territory this audit owns — the open/reveal
+boundary — and `v1.0.1` was tagged on top of it. Claims are re-verified on
+the exact new SHA; nothing from §10.1–§10.11 is reused on a different tree.
+
+**Tested source (exact refs).** Tag `v1.0.1` = commit `7fcb4fe31012`
+(also current `main` tip at the time of this round, which includes the PR
+#95 boundary redesign, PR #98's release commit `16a2359`, and the CI-only
+fixes #99/#100). Diff from the §10.11 tree (`2075038`) touches 86 files;
+the audit-relevant subset is enumerated below. The unmerged head of PR #94
+(`c662993`, docs-only §10.11) is carried onto this round's branch by
+cherry-pick so the section numbering stays continuous.
+
+**What changed in owned territory since `2075038` (read in full):**
+
+- `download_finalize.rs` (+46/-6): (a) new `completed_parent_dirs()` —
+  canonicalized, deduplicated parents of this session's completed
+  artifacts, feeding the directory-admission rule of the new
+  `open_download_dir`; (b) `sanitize_filename` hardening — Windows
+  trailing-dot/space parity (`readme.` / `readme. ` now strip to the name
+  Windows actually materializes; an all-dots run `"..."` strips to empty
+  and collapses to `download.bin`, where the old rule caught only `.` and
+  `..`). Both changes verified against the code: the hardening strictly
+  narrows accepted names; `completed_parent_dirs` derives only from
+  engine-committed canonical records.
+- `download_integration.rs` (+43): three new deterministic tests pinning
+  (a) all-dots collapse, (b) trailing-dot/space parity incl. reserved
+  `NUL.`, (c) Content-Disposition dot-run names. Executed below.
+- `lib.rs` (+164/-23, **report-only file** for this audit): the boundary
+  redesign — `opener:allow-open-path` /
+  `opener:allow-reveal-item-in-dir` removed from
+  `capabilities/default.json` (verified: the permission array now grants
+  only event listen/unlisten, `path:dirname`, `dialog:open`, and
+  https-scoped `open-url`); desktop dispatch of `open_downloaded_file` now
+  exists (opener plugin's **Rust** API, capability files gate webview IPC
+  only); new commands `reveal_download_file` (same
+  `resolve_completed_artifact` discipline via `spawn_blocking`),
+  `open_download_dir` (admits only: platform default download folder, OR a
+  `completed_parent_dirs()` member, OR a `record_download_directory`
+  admission; every refusal the uniform typed code; Android refused typed),
+  and `record_download_directory` (in-memory, LRU-capped at 32,
+  session-scoped by design — the code comment correctly argues a persisted
+  admission set would let webview-influenced state outlive the process
+  that verified the pick).
+- `docs/security/tauri-security.md` (+33): the permission matrix and the
+  residual-risk statement updated to the new architecture; verified
+  consistent with the capability file and the command code, with one
+  refinement noted below (finding R4-1).
+
+**Independent re-execution (fresh sandbox, toolchain exactly
+`rustc 1.98.1` / rustfmt 1.9.0 / clippy 0.1.98 per `rust-toolchain.toml`):**
+
+- Harness rebuilt at `7fcb4fe`: production files **symlinked verbatim**
+  (never copied) — `http_body.rs`, `network_policy.rs` +
+  `network_policy/tests.rs`, `artifact_open.rs`, `download_finalize.rs`,
+  `download_integration.rs`; the `tauri` dependency is an inert local stub
+  (pass-through `#[command]` proc-macro + never-constructed `State`); the
+  lib.rs root items `download_integration.rs` imports (`fetch_text`, the
+  GhRelease/FdroidPackage structs and callees) are **machine-extracted
+  verbatim** from the audited `lib.rs` by a checked-in generator script
+  (`scripts/extract_root_items.py`, source SHA recorded in the generated
+  header — no hand-copies). Direct dependencies `=`-pinned to the exact
+  `src-tauri/Cargo.lock` resolutions: reqwest 0.12.28, serde 1.0.229,
+  serde_json 1.0.151, sha2 0.10.9, tokio 1.53.1, futures-util 0.3.34.
+  Disclosed deviation: blanket `#![allow(dead_code)]` at the harness root.
+- **Native tests: 209 passed, 0 failed** (http_body 14, network_policy 52,
+  artifact_open 23, download_finalize 96, download_integration 24 —
+  exact `--list` census). Up from 162 at §10.10's tree: PR #95's suites
+  grew the owned-module count by 47.
+- fmt: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` — exit
+  0 on the full workspace. clippy: `-D warnings` clean on every owned
+  module via the harness (the full-workspace clippy remains CI-proven:
+  run on `c662993`'s mergeable ancestor, linux/windows/macos all green —
+  12/12 checks at the PR head).
+- **Kill-tests executed this round (guard deleted → named tests run →
+  guard restored → clean tree re-verified green):**
+  1. `sanitize_filename` trailing-dot strip disabled →
+     `all_dot_runs_collapse_to_the_safe_default`,
+     `trailing_dots_and_spaces_strip_to_the_name_windows_will_create`,
+     `content_disposition_dot_run_filename_collapses` and
+     `dot_dot_and_empty_collapse_to_the_safe_default` all FAIL. Restored.
+  2. Byte-identity validator-less discard disabled (the `if false &&`
+     mutation at the `discard_staging` rule) →
+     `a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail`
+     FAILS — the §10.5 guard-sensitive pin still bites exactly as
+     designed (the 206-shape catches what the 200-shape cannot).
+     Restored.
+  3. `PathPin::admits` host comparison inverted (`!=` → `==`) →
+     `the_self_update_path_pin_binds_github_hops_to_the_fress_repo` and
+     `the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin`
+     both FAIL. Restored; full suite re-run green (209/209).
+
+**Dependency audit re-run at `v1.0.1`'s `src-tauri/Cargo.lock`**
+(cargo-audit 0.22.2, advisory DB as of 2026-10-18): **0 vulnerabilities;
+10 warnings** (9 unmaintained + 1 unsound). Drift since §10.7's "7
+warnings": three NEW 2026 advisories on the Linux DBus stack that Tauri
+pulls in — `zbus_names` (RUSTSEC-2026-0371), `zvariant`
+(RUSTSEC-2026-0370), `zvariant_derive` (RUSTSEC-2026-0372), all
+"unmaintained" classifications with no fix release; the pre-existing
+`proc-macro-error`, `unic-*` (×5) and `glib` unsound advisory are
+unchanged. None is in Fress-owned code; all remain transitive to Tauri's
+Linux backend. CI policy unchanged (security.yml `cargo audit` is
+`continue-on-error` on purpose, documented; the job succeeded at the
+release commit `4528009`).
+
+**Defect hunt at the new tree — one finding, severity LOW (report-only,
+`lib.rs` is outside the audit's fix scope):**
+
+- **R4-1 — `record_download_directory` is webview-callable with an
+  arbitrary path.** The command takes any `dir: String`, canonicalizes it,
+  and inserts it into the session admission set on success — there is no
+  native binding between the call and an actual picker interaction
+  (the native `dialog` plugin cannot hand the app a "the user really
+  picked this" token that the command could demand). A compromised
+  webview can therefore self-admit any existing directory (e.g.
+  `invoke('record_download_directory', { dir: '/home/user' })`) and then
+  `open_download_dir` it. Impact is bounded and honest: a file-manager
+  window on a directory the user can see being opened — **no file can be
+  opened** (the file path stays registry-bound), **no content returns to
+  the webview** (no read/readdir command exists), no exec surface, the
+  refusal code is uniform, and the set is in-memory only. This is still a
+  strict improvement over the pre-redesign grants, which allowed opening
+  any file with the OS handler. Two corrections follow from it:
+  (a) `docs/security/tauri-security.md`'s residual-risk sentence ("the
+  effective blast radius is 'files the engine itself committed this
+  session'") is true for FILES but slightly understates the DIRECTORY
+  surface — a compromised webview can pop a file-manager window on any
+  existing directory, not only engine-touched ones; (b) if the project
+  wants the "user picked it" invariant enforced natively, the admission
+  should be recorded inside the dialog plugin's accept path (native side
+  of the picker) rather than by a webview-invoked command — or the
+  command should require a one-time admission token minted by the dialog
+  plugin's accept handler. Routed to the boundary owner; no fix attempted
+  from this audit (file ownership).
+
+**Tag-level verification of the two stable releases** (both tags fetched
+and diffed directly): `v1.0.0` = `e8830c4` (= `78d5e8f`, the tree §10.1–
+§10.11 already audited: grants present, desktop open/reveal via the
+plugin JS API, `open_downloaded_file` desktop-dispatching to the opener
+plugin's Rust API) — its release notes' account of a desktop
+open/reveal regression is the release owner's record and outside this
+audit's scope; what this audit verifies independently is the endpoint:
+`v1.0.1` grants are REMOVED, every webview-reachable open/reveal flows
+through registry-validated commands, and the boundary's own test battery
+(§10.12 re-execution) is green with kill-test-proven teeth.
+
+**PR #94 status at this round's close:** 3 of its 4 commits (`cf27c20`,
+`202d002`, `2075038`) are merged into `main` (verified by
+`merge-base --is-ancestor`); only the docs-only head `c662993` remains,
+CI 12/12 green at that head; this round's branch carries the same commit
+as `b51cc7c` so the sections merge in order.
+
+**Verdict of Round 4: PASS.** The v1.0.1 boundary redesign was verified
+end to end at the tagged SHA: the owned-file changes are hardening plus
+tests, the redesign's claims hold in code and in execution, three new
+kill-tests prove the guards have teeth, and the dependency baseline is
+unchanged in kind (0 vulnerabilities; 10 advisory-grade transitive
+warnings, three of them new 2026 unmaintained classifications on
+Tauri's Linux stack). One LOW finding (R4-1) is reported to the boundary
+owner with a concrete native-enforcement recommendation; no known
+security or correctness defect remains in the audit-owned code.
+
 ## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified
@@ -760,7 +986,10 @@ final tree re-audits clean.**
   the size-cap/timeout rails are proven independently enforced by loopback
   tests that run against the real readers (161/161 locally executed on the
   final tree; per-module: download_finalize 95, network_policy 52,
-  http_body 14).
+  http_body 14). Reconciled by the handoff rounds: the strengthened
+  byte-identity fixture brings this to 162/162 (download_finalize 96) at the
+  pushed PR head, re-executed and CI-green there; §10.11 records the
+  full-coverage read of every owned file at that head.
 - The trust boundaries hold end to end: registry → verification → launch
   (now re-checked at the launch instant), admission → per-hop rules →
   public-only DNS (now path-pinned for the self-update feed), embedded-key

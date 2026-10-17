@@ -3871,15 +3871,24 @@ export function isRtl(lang: Language): boolean {
  * The consumer-side `dict.replace('{x}', v)` pattern only replaced the
  * FIRST occurrence of a token and - worse - interpreted `$&`-style
  * replacement patterns inside the VALUE, so a filename like "a$&b.txt"
- * corrupted the very toast announcing it. split/join replaces every
- * occurrence and inserts the value literally.
+ * corrupted the very toast announcing it. split/join replaced every
+ * occurrence and dodged the `$` patterns - but it ran one pass PER TOKEN,
+ * so text inserted by an earlier pass was re-scanned by the later ones:
+ * a custom app named "X {host} Y" rendered through a {name}/{host}
+ * template had its literal "{host}" swapped for the real host. This
+ * implementation scans the template ONCE (a combined alternation over the
+ * known tokens) and inserts every value through a function replacer,
+ * whose return value the engine treats as literal text: no `$` pattern
+ * interpretation, no re-scan, every occurrence replaced.
  */
 export function formatMessage(template: string, values: Record<string, string | number>): string {
-  let out = template;
-  for (const [token, value] of Object.entries(values)) {
-    out = out.split(`{${token}}`).join(String(value));
-  }
-  return out;
+  const entries = Object.entries(values);
+  if (entries.length === 0) return template;
+  const alternation = entries
+    .map(([token]) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const pattern = new RegExp(`\\{(${alternation})\\}`, 'g');
+  return template.replace(pattern, (_match, token: string) => String(values[token]));
 }
 
 interface I18nContextValue {

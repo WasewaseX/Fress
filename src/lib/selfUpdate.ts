@@ -286,12 +286,23 @@ export function compareVersions(a: string, b: string): number {
 /**
  * How rough a version is: 0 stable, 1 beta/rc, 2 alpha/dev/anything else.
  * Used for channel filtering, not for ordering (ordering is SemVer).
+ *
+ * Stage 1 is reserved for the release stages this project actually
+ * publishes and documents (every prerelease tag to date is "beta"; the
+ * release workflow additionally names rc). The match is the FIRST
+ * dot-separated identifier, whole-token, optionally numbered ("beta",
+ * "beta2", "rc", "rc.1"). Substring and single-letter prefix tests would
+ * classify UNKNOWN identifiers as Beta: "1.0.5-source" CONTAINS "rc"
+ * (sou-rc-e) and "1.0.5-build.1" STARTS WITH "b" - under the old rule both
+ * were offered to Beta-channel users as routine updates. Unknown labels
+ * now fall to stage 2, which keeps them visible on Alpha (the widest
+ * channel) without ever widening Beta.
  */
 function prereleaseStage(v: ParsedVersion): number {
   if (v.prerelease.length === 0) return 0;
   const first = v.prerelease[0].toLowerCase();
-  if (first.includes('rc')) return 1;
-  if (first.startsWith('beta') || first.startsWith('b')) return 1;
+  if (/^rc\d*$/.test(first)) return 1;
+  if (/^beta\d*$/.test(first)) return 1;
   return 2;
 }
 

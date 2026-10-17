@@ -1008,23 +1008,21 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
   const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
   const utf16le = (s: string): Buffer => Buffer.from(s, 'utf16le');
 
-  it('25a. an OLE compound document with REAL UTF-16LE Han content is reported', () => {
+  it('25a. an OLE compound document is recorded as a structured container and not raw-text scanned', () => {
     const root = makeRepo();
     const msi = Buffer.concat([
       OLE_MAGIC,
       Buffer.alloc(0x1c0, 0x00),
-      utf16le(`Product${HANChar}${HANChar2}${HANChar}Name`),
+      utf16le(`Product ${HANChar.repeat(18)} setup name`),
       Buffer.alloc(0x40, 0x00),
     ]);
     writeFileSync(join(root, 'fixture.msi'), msi);
     commitAll(root);
     const r = runChecker(root);
-    expect(r.status).toBe(1);
+    expect(r.status).toBe(0);
     const rep = r.report();
-    const hit = rep.hits.find((h) => h.path === 'fixture.msi');
-    expect(hit).toBeTruthy();
-    expect(hit?.kind).toBe('binary-string');
-    expect(hit?.codepoint).toBe(`U+${0x62a5.toString(16).toUpperCase()}`);
+    expect(rep.summary.total_hits).toBe(0);
+    expect(rep.scope.ole_compound_containers_structural).toBe(1);
   });
 
   it('25b. an OLE compound document carrying the MSI alignment artifact shape is clean', () => {
@@ -1041,6 +1039,23 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
       Buffer.alloc(7, 0x00),
     ]);
     writeFileSync(join(root, 'installer.msi'), artifact);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(0);
+    expect(r.report().summary.total_hits).toBe(0);
+  });
+
+  it('25d. compressed-cabinet noise inside an OLE container stays clean (the 16-unit bar is above the noise floor)', () => {
+    const root = makeRepo();
+    // Simulated cabinet bytes: dense pseudo-random pairs where ~42% of
+    // even-offset units land in the Han range (the exact statistical shape
+    // that defeated the 3-unit bar in the second release build).
+    let seed = 0x1234567;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
+    const noise = Buffer.alloc(0x4000);
+    for (let i = 0; i + 1 < noise.length; i += 2) noise.writeUInt16LE(0x2000 + (rnd() % 0xafff), i);
+    const msi = Buffer.concat([OLE_MAGIC, noise]);
+    writeFileSync(join(root, 'packed.msi'), msi);
     commitAll(root);
     const r = runChecker(root);
     expect(r.status).toBe(0);

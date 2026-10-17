@@ -2608,6 +2608,69 @@ mod tests {
         assert_eq!(session.snapshot().await, Some(DownloadState::Completed));
     }
 
+    #[tokio::test]
+    async fn a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail() {
+        // Kill-test closure for the byte-identity rule (round 3 audit). The
+        // sibling test above drives the 200-answer shape, where the truncate
+        // path ALSO removes the unprovable prefix - so disabling the rule
+        // does NOT fail that test (found by executing the kill-test this
+        // round: the guard was deleted and the named test still passed). The
+        // dangerous shape is a server that answers the resume's `Range` with
+        // a 206: only the rule's discard-BEFORE-request prevents an
+        // unprovable prefix from being glued to a hostile tail and
+        // finalized. This test pins that exact ordering: after the discard,
+        // the request must go out with NO Range header, the 206 must be
+        // refused as a partial body for a range-less request, and the
+        // poisoned hybrid must exist nowhere - not as a staging file, not as
+        // a completed artifact, not as a registry record.
+        let tmp = TempDir::new("no-validator-206");
+        let part = tmp.path().join("file.bin.part");
+        tokio::fs::write(&part, b"12345").await.unwrap();
+        let headers = reqwest::header::HeaderMap::new(); // no validators
+        write_part_meta(&part, "https://example.com/file.bin", &headers).await;
+        assert!(read_part_meta(&part).await.is_some());
+
+        // Hostile/broken origin: answers ANY request with a 206 continuing
+        // exactly from the staged length (5) - the glue shape a full-200
+        // server can never produce.
+        let server = spawn_mock(vec![MockReply::partial_206("bytes 5-14/15", &pattern(10))]);
+        let plan = DownloadPlan {
+            resume: true,
+            ..plan_for(&server.url, tmp.path(), Some("file.bin"))
+        };
+        let (session, cancel_rx) = test_session().await;
+        let log = EventLog::default();
+        let result = execute_with_retries(&log, &session, 1, plan, cancel_rx, test_backoff()).await;
+
+        // Fail closed: the 206 is refused (a partial body for a request
+        // that asked for no range).
+        assert!(
+            result.is_err(),
+            "a 206 to a range-less request must be refused"
+        );
+        // The discard happened BEFORE the request: no staging byte or
+        // sidecar survived.
+        assert!(
+            !part.exists(),
+            "validator-less staging must be discarded before the resume request"
+        );
+        assert!(!meta_path_for(&part).exists());
+        // The poisoned hybrid never reached a completed file...
+        assert!(
+            !tmp.path().join("file.bin").exists(),
+            "an unprovable prefix plus a hostile tail must never be committed"
+        );
+        // ...and the one request the server saw carried NO Range header.
+        let head = request_head(&server, 0);
+        assert!(
+            !head.contains("range:"),
+            "the request must not carry a Range header after the discard: {head:?}"
+        );
+        // No completed-artifact record for a download that never committed.
+        assert_eq!(session.registry.completed_len(), 0);
+        assert_eq!(session.snapshot().await, Some(DownloadState::Failed));
+    }
+
     // -----------------------------------------------------------------------
     // No-clobber finalization
     // -----------------------------------------------------------------------

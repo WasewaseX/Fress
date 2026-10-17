@@ -17,7 +17,6 @@ import { installNetworkPolicy, storageSeeds, buildStarSeed, APP_VERSION } from '
 import {
   perfFixtureWithProbes,
   RELEASES_LOCALSEND,
-  OWN_RELEASES_VALID,
   OWN_SUMS_TXT,
   OWN_SIG_TXT,
   type GhReleaseFixture,

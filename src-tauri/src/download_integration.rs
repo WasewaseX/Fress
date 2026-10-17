@@ -86,6 +86,49 @@ fn dot_dot_and_empty_collapse_to_the_safe_default() {
 }
 
 #[test]
+fn all_dot_runs_collapse_to_the_safe_default() {
+    // The old rule only caught "." and "..", so a server-supplied "..."
+    // reached CreateFile, which on Windows refuses (or silently mangles)
+    // dot-runs. Every pure dot-run now strips to nothing and collapses.
+    for dots in ["...", "....", ".....", ".........."] {
+        assert_eq!(
+            sanitize_filename(dots),
+            "download.bin",
+            "{dots} must collapse"
+        );
+    }
+}
+
+#[test]
+fn trailing_dots_and_spaces_strip_to_the_name_windows_will_create() {
+    // Windows materializes "readme." and "readme.  " as "readme"; the
+    // recorded finalize path must describe the file actually on disk.
+    assert_eq!(sanitize_filename("readme."), "readme");
+    assert_eq!(sanitize_filename("readme.  "), "readme");
+    assert_eq!(sanitize_filename("setup.exe..."), "setup.exe");
+    assert_eq!(sanitize_filename("v1.2.3"), "v1.2.3");
+    // A leading dot is a hidden file, not a dot-run: preserved.
+    assert_eq!(sanitize_filename(".gitignore"), ".gitignore");
+    // A reserved stem with a trailing dot is still reserved once stripped.
+    assert_eq!(sanitize_filename("NUL."), "download.bin");
+}
+
+#[test]
+fn content_disposition_dot_run_filename_collapses() {
+    let url: reqwest::Url = "https://example.com/x.bin".parse().unwrap();
+    let name = filename_from_headers(&url, &header_map(Some("attachment; filename=\"...\"")))
+        .expect("name from CD");
+    assert_eq!(name, "download.bin");
+    // Trailing dots ride along from the header and strip the same way.
+    let name = filename_from_headers(
+        &url,
+        &header_map(Some("attachment; filename=\"app-1.2.exe.\"")),
+    )
+    .expect("name from CD");
+    assert_eq!(name, "app-1.2.exe");
+}
+
+#[test]
 fn windows_reserved_device_names_collapse_to_the_safe_default() {
     // The rule applies up to the first dot and is case-insensitive.
     for reserved in ["CON", "nul", "NUL.tar.gz", "com1", "COM9.exe", "lpt4"] {

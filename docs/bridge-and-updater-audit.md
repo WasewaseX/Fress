@@ -38,11 +38,23 @@ uncallable command is surface without a purpose.
 | --- | --- | --- | --- | --- |
 | `core:event:allow-listen` | `plugin:event\|listen` | `DownloadsProvider` (download progress/complete/error/retrying) | the only way the WebView receives engine events | no — already the narrowest form (per-command) |
 | `core:event:allow-unlisten` | `plugin:event\|unlisten` | same (cleanup returned by `listen()`) | prevents leaked listeners on unmount | no |
-| `core:path:allow-dirname` | `plugin:path\|dirname` | `openFolder` reveal fallback in `downloads.tsx` | derive the containing folder when `revealItemInDir` fails (Windows builds without the explorer integration) | no |
+| `core:path:allow-dirname` | `plugin:path\|dirname` | `openFolder` reveal fallback in `downloads.tsx` | derive the containing folder when `reveal_download_file` fails (Windows builds without the explorer integration) | no |
 | `dialog:allow-open` | `plugin:dialog\|open` | "Choose download folder" (`chooseFolder`, desktop only) | the folder picker; `dialog:default`'s `allow-message`/`allow-save` are deliberately NOT granted | no — `directory: true, multiple: false` is passed at the call level; the plugin ACL has no finer scope for open |
 | `opener:allow-open-url` scoped `https://**` | `plugin:opener\|open_url` | `openExternal()` in `src/lib/external.ts` (vendor sites, release pages) | every external link; the scope makes `http:`, `mailto:`, `tel:`, `file:` and custom schemes IPC-rejected even if the frontend check were bypassed | partially — a site allowlist is impossible (the catalog links to arbitrary official publisher sites); the scheme scope IS the boundary |
-| `opener:allow-open-path` | `plugin:opener\|open_path` | "Open file" on completed downloads; `openFolder` fallback | open the downloaded file / its folder with the platform default handler | no — the opener plugin's ACL supports URL scopes but no path scopes; the frontend only passes paths that a `download-complete` event established |
-| `opener:allow-reveal-item-in-dir` | `plugin:opener\|reveal_item_in_dir` | "Show in folder" | reveal the download in the platform file manager | no (same plugin limitation) |
+
+**Removed in the stable-hardening round (2026-10-15):** `opener:allow-open-path`
+and `opener:allow-reveal-item-in-dir` are no longer granted. The opener
+plugin's path bindings have no path scope, so the frontend previously held an
+unrestricted open/execute primitive. Opening and revealing downloaded files
+now runs through the native `open_download_file` / `reveal_download_file`
+commands (src-tauri/src/download_open.rs), which admit only paths inside
+download-engine folders — the platform default download dir plus the
+app-owned ledger of folders a download actually ran in (or that the user
+picked, recorded via `record_download_directory`). Residual risk is
+documented in docs/security/tauri-security.md: a frontend that can start
+downloads can aim the engine at a folder, so the blast radius is "files
+inside download folders" — pre-existing local files outside those folders
+are unreachable from the webview.
 
 Deliberately not granted (unchanged from the audited baseline): the seven
 unused `core:*` module defaults, `dialog:allow-message`/`allow-save`,
@@ -85,10 +97,10 @@ configured (see CODE_SIGNING.md for the evidence).
 
 | Platform | Default folder | User-chosen folder | Open file | Reveal in folder | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Windows | `FOLDERID_Downloads` (follows OneDrive redirection) via `dirs::download_dir` | dialog picker; persisted in localStorage | `openPath` (ShellExecute) | `revealItemInDir`, fallback `openPath(dirname)` | reveal can fail on some Windows builds; the fallback opens the CONTAINING folder, never the file |
-| macOS | `~/Downloads` | dialog picker | `openPath` | same fallback chain | host arch comes from the native command (WebKit UA lies on Apple Silicon) |
-| Linux | XDG download dir | dialog picker | `openPath` | same fallback chain | resolver/download hosts unchanged; engine identically gated |
-| Android | app-private `app_data_dir/Download` (created on demand) | picker intentionally hidden (`isAndroidWebview()` gates both Header and DownloadManager) | `openPath` via the opener plugin | hidden (no file-manager reveal in app-private storage) | the WebView cannot treat desktop paths as available; unavailable folders and rename failures surface as honest engine errors (kind absent → generic failed state with Resume where sound) |
+| Windows | `FOLDERID_Downloads` (follows OneDrive redirection) via `dirs::download_dir` | dialog picker; persisted in localStorage | `open_download_file` (validated native boundary → ShellExecute) | `reveal_download_file`, fallback `open_download_file(dirname)` | reveal can fail on some Windows builds; the fallback opens the CONTAINING folder, never the file |
+| macOS | `~/Downloads` | dialog picker | `open_download_file` | same fallback chain | host arch comes from the native command (WebKit UA lies on Apple Silicon) |
+| Linux | XDG download dir | dialog picker | `open_download_file` | same fallback chain | resolver/download hosts unchanged; engine identically gated |
+| Android | app-private `app_data_dir/Download` (created on demand) | picker intentionally hidden (`isAndroidWebview()` gates both Header and DownloadManager) | `open_download_file` → opener's mobile `open` (system default program) | hidden (no file-manager reveal in app-private storage; `reveal_item_in_dir` is runtime-unsupported on Android and surfaces as the honest error path) | the WebView cannot treat desktop paths as available; unavailable folders and rename failures surface as honest engine errors (kind absent → generic failed state with Resume where sound) |
 
 Cross-platform invariants verified in code: a completed item's `path` is set
 ONLY by the engine's terminal `download-complete` event (the file exists in

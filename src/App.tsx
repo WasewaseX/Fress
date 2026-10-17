@@ -44,7 +44,7 @@ import { DownloadManager } from './components/DownloadManager';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ReplaceTab } from './components/ReplaceTab';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
-import { I18nProvider, useI18n } from './lib/i18n';
+import { I18nProvider } from './lib/i18n';
 import { DownloadsProvider, useDownloadActions, useDownloadSummary } from './lib/downloads';
 import { Category } from './types';
 
@@ -63,7 +63,6 @@ import { useWhatsNew } from './features/whatsNew/useWhatsNew';
 
 function AppShell() {
   const { theme: uiTheme } = useTheme();
-  const { t } = useI18n();
   // Focused subscriptions: the shell needs the actions and the active
   // count, NOT the live item list. Byte-count/ETA updates therefore do not
   // rerender the shell - and with memoized cards, not the grid either.
@@ -312,7 +311,6 @@ function AppShell() {
         isOpen={dialogs.isCommandPaletteOpen}
         onClose={() => dialogs.setIsCommandPaletteOpen(false)}
         apps={catalog.apps}
-        favorites={catalog.favorites}
         onToggleFavorite={catalog.toggleFavorite}
         onOpenAppDetail={(app) => dialogs.openDetail(app)}
         onSelectCategory={(cat: Category) => handleFilterChange({ category: cat })}

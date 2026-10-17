@@ -16,13 +16,13 @@
 // their cache/retry behavior belong to a different owner - the dialog only
 // consumes the agreed interface in src/lib/resolveRetry.ts).
 
-import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../lib/i18n';
 import { AppDetailModal } from '../AppDetailModal';
 import { AppItem } from '../../types';
+import type { ResolvedDownload } from '../../lib/release/types';
 
 vi.mock('../../lib/releaseFetch', () => ({
   resolveGitHubDownload: vi.fn(),
@@ -69,14 +69,12 @@ vi.mock('../AppCard', () => ({
 
 import {
   resolveGitHubDownload,
-  resolveFdroidDownload,
   peekResolveError,
 } from '../../lib/releaseFetch';
 import { resolveOfficialDownload } from '../../lib/officialResolvers';
 import { resolverRetry } from '../../lib/resolveRetry';
 
 const mockedGh = vi.mocked(resolveGitHubDownload);
-const mockedFd = vi.mocked(resolveFdroidDownload);
 const mockedOfficial = vi.mocked(resolveOfficialDownload);
 const mockedPeek = vi.mocked(peekResolveError);
 const mockedRetryGh = vi.mocked(resolverRetry.retryGitHubResolve);
@@ -200,7 +198,7 @@ describe('AppDetailModal resolver failure model', () => {
   });
 
   it('a superseded response cannot update the dialog (lifecycle guard)', async () => {
-    let resolveFirst: (v: unknown) => void = () => {};
+    let resolveFirst: (v: ResolvedDownload | null) => void = () => {};
     // First request (windows) hangs; the user switches platform, which
     // starts a second request that answers immediately.
     mockedGh.mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }));

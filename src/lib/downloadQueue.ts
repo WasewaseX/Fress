@@ -18,11 +18,16 @@
  * few enough that one connection still gets a useful share. */
 export const MAX_CONCURRENT_DOWNLOADS = 3;
 
-/** One waiting download, exactly what startDownload received. */
+/** One waiting download, exactly what startDownload received.
+ * `localId` is the panel row this payload came from (a negative local id).
+ * It is REQUIRED: cancel and promotion match on it. URL-only matching used
+ * to evict - or orphan - a sibling row when the same URL was legitimately
+ * queued twice for two different folders. */
 export interface QueuedDownload {
   url: string;
   name?: string;
   opts?: { expectedSha256?: string; expectedSha512?: string; resume?: boolean; dir?: string | null };
+  localId: number;
 }
 
 export class DownloadQueue {
@@ -69,6 +74,15 @@ export class DownloadQueue {
       return true;
     });
     return before - this.items.length;
+  }
+
+  /** Remove the ONE waiting download whose panel row the user cancelled.
+   * Identity, not URL: two waiting entries may share a URL (the same file
+   * queued for two folders), and a URL match used to evict the sibling
+   * from the line as well - its panel row then stayed 'queued' forever
+   * with nothing behind it to promote. */
+  removeById(localId: number): number {
+    return this.removeWhere((q) => q.localId === localId);
   }
 
   clear(): void {

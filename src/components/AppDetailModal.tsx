@@ -47,7 +47,7 @@ import { useAppText } from '../lib/appText';
 import { useLiveStars } from '../lib/starFetch';
 import { sourceLinksFor, SourceLink } from '../lib/sourceLinks';
 import { AppIcon } from './AppCard';
-import { toast } from 'sonner';
+
 
 /** Forge icon for source links. A module-level component: the previous
  *  inline definition was re-created per render, remounting every rendered
@@ -145,7 +145,6 @@ function translateDownloadLabel(t: (key: string) => string, label: string): stri
 const DownloadSection: React.FC<{ app: AppItem }> = ({ app }) => {
   const { startDownload, recordExternalOpen } = useDownloadActions();
   const { t } = useI18n();
-  const tx = useAppText(app);
   const inApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   // Re-entry guard for the transfer start itself: startDownload has no
   // per-URL dedupe, so a rapid double-click used to enqueue the SAME file

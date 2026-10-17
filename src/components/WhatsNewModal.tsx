@@ -8,7 +8,7 @@ import { formatMessage, useI18n } from '../lib/i18n';
 import { X, Check, Sparkles, ExternalLink, Wrench, RefreshCw, Minus, ChevronDown } from 'lucide-react';
 import { BrandMark } from './Header';
 import { notesForVersion } from '../lib/releaseNotes';
-import { CHANGELOG_ENTRIES, changelogForVersion, earlierChangelog, ChangelogSection } from '../lib/changelog';
+import { changelogForVersion, earlierChangelog, ChangelogSection } from '../lib/changelog';
 import { openExternal } from '../lib/external';
 import pkg from '../../package.json';
 

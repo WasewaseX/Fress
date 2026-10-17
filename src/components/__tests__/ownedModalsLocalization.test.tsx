@@ -12,7 +12,6 @@
 // fallback for an unexpected runtime key emits a development warning instead
 // of silently hiding translation debt.
 
-import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

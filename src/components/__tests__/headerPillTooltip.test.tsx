@@ -14,7 +14,6 @@
  * download that the planner just refused. Pinned here so the fallback
  * truthfulness fix (quality-gates finding 1 follow-up) cannot regress.
  */
-import React from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

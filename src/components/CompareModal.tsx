@@ -7,18 +7,7 @@ import { keepFocusInside } from '../lib/modalFocus';
 import { formatMessage, useI18n, CATEGORY_I18N_KEYS, RATING_I18N_KEYS, translateLicenseDisplay } from '../lib/i18n';
 import { AppItem } from '../types';
 import { openExternal } from '../lib/external';
-import {
-  Columns,
-  X,
-  Check,
-  Minus,
-  ExternalLink,
-  Star,
-  ShieldCheck,
-  HardDrive,
-  Cpu,
-  Terminal
-} from 'lucide-react';
+import { Columns, X, Check, Minus, ExternalLink, Star } from 'lucide-react';
 
 interface CompareModalProps {
   isOpen: boolean;
@@ -287,7 +276,11 @@ export const CompareModal: React.FC<CompareModalProps> = ({
                   <div className="font-semibold text-slate-400">{t('cmp.rowCurve')}</div>
                   {appsToCompare.map((app) => (
                     <div key={app.id} className="px-3 text-slate-300">
-                      {t(RATING_I18N_KEYS[app.beginnerRating] ?? app.beginnerRating)}
+                      {/* Unrated apps render blank, exactly as before strict
+                          typing; the optional field just gets a real guard. */}
+                      {app.beginnerRating
+                        ? t(RATING_I18N_KEYS[app.beginnerRating] ?? app.beginnerRating)
+                        : ''}
                     </div>
                   ))}
                 </div>

@@ -68,9 +68,15 @@ const expected = [
   { id: 'core:path:allow-dirname', evidence: { file: 'src/lib/downloads.tsx', pattern: "dirname" }, why: 'dirname() is an IPC call (plugin:path|dirname) used to fall back to opening the parent folder' },
   { id: 'dialog:allow-open', evidence: { file: 'src/lib/downloads.tsx', pattern: "from '@tauri-apps/plugin-dialog'" }, why: 'the "Choose download folder" picker (openDialog, directory mode)' },
   { id: 'opener:allow-open-url', evidence: { file: 'src/lib/external.ts', pattern: 'openUrl' }, why: 'opens official vendor websites, scoped to https:// only' },
-  { id: 'opener:allow-open-path', evidence: { file: 'src/lib/downloads.tsx', pattern: 'openPath' }, why: '"Open file" / "Open folder" on completed downloads' },
-  { id: 'opener:allow-reveal-item-in-dir', evidence: { file: 'src/lib/downloads.tsx', pattern: 'revealItemInDir' }, why: '"Show in folder" reveals a downloaded file in the platform file manager' },
 ];
+
+// The opener plugin's unrestricted open-path / reveal-item-in-dir grants are
+// deliberately ABSENT: opening/revealing downloaded files runs through the
+// native `open_download_file` / `reveal_download_file` commands, which admit
+// only paths inside download-engine folders (default download dir + the
+// persisted ledger of folders downloads actually used). The inverse check
+// below fails if either grant ever reappears in the capability file.
+const forbidden = ['opener:allow-open-path', 'opener:allow-reveal-item-in-dir'];
 
 const granted = new Map();
 for (const p of cap.permissions) {
@@ -87,6 +93,14 @@ for (const e of expected) {
 
 const unexplained = [...granted.keys()].filter((id) => !expectedIds.has(id));
 check(unexplained.length === 0, 'no unexplained/extra permissions in the capability', `unexpected grants: ${unexplained.join(', ')}`);
+
+for (const id of forbidden) {
+  check(!granted.has(id), `capability must NOT grant ${id}`, 'open/reveal runs through the validated native open_download_file / reveal_download_file commands instead');
+}
+for (const cmd of ['open_download_file', 'reveal_download_file', 'record_download_directory']) {
+  const hits = grepSource(cmd, 'src');
+  check(hits.length > 0, `frontend evidence for native command ${cmd}`, `no src/ call site invokes ${cmd} — the native boundary has no consumer`);
+}
 
 check(Array.isArray(cap.windows) && cap.windows.length === 1 && cap.windows[0] === 'main', 'capability targets only the main window');
 const configuredWindows = (tauri.app.windows || []).map((w) => w.label || 'main');

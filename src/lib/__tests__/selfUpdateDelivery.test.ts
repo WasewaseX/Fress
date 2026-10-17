@@ -74,7 +74,6 @@ function emit(event: string, payload: unknown): void {
 /* ------------------------------------------------------------------ */
 
 const ASSET = 'Fress_1.0.9_x64-setup.exe';
-const SIDECAR = `${ASSET}.sig`;
 const GOOD_SHA = 'e7de715cd4a309dc8c6fe72c93ad8f2b9e3d3c1b4a1d5f2c8e6b0a9d7c3f5e1b';
 
 /** A well-formed Tauri/minisign signature document (74-byte "ED" prehashed

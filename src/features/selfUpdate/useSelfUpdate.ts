@@ -4,11 +4,11 @@
 //
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 
 import { useI18n, formatMessage } from '../../lib/i18n';
 import { openExternal } from '../../lib/external';
-import { useDownloadActions, useDownloadItems } from '../../lib/downloads';
+import { useDownloadItems } from '../../lib/downloads';
 import {
   checkForUpdate,
   getUpdateChannel,
@@ -308,6 +308,11 @@ export function useSelfUpdate(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Reveal a delivered (and signature-verified) update artifact in the
+   * platform file manager, through the native open/reveal boundary. */
+  const revealDeliveredUpdate = (path: string): unknown =>
+    invoke('reveal_download_file', { path });
+
   const handleHeaderUpdateClick = () => {
     if (!ownUpdate) return;
     // The delivery-lifecycle state describes ONE pinned version (the one
@@ -321,7 +326,9 @@ export function useSelfUpdate(
     if (deliveryIsForThisUpdate && deliveryState.phase === 'verified') {
       // Reveal - never auto-launch. Verification established trust in the
       // bytes; the user decides when (and whether) to run the installer.
-      void revealItemInDir(deliveryState.path);
+      // The native open/reveal boundary admits the delivered artifact: it
+      // is a completed download inside a download-engine folder.
+      void revealDeliveredUpdate(deliveryState.path);
       return;
     }
     if (isDelivering()) {
@@ -349,7 +356,7 @@ export function useSelfUpdate(
         asset: ownUpdate.asset,
         expectedSha256: ownUpdate.expectedSha256,
       },
-      { startDownload, openExternal, revealItemInDir }
+      { startDownload, openExternal, revealItemInDir: revealDeliveredUpdate }
     );
   };
 

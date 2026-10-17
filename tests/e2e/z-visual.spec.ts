@@ -18,9 +18,8 @@
  * docs/quality-gates.md, "What still requires manual device testing").
  */
 import { expect, test, fontsReady, bridge, PERF_CATALOG } from './fixtures';
-import { sel, openPalette, openDownloads, dict, paletteInput } from './selectors';
+import { sel, openPalette, openDownloads, paletteInput } from './selectors';
 import { DICTS } from '../../src/lib/i18n';
-import { PAYLOAD_SHA256 } from './fixtures/data';
 
 const VIEWPORTS = [320, 390, 768, 1366, 1600, 1920];
 

@@ -741,21 +741,23 @@ fn open_disposition(path: &std::path::Path) -> OpenDisposition {
 /// THE open boundary: opens (or, on Android, installs) a COMPLETED download
 /// artifact.
 ///
-/// This is the Android adapter of the download-to-open contract
+/// This is the single native dispatch of the download-to-open contract
 /// (docs/download-open-contract.md): the frontend's `openCompletedArtifact`
-/// policy binds this command as its `openPath` dep on Android (the opener
-/// plugin cannot hand out app-private files there); desktop keeps the
-/// opener plugin. `path` must be the exact `path` a download-complete event
-/// reported; it is resolved through the same completed-artifact registry
-/// discipline as the updater's signature verification
-/// ([`resolve_completed_artifact`]): session-scoped registry match, no
-/// staging names, canonical stability, regular file, committed size.
-/// Everything else gets the one uniform [`OPEN_NOT_REGISTERED_REFUSAL`]
-/// typed code, so the command is not a filesystem probe and cannot be
-/// pointed at arbitrary paths by a compromised webview.
+/// policy binds this command as its `openPath` dep on EVERY platform. The
+/// webview holds no path-opening capability at all - the opener plugin's
+/// blanket `open_path` / `reveal_item_in_dir` grants are deliberately
+/// absent from the capability file - so the OS is only ever asked from the
+/// Rust side, after validation. `path` must be the exact `path` a
+/// download-complete event reported; it is resolved through the same
+/// completed-artifact registry discipline as the updater's signature
+/// verification ([`resolve_completed_artifact`]): session-scoped registry
+/// match, no staging names, canonical stability, regular file, committed
+/// size. Everything else gets the one uniform
+/// [`OPEN_NOT_REGISTERED_REFUSAL`] typed code, so the command is not a
+/// filesystem probe and cannot be pointed at arbitrary paths by a
+/// compromised webview.
 ///
-/// Per-platform dispatch of a VALIDATED path (Android is the only native
-/// dispatch; desktop never reaches this command):
+/// Per-platform dispatch of a VALIDATED path:
 ///   - Android: `.apk` artifacts are handed to the system package installer
 ///     through a FileProvider `content://` URI scoped to this app's
 ///     `files/Download` directory (`tauri-plugin-fress-open`, Kotlin side
@@ -802,13 +804,142 @@ async fn open_downloaded_file(
     }
     #[cfg(not(target_os = "android"))]
     {
-        // Desktop has no installer flow; an .apk still just opens (the OS
-        // will report "no handler" honestly) - the disposition exists for
-        // Android, so it is deliberately not consulted here.
+        // Desktop dispatch of the SAME validated boundary: the opener
+        // plugin's Rust API performs the OS-default-handler open. The
+        // webview never calls the plugin directly - its capability grants
+        // for path operations do not exist.
         let _ = record;
         let _ = &app;
         tauri_plugin_opener::open_path(&canonical, None::<&str>)
             .map_err(|e| format!("Cannot open the file: {e}"))
+    }
+}
+
+/// Session-scoped set of download directories the user picked in the
+/// native dialog this session (frontmost = newest, LRU-capped). In memory
+/// only, and rebuilt by the next picker interaction every session: a
+/// persisted admission set would let webview-influenced state outlive the
+/// process that verified the pick, which the boundary refuses by design.
+#[derive(Default)]
+struct SessionDownloadDirs(std::sync::Mutex<Vec<PathBuf>>);
+
+/// LRU cap of [`SessionDownloadDirs`]. Growth is bounded by the picker:
+/// a folder enters only when the user explicitly picks it.
+const SESSION_DIR_CAP: usize = 32;
+
+/// The frontend calls this right after the native folder picker accepts a
+/// directory, so "Open folder" and the reveal fallback work for a freshly
+/// chosen folder before its first download lands there. Session-scoped
+/// admission record - see [`SessionDownloadDirs`]. Every failure is the
+/// same generic typed refusal: the command leaks nothing about the
+/// filesystem.
+#[tauri::command]
+fn record_download_directory(
+    dir: String,
+    session: State<'_, SessionDownloadDirs>,
+) -> Result<(), String> {
+    let trimmed = dir.trim();
+    if trimmed.is_empty() {
+        return Err(OPEN_NOT_REGISTERED_REFUSAL.to_string());
+    }
+    let canon = std::fs::canonicalize(trimmed)
+        .map_err(|_| OPEN_NOT_REGISTERED_REFUSAL.to_string())?;
+    let mut dirs = session.0.lock().expect("session dirs poisoned");
+    dirs.retain(|d| d != &canon);
+    dirs.insert(0, canon);
+    while dirs.len() > SESSION_DIR_CAP {
+        dirs.pop();
+    }
+    Ok(())
+}
+
+/// Opens a DOWNLOAD-FOLDER directory - never an arbitrary path. The folder
+/// must be the platform default download folder, the parent of a completed
+/// artifact this session, or a folder the user picked in the native dialog
+/// this session. This is the containing-folder fallback of the reveal
+/// action and the "open download folder" affordance; every refusal is the
+/// same generic typed code, so the command leaks nothing about
+/// unregistered paths.
+#[tauri::command]
+fn open_download_dir(
+    app: AppHandle,
+    dir: String,
+    registry: State<'_, Arc<DownloadRegistry>>,
+    session: State<'_, SessionDownloadDirs>,
+) -> Result<(), String> {
+    let trimmed = dir.trim();
+    if trimmed.is_empty() {
+        return Err(OPEN_NOT_REGISTERED_REFUSAL.to_string());
+    }
+    let canon =
+        std::fs::canonicalize(trimmed).map_err(|_| OPEN_NOT_REGISTERED_REFUSAL.to_string())?;
+    if !canon.is_dir() {
+        return Err(OPEN_NOT_REGISTERED_REFUSAL.to_string());
+    }
+    let platform_dir = platform_download_dir(&app);
+    let default_dir = std::fs::canonicalize(&platform_dir).unwrap_or(platform_dir);
+    let admitted = canon == default_dir
+        || registry
+            .completed_parent_dirs()
+            .iter()
+            .any(|d| d == &canon)
+        || session
+            .0
+            .lock()
+            .expect("session dirs poisoned")
+            .iter()
+            .any(|d| d == &canon);
+    if !admitted {
+        return Err(OPEN_NOT_REGISTERED_REFUSAL.to_string());
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        Err("open-artifact/unsupported-platform: revealing a folder is a desktop action".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        tauri_plugin_opener::open_path(canon, None::<&str>)
+            .map_err(|e| format!("Cannot open the folder: {e}"))
+    }
+}
+
+/// Reveals a COMPLETED download in the platform file manager, selected in
+/// its folder. The SAME registry discipline as [`open_downloaded_file`]:
+/// the exact completion-event path must resolve to a session registry
+/// record (canonical stability, regular file, committed size) before the
+/// OS is asked for anything. Desktop dispatch only - on Android the typed
+/// unsupported-platform refusal keeps the taxonomy honest (the Android
+/// adapter's open flow owns the device-side presentation).
+#[tauri::command]
+async fn reveal_download_file(
+    app: AppHandle,
+    path: String,
+    registry: State<'_, Arc<DownloadRegistry>>,
+) -> Result<(), String> {
+    let registry = Arc::clone(registry.inner());
+    let (record, canonical, artifact_file) = tokio::task::spawn_blocking(move || {
+        resolve_completed_artifact(&registry, &path).map_err(open_boundary_error)
+    })
+    .await
+    .map_err(|e| format!("Reveal task failed: {e}"))??;
+    // The handle proved regular-file + committed-size; reveal re-reads the
+    // path itself, so the handle is released here.
+    drop(artifact_file);
+    let _ = record;
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        Err("open-artifact/unsupported-platform: revealing is a desktop action".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        let _ = app;
+        app.opener()
+            .reveal_item_in_dir(&canonical)
+            .map_err(|e| format!("Cannot reveal the file: {e}"))
     }
 }
 
@@ -1137,6 +1268,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fress_open::init())
         .manage(Arc::new(DownloadRegistry::default()))
+        .manage(SessionDownloadDirs::default())
         .invoke_handler(tauri::generate_handler![
             start_download,
             cancel_download,
@@ -1148,6 +1280,9 @@ pub fn run() {
             fetch_self_update_text,
             verify_self_update_signature,
             open_downloaded_file,
+            reveal_download_file,
+            open_download_dir,
+            record_download_directory,
             host_arch,
             artifact_open::launch_app_image_artifact
         ])

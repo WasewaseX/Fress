@@ -103,7 +103,6 @@ describe('palette clipboard feedback', () => {
           isOpen
           onClose={onClose}
           apps={APPS}
-          favorites={[]}
           onToggleFavorite={() => {}}
           onOpenAppDetail={onOpenAppDetail}
           onSelectCategory={() => {}}
@@ -140,8 +139,7 @@ describe('palette clipboard feedback', () => {
           isOpen
           onClose={onClose}
           apps={APPS}
-          favorites={[]}
-          onToggleFavorite={() => {}}
+            onToggleFavorite={() => {}}
           onOpenAppDetail={onOpenAppDetail}
           onSelectCategory={() => {}}
           onToggleViewMode={() => {}}

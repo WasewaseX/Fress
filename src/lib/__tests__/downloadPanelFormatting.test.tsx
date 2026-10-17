@@ -31,7 +31,6 @@
 // an id, native events land through the mocked listen bridge) - the same
 // harness discipline as artifactOpen.test.tsx.
 
-import React from 'react';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

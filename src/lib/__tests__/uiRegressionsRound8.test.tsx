@@ -26,8 +26,8 @@
 //    buttons.
 
 import React from 'react';
-import { cleanup, render, screen, fireEvent, act, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider, DICTS, formatMessage } from '../i18n';
 import { ThemeProvider } from '../../components/ThemeProvider';
@@ -299,7 +299,6 @@ describe('command palette: arrows from a row keep focus, highlight and Enter on 
         isOpen
         onClose={() => undefined}
         apps={apps}
-        favorites={[]}
         onToggleFavorite={() => undefined}
         onOpenAppDetail={onOpenAppDetail}
         onSelectCategory={() => undefined}

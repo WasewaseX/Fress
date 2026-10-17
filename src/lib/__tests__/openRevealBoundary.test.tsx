@@ -11,10 +11,11 @@ import { DownloadsProvider, useDownloadActions, useDownloadSummary } from '../do
 /**
  * The open/reveal wiring contract: the download panel's "Open file" /
  * "Show in folder" / "Open folder" actions go through the NATIVE validated
- * boundary (open_download_file / reveal_download_file / record_download_directory),
- * never through the opener plugin's unrestricted openPath / revealItemInDir
- * bindings (those capability grants were removed - see
- * docs/security/tauri-security.md and the Rust download_open module).
+ * boundary (open_downloaded_file / reveal_download_file / open_download_dir /
+ * record_download_directory), never through the opener plugin's
+ * unrestricted openPath / revealItemInDir bindings (those capability grants
+ * are absent - see docs/security/tauri-security.md; the session registry
+ * and the folder admission own the Rust-side validation).
  */
 
 const h = vi.hoisted(() => ({
@@ -59,18 +60,28 @@ function setTauriMode(on: boolean): void {
 
 const callsFor = (cmd: string) => h.calls.filter((c) => c.cmd === cmd);
 
+const ARTIFACT = {
+  id: 1,
+  path: '/downloads/app.apk',
+  name: 'app.apk',
+  url: 'https://example.com/app.apk',
+};
+
 function Probe() {
   const { openFile, openFolder, chooseFolder } = useDownloadActions();
   const { downloadDir } = useDownloadSummary();
   return (
     <div>
-      <button type="button" onClick={() => openFile('/downloads/app.apk')}>
+      <button type="button" onClick={() => openFile(ARTIFACT)}>
         open-file
       </button>
-      <button type="button" onClick={() => openFolder('/downloads/app.apk')}>
+      <button type="button" onClick={() => openFolder(ARTIFACT)}>
         show-in-folder
       </button>
-      <button type="button" onClick={() => openFolder()}>
+      <button
+        type="button"
+        onClick={() => openFolder({ id: -1, path: '', name: '', url: '' })}
+      >
         open-folder
       </button>
       <button type="button" onClick={() => void chooseFolder()}>
@@ -107,7 +118,7 @@ describe('the native open/reveal boundary wiring', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'open-file' }));
     });
-    const opens = callsFor('open_download_file');
+    const opens = callsFor('open_downloaded_file');
     expect(opens).toHaveLength(1);
     expect(opens[0].args).toEqual({ path: '/downloads/app.apk' });
   });
@@ -128,7 +139,7 @@ describe('the native open/reveal boundary wiring', () => {
     await act(async () => undefined);
     expect(callsFor('reveal_download_file')).toHaveLength(1);
     // Admitted: no fallback ran.
-    expect(callsFor('open_download_file')).toHaveLength(0);
+    expect(callsFor('open_downloaded_file')).toHaveLength(0);
 
     // The boundary refuses (path outside download folders): the fallback
     // opens the file's CONTAINING folder through the same boundary.
@@ -137,9 +148,9 @@ describe('the native open/reveal boundary wiring', () => {
       fireEvent.click(screen.getByRole('button', { name: 'show-in-folder' }));
     });
     await act(async () => undefined);
-    const fallbacks = callsFor('open_download_file');
+    const fallbacks = callsFor('open_download_dir');
     expect(fallbacks).toHaveLength(1);
-    expect(fallbacks[0].args).toEqual({ path: '/downloads' });
+    expect(fallbacks[0].args).toEqual({ dir: '/downloads' });
   });
 
   it('open-folder without a path opens the current download dir through the boundary', async () => {
@@ -154,10 +165,10 @@ describe('the native open/reveal boundary wiring', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'open-folder' }));
     });
-    const opens = callsFor('open_download_file');
+    const opens = callsFor('open_download_dir');
     expect(opens).toHaveLength(1);
-    expect(typeof opens[0].args.path).toBe('string');
-    expect(opens[0].args.path).not.toBe('');
+    expect(typeof opens[0].args.dir).toBe('string');
+    expect(opens[0].args.dir).not.toBe('');
   });
 
   it('choosing a folder records it for admission before the first download lands', async () => {
@@ -196,7 +207,7 @@ describe('the native open/reveal boundary wiring', () => {
       fireEvent.click(screen.getByRole('button', { name: 'open-folder' }));
     });
     await act(async () => undefined);
-    expect(callsFor('open_download_file')).toHaveLength(0);
+    expect(callsFor('open_downloaded_file')).toHaveLength(0);
     expect(callsFor('reveal_download_file')).toHaveLength(0);
   });
 });

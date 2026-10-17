@@ -4,7 +4,7 @@
 //
 import React, { useState, useSyncExternalStore } from 'react';
 import { RefreshCw, Check, Download, ExternalLink } from 'lucide-react';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 import { LegalTab } from './LegalModals';
 import { openExternal } from '../lib/external';
 import { useDownloadActions } from '../lib/downloads';
@@ -13,6 +13,11 @@ import { startOwnUpdateDelivery, getDeliveryState, subscribeDelivery } from '../
 import { pillStatusFor } from '../features/selfUpdate/useSelfUpdate';
 import { useI18n, formatMessage } from '../lib/i18n';
 import pkg from '../../package.json';
+
+/** The delivered update artifact is revealed through the registry-validated
+ * native boundary (it is a completed engine download, admitted by the
+ * session registry); the webview holds no opener path capability. */
+const revealItemInDir = (path: string): unknown => invoke('reveal_download_file', { path });
 
 interface FooterProps {
   onOpenLegal: (tab: LegalTab) => void;

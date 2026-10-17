@@ -464,6 +464,26 @@ impl DownloadRegistry {
         completed.iter().find(|a| a.canonical == canonical).cloned()
     }
 
+    /// Directories that hold at least one completed artifact this session,
+    /// canonicalized and deduplicated. The open boundary admits a DIRECTORY
+    /// target when it is the platform default download folder, one of these
+    /// parents, or a folder the user picked in the native dialog this
+    /// session - the three cases where "Show in folder" / "Open folder" is
+    /// legitimately the user acting on their own downloaded content.
+    pub(crate) fn completed_parent_dirs(&self) -> Vec<PathBuf> {
+        let completed = self
+            .completed
+            .lock()
+            .expect("completed-artifact registry poisoned");
+        let mut dirs: Vec<PathBuf> = completed
+            .iter()
+            .filter_map(|a| a.canonical.parent().map(|p| p.to_path_buf()))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs
+    }
+
     /// Test-only view of the completed queue length (cap regression tests,
     /// and the registry-immutability assertion in lib.rs's boundary tests).
     #[cfg(test)]

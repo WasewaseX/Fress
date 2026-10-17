@@ -16,7 +16,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -556,7 +556,7 @@ describe('integration-snapshot.mjs (spawned against fixtures + a mock GitHub API
   it('12c. CI runs are queried strictly by the tested SHA and a pending run yields aggregate PENDING', async () => {
     const { root, shas } = makeFixture(1);
     const head = shas[shas.length - 1];
-    freshHandlers(root, { runs: [defaultRun(head, null, 'in_progress')] });
+    freshHandlers(root, { runs: [defaultRun(head, undefined, 'in_progress')] });
     const r = await runSnapshot(root, { args: ['--version-coherence', 'pass', '--version-coherence-rc', '0', '--artifact-audit', JSON.stringify({ verdict: 'pass', verifier_exit_code: 0, hard_failures: 0, release_tag: TAG })] });
     expect(r.status).toBe(0);
     expect(r.json().ci.aggregated_conclusion).toBe('pending');

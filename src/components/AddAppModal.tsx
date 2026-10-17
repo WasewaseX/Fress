@@ -260,7 +260,6 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       const nameKey = name.trim().toLowerCase();
       const repoKey = githubUrl.trim().toLowerCase().replace(/\/$/, '');
       const duplicate = existingApps.some((a) => {
-        if (a.id === initialApp?.id) return false;
         if (a.name.trim().toLowerCase() === nameKey) return true;
         return !!repoKey && (a.githubUrl || '').trim().toLowerCase().replace(/\/$/, '') === repoKey;
       });

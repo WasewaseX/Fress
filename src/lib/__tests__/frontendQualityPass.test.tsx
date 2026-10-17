@@ -15,8 +15,7 @@
 //    of dropping apps 5+ with no feedback (and its side effects living
 //    OUTSIDE the state updaters, which StrictMode double-invokes).
 
-import React from 'react';
-import { cleanup, render, act, renderHook } from '@testing-library/react';
+import { cleanup, render, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../lib/i18n';

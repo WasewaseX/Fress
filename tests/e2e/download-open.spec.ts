@@ -314,10 +314,10 @@ test.describe('Workflow K: the download-to-open journey', () => {
     // The fourth transfer waits in the FIFO queue (three slots).
     await startFromDetail(page, 'sharex', 'Windows', /ShareX-17\.1\.0-setup\.exe/);
     await openDownloads(page);
+    const panel = page.locator(sel.downloadsPanel);
     await expect(page.locator(sel.downloadRow('active'))).toHaveCount(3);
     await expect(page.locator(sel.downloadRow('queued'))).toHaveCount(1);
 
-    const panel = page.locator(sel.downloadsPanel);
     // A hidden action must also not be a focusable/activatable one: the
     // rows expose ONLY their documented action (Cancel). Anything absent
     // from the DOM cannot be tabbed to or pressed.
@@ -366,9 +366,7 @@ test.describe('Workflow K: the download-to-open journey', () => {
     // the one path where a checksum mismatch can genuinely occur.
     await startFromDetail(page, 'signal', 'Windows', /signal-desktop-win-x64-7\.20\.0\.exe/);
     await openDownloads(page);
-    const panel = page.locator(sel.downloadsPanel);
     const localsendId = await downloadIdByUrl(page, 'localsend');
-    const vlcId = await downloadIdByUrl(page, 'vlc');
     const signalId = await downloadIdByUrl(page, 'signal');
 
     // Network failure: resumable, but nothing runnable exists.

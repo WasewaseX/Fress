@@ -60,19 +60,11 @@ import {
   setUpdateChannel,
   signatureSidecarFor,
 } from '../selfUpdate';
-import type { OwnRelease, UpdateState } from '../selfUpdate';
+import type { UpdateState } from '../selfUpdate';
 import { getDeliveryState, resetDeliveryForTest } from '../../features/selfUpdate/updateDelivery';
 import { useSelfUpdate } from '../../features/selfUpdate/useSelfUpdate';
 
 const CHANNEL_KEY = 'fress.updateChannel';
-
-const release = (tag: string, prereleaseFlag = false): OwnRelease => ({
-  tag,
-  version: tag.replace(/^v/i, ''),
-  publishedAt: '2026-10-01T00:00:00Z',
-  htmlUrl: `https://github.com/WasewaseX/Fress/releases/tag/${tag}`,
-  assets: [],
-});
 
 /** Derive a version RELATIVE to the running build instead of hard-coding
  * release numbers (the spec's rule: only the intentional v1.0.0 / 1.0.12-beta
@@ -1198,7 +1190,7 @@ describe('spec §6 (invariant 12b): a delivery underway names its own version', 
     await act(async () => {
       res = await result.current.runUpdateCheck(true);
     });
-    expect(res?.kind).toBe('error');
+    expect((res as UpdateState | null)?.kind).toBe('error');
     expect(result.current.ownUpdate).toBeNull();
     expect(result.current.updatePillStatus).toBeNull();
     // Exactly the quiet note - no available toast, no "up to date".

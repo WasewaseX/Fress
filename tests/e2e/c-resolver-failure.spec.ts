@@ -22,16 +22,7 @@
 import { expect, bridge } from './fixtures';
 import { sel, openDownloads } from './selectors';
 import { test } from './fixtures';
-import type { Page } from '@playwright/test';
 import { DICTS } from '../../src/lib/i18n';
-
-/** Lets the toast queue drain: toasts float top-right and would intercept
- * clicks on the dialog and the header (Workflow D/K convention). */
-async function drainToasts(page: Page): Promise<void> {
-  await expect
-    .poll(async () => page.locator('[data-sonner-toast]').count(), { timeout: 15_000 })
-    .toBe(0);
-}
 
 test.describe('Workflow C: resolver failure and retry (browser mode, route-level 403)', () => {
   test.use({ rateLimitResolver: true });

@@ -7,7 +7,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { dirname } from '@tauri-apps/api/path';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from 'sonner';
 import { formatBytes, formatSpeed, formatEta } from './format';
 import { DownloadQueue, MAX_CONCURRENT_DOWNLOADS, QueuedDownload } from './downloadQueue';
@@ -410,8 +409,20 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           if (!next) break;
           // The queued placeholder item (negative local id) is replaced by
           // the real item startDownload creates for the Rust transfer.
-          setItems((prev) => prev.filter((it) => !(it.status === 'queued' && it.url === next.url)));
-          await startTauriDownload(next.url, next.name, next.opts);
+          // Matched by identity: a sibling row may share this URL (the same
+          // file queued for two folders) and must stay in the line.
+          setItems((prev) =>
+            prev.filter((it) => !(it.status === 'queued' && it.id === next.localId))
+          );
+          try {
+            await startTauriDownload(next.url, next.name, next.opts);
+          } catch {
+            // startTauriDownload already showed the error toast and did not
+            // take a slot. The pump itself must survive: letting this
+            // rejection escape killed the whole promotion loop with an
+            // unhandled rejection and left every later queued entry stuck
+            // until some unrelated event happened to fire promoteQueued.
+          }
         }
       } finally {
         promotingRef.current = false;
@@ -690,11 +701,16 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         } catch {
           guessedName = nameHint || undefined;
         }
-        const payload: QueuedDownload = { url, name: nameHint, opts };
+        // The queue entry carries the panel row's identity (localId), not
+        // just its URL: the same file can legitimately be queued for two
+        // folders, and an identity-less entry made cancel/promotion evict
+        // the wrong sibling.
+        const localId = makeLocalItemId();
+        const payload: QueuedDownload = { url, name: nameHint, opts, localId };
         if (queueRef.current.push(payload)) {
           setItems((prev) => [
             {
-              id: makeLocalItemId(),
+              id: localId,
               url,
               name: guessedName || tRef.current('downloads.toast.downloadFallback'),
               dir: 'Queued',
@@ -730,8 +746,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const cancel = useCallback((id: number) => {
     const item = itemsRef.current.find((it) => it.id === id);
     if (item && item.status === 'queued') {
-      // Still waiting: no Rust transfer exists yet. Drop it from the line.
-      queueRef.current.removeWhere((q) => q.url === item.url);
+      // Still waiting: no Rust transfer exists yet. Drop it from the line
+      // by the row's identity - a URL match would evict a sibling row that
+      // queued the same file for a different folder.
+      queueRef.current.removeById(id);
       setItems((prev) => prev.filter((it) => it.id !== id));
       return;
     }
@@ -797,26 +815,32 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   const appImageLaunchSupported =
     isTauri() && !isAndroidWebview() && /linux/i.test(navigator.userAgent);
 
-  // ---- The Android adapter binding ---------------------------------------
-  // On Android the SAME openCompletedArtifact policy runs with ONE dep
-  // swapped: the opener plugin's open_path cannot hand out app-private
-  // files, so openPath binds to the registry-validated native adapter
-  // command. It resolves the exact path against the session's download
-  // registry (the same discipline as the updater's signature verification)
-  // and routes .apk artifacts to the system package installer through a
-  // FileProvider content URI, everything else to a MIME viewer with a
-  // share fallback - temporary read grant only. The policy and the UI do
-  // not branch for Android; this is a platform dep binding, the same
-  // pattern as appImageLaunchSupported above. Errors surface in the
-  // open-artifact/<code> typed namespace the boundary already parses.
-  const androidAdapterSupported = isTauri() && isAndroidWebview();
-  const androidOpenAdapter = useCallback(
-    async (path: string): Promise<void> => {
-      await invoke('open_downloaded_file', { path });
-    },
+  // ---- The native open/reveal bindings -----------------------------------
+  // ONE registry-validated native boundary for every platform: the exact
+  // completion-event path crosses as ONE value, the session registry
+  // admits it natively (canonical stability, regular file, committed
+  // size - the same discipline as the updater's signature verification),
+  // and the OS is only asked from the Rust side afterwards. Desktop
+  // dispatch runs the opener plugin's Rust API; on Android the fress-open
+  // adapter owns the APK installer / viewer handoff through a FileProvider
+  // content URI. The webview itself holds NO path-opening capability at
+  // all: the blanket opener open-path / reveal-item-in-dir grants are
+  // gone (docs/security/tauri-security.md), so a compromised frontend can
+  // no longer open or reveal arbitrary pre-existing local files. Errors
+  // surface in the open-artifact/<code> typed namespace the boundary
+  // already parses.
+  const artifactOpenPath = useCallback(
+    (path: string) => invoke('open_downloaded_file', { path }).then(() => undefined),
     []
   );
-  const artifactOpenPath = androidAdapterSupported ? androidOpenAdapter : openPath;
+  const artifactRevealItem = useCallback(
+    (path: string) => invoke('reveal_download_file', { path }).then(() => undefined),
+    []
+  );
+  const artifactOpenDir = useCallback(
+    (dir: string) => invoke('open_download_dir', { dir }).then(() => undefined),
+    []
+  );
 
   const openFile = useCallback(
     async (artifact: CompletedArtifactRef): Promise<OpenOutcome> => {
@@ -870,8 +894,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           // file's CONTAINING folder - never the file itself; on total
           // refusal an honest error. The artifact stays completed.
           const outcome = await revealCompletedArtifact(artifact, {
-            revealItemInDir,
-            openPath,
+            revealItemInDir: artifactRevealItem,
+            openPath: artifactOpenDir,
             dirname,
             warn: (message, detail) => console.warn(`[download-reveal] ${message}`, detail),
           });
@@ -882,9 +906,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           }
           return outcome;
         }
-        // No exact file known (defensive): open the configured directory.
+        // No exact file known (defensive): open the configured directory
+        // through the folder admission (default download folder, a folder
+        // that holds a completed artifact, or one picked this session).
         try {
-          await openPath(path);
+          await artifactOpenDir(path);
           return { ok: true, kind: 'unknown' };
         } catch (e) {
           const parsed = parseOpenError(e);
@@ -909,6 +935,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     const selected = await openDialog({ directory: true, multiple: false, title: tRef.current('downloads.toast.chooseFolderTitle') });
     if (typeof selected === 'string') {
       setDownloadDir(selected);
+      // Session admission for the freshly picked folder: "Open folder" and
+      // the reveal fallback work before the first download lands there.
+      // Best effort - the boundary refuses honestly if this ever failed.
+      void invoke('record_download_directory', { dir: selected }).catch(() => undefined);
       try {
         localStorage.setItem(DIR_KEY, selected);
       } catch {

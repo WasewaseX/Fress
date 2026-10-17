@@ -16,7 +16,6 @@ import {
   Award,
   Flame,
   Smartphone,
-  SlidersHorizontal
 } from 'lucide-react';
 
 interface FilterBarProps {

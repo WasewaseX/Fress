@@ -278,7 +278,6 @@ describe('optional Android parsers', () => {
   });
 
   it('validateVersions: a delegating build.gradle.kts is verified through its tauri.properties', () => {
-    const files = coherentFiles();
     const gradle = [
       'import java.util.Properties',
       'val tauriProperties = Properties().apply {',

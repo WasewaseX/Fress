@@ -15,9 +15,6 @@ import {
   X, 
   ShieldCheck,
   AlertTriangle,
-  Laptop,
-  Apple,
-  Cpu
 } from 'lucide-react';
 
 interface BatchInstallModalProps {

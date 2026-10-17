@@ -17,7 +17,6 @@
 //     classified description and stay retryable, and concurrent artifacts
 //     never cross-wire their paths.
 
-import React from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -38,9 +37,16 @@ const h = vi.hoisted(() => {
   const listeners = new Map<string, Array<(e: { payload: unknown }) => void>>();
   return {
     listeners,
-    openPath: vi.fn(async () => undefined),
-    revealItemInDir: vi.fn(async () => undefined),
-    invoke: vi.fn((..._: unknown[]) => Promise.resolve(null as unknown)),
+    openPath: vi.fn(async (_path?: string): Promise<void> => undefined),
+    revealItemInDir: vi.fn(async (_path?: string): Promise<void> => undefined),
+    invoke: vi.fn((cmd?: unknown, args?: unknown) => {
+      const c = typeof cmd === 'string' ? cmd : '';
+      const a = (args ?? {}) as Record<string, unknown>;
+      if (c === 'open_downloaded_file') return h.openPath(String(a.path ?? ''));
+      if (c === 'reveal_download_file') return h.revealItemInDir(String(a.path ?? ''));
+      if (c === 'open_download_dir') return h.openPath(String(a.dir ?? ''));
+      return Promise.resolve(null as unknown);
+    }),
     toastError: vi.fn(),
     toastSuccess: vi.fn(),
     toastInfo: vi.fn(),
@@ -64,11 +70,6 @@ vi.mock('@tauri-apps/api/path', () => ({ dirname: vi.fn(async (p: string) => p +
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
-vi.mock('@tauri-apps/plugin-opener', () => ({
-  openPath: h.openPath,
-  revealItemInDir: h.revealItemInDir,
-}));
-
 vi.mock('sonner', () => ({
   toast: {
     error: h.toastError,
@@ -88,9 +89,16 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
   // Restore the default no-failure behavior after fault-injection tests.
-  h.openPath.mockImplementation(async () => undefined);
-  h.revealItemInDir.mockImplementation(async () => undefined);
-  h.invoke.mockImplementation(async () => null);
+  h.openPath.mockImplementation(async (_path?: string): Promise<void> => undefined);
+  h.revealItemInDir.mockImplementation(async (_path?: string): Promise<void> => undefined);
+  h.invoke.mockImplementation((cmd?: unknown, args?: unknown) => {
+    const c = typeof cmd === 'string' ? cmd : '';
+    const a = (args ?? {}) as Record<string, unknown>;
+    if (c === 'open_downloaded_file') return h.openPath(String(a.path ?? ''));
+    if (c === 'reveal_download_file') return h.revealItemInDir(String(a.path ?? ''));
+    if (c === 'open_download_dir') return h.openPath(String(a.dir ?? ''));
+    return Promise.resolve(null as unknown);
+  });
   setTauriMode(false);
 });
 
@@ -389,10 +397,16 @@ describe('provider openFile/openFolder wiring', () => {
     try {
       h.openPath.mockRejectedValueOnce('no method available');
       // Dispatch by command: the provider's mount-time directory lookup
-      // must not consume the launcher's rejection.
-      h.invoke.mockImplementation(async (cmd: unknown) => {
-        if (cmd === 'launch_app_image_artifact') throw 'open-artifact/not-registered';
-        if (cmd === 'default_download_dir') return '/home/test/Downloads';
+      // must not consume the launcher's rejection, and the open itself
+      // flows through the validated open command before the fallback.
+      h.invoke.mockImplementation(async (cmd?: unknown, args?: unknown) => {
+        const c = typeof cmd === 'string' ? cmd : '';
+        const a = (args ?? {}) as Record<string, unknown>;
+        if (c === 'open_downloaded_file') return h.openPath(String(a.path ?? ''));
+        if (c === 'reveal_download_file') return h.revealItemInDir(String(a.path ?? ''));
+        if (c === 'open_download_dir') return h.openPath(String(a.dir ?? ''));
+        if (c === 'launch_app_image_artifact') throw 'open-artifact/not-registered';
+        if (c === 'default_download_dir') return '/home/test/Downloads';
         return null;
       });
 
@@ -432,7 +446,9 @@ describe('provider openFile/openFolder wiring', () => {
       const out = await actions.openFile(APPIMAGE);
       expect(out).toMatchObject({ ok: true });
       expect(h.invoke).toHaveBeenCalledWith('open_downloaded_file', { path: APPIMAGE.path });
-      expect(h.openPath).not.toHaveBeenCalled();
+      // The webview's only open identity is the validated command; the
+      // opener-plugin binding no longer exists on any platform.
+      expect(h.invoke.mock.calls.every(([c]) => c !== 'plugin:opener|open_path')).toBe(true);
 
       // No launch command on Android, ever: the AppImage launcher stays a
       // desktop-Linux capability even when the open fails there.

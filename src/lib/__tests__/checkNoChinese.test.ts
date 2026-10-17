@@ -890,7 +890,7 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     // Byte-wise code-point order ('a' < 's' < 'z'), independent of ICU locale.
     expect(hits.map((h) => h.path)).toEqual(['alpha.md', 'sub/nested.txt', 'zeta.txt', 'zeta.txt']);
     // Same file: ordered by line (line 1 hit before line 3 hit).
-    expect(hits[2].line).toBeLessThan(hits[3].line);
+    expect(hits[2].line as number).toBeLessThan(hits[3].line as number);
     // Every hit carries a non-empty escaped context and an escaped match.
     for (const h of hits) {
       expect(h.context_escaped.length).toBeGreaterThan(0);

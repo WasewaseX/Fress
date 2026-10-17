@@ -67,6 +67,21 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, lstatSync, readlinkSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
+
+// zlib-bomb cap for PNG text chunks: iTXt/zTXt payloads are attacker-
+// suppliable in a PR, and deflate expansion ratios >1000:1 are trivial to
+// craft. Refuse to expand any single text chunk beyond 64 MiB; on cap
+// overflow (or malformed stream) the caller falls back to the raw bytes,
+// which still pass through the printable-run scan. Detection stays
+// fail-closed: real-world text metadata is orders of magnitude smaller.
+const MAX_INFLATED_TEXT_BYTES = 64 << 20;
+function boundedInflate(buf) {
+  try {
+    return inflateSync(buf, { maxOutputLength: MAX_INFLATED_TEXT_BYTES });
+  } catch {
+    return null; // malformed stream or expansion over the cap: keep raw
+  }
+}
 import { join, resolve, sep, basename, extname } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -256,7 +271,7 @@ function pngTextPayloads(buf) {
             const transEnd = rest.indexOf(0);
             if (transEnd >= 0) {
               let txt = rest.subarray(transEnd + 1);
-              if (compFlag === 1) { try { txt = inflateSync(txt); } catch { /* keep raw */ } }
+              if (compFlag === 1) { const inf = boundedInflate(txt); if (inf) txt = inf; }
               out.push({ source: `iTXt:${data.toString('latin1', 0, z)}`, text: txt.toString('utf8') });
             }
           }
@@ -264,7 +279,8 @@ function pngTextPayloads(buf) {
       } else if (type === 'zTXt') {
         const z = data.indexOf(0);
         if (z > 0 && data[z + 1] === 0) {
-          try { out.push({ source: `zTXt:${data.toString('latin1', 0, z)}`, text: inflateSync(data.subarray(z + 2)).toString('utf8') }); } catch { /* keep raw */ }
+          const inf = boundedInflate(data.subarray(z + 2));
+          if (inf) out.push({ source: `zTXt:${data.toString('latin1', 0, z)}`, text: inf.toString('utf8') });
         }
       }
     } catch { /* malformed chunk: move on */ }

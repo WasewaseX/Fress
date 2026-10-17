@@ -1153,4 +1153,41 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
       .history_hits.find((h) => h.path === 'live.txt');
     expect(rec2?.still_present).toBe(true);
   });
+
+  it('27. a zlib-bomb zTXt chunk is neutralized without crashing the gate (bounded inflate)', () => {
+    // Task-19 script-audit finding: inflateSync on PR-supplied PNG text chunks
+    // had no maxOutputLength, so a tiny file could expand to gigabytes and OOM
+    // the runner. The bomb chunk must be neutralized (cap exceeded -> raw
+    // fallback) while normal compressed chunks in the SAME file are still
+    // detected. Status 1 (not 2) proves the gate neither crashed nor failed.
+    const root = makeRepo();
+    const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(data.length);
+      const crc = Buffer.alloc(4);
+      return Buffer.concat([len, Buffer.from(type, 'latin1'), data, crc]);
+    };
+    // Bomb: ~80 MiB of zeros deflate to a few dozen KiB (>> 64 MiB cap on
+    // expansion, tiny in the repo).
+    const bombPayload = Buffer.concat([
+      Buffer.from('Bomb\0', 'latin1'),
+      Buffer.from([0x00]),
+      deflateSync(Buffer.alloc(80 * 1024 * 1024), { level: 1 }),
+    ]);
+    // Normal compressed chunk in the same file: must STILL be detected.
+    const goodPayload = Buffer.concat([
+      Buffer.from('Author\0', 'latin1'),
+      Buffer.from([0x00]),
+      deflateSync(Buffer.from(`made by ${HANChar2}`, 'utf8'), { level: 6 }),
+    ]);
+    const png = Buffer.concat([sig, chunk('IHDR', Buffer.alloc(13)), chunk('zTXt', bombPayload), chunk('zTXt', goodPayload), chunk('IEND', Buffer.alloc(0))]);
+    writeFileSync(join(root, 'banner.png'), png);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const hits = r.report().hits.filter((h) => h.path === 'banner.png' && h.kind === 'binary-metadata');
+    expect(hits.length).toBe(1);
+    expect(hits[0].codepoint).toBe(`U+${0x544a.toString(16).toUpperCase()}`);
+  });
 });

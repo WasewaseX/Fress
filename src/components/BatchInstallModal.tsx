@@ -347,7 +347,7 @@ export const BatchInstallModal: React.FC<BatchInstallModalProps> = ({
           aria-label={formatMessage(t('bs.selected'), { n: selectedApps.length })}
         >
           <span className="text-slate-400 font-mono text-[11px] uppercase tracking-wider me-1 shrink-0">
-            {t('bs.selected')} ({selectedApps.length}):
+            {formatMessage(t('bs.selected'), { n: selectedApps.length })}:
           </span>
           {selectedApps.length > 0 ? (
             selectedApps.map((app) => (

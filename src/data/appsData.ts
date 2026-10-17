@@ -93,7 +93,7 @@ const BASE_APPS: AppItem[] = [
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
     addedAt: '2025-01-05',
-    lastVerifiedAt: '2026-10-12',
+    lastVerifiedAt: '2026-10-17',
   },
   {
     id: 'obsidian',
@@ -233,7 +233,7 @@ const BASE_APPS: AppItem[] = [
     beginnerGuide: 'Select a brush preset on the right dock, press B to start sketching on your canvas, and use Shift plus drag to resize brush diameter smoothly.',
     githubUrl: 'https://github.com/KDE/krita',
     websiteUrl: 'https://krita.org',
-    downloadUrl: 'https://krita.org/en/download/krita-desktop',
+    downloadUrl: 'https://krita.org/en/download/',
     category: 'Design & Creative',
     platforms: ['windows', 'mac', 'linux', 'android'],
     fdroidId: 'org.krita',
@@ -253,7 +253,7 @@ const BASE_APPS: AppItem[] = [
     architectures: ['x86_64', 'arm64', 'universal'],
     offlineReady: true,
     addedAt: '2025-01-22',
-    lastVerifiedAt: '2026-10-12',
+    lastVerifiedAt: '2026-10-17',
   },
   {
     id: '7zip',
@@ -756,7 +756,7 @@ const BASE_APPS: AppItem[] = [
     architectures: ['arm64'],
     offlineReady: true,
     addedAt: '2025-02-28',
-    lastVerifiedAt: '2026-10-12',
+    lastVerifiedAt: '2026-10-17',
   },
   {
     id: 'termux',

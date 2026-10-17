@@ -509,6 +509,52 @@ function scanBinaryFile(kind, scope, absPath, relPath, buf) {
       return;
     }
   }
+  scanOpaqueBinary(buf, scope, relPath, pushHit2);
+}
+
+// OLE Compound File (.msi installer): structurally a sector-aligned
+// container whose real text lives in codepage / UTF-16LE streams. A raw
+// UTF-8 printable-run scan of a CFB is pure alignment noise - byte pairs
+// of the container's own structures decode as random Han triplets (the
+// false-positive class that failed the v1.0.1 Windows release build) -
+// while the format's ACTUAL text encoding (UTF-16LE) is invisible to a
+// UTF-8 run scan, so the old path could only ever produce false hits and
+// never true ones on this format. Following the PNG precedent (parse the
+// structure, scan the format's real text), a structurally-valid CFB gets
+// a UTF-16LE run scan at the SAME RUN_CJK_MIN evidence bar. CFB sectors
+// and mini-streams are even-aligned, so even-offset unit pairing sees
+// every stream's strings; anything else keeps the conservative opaque
+// path. This is a declared, documented rule - not a suppression list:
+// every run above the bar reports ALL of its findings.
+const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+
+function oleUtf16Runs(buf, minUnits = 3) {
+  // minUnits = RUN_CJK_MIN: a run shorter than the evidence bar can never
+  // produce a finding, so extraction and evidence use the same bar.
+  const runs = [];
+  let cur = [];
+  const push = () => { if (cur.length >= minUnits) runs.push(String.fromCharCode.apply(null, cur)); cur = []; };
+  for (let i = 0; i + 1 < buf.length; i += 2) {
+    const u = buf.readUInt16LE(i);
+    const ascii = u >= 0x20 && u <= 0x7e;
+    const cjk = (u >= 0x3400 && u <= 0x9fff) || (u >= 0xf900 && u <= 0xfaff) || (u >= 0x3000 && u <= 0x303f);
+    if (ascii || cjk) { cur.push(u); continue; }
+    push();
+  }
+  push();
+  return runs;
+}
+
+function scanOpaqueBinary(buf, scope, relPath, pushHit2) {
+  // Structured container: OLE compound document (see OLE_MAGIC above).
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(OLE_MAGIC)) {
+    SUMMARY.binaryStringScans += 1;
+    for (const run of oleUtf16Runs(buf)) {
+      if (countCjkCodePoints(run) < RUN_CJK_MIN) continue;
+      for (const hit of scanTextPayload('binary-string', scope, relPath, run, { sourceLabel: 'OLE UTF-16 run', allowLocale: false })) pushHit2(hit, 'binary-string', scope, relPath);
+    }
+    return;
+  }
   // Opaque binary: conservative printable-run scan of the whole payload.
   // Locale-id detection is DISABLED here: random byte runs in compressed
   // data routinely contain root-like fragments in mixed case that are

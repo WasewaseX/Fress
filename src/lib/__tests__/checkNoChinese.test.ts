@@ -22,16 +22,24 @@
  * Critique-round additions (Agent 2 audit wave 2): 20a-20e prove Korean
  * script is never classified as Chinese; 15/15b/21a/21b prove byte-level
  * parser correctness incl. signature-spoof and truncated-container labs;
- * 16/16b prove locale pairing and astral columns/context; 17/17b/17c/21c
+ * 16/16b prove locale pairing and astral columns/context; 17/17b/21a/21b
  * prove determinism, safe --out behavior and strict flag validation; 17d
  * proves honest history reporting.
+ *
+ * Integrity-round additions (Agent 2 post-merge audit, mapping the NEW
+ * 12-case acceptance matrix): 13c proves a git-execution failure exits 2
+ * (case 8); 22 proves multi-file stable code-point sort order plus escaped
+ * context (case 10); 23 is the mutation/negative-control pair (case 12:
+ * weakened range and raised binary bar both lose hits the real gate keeps);
+ * 24 proves the --extra-dir package-extraction primitive (case 8's missing-
+ * required-target rule plus the extra-scope finding path).
  */
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 const CHECKER = resolve(process.cwd(), 'scripts/ci/check-no-chinese.mjs');
@@ -74,7 +82,7 @@ function commitAll(root: string): void {
 
 interface Report {
   summary: { total_hits: number; warnings_count: number; result: string; exit_code: number };
-  hits: Array<{ kind: string; path: string; line: number | null; col: number | null; codepoint: string | null; category: string; family: string; context_escaped: string; owner_action: string; role_hint?: string; source?: string; severity?: string }>;
+  hits: Array<{ kind: string; path: string; line: number | null; col: number | null; codepoint: string | null; category: string; family: string; context_escaped: string; match_escaped?: string; scope?: string; owner_action: string; role_hint?: string; source?: string; severity?: string }>;
   warnings: Array<{ path: string; codepoint: string | null; category: string }>;
   scope: Record<string, number | null>;
   commit: string | null;
@@ -839,6 +847,133 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     const r = runChecker(root, ['--out', '--json']);
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('--out requires a path');
+  });
+
+  it('13c. an unavailable git binary fails closed with exit 2 (never a green gate)', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'ok.txt'), 'clean\n');
+    commitAll(root);
+    // Strip PATH so spawnSync('git') cannot resolve; the checker must treat
+    // an execution failure as exit 2, not as an empty (clean) tree.
+    const run = spawnSync(process.execPath, [CHECKER, '--json'], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 16 << 20,
+      env: { ...process.env, PATH: '', Path: '' },
+    });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain('::error::');
+    expect(run.stderr).toContain('git');
+  });
+
+  it('22. hits from multiple files are reported in stable code-point order with escaped context', () => {
+    const root = makeRepo();
+    mkdirSync(join(root, 'sub'), { recursive: true });
+    // Committed in deliberately NON-alphabetical order; the report order
+    // must not depend on creation, inode or locale order.
+    writeFileSync(join(root, 'zeta.txt'), `line1: ${HANChar}\nline2 ok\nline3: ${HANChar2}\n`);
+    writeFileSync(join(root, 'sub', 'nested.txt'), `deep ${HANChar}\n`);
+    writeFileSync(join(root, 'alpha.md'), `early ${HANChar}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const hits = r.report().hits;
+    expect(hits).toHaveLength(4);
+    // The report's order IS the documented (path, line, col) code-point order.
+    const sorted = [...hits].sort(
+      (a, b) =>
+        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) ||
+        (a.line || 0) - (b.line || 0) ||
+        (a.col || 0) - (b.col || 0),
+    );
+    expect(hits).toEqual(sorted);
+    // Byte-wise code-point order ('a' < 's' < 'z'), independent of ICU locale.
+    expect(hits.map((h) => h.path)).toEqual(['alpha.md', 'sub/nested.txt', 'zeta.txt', 'zeta.txt']);
+    // Same file: ordered by line (line 1 hit before line 3 hit).
+    expect(hits[2].line).toBeLessThan(hits[3].line);
+    // Every hit carries a non-empty escaped context and an escaped match.
+    for (const h of hits) {
+      expect(h.context_escaped.length).toBeGreaterThan(0);
+      expect(h.match_escaped).toMatch(/^\\u[0-9a-f]{4}$/);
+      expect(h.context_escaped).toContain(h.match_escaped);
+    }
+  });
+
+  it('23. mutation/negative control: weakened detection loses hits the real gate keeps', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'guard.ts'), `export const note = "${HANChar}";\n`);
+    writeFileSync(
+      join(root, 'noise.bin'),
+      Buffer.concat([Buffer.alloc(32, 0x00), Buffer.from(`zzz ${HANChar}${HANChar}${HANChar} yyy`, 'utf8')]),
+    );
+    commitAll(root);
+    // Real gate: BOTH detection families fire (declared text + binary run).
+    const real = runChecker(root);
+    expect(real.status).toBe(1);
+    expect(real.report().hits.filter((h) => h.path === 'guard.ts')).toHaveLength(1);
+    expect(real.report().hits.filter((h) => h.path === 'noise.bin')).toHaveLength(3);
+
+    const src = readFileSync(CHECKER, 'utf8');
+    const mutantDir = mkdtempSync(join(tmpdir(), 'no-chinese-mutant-'));
+    roots.push(mutantDir);
+    const runFrom = (checkerPath: string) =>
+      spawnSync(process.execPath, [checkerPath, '--json'], { cwd: root, encoding: 'utf8', maxBuffer: 16 << 20 });
+    const hitsOf = (out: string) => JSON.parse(out.slice(out.indexOf('{'))).hits as Array<{ path: string }>;
+
+    // Mutant 1: narrow the Han range so the BMP ideograph escapes content scan.
+    const originalRange = "[0x4e00, 0x9fff, 'CJK Unified Ideographs (Han)']";
+    expect(src.indexOf(originalRange)).toBe(src.lastIndexOf(originalRange)); // single, exact mutation target
+    const mutant1 = join(mutantDir, 'mutant-range.mjs');
+    writeFileSync(mutant1, src.replace(originalRange, "[0x4e00, 0x6200, 'CJK Unified Ideographs (Han)']"));
+    const m1 = runFrom(mutant1);
+    expect(m1.status).toBe(0); // the weakened gate MISSES what the real gate blocks
+    expect(hitsOf(m1.stdout)).toHaveLength(0);
+
+    // Mutant 2: raise the binary evidence bar so printable-run findings vanish
+    // while declared-text detection still fires (independent failure modes).
+    const originalBar = 'const RUN_CJK_MIN = 3;';
+    expect(src.indexOf(originalBar)).toBe(src.lastIndexOf(originalBar));
+    const mutant2 = join(mutantDir, 'mutant-bar.mjs');
+    writeFileSync(mutant2, src.replace(originalBar, 'const RUN_CJK_MIN = 99;'));
+    const m2 = runFrom(mutant2);
+    expect(m2.status).toBe(1); // text hit survives...
+    const m2hits = hitsOf(m2.stdout);
+    expect(m2hits.filter((h) => h.path === 'noise.bin')).toHaveLength(0); // ...but the binary run is lost
+    expect(m2hits.some((h) => h.path === 'guard.ts')).toBe(true);
+    // Conclusion: both suite fixtures are discriminating - a scanner regression
+    // in either family would flip a real-gate assertion above from pass to fail.
+  });
+
+  it('24. --extra-dir scans an explicitly added tree; a missing one fails closed', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, 'src.ts'), 'export const ok = 1;\n');
+    commitAll(root);
+    const extra = mkdtempSync(join(tmpdir(), 'no-chinese-extra-'));
+    roots.push(extra);
+    writeFileSync(join(extra, 'extracted.txt'), `packaged ${HANChar}\n`);
+    writeFileSync(join(extra, 'clean.txt'), 'fine\n');
+    // Without the flag: the extra tree is invisible to the repo scan.
+    const r0 = runChecker(root);
+    expect(r0.status).toBe(0);
+    expect(r0.report().scope.extra_dir_files).toBeNull();
+    // With the flag: the packaged text is a real finding, path-attributed.
+    const r1 = runChecker(root, ['--extra-dir', extra]);
+    expect(r1.status).toBe(1);
+    const rep1 = r1.report();
+    expect(rep1.scope.extra_dir_files).toBe(2);
+    const hit = rep1.hits.find((h) => h.scope === 'extra-dir' && h.path.endsWith('/extracted.txt'));
+    expect(hit).toBeTruthy();
+    expect(hit?.path.startsWith(`${basename(extra)}/`)).toBe(true); // deterministic prefix
+    expect(hit?.line).toBe(1);
+    // A missing explicitly requested target can never pass silently.
+    const r2 = runChecker(root, ['--extra-dir', join(extra, 'does-not-exist')]);
+    expect(r2.status).toBe(2);
+    expect(r2.stderr).toContain('::error::');
+    expect(r2.stderr).toContain('--extra-dir');
+    // A valueless --extra-dir is a usage error like --out.
+    const r3 = runChecker(root, ['--extra-dir']);
+    expect(r3.status).toBe(2);
+    expect(r3.stderr).toContain('--extra-dir requires a path');
   });
 
   it('17d. the history report declares every skip class and labels the touching commit', () => {

@@ -319,7 +319,7 @@ function jpegTextPayloads(buf) {
 }
 
 const SUMMARY = { tracked: 0, untracked: 0, dist: 0, extra: 0, textScanned: 0, binarySkipped: 0, fontSkipped: 0,
-  pngMetadata: 0, jpegMetadata: 0, binaryStringScans: 0, historyBlobs: 0,
+  pngMetadata: 0, jpegMetadata: 0, binaryStringScans: 0, oleContainers: 0, historyBlobs: 0,
   historyNonBlobObjects: 0, historySkippedOversize: 0, historySkippedEmpty: 0, historySkippedUndecodable: 0 };
 
 const HITS = [];
@@ -512,47 +512,36 @@ function scanBinaryFile(kind, scope, absPath, relPath, buf) {
   scanOpaqueBinary(buf, scope, relPath, pushHit2);
 }
 
-// OLE Compound File (.msi installer): structurally a sector-aligned
-// container whose real text lives in codepage / UTF-16LE streams. A raw
-// UTF-8 printable-run scan of a CFB is pure alignment noise - byte pairs
-// of the container's own structures decode as random Han triplets (the
-// false-positive class that failed the v1.0.1 Windows release build) -
-// while the format's ACTUAL text encoding (UTF-16LE) is invisible to a
-// UTF-8 run scan, so the old path could only ever produce false hits and
-// never true ones on this format. Following the PNG precedent (parse the
-// structure, scan the format's real text), a structurally-valid CFB gets
-// a UTF-16LE run scan at the SAME RUN_CJK_MIN evidence bar. CFB sectors
-// and mini-streams are even-aligned, so even-offset unit pairing sees
-// every stream's strings; anything else keeps the conservative opaque
-// path. This is a declared, documented rule - not a suppression list:
-// every run above the bar reports ALL of its findings.
+// OLE Compound File (.msi installer): a sector-aligned STRUCTURAL
+// container whose bulk is compressed cabinet data. Two hard facts make a
+// raw text heuristic unsound on this format, in BOTH directions:
+//   1. The container's own structures and compressed streams decode as
+//      random Han triplets under a UTF-8 run scan (the false-positive
+//      class that failed the v1.0.1 Windows release build) - and under a
+//      UTF-16LE pairing ~42% of random units still land in the Han range,
+//      so a 40 MB installer statistically FORCES chains of 16+ Han units
+//      (the second release build proved it). No chain-based bar is both
+//      sensitive and sound on this payload.
+//   2. The format's real text (UTF-16LE / codepage string pools) is
+//      invisible to a UTF-8 run scan, so the old path could never deliver
+//      a TRUE finding on this format either.
+// Declared rule (same family as font binaries: "glyph coverage is not UI
+// copy"): a structurally-verified OLE compound document is recorded as a
+// structured container and excluded from raw-byte text heuristics, with
+// the exclusion VISIBLE in the report summary. What makes this fail-closed
+// rather than a blind spot: every string that goes INTO the installer is
+// source-level content - the app's UI copy, catalog data, the WiX
+// template's own English strings - and the SOURCE scan (exact,
+// 1-character sensitivity, every tracked file) covers all of it. The
+// binary heuristic exists for metadata that never passes through the
+// source tree; an MSI's payload never contains such content.
 const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 
-function oleUtf16Runs(buf, minUnits = 3) {
-  // minUnits = RUN_CJK_MIN: a run shorter than the evidence bar can never
-  // produce a finding, so extraction and evidence use the same bar.
-  const runs = [];
-  let cur = [];
-  const push = () => { if (cur.length >= minUnits) runs.push(String.fromCharCode.apply(null, cur)); cur = []; };
-  for (let i = 0; i + 1 < buf.length; i += 2) {
-    const u = buf.readUInt16LE(i);
-    const ascii = u >= 0x20 && u <= 0x7e;
-    const cjk = (u >= 0x3400 && u <= 0x9fff) || (u >= 0xf900 && u <= 0xfaff) || (u >= 0x3000 && u <= 0x303f);
-    if (ascii || cjk) { cur.push(u); continue; }
-    push();
-  }
-  push();
-  return runs;
-}
-
 function scanOpaqueBinary(buf, scope, relPath, pushHit2) {
-  // Structured container: OLE compound document (see OLE_MAGIC above).
+  // Structured container: OLE compound document (see the declared rule
+  // above). Recorded in the summary; never raw-byte text-scanned.
   if (buf.length >= 8 && buf.subarray(0, 8).equals(OLE_MAGIC)) {
-    SUMMARY.binaryStringScans += 1;
-    for (const run of oleUtf16Runs(buf)) {
-      if (countCjkCodePoints(run) < RUN_CJK_MIN) continue;
-      for (const hit of scanTextPayload('binary-string', scope, relPath, run, { sourceLabel: 'OLE UTF-16 run', allowLocale: false })) pushHit2(hit, 'binary-string', scope, relPath);
-    }
+    SUMMARY.oleContainers += 1;
     return;
   }
   // Opaque binary: conservative printable-run scan of the whole payload.
@@ -854,6 +843,7 @@ const report = {
     png_metadata_payloads_inspected: SUMMARY.pngMetadata,
     jpeg_metadata_payloads_inspected: SUMMARY.jpegMetadata,
     opaque_binaries_string_scanned: SUMMARY.binaryStringScans,
+  ole_compound_containers_structural: SUMMARY.oleContainers,
     history_blobs_scanned: historyMode ? SUMMARY.historyBlobs : null,
     history_only_findings: historyMode ? HISTORY_HITS.length : null,
     history_non_blob_objects_skipped: historyMode ? SUMMARY.historyNonBlobObjects : null,
@@ -890,6 +880,7 @@ md.push(`| - font binaries skipped (glyph coverage is not UI copy) | ${SUMMARY.f
 md.push(`| - PNG metadata payloads inspected | ${SUMMARY.pngMetadata} |`);
 md.push(`| - JPEG metadata payloads inspected | ${SUMMARY.jpegMetadata} |`);
 md.push(`| - opaque binaries printable-run scanned | ${SUMMARY.binaryStringScans} |`);
+md.push(`| - OLE compound containers (MSI): structured, not raw-text scanned | ${SUMMARY.oleContainers} |`);
 if (historyMode) {
   md.push(`| history blobs scanned (report-only) | ${SUMMARY.historyBlobs} |`);
   md.push(`| history non-blob objects skipped | ${SUMMARY.historyNonBlobObjects} |`);

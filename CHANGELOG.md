@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.2 (2026-10-17): the queue-honesty release
+
+Every open pull request of the second review wave (#93, #96, #97, #101, #102, #103, #104, #105) was reviewed, defect-fixed where review found defects, and merged; #94 was closed as byte-identical content already carried by #104. The release tree's unit battery is 877 passed / 2 environment-skipped across 59 files with `tsc --noEmit` clean, the production build is green, and `npm audit` reports **zero vulnerabilities** (the two critical tinypool RCE gadgets and the moderate mocker path traversal of the 1.0.1 dev toolchain are gone). Integration evidence: every merged head ran the full 12-check CI matrix, and the two PRs whose review found defects were fixed on their branches and re-verified green before merging.
+
+### Native engine: the hung-server hang, the stale .part, and the retry taxonomy (PR #103)
+
+- **A server that accepts and never answers can no longer wedge a download forever.** The wait for the response line and headers used to be unbounded - cancellation was observed only in the body loop and the retry backoff, so a silent server held the transfer in `Downloading` forever and a Cancel click could not stop it. The wait is now a bounded, cancellable select arm: the same 60-second policy as the body stall, applied one phase earlier, with cancellation winning the race and a timeout failing the attempt as a retryable network error.
+- **Every stop path flushes the bytes it accepted.** The staging writer buffers, and a background drop-flush could still be pending when the next attempt (or the user's Resume) measured the `.part` file - a resume from a stale length would duplicate or drop bytes nothing could account for. Cancel, stall, mid-body connection death, and the final pre-finalize cancel drain all flush before returning now; a test-only deferred-flush sink makes the invariant a deterministic assertion.
+- **Transient server statuses are retried; deterministic ones are not.** 429/502/503/504 answer differently seconds later - the retry loop exists for exactly these, and a transfer that hits two 503s and then the real body now completes instead of dying final. 404/403/500 and friends stay final: retrying them can only reproduce them, and the retry budget is no longer burned. A refused redirect (scheme downgrade, allowlist miss, loop, hop budget) is final too, and the message names the refusal instead of misreporting a security decision as "Connection failed".
+
+### Download manager: order-proof slots, honest cancels, honest retries (PR #101)
+
+- **The concurrency gate is per-id, not a counter.** A fast-completing transfer could deliver its terminal event before `start_download`'s invoke resolved; the handler's decrement then hit a count the start had not raised yet, the later increment leaked the slot, and the queue stalled with free capacity. Slot ownership is now keyed by the Rust download id: whichever of {start resolved, terminal observed} lands first records it, the other clears it, and a repeated terminal event cannot free a second slot.
+- **Cancelling a queued row can no longer leave a zombie transfer.** If the entry was already shifted out of the line and its start was in flight, the cancel used to be lost and the download ran to completion unnamed. The pump now carries the cancel marker to the real id the moment the start resolves.
+- **Retry re-sends the wire identity, and only from a terminal state.** Retrying re-sends what the original start sent (or nothing, letting the server name the file) instead of the localized display fallback word that would rename the retried file; and retry is refused for live or queued rows, where it would orphan a transfer or race the promotion pump. The wire hint survives persistence, so a retry after a restart still sends the original hint.
+
+### Security and toolchain (PR #97)
+
+- **vitest 5.0.5: the dev toolchain's vulnerability set is gone.** `tinypool <= 2.1.1` carried two critical prototype-pollution gadgets to RCE in worker/run options, and `@vitest/mocker` carried a moderate path traversal; all dev/CI-only, none shipped in the desktop bundle - now all fixed at the root and `npm audit` is clean. The two strict-typing fallouts of the major upgrade were fixed on the branch (an explicit mock-call annotation, and the config type rename to `ViteUserConfig`).
+
+### Catalog and i18n (PRs #102, #105)
+
+- **Stale app links route to current official targets**, every changed URL verified live at merge time: Immich's install docs moved to the Docker Compose guide, Krita's download page and Flathub app id were re-pointed (`org.kde.krita`), VLC's App Store listing id was corrected, NewPipe's F-Droid page was canonicalized, and Tuta (`de.tutao.tutanota`) and Proton Mail (`ch.protonmail.android`) carry their real Play Store package ids - the old ids 404.
+- **The batch-install selection count is announced in every locale.** The screen-reader label was stuck at a bare "Selected" because no template declared the `{n}` its call site supplied; all five locales now declare the token, a dict-level token-parity test fails CI if any locale drops or invents a token, and the visible chip-bar label renders through `formatMessage` too so it can never show a literal template.
+
+### CI gates (PR #96)
+
+- **The no-Chinese gate sees CJK Han extensions G/H/I** (the supplementary-plane blocks at and above U+2EBEF that older scans silently passed) and the history still-present attribution respects locale-id boundaries; both gains are pinned by new gate tests alongside the OLE-container rounds of 1.0.1.
+
 ## 1.0.1 (2026-10-17): the verified-boundary release
 
 The first stable round's review findings are fixed, the download panel's Open / "Show in folder" actions work again on every desktop, and the whole open/reveal surface now crosses one registry-validated native boundary on every platform. TypeScript compiles under full `strict` mode and the strictness is enforced on every future change. Integration evidence: all five open audit/hardening pull requests (#92-#96) reviewed, defect-fixed and merged; the unit battery on the release tree is 860 passed / 2 environment-skipped across 57 files with `tsc --noEmit` clean under `strict`/`noUnusedLocals`/`noImplicitReturns`; the security validator, catalog validator, version-coherence validator and the no-Chinese source gate all pass on the release commit.

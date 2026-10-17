@@ -1,4 +1,4 @@
-# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9)
+# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9 + handoff re-execution at the pushed head, §10.10)
 
 Audit scope: `src-tauri/src/**` on the integrated stable candidate — branch
 `integrate/stable-candidate` (PR #85 head `a9c38f02`, which integrates PRs
@@ -46,12 +46,15 @@ one reporting correction (a harness-only clippy allowance, disclosed there).
 
 ## 1. Native command inventory
 
-All 11 commands registered in `src-tauri/src/lib.rs`
-(`tauri::generate_handler!`, lib.rs ~:1009), re-verified against the code and
+All 12 commands registered in `src-tauri/src/lib.rs`
+(`tauri::generate_handler!`, lib.rs ~:1140), re-verified against the code and
 the frontend's `invoke(...)` call sites this round (no command unregistered,
 no invoke of an unregistered command; the only extra name seen,
 `open_downloaded_artifact` in `tests/e2e/tauri-bridge.ts:410`, is a test-only
-mock hook):
+mock hook). Count and line reconciled in the §10.10 handoff round: the table
+below predates the Android open-boundary integration (PR #74), which added
+`open_downloaded_file` as the twelfth command — its row is now recorded here
+rather than only in §10.2.
 
 | Command | Frontend call site | Input validation (native) | Authority | Privileged operation | Failure behavior | Tests |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -64,6 +67,7 @@ mock hook):
 | `fetch_text` | `src/lib/officialResolvers.ts:54` | `resolver_manifest()`: HTTPS-only, 21-host allowlist, credentials refused, private literals refused, EVERY hop re-checked; 2 MiB cap, truncate-and-report (`truncated: true`) | Network to allowlisted vendor hosts | None | Named redirect refusals; truncation reported as data | `fetch_text_enforces_https_and_the_host_allowlist_before_any_request` + 52 policy tests |
 | `fetch_self_update_text` | `src/lib/selfUpdate.ts:48` | Narrower: 3 GitHub-owned hosts + repo-path pin at admission (`check_self_update_repo_path`, now a shared fn the tests drive) AND on every redirect hop (new `PathPin`, §3/N-3); 2 MiB cap | Network to `github.com` + 2 asset-CDN hosts | None | same as fetch_text | 5 command-layer admission tests (incl. normalization matrix) + policy tests |
 | `verify_self_update_signature` | `src/features/selfUpdate/updateDelivery.ts:271` | Registry-scoped: staging-name gate → live engine record → canonical stability → open-handle metadata (regular file, committed size) → streamed minisign verdict against the compile-time-embedded key | Filesystem READ of one registered artifact; verify-only | None | Uniform `VERIFICATION_SCOPE_REFUSAL` for every unregistered path (anti-probe) | 12 boundary + 7 fixture + 8 legacy/staging tests (incl. new legacy-algorithm refusals on both verifier paths) |
+| `open_downloaded_file` | `src/lib/artifactOpen.ts` (`openCompletedArtifact` policy binds it as the Android `openPath` dep) | `resolve_completed_artifact` (lib.rs:504): staging-name gates before ANY fs touch, session-scoped registry record for the EXACT path, canonical stability, regular file + committed size; every out-of-scope path gets ONE uniform refusal (anti-probe) | Filesystem open of ONE registered completed artifact | Android: FileProvider `content://` install/open intent through `tauri-plugin-fress-open` (temporary READ grant only; APK → system package installer, everything else → viewer/share fallback); desktop: opener plugin `open_path` of the validated canonical path | Uniform typed `open-artifact/not-registered` for every unregistered path; restored (persisted) rows have no record and fail closed | lib.rs open-boundary matrix over the shared `resolve_completed_artifact` (staging/traversal/replacement/eviction/cross-wiring) + the Android adapter crate's own tests (Agent 7's scope) |
 | `host_arch` | `src/lib/release/hostArch.ts:32` | none | Reads CPU arch (Windows: `GetNativeSystemInfo`) | Fallback to compile-time `ARCH` | Infallible | cfg'd; CI-proven on Windows |
 | `launch_app_image_artifact` | `downloads.tsx:812` | Name gates (`.part`/`.part.meta`/`.sig`/empty/`..`) before ANY fs touch; `symlink_metadata` regular-file; AppImage-only; registry + id (now `u32::try_from`-gated) + canonical + committed-size match; plan-time AND launch-time re-checks (new, §5) | `chmod +x` on THAT validated file only, then argv-only `Command::new(path)` (no shell, no args) | Launches the one AppImage | Typed `open-artifact/<code>` rejections | 22 boundary tests (traversal, staging, symlink, restored rows, cross-wiring, cap eviction, Unicode, non-AppImage, out-of-range id, plan/launch drift) |
 
@@ -644,6 +648,99 @@ defect; the PR stays narrowly scoped (two files, no production change).**
 Verdict of this round: **PASS** — the PR head is ready as the audit record;
 nothing needs to be added to the diff, and no release artifact, tag or
 release metadata was touched.
+
+### 10.10 Handoff round: independent re-execution at the pushed head `202d002` (Agent 6, fresh sandbox, REST-backed CI evidence)
+
+A further independent pass — a different machine, fresh rustup, empty cargo
+cache, cargo-audit installed from crates.io minutes before use — re-executed
+the §10.3–§10.9 claims against the PR's ACTUAL pushed head. Motivation: the
+PR head had moved one commit past the SHA §10.9 tested (`cf27c20` →
+`202d002`), and the standing rule is that verification results are never
+copied forward to a different SHA. The move is docs-only (an empty
+`git diff cf27c20..202d002 -- src-tauri/`), so every code conclusion carries
+over by construction — this round re-proved the load-bearing ones by
+execution anyway.
+
+Tested source:
+
+| Ref | SHA |
+| --- | --- |
+| `main` / `v1.0.0` tag | `78d5e8ff8e1bc38ca8789539da005fdea4b15613` (re-fetched this round; the tag is ON main HEAD) |
+| PR #94 base | `78d5e8ff…` (merge-base of the PR head and main — the claimed base is exact) |
+| PR #94 head | `202d0020a765d518c5e62ff677c57339058205bd` (branch `agent6/native-audit-round2`; code-identical to `cf27c20`) |
+
+Environment: rustup 1.29.1 fresh; toolchain from `rust-toolchain.toml`
+(1.98.1: rustc/cargo 1.98.1, rustfmt 1.9.0, clippy 0.1.98 — component
+versions match §10.3's record exactly). Harness rebuilt from scratch on this
+machine: the three Tauri-free production modules as UNMODIFIED symlinks,
+direct dependencies pinned `=` to the `src-tauri/Cargo.lock` versions
+(reqwest 0.12.28 `rustls-tls+stream+http2` default-features-off, serde
+1.0.229, serde_json 1.0.151, sha2 0.10.9, tokio 1.53.1, futures-util
+0.3.34), `#![allow(dead_code)]` in the harness root only (the §10.9
+disclosure). One harness-only delta from §10.9's harness description, for
+completeness: two engine tests declare `#[tokio::test(flavor =
+"multi_thread")]`, so the harness's tokio features must include
+`rt-multi-thread` (in the real crate the feature arrives transitively
+through the Tauri dependency graph; the harness must name it explicitly).
+No source file was modified to build the harness.
+
+| Check | Result on head `202d002` |
+| --- | --- |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | **PASS**, exit 0 |
+| Harness `cargo test` (unmodified sources) | **162/162 PASS** (per-module re-count: download_finalize **96**, network_policy **52**, http_body **14** — matches §10.9) |
+| Harness `cargo clippy --all-targets -- -D warnings` | **PASS**, exit 0 (with the harness-root dead_code allowance) |
+| `cargo audit --file src-tauri/Cargo.lock` (cargo-audit 0.22.2, live advisory DB fetched this round) | **exit 0 — 0 vulnerabilities, 7 advisory warnings, 0 yanked findings**: 6 × unmaintained (`proc-macro-error` RUSTSEC-2024-0370; `unic-char-property` -0081, `unic-char-range` -0075, `unic-common` -0080, `unic-ucd-ident` -0100, `unic-ucd-version` -0098, via `urlpattern`) + 1 × unsound (`glib` 0.18.5 RUSTSEC-2024-0429). Same classification as §10.7/§10.9, independently reproduced |
+| Production-read sweeps (re-run, not copied): `.text()`/`.bytes()`/`.json()`/`read_to_string`, `unsafe`, `Command::new`, unchecked `+=` | same as §10.6 — the only `read_to_string` is the 64 KiB-bounded sidecar take (download_finalize.rs:742); the only `unsafe` is `windows_machine_arch` (lib.rs:912-915); the only `Command::new` is the AppImage launcher (artifact_open.rs:305, argv-only, stdio nulled); every server-reachable sum checked/saturating (:937, :1584, :1658, :1734, :1785) — the two plain-`+=` hits in the sweep are both inside `mod tests` |
+| Key guard sites re-read at their claimed lines | byte-identity rule (download_finalize.rs:1423, discards pre-request), `checked_add(1)` in `validate_resume_content_range` (:936-941), impossible-range `discard_staging` (:1750), `u32::try_from` id gate (artifact_open.rs:238), launch-time re-check (artifact_open.rs:289-295), `PathPin` (network_policy.rs:471) + hop ordering (pin evaluated LAST, after host rule) + `is_publicly_routable` v4/v6 tables + the admission-side repo pin (`check_self_update_repo_path`, lib.rs:255) — all present exactly as documented |
+| Deeper reads this round (health pass) | `download_integration.rs` (426 L, test-only — all assertions sound), the lib.rs command surface (all 12 registrations traced, §1 below), `capabilities/default.json` (matches the documented permission set exactly), `main.rs` (10 L, trivial), and a review-only read of Agent 7's `plugins/fress-open` Kotlin adapter (READ-only URI grants on every intent, no exec/delete/write-grant surface, correct layering behind the Rust boundary) |
+
+Kill-tests EXECUTED by hand this round (edit → named test → observe →
+`git checkout` restore → clean-tree re-run; `git status` verified between
+runs):
+
+| # | Guard killed | Named test after the kill | Observed verdict |
+| --- | --- | --- | --- |
+| KT-1 | `(end - start).checked_add(1)` → `wrapping_sub/wrapping_add` (download_finalize.rs:936) | `a_hostile_u64_max_range_is_refused_not_wrapped_or_panicked` | **FAILS** — guard verified |
+| KT-2 | `self_update_feed` `path_pin: Some(..)` → `None` (network_policy.rs:471) | `the_self_update_path_pin_binds_github_hops_to_the_fress_repo` AND `the_self_update_client_refuses_a_redirect_back_onto_github_outside_the_repo_pin` | **BOTH FAIL** (the sibling off-allowlist-hop test keeps passing — the host rule alone, exactly the N-3 gap) — guard verified |
+| KT-3 | `read_part_meta` `take(64 KiB)` → unbounded `read_to_string` (download_finalize.rs:740-742) | `an_oversized_part_meta_sidecar_reads_as_no_validators` | **FAILS** — the oversized sidecar parses unbounded and yields validators — guard verified |
+| KT-4 | `discard_staging(&part)` removed from the impossible-range branch (download_finalize.rs:1750) | `a_hostile_u64_max_content_range_fails_named_without_completing` | **FAILS on the filesystem assertion** — "the poisoned .part must be discarded" — not on an error string — guard verified |
+| KT-5 | byte-identity rule disabled (`if false && …`, download_finalize.rs:1423) | `a_validator_less_resume_never_sends_a_range_request_or_glues_a_tail` + sibling `validator_less_staging_is_discarded_on_resume` | **NEW TEST FAILS while the SIBLING STILL PASSES** — re-proving the §10.5 discriminator claim by execution; guard restored → both pass |
+
+After all kills were restored: full harness re-run **162/162 PASS**, working
+tree clean against the head.
+
+CI evidence, re-verified this round through the REST API with a live
+maintainer token (the token available to the previous handoff attempt had
+been revoked — `401 Bad credentials` — forcing HTML-page evidence there;
+this round's checks below are API responses, not page scrapes):
+
+| Commit | Check runs | Result |
+| --- | --- | --- |
+| `202d002` (PR #94 head) | 12 of 12 | **success** — including `Rust fmt, clippy, tests (linux)`, `Rust tests (windows-latest)`, `Rust tests (macos-latest)`, version consistency, No-Chinese zero-hit scan, typecheck/build, E2E + visual, perf invariants, release-artifact verifier, Ubuntu 26 canary, both author guards |
+| `cf27c20` (§10.9's tested head) | 12 of 12 | **success** — same shape; the earlier round's claim re-verified via API |
+| `78d5e8ff` (main = v1.0.0) | 26 of 26 | **success** — the CI-backed proof for the Tauri-coupled files at the exact base |
+| PR #94 mergeability | `mergeable: true`, `mergeable_state: clean` | the branch merges into main without conflict |
+
+One record-accuracy finding (doc-only, fixed in this commit): §1's command
+inventory still said "All 11 commands" with a `lib.rs ~:1009` registration
+line — both stale since the Android open-boundary integration added
+`open_downloaded_file` as the twelfth registered command (registration now
+at ~:1140). §10.2 already covered the command's boundary; the missing §1
+table row has been added, and the count/line reconciled. No production
+change; no code finding was involved.
+
+Defect hunt: the pattern sweeps, the deeper reads above, and the full re-read
+of the owned production files found **no new production defect**; nothing in
+this round required a code change, and the PR's diff remains exactly the two
+files (the §10.5 regression test + this report). Per §10.9's correction, the
+statement of scope stands: the Tauri-free harness proves the
+engine/policy/body modules; `lib.rs`, `artifact_open.rs` and
+`download_integration.rs` remain CI-proven, and §9's hardware rows remain
+NOT RUN.
+
+Verdict of this round: **PASS** — every executable claim of §10.3–§10.9 was
+re-executed on the pushed head `202d002` and held; the audit record is
+accurate as it stands, now with the §1 inventory reconciled.
 
 ## 11. Conclusion
 

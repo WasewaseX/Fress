@@ -995,4 +995,73 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(historyHits[0].last_touching_commit).toBeTruthy();
     expect(historyHits[0].last_touching_commit).not.toBe('unattributed');
   });
+
+  // ------------------------------------------------------------------
+  // OLE compound documents (the .msi installer): the release build's
+  // UTF-8 printable-run scan produced alignment false positives on the
+  // container's own structures while being structurally unable to see
+  // the format's real UTF-16LE text. The structural rule: a CFB gets a
+  // UTF-16LE run scan at the same evidence bar; everything else keeps
+  // the opaque path.
+  // ------------------------------------------------------------------
+
+  const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  const utf16le = (s: string): Buffer => Buffer.from(s, 'utf16le');
+
+  it('25a. an OLE compound document with REAL UTF-16LE Han content is reported', () => {
+    const root = makeRepo();
+    const msi = Buffer.concat([
+      OLE_MAGIC,
+      Buffer.alloc(0x1c0, 0x00),
+      utf16le(`Product${HANChar}${HANChar2}${HANChar}Name`),
+      Buffer.alloc(0x40, 0x00),
+    ]);
+    writeFileSync(join(root, 'fixture.msi'), msi);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const rep = r.report();
+    const hit = rep.hits.find((h) => h.path === 'fixture.msi');
+    expect(hit).toBeTruthy();
+    expect(hit?.kind).toBe('binary-string');
+    expect(hit?.codepoint).toBe(`U+${0x62a5.toString(16).toUpperCase()}`);
+  });
+
+  it('25b. an OLE compound document carrying the MSI alignment artifact shape is clean', () => {
+    const root = makeRepo();
+    // The exact byte shape the v1.0.1 Windows build tripped on: UTF-8 Han
+    // triplets interleaved with '~;' separators (OLE string-pool alignment
+    // noise). Under even-offset UTF-16LE pairing these isolated pairs stay
+    // below the evidence bar.
+    const artifact = Buffer.concat([
+      OLE_MAGIC,
+      Buffer.from([0xe9, 0x97, 0x91]), Buffer.from('~;', 'latin1'),
+      Buffer.from([0xe9, 0xb7, 0x93]), Buffer.from('~;', 'latin1'),
+      Buffer.from([0xe9, 0xb7, 0x93]),
+      Buffer.alloc(7, 0x00),
+    ]);
+    writeFileSync(join(root, 'installer.msi'), artifact);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(0);
+    expect(r.report().summary.total_hits).toBe(0);
+  });
+
+  it('25c. the same artifact bytes WITHOUT the OLE magic still fail (opaque path unchanged)', () => {
+    const root = makeRepo();
+    const bytes = Buffer.concat([
+      Buffer.from([0xe9, 0x97, 0x91]), Buffer.from('~;', 'latin1'),
+      Buffer.from([0xe9, 0xb7, 0x93]), Buffer.from('~;', 'latin1'),
+      Buffer.from([0xe9, 0xb7, 0x93]),
+      Buffer.alloc(7, 0x00),
+    ]);
+    writeFileSync(join(root, 'blob.bin'), bytes);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const rep = r.report();
+    const hit = rep.hits.find((h) => h.path === 'blob.bin');
+    expect(hit).toBeTruthy();
+    expect(hit?.kind).toBe('binary-string');
+  });
 });

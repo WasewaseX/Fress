@@ -1,4 +1,4 @@
-# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9 + handoff re-execution at the pushed head, §10.10)
+# Native code-integrity audit — October 2026 (rounds 2–3, reconciled onto the stable candidate; §10 = independent post-tag re-verification + finish-the-PR re-execution, §10.9 + handoff re-execution at the pushed head, §10.10 + full-coverage read at the final head §10.11)
 
 Audit scope: `src-tauri/src/**` on the integrated stable candidate — branch
 `integrate/stable-candidate` (PR #85 head `a9c38f02`, which integrates PRs
@@ -742,6 +742,66 @@ Verdict of this round: **PASS** — every executable claim of §10.3–§10.9 wa
 re-executed on the pushed head `202d002` and held; the audit record is
 accurate as it stands, now with the §1 inventory reconciled.
 
+### 10.11 Full-coverage read round: CI completed at `2075038`, every owned file read end to end (Agent 6, fresh token round)
+
+This round closed the two items §10.10 left open — the CI runs that were
+still in flight when that round pushed, and the targeted-read shape of the
+source review — after the environment was reset again (the sandbox lost the
+cargo PATH between turns; `~/.cargo/bin` and the pinned 1.98.1 toolchain
+survived, and a fresh fine-grained token supplied by the repository owner
+replaced the revoked one for git + REST access).
+
+**CI completion at the final PR head `2075038`.** The §10.10 table showed
+4 of 12 checks green within 45 s of the push. With the new token the REST
+check-run query at the same SHA now reports **12 of 12 `success`**,
+including `Rust fmt, clippy, tests (linux)`, `Rust tests (windows-latest)`,
+`Rust tests (macos-latest)`, and both author guards. The docs-only delta
+`202d002..2075038` is exactly the §10.10 report (105 lines in this file,
+zero source lines), so the §10.3–§10.9 evidence at `202d002` transfers to
+the pushed head unchanged.
+
+**Gates re-run on the current tree (= PR head `2075038`).** Harness
+**162/162** (`96 + 52 + 14`, 30.1 s), harness clippy `-D warnings` PASS,
+`cargo fmt --check` PASS in `src-tauri`, and `cargo audit` (0.22.2, live
+advisory DB re-fetched this round) exit 0 with the same 7 known warnings
+and **0 vulnerabilities** — no new advisory published since §10.4.
+
+**First complete line-coverage read of every owned file.** Earlier rounds
+verified the security-critical regions by targeted reads plus kill-tests;
+this round read the full production surface at the pushed head:
+
+| File (lines read) | Focus of the read | Verdict |
+| --- | --- | --- |
+| `http_body.rs` (460, all) | Both cap rails: check-before-extend in u64; `room` subtraction cannot underflow (loop invariant `buf.len() ≤ cap`); JSON-refuses / text-truncates contrast; exactly-at-cap boundary pins; slow-drip time-rail pin | CLEAN |
+| `network_policy.rs` (928, all) | Admission (https-only, credentials, exact-host post-normalization), hop evaluation order with the path pin LAST (:697), v4 table completeness (`b[0] < 224` tail), v6 `2000::/3` gate — confirmed `2001:db8::/32` is NOT shadowed by the `/23` check (`0x0db8 & 0xfe00 = 0x0c00 ≠ 0`, both rows load-bearing), IPv4-mapped/NAT64/Teredo refused by the native-unicast gate, `PathPin` prefix ends with `/` (defeats `FressEvil` siblings), resolver never caches | CLEAN |
+| `download_finalize.rs` (1–2012 production, all) | State-machine table = documented spec; registry cap FIFO + replace-by-canonical; `percent_decode` bounds; `sanitize_filename` keeps no separators, collapses `.`/`..`/reserved names; `validate_resume_content_range` checked arithmetic; `evaluate_response` 200/206/416 matrix; link-refused fallback set (unix 1\|2\|13\|18\|30\|38\|95, windows 1\|5\|17\|50); reservation-copy cleans a failed commit; streaming loop cancel + 60 s stall + checked counter; flush+sync before commit; record only after commit | CLEAN |
+| `artifact_open.rs` (780, all) | Name gates (staging/sidecar/`.sig` case-insensitive, `..` components, no file-name), `symlink_metadata` shape gate, AppImage-only routing, negative-id and `u32::try_from` gates (:238), id binding, canonical + size stability at plan AND launch time, argv-only spawn with nulled stdio, `0o100` chmod restricted to the validated file; 20 unit tests pin every gate | CLEAN |
+| `network_policy/tests.rs` (1374, all) | 52 tests: per-class admission, credential/userinfo disguises, v4/v6 boundary rows, IDN/punycode/trailing-dot look-alikes, zone ids, redirect decisions incl. loops/budget/allowlist/pin, strict-policy drift guard, scripted resolver (mixed / all-private / rebinding re-check / lookup failure), literals-skip-DNS pin, self-update 3-host allowlist + `.sig` rides the same policy + path-pin matrix incl. the dot-segment escape; spot-read the rebinding and path-pin bodies — both assert what their names claim | CLEAN, no material coverage gap |
+
+**Cross-file boundary check (read-only, `lib.rs` not owned).** The one
+unverified ingress into the engine's filename handling was
+`DownloadPlan.requested_name`: inside `download_finalize.rs` only header- and
+URL-derived names pass through `sanitize_filename`, so a pass-through of the
+frontend-supplied name would have allowed `dir.join()` traversal. Verified
+closed: `start_download` (lib.rs:942) is the ONLY production plan-construction
+site, it sanitizes at lib.rs:980 (`filename.map(|n| sanitize_filename(&n))`)
+AFTER the URL has been admitted and BEFORE any filesystem side effect, and the
+spawned task wraps the engine in `catch_unwind` with an unconditional
+`session.release()` — matching the module invariant that no failure path can
+leave an active-set entry behind. No change needed.
+
+Defect hunt result of this round: **no new production defect**; the PR diff
+remains exactly the two files it has been since `202d002`. Scope statement
+unchanged: the Tauri-free harness proves the engine/policy/body modules;
+`lib.rs`, `artifact_open.rs` and `download_integration.rs` remain CI-proven;
+§9's hardware rows remain NOT RUN.
+
+Verdict of this round: **PASS** — CI evidence is now complete at the pushed
+head, and the audit's source-review claim can be upgraded from
+"security-critical regions verified" to "every owned production file read in
+full at the pushed head, with the one cross-file ingress boundary verified
+closed".
+
 ## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified
@@ -760,7 +820,10 @@ final tree re-audits clean.**
   the size-cap/timeout rails are proven independently enforced by loopback
   tests that run against the real readers (161/161 locally executed on the
   final tree; per-module: download_finalize 95, network_policy 52,
-  http_body 14).
+  http_body 14). Reconciled by the handoff rounds: the strengthened
+  byte-identity fixture brings this to 162/162 (download_finalize 96) at the
+  pushed PR head, re-executed and CI-green there; §10.11 records the
+  full-coverage read of every owned file at that head.
 - The trust boundaries hold end to end: registry → verification → launch
   (now re-checked at the launch instant), admission → per-hop rules →
   public-only DNS (now path-pinned for the self-update feed), embedded-key

@@ -46,11 +46,12 @@ uncallable command is surface without a purpose.
 and `opener:allow-reveal-item-in-dir` are no longer granted. The opener
 plugin's path bindings have no path scope, so the frontend previously held an
 unrestricted open/execute primitive. Opening and revealing downloaded files
-now runs through the native `open_download_file` / `reveal_download_file`
-commands (src-tauri/src/download_open.rs), which admit only paths inside
-download-engine folders — the platform default download dir plus the
-app-owned ledger of folders a download actually ran in (or that the user
-picked, recorded via `record_download_directory`). Residual risk is
+now runs through the native `open_downloaded_file` / `reveal_download_file`
+commands, which validate the exact completion-event path against the
+session's completed-artifact registry before the OS is asked from the Rust
+side (`open_download_dir` admits folder targets: the platform default
+download dir, a folder holding a completed artifact this session, or one
+the user picked via `record_download_directory`). Residual risk is
 documented in docs/security/tauri-security.md: a frontend that can start
 downloads can aim the engine at a folder, so the blast radius is "files
 inside download folders" — pre-existing local files outside those folders
@@ -97,10 +98,10 @@ configured (see CODE_SIGNING.md for the evidence).
 
 | Platform | Default folder | User-chosen folder | Open file | Reveal in folder | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Windows | `FOLDERID_Downloads` (follows OneDrive redirection) via `dirs::download_dir` | dialog picker; persisted in localStorage | `open_download_file` (validated native boundary → ShellExecute) | `reveal_download_file`, fallback `open_download_file(dirname)` | reveal can fail on some Windows builds; the fallback opens the CONTAINING folder, never the file |
-| macOS | `~/Downloads` | dialog picker | `open_download_file` | same fallback chain | host arch comes from the native command (WebKit UA lies on Apple Silicon) |
-| Linux | XDG download dir | dialog picker | `open_download_file` | same fallback chain | resolver/download hosts unchanged; engine identically gated |
-| Android | app-private `app_data_dir/Download` (created on demand) | picker intentionally hidden (`isAndroidWebview()` gates both Header and DownloadManager) | `open_download_file` → opener's mobile `open` (system default program) | hidden (no file-manager reveal in app-private storage; `reveal_item_in_dir` is runtime-unsupported on Android and surfaces as the honest error path) | the WebView cannot treat desktop paths as available; unavailable folders and rename failures surface as honest engine errors (kind absent → generic failed state with Resume where sound) |
+| Windows | `FOLDERID_Downloads` (follows OneDrive redirection) via `dirs::download_dir` | dialog picker; persisted in localStorage | `open_downloaded_file` (registry-validated native boundary → OS default handler) | `reveal_download_file`, fallback `open_download_dir(dirname)` | reveal can fail on some Windows builds; the fallback opens the CONTAINING folder, never the file |
+| macOS | `~/Downloads` | dialog picker | `open_downloaded_file` | same fallback chain | host arch comes from the native command (WebKit UA lies on Apple Silicon) |
+| Linux | XDG download dir | dialog picker | `open_downloaded_file` | same fallback chain | resolver/download hosts unchanged; engine identically gated |
+| Android | app-private `app_data_dir/Download` (created on demand) | picker intentionally hidden (`isAndroidWebview()` gates both Header and DownloadManager) | `open_downloaded_file` → fress-open adapter (system installer / viewer / share) | hidden (no file-manager reveal in app-private storage; `reveal_item_in_dir` is runtime-unsupported on Android and surfaces as the honest error path) | the WebView cannot treat desktop paths as available; unavailable folders and rename failures surface as honest engine errors (kind absent → generic failed state with Resume where sound) |
 
 Cross-platform invariants verified in code: a completed item's `path` is set
 ONLY by the engine's terminal `download-complete` event (the file exists in

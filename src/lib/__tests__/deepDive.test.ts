@@ -1,16 +1,13 @@
 // Fress deep-dive probe: answers specific resolver questions against live APIs.
 // FRESS_LIVE_PROBE=1 node --experimental-strip-types? No - run via vitest like liveProbe.
-import { readFileSync } from 'node:fs';
 import { describe, it } from 'vitest';
 
 function readPat(): string | null {
-  try {
-    // Local-audit convenience only: a token from the operator's machine, if
-    // it exists. CI has no such file and skips these probes entirely.
-    return (readFileSync('/home/z/my-project/scripts/verify_round6.py', 'utf8').match(/github_pat_[A-Za-z0-9_]+/) || [])[0] || null;
-  } catch {
-    return null;
-  }
+  // Local-audit convenience only: the operator passes a token through the
+  // environment when running the probe by hand. CI has no such variable
+  // and skips these probes entirely; no token, path or credential pattern
+  // is stored in the repository.
+  return process.env.FRESS_LIVE_PROBE_PAT || null;
 }
 const pat = readPat();
 const H: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'fress-probe' };

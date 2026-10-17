@@ -26,16 +26,26 @@ Deliberately NOT granted (each verified unused by the frontend):
   opener plugin's JS bindings for local paths are unrestricted (no path
   scope exists), so a compromised frontend could open or execute ANY file
   with the system handler. Opening and revealing downloaded files instead
-  runs through the native `open_download_file` / `reveal_download_file`
-  commands (src-tauri/src/download_open.rs), which admit only paths inside
-  download-engine folders: the platform default download dir plus the
-  persisted ledger of folders a download actually ran in (or the user
-  picked in the native dialog, recorded via `record_download_directory`).
+  runs through the native `open_downloaded_file` / `reveal_download_file`
+  commands, which validate the EXACT completion-event path against the
+  session's completed-artifact registry (canonical stability, regular
+  file, committed size — the same discipline as the updater's signature
+  verification) before the OS is asked from the Rust side; desktop
+  dispatch is the opener plugin's RUST API, Android dispatch is the
+  fress-open adapter (APK installer / viewer / share). Directory targets
+  (`open_download_dir`) admit only the platform default download folder,
+  a folder holding a completed artifact this session, or a folder the
+  user picked in the native dialog this session
+  (`record_download_directory`). The admission state is deliberately
+  session-scoped and app-owned — a panel row restored after a restart is
+  refused with the typed `not-registered` code, because persisted
+  (webview-writable) state must never feed a native open.
   Residual risk, stated honestly: a frontend that can start downloads can
   direct the engine at a folder of its choosing (the URL policy constrains
   where downloads come FROM, not where they land), so the effective blast
-  radius is "files inside download folders" — pre-existing local files
-  outside those folders can no longer be touched from the webview at all.
+  radius is "files the engine itself committed this session" — pre-existing
+  local files outside those commits can no longer be touched from the
+  webview at all.
 
 - **`core:default`** expands to nine module defaults (`app`, `event`, `image`,
   `menu`, `path`, `resources`, `tray`, `webview`, `window`). Only `event`
@@ -130,8 +140,9 @@ restrict:
   / `fetch_text` commands — governed by the Rust-side URL policy in
   `src-tauri/src/` (see the native network policy module);
 - files opened or revealed through the native open/reveal boundary
-  (`open_download_file` / `reveal_download_file` — validated against the
-  download-engine folder set, see the capability matrix above);
+  (`open_downloaded_file` / `reveal_download_file` — validated against the
+  session completed-artifact registry; `open_download_dir` for folder
+  targets, see the capability matrix above);
 - the updater plugin, when it gets wired (governed by its own endpoint
   configuration).
 

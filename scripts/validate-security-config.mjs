@@ -72,10 +72,13 @@ const expected = [
 
 // The opener plugin's unrestricted open-path / reveal-item-in-dir grants are
 // deliberately ABSENT: opening/revealing downloaded files runs through the
-// native `open_download_file` / `reveal_download_file` commands, which admit
-// only paths inside download-engine folders (default download dir + the
-// persisted ledger of folders downloads actually used). The inverse check
-// below fails if either grant ever reappears in the capability file.
+// native `open_downloaded_file` / `reveal_download_file` commands, which
+// validate against the session's completed-artifact registry (canonical
+// stability, regular file, committed size) before the OS is asked from the
+// Rust side; `open_download_dir` admits only download folders (the platform
+// default, a folder holding a completed artifact, or one picked this
+// session via `record_download_directory`). The inverse check below fails
+// if either grant ever reappears in the capability file.
 const forbidden = ['opener:allow-open-path', 'opener:allow-reveal-item-in-dir'];
 
 const granted = new Map();
@@ -95,9 +98,9 @@ const unexplained = [...granted.keys()].filter((id) => !expectedIds.has(id));
 check(unexplained.length === 0, 'no unexplained/extra permissions in the capability', `unexpected grants: ${unexplained.join(', ')}`);
 
 for (const id of forbidden) {
-  check(!granted.has(id), `capability must NOT grant ${id}`, 'open/reveal runs through the validated native open_download_file / reveal_download_file commands instead');
+  check(!granted.has(id), `capability must NOT grant ${id}`, 'open/reveal runs through the validated native open_downloaded_file / reveal_download_file commands instead');
 }
-for (const cmd of ['open_download_file', 'reveal_download_file', 'record_download_directory']) {
+for (const cmd of ['open_downloaded_file', 'reveal_download_file', 'open_download_dir', 'record_download_directory']) {
   const hits = grepSource(cmd, 'src');
   check(hits.length > 0, `frontend evidence for native command ${cmd}`, `no src/ call site invokes ${cmd} — the native boundary has no consumer`);
 }

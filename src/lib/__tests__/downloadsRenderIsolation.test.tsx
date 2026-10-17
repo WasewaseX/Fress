@@ -142,7 +142,7 @@ describe('download state subscriptions (React Profiler, 500-card catalog)', () =
   let setItemSpy: ReturnType<typeof vi.spyOn>;
 
   const writesFor = (key: string): string[] =>
-    setItemSpy.mock.calls.filter((call) => call[0] === key).map((call) => call[1] as string);
+    setItemSpy.mock.calls.filter((call: string[]) => call[0] === key).map((call: string[]) => call[1] as string);
 
   beforeEach(() => {
     h.listeners.clear();

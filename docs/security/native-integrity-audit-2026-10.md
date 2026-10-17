@@ -968,6 +968,146 @@ Tauri's Linux stack). One LOW finding (R4-1) is reported to the boundary
 owner with a concrete native-enforcement recommendation; no known
 security or correctness defect remains in the audit-owned code.
 
+### §10.13 Round 5 — re-verification at main `0be68b7` after the second review wave merged (Agent 6)
+
+**Why a new round:** the exact-SHA rule forbids reusing Round 4's results
+on a different tree. Between Round 4 and this round, `main` advanced
+`7fcb4fe` → `0be68b7`: the second review wave merged in full (#93, #96,
+#97, #101, #102, #103, #104 — this audit's own §10.12 — and #105;
+#94 was closed unmerged, its only unmerged head commit being the
+docs-only §10.11 whose content PR #104 carries byte-identically). The
+entire `src-tauri/` delta between the two heads is **one file**:
+`download_finalize.rs` +610/−31 (PR #103). Every other native file the
+audit owns is byte-identical (verified by `git diff 7fcb4fe..0be68b7 --
+src-tauri/`).
+
+**Full-delta read of PR #103's merged production code** (all four
+clusters):
+
+1. *Cancellable, bounded first-response wait.* The unbounded
+   `request.send().await` is now a `tokio::select!` with `biased;` — the
+   cancel arm is polled first, so a pre-latched cancel wins the race
+   against a response that has already arrived; the send is wrapped in a
+   60 s window (`FIRST_RESPONSE_TIMEOUT`, same policy as the body stall,
+   one phase earlier). On cancel before a byte moved: state → Cancelled,
+   `CANCEL_SENTINEL` with kind `None`, nothing on disk (the gate precedes
+   the staging reservation). On timeout: retryable `network` failure with
+   a named message. The window also covers redirect hops (reqwest follows
+   them inside `send`), so a slow-drip redirect chain cannot wedge the
+   attempt either.
+2. *Transient-vs-deterministic status taxonomy.* `evaluate_response`
+   returns kind `Some("network")` for 429/502/503/504 (retryable — the
+   retry loop exists for exactly these) and stays final `None` for every
+   other status; the protocol gate still admits only 200/206. The unit
+   pin `transient_server_statuses_are_retryable_and_deterministic_ones_
+   are_not` asserts both directions, and `a_deterministic_404_is_never_
+   retried` proves the budget is not burned (exactly one request hits the
+   mock).
+3. *Named redirect refusals.* `classify_send_error` maps
+   `reqwest::Error::is_redirect()` — the surface on which
+   `network_policy`'s per-hop refusals (scheme downgrade, allowlist miss,
+   loop, hop budget, credentials on a hop) arrive — to a FINAL failure
+   whose message names the refusal ("Insecure redirect refused: …"),
+   replacing the old misleading "Connection failed" + retry-budget burn.
+   `a_redirect_policy_refusal_is_final_and_named_not_retried` pins final
+   classification, naming, and single-request behavior. Security-positive:
+   a security decision is no longer misreported as a network blip.
+4. *Flush-on-stop on every stop path.* All four stop paths (cancel
+   mid-body, 60 s stall, mid-body connection death, the pre-finalize
+   cancel drain) now run `file.flush().await` before `drop(file)` and
+   state advance, so the `.part` file's on-disk length equals exactly the
+   bytes the engine accepted at the moment the error returns — closing
+   the window where a buffered tail or a pending drop-flush would make a
+   fast automatic retry (or the user's Resume) probe a stale length and
+   glue a corrupted file. The test-only `DeferredFlushSink` models
+   tokio's buffering semantics and turns the invariant into a
+   deterministic byte-equality assertion on both the interrupt and stall
+   paths.
+
+Static sweep of the file's 2 134 production lines: **zero `unsafe`**
+(the single grep hit is the English word in a doc comment), **zero
+`unwrap`, zero `panic!`/`todo!`**, no TODO/FIXME markers; the four
+`.expect(...)` sites are the pre-existing, documented completed-artifact
+registry lock-poisoning guards (:436/:463/:481/:497), unchanged by this
+PR. No new command, no new fs surface, no path-handling change.
+
+**Harness rebuilt at `0be68b7`** (sandbox reset had wiped the previous
+rig): same discipline — the five production modules symlinked verbatim
+from the live tree; the inert `tauri` stub reduced to exactly what the
+modules reference (`State<'r, T>` with `.inner()`, and the pass-through
+`#[tauri::command]` proc macro); the root items `download_integration`
+imports (`fetch_text`, `fetch_latest_release`, `fetch_recent_releases`,
+`fetch_fdroid_package`, `parse_gh_release`, `sanitize_filename` + the
+three resolver structs) copied verbatim from `lib.rs` @ `0be68b7` (lines
+38–246, 943–1005); direct dependencies pinned `=` to the audited versions
+(reqwest 0.12.28, serde 1.0.229, serde_json 1.0.151, sha2 0.10.9, tokio
+1.53.1, futures-util 0.3.34). Disclosed harness-only deviations: the
+root `#![allow(dead_code)]`; a private `use download_finalize::
+sanitize_filename` with an explicit `allow(unused_imports)` (production
+resolves the same name the same way); tokio's `rt-multi-thread` feature
+enabled for the two `#[tokio::test(flavor = "multi_thread")]` attributes
+(in production this feature arrives transitively via Tauri). Toolchain
+exactly per `rust-toolchain.toml`: 1.98.1 / rustfmt 1.9.0 / clippy
+0.1.98.
+
+**Native battery at `0be68b7`: 217 passed / 0 failed** (census:
+http_body 14, network_policy 52, artifact_open 23, download_finalize
+104, download_integration 24 — exactly +8 over Round 4's 209, matching
+the eight new tests PR #103 adds). `cargo fmt --check` exit 0 on the
+full harness; `cargo clippy --tests -- -D warnings` clean (the test
+target is where every production line compiles; the bare-lib pass emits
+harness-only unused-import warnings for imports the Tauri command surface
+consumes in production).
+
+**Kill-tests executed this round (both prove the new teeth, both
+restored to a clean tree and 217/217 green afterwards):**
+
+1. Stall-path flush deleted (`let _ = file.flush().await;` at the 60 s
+   stall arm) → `a_stalled_transfer_flushes_its_accepted_bytes_before_
+   returning` FAILS with exactly the invariant assertion ("the staging
+   file must hold exactly the bytes the engine accepted"). Restored.
+2. `503` dropped from the transient-taxonomy `matches!` → BOTH
+   `transient_server_statuses_are_retryable_and_deterministic_ones_are_
+   not` (unit pin) and `a_transient_503_is_retried_and_the_download_
+   completes` (end-to-end) FAIL. Restored.
+
+**Dependency audit re-run at `0be68b7`'s lock** (cargo-audit 0.22.2,
+advisory DB as of 2026-10-18): **0 vulnerabilities; 10 warnings** — the
+identical set to Round 4 (proc-macro-error, unic ×5, zbus_names /
+zvariant / zvariant_derive, glib unsound). Zero drift; no new advisories.
+
+**Frontend wave verified in review** (TS/TSX is report-only territory
+for this audit): PR #101's per-id slot accounting traced sound against
+the engine contract — the design's load-bearing assumption (Rust
+download ids are never reused) verified at `download_finalize.rs:386`
+(monotonic `AtomicU32::fetch_add`, SeqCst); PR #102's URL reroutes
+verified official domain-by-domain (VLC's iOS listing live-verified as
+`id650377962`; Krita's Flathub id, Tuta's and Proton's Play package ids
+all corrected); PR #97's lockfile diff verified confined to the vitest-3
+subtree (the RCE-advisory-carrying `tinypool 1.1.1` pin removed with it).
+Reviews posted on the PRs.
+
+**Process finding (report-only):** PR #103 merged with its commit
+authored `Fress Agent 2 <agent2@fress.local>` — the author-guard
+convention (`WasewaseX <WasewaseX@users.noreply.github.com>`) was
+violated despite being flagged blocking-for-merge in the pre-merge
+review; the merge commit itself is correctly authored. The violation is
+historical-record only and carries no code risk, but the convention is
+unenforceable if review flags do not gate merges.
+
+**Release scaffold #106 cross-checked** (report-only): all four
+authoritative version fields at 1.0.2 with version-only lockfile diffs;
+every changelog claim about the merged wave cross-checked against this
+audit's own verification (not the PR bodies) and found accurate.
+
+**Verdict of Round 5: PASS.** The second review wave's native delta is
+hardening plus tests, verified in code and in execution with
+kill-test-proven teeth; the dependency baseline is unchanged (0
+vulnerabilities, same 10 advisory-grade transitive warnings); no defect
+was found in audit-owned code at `0be68b7`; one process finding (the
+#103 author-guard violation) is recorded above. The audit doc's claims
+now stand verified at `0be68b7` under the exact-SHA rule.
+
 ## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified

@@ -471,7 +471,7 @@ async function resolveKrita(platform: Platform, arch: string | undefined, _app: 
     .map((h) => ({ name: basename(h), url: `${base}${latest}/${h}` }));
   const picked = pickOfficial(files, platform, arch);
   if (!picked) return null;
-  return official(picked, latest, 'https://krita.org/en/download/krita-desktop/');
+  return official(picked, latest, 'https://krita.org/en/download/');
 }
 
 async function resolveKdenlive(platform: Platform, arch: string | undefined, _app: AppItem): Promise<ResolvedDownload | null> {

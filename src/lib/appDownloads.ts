@@ -97,7 +97,7 @@ const CURATED: Record<string, CuratedEntry> = {
     // the official channels. Flathub carries the VLC team's own build.
     linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.videolan.VLC', note: 'flatpak install flathub org.videolan.VLC' }],
     android: [{ kind: 'page', label: 'VLC on Google Play', url: 'https://play.google.com/store/apps/details?id=org.videolan.vlc' }],
-    ios: [{ kind: 'store', label: 'VLC on the App Store', url: 'https://apps.apple.com/app/vlc-media-player/id6503779629' }],
+    ios: [{ kind: 'store', label: 'VLC on the App Store', url: 'https://apps.apple.com/app/vlc-media-player/id650377962' }],
   },
   localsend: {
     windows: [{ kind: 'page', label: 'Download .exe from GitHub', url: 'https://github.com/localsend/localsend/releases/latest' }],
@@ -126,9 +126,11 @@ const CURATED: Record<string, CuratedEntry> = {
     linux: [{ kind: 'page', label: 'Linux packages', url: 'https://www.qbittorrent.org/download' }],
   },
   krita: {
-    windows: [{ kind: 'page', label: 'Windows installer', url: 'https://krita.org/en/download/krita-desktop' }],
-    mac: [{ kind: 'page', label: 'macOS installer', url: 'https://krita.org/en/download/krita-desktop' }],
-    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.krita', note: 'flatpak install flathub org.krita' }],
+    windows: [{ kind: 'page', label: 'Windows installer', url: 'https://krita.org/en/download/' }],
+    mac: [{ kind: 'page', label: 'macOS installer', url: 'https://krita.org/en/download/' }],
+    // Krita's Flathub app id is org.kde.krita; the old org.krita id was
+    // retired and now 404s on both the Flathub website and its API.
+    linux: [{ kind: 'package', label: 'Install via Flatpak (official build)', url: 'https://flathub.org/apps/org.kde.krita', note: 'flatpak install flathub org.kde.krita' }],
     android: [{ kind: 'page', label: 'Krita on Google Play', url: 'https://play.google.com/store/apps/details?id=org.krita' }],
   },
   handbrake: {
@@ -200,13 +202,20 @@ const CURATED: Record<string, CuratedEntry> = {
     linux: [{ kind: 'page', label: 'Linux builds', url: 'https://github.com/upscayl/upscayl/releases/latest' }],
   },
   immich: {
-    web: [{ kind: 'page', label: 'Self-hosting guide', url: 'https://immich.app/docs/install/script-install' }],
+    // Immich's docs moved from immich.app/docs to docs.immich.app and the
+    // old script-install path 404s there. Docker Compose is the install
+    // method Immich itself marks [Recommended] (the install script is
+    // [Experimental]).
+    web: [{ kind: 'page', label: 'Self-hosting install (Docker Compose)', url: 'https://docs.immich.app/install/docker-compose/' }],
   },
   'home-assistant': {
     web: [{ kind: 'page', label: 'Installation options', url: 'https://www.home-assistant.io/installation/' }],
   },
   newpipe: {
-    android: [{ kind: 'page', label: 'Download .apk', url: 'https://newpipe.net/FAQ/tutorials/install-add-f-droid/', note: 'Via F-Droid or GitHub' }],
+    // The old tutorial page (newpipe.net/FAQ/tutorials/install-add-f-droid/)
+    // was removed from the rebuilt newpipe.net; the official F-Droid listing
+    // serves the APK directly and newpipe.net itself links there.
+    android: [{ kind: 'page', label: 'Get the .apk from F-Droid', url: 'https://f-droid.org/en/packages/org.schabi.newpipe/', note: 'Official F-Droid listing; GitHub Releases also carry the .apk' }],
   },
   termux: {
     android: [{ kind: 'page', label: 'Download .apk (F-Droid)', url: 'https://f-droid.org/en/packages/com.termux/', note: 'Use the F-Droid build, not Play Store' }],

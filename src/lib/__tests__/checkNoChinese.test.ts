@@ -1079,4 +1079,78 @@ describe('check-no-chinese.mjs (spawned against git fixture trees)', () => {
     expect(hit).toBeTruthy();
     expect(hit?.kind).toBe('binary-string');
   });
+
+  it('25e. Han extensions I/G/H (newer supplementary-plane blocks) are blocking hits', () => {
+    const root = makeRepo();
+    // Round-4 audit finding: HAN_RANGES ended at Extension F (0x2EBEF) and had
+    // nothing at or above 0x30000; a planted Ext I/G/H ideograph passed silently.
+    // All fixtures constructed from numeric code points.
+    const EXT_I = String.fromCodePoint(0x2ebf0); // Extension I (Unicode 15.1)
+    const EXT_G = String.fromCodePoint(0x30000); // Extension G (Unicode 13.0)
+    const EXT_H = String.fromCodePoint(0x31350); // Extension H (Unicode 15.0)
+    writeFileSync(join(root, 'ext-ghi.txt'), `supplementary ${EXT_I}${EXT_G}${EXT_H}\n`);
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const cps = r.report().hits.map((h) => h.codepoint);
+    expect(cps).toContain('U+2EBF0');
+    expect(cps).toContain('U+30000');
+    expect(cps).toContain('U+31350');
+    // Negative control: adjacent NON-Han astral scripts stay clean (exit 0) -
+    // proves the new blocks are discriminating, not an over-broad astral sweep.
+    const root2 = makeRepo();
+    const MUSICAL = String.fromCodePoint(0x1d10c); // Musical symbol (U+1D10C)
+    const LINEAR_B = String.fromCodePoint(0x10000); // Linear B syllable (U+10000)
+    const EGYPTIAN = String.fromCodePoint(0x13000); // Egyptian hieroglyph (U+13000)
+    writeFileSync(join(root2, 'astral-clean.txt'), `${MUSICAL}${LINEAR_B}${EGYPTIAN} ok\n`);
+    commitAll(root2);
+    const r2 = runChecker(root2);
+    expect(r2.status).toBe(0);
+  });
+
+  it('25f. an Extension G ideograph in a FILE NAME is a blocking finding', () => {
+    const root = makeRepo();
+    writeFileSync(join(root, `x${String.fromCodePoint(0x30001)}.txt`), 'clean\n');
+    commitAll(root);
+    const r = runChecker(root);
+    expect(r.status).toBe(1);
+    const fn = r.report().hits.find((h) => h.kind === 'filename');
+    expect(fn).toBeTruthy();
+    expect(fn?.codepoint).toBe('U+30001');
+  });
+
+  it('26. history still-present attribution respects locale-id boundaries (decoys are not live ids)', () => {
+    // Round-5 audit finding: the locale-identifier branch of the history
+    // still-present check used a boundary-free substring test, so a historical
+    // banned id was reported STILL PRESENT whenever the current tree contained
+    // the same characters inside a longer token - e.g. this suite's own
+    // negative-control decoy planted to prove the scan ignores such decoys.
+    // Live-id fixtures are built from code points so this test file can never
+    // match itself; the decoy stays literal because an alnum-embedded id is
+    // unmatchable by the scan's own boundary contract.
+    const ZH_CN = `${String.fromCodePoint(0x7a)}${String.fromCodePoint(0x68)}-CN`;
+    // Negative control: id existed in history; the current tree only embeds
+    // it in a longer token, so still_present must be false (and exit 0).
+    const root = makeRepo();
+    writeFileSync(join(root, 'hist.txt'), `old: "${ZH_CN}" literal fixture\n`);
+    commitAll(root);
+    writeFileSync(join(root, 'hist.txt'), "Buffer.from('xzh-CNx', 'latin1'); // decoy, not a locale id\n");
+    commitAll(root);
+    const r = runChecker(root, ['--history']);
+    expect(r.status).toBe(0);
+    const rec = (r.report() as unknown as { history_hits: Array<{ path: string; still_present: boolean }> })
+      .history_hits.find((h) => h.path === 'hist.txt');
+    expect(rec).toBeTruthy();
+    expect(rec?.still_present).toBe(false);
+    // Positive control: the same id still live in the current tree -> the
+    // history record says still_present=true and the scan exits 1.
+    const root2 = makeRepo();
+    writeFileSync(join(root2, 'live.txt'), `still registered: "${ZH_CN}"\n`);
+    commitAll(root2);
+    const r2 = runChecker(root2, ['--history']);
+    expect(r2.status).toBe(1);
+    const rec2 = (r2.report() as unknown as { history_hits: Array<{ path: string; still_present: boolean }> })
+      .history_hits.find((h) => h.path === 'live.txt');
+    expect(rec2?.still_present).toBe(true);
+  });
 });

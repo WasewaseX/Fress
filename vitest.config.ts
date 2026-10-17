@@ -15,13 +15,13 @@
  * exactly what it was (same plugins, same aliases, jsdom via the existing
  * per-file pragmas).
  */
-import { mergeConfig, defineConfig, type UserConfig } from 'vitest/config';
+import { mergeConfig, defineConfig, type ViteUserConfig } from 'vitest/config';
 import viteConfig from './vite.config';
 
 // The Vite config is exported in callback form; resolve it before merging
 // (it ignores the command/mode arguments, so a plain call is safe here).
 const resolvedViteConfig =
-  typeof viteConfig === 'function' ? (viteConfig as unknown as () => UserConfig)() : viteConfig;
+  typeof viteConfig === 'function' ? (viteConfig as unknown as () => ViteUserConfig)() : viteConfig;
 
 export default mergeConfig(
   resolvedViteConfig,

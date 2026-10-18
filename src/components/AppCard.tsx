@@ -99,7 +99,7 @@ const AppCardImpl: React.FC<AppCardProps> = ({
   // Focused actions only: the card must not subscribe to the live item
   // list. Its download state comes from the active-set subscription below,
   // which is blind to byte-count/ETA updates.
-  const { startDownload, recordExternalOpen } = useDownloadActions();
+  const { startDownload } = useDownloadActions();
   const isDownloading = useAppDownloadStatus(app.id, app.name);
   const { t } = useI18n();
   const tx = useAppText(app);
@@ -169,28 +169,23 @@ const AppCardImpl: React.FC<AppCardProps> = ({
 
   /** Curated fallback. Reached ONLY when the resolver honestly ANSWERED
    * "no automatic installer exists for this platform" - a failed lookup
-   * never gets here (see handleDownload). Page/store/package targets open
-   * externally and say so; they never imply an in-app transfer began. */
+   * never gets here (see handleDownload).
+   *
+   * The Download button NEVER launches the system browser by itself. Every
+   * automatic handoff (the old behavior opened the curated page via the
+   * opener plugin straight from the click) read as "Fress opened a browser
+   * instead of downloading", which is the one defect users reported more
+   * than any other. A direct curated target still starts the in-app
+   * transfer; a page/store target lands in the in-app detail dialog where
+   * every official option is a LABELED link the user opens by choice. */
   const openCuratedFallback = (platform: Platform) => {
     const target = bestDownloadFor(app, platform);
-    if (!target) {
-      toast.info(t('card.toast.options').replace('{name}', app.name));
-      onOpenDetail(app);
+    if (target && target.kind === 'direct') {
+      launchDirect(target.url, `${app.name} ${target.label}`.trim());
       return;
     }
-    if (target.kind === 'direct') {
-      launchDirect(target.url, `${app.name} ${target.label}`.trim());
-    } else {
-      // Every other target IS the download page: open it in the
-      // browser and say so. Popping the in-app guide here (the
-      // old behavior) read as "the download button opens a help
-      // window instead of downloading".
-      recordExternalOpen(`${app.name}: ${target.label}`, target.url);
-      toast.info(t('card.toast.officialPage').replace('{name}', app.name), {
-        description: t('card.toast.inBrowser').replace('{label}', target.label),
-      });
-      void openExternal(target.url);
-    }
+    toast.info(t('card.toast.options').replace('{name}', app.name));
+    onOpenDetail(app);
   };
 
   const handleDownload = () => {

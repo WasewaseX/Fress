@@ -1,0 +1,25 @@
+meta {
+  name: M6 SHA256SUMS format (mock)
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{mockBase}}/updater/SHA256SUMS.txt
+  body: none
+  auth: none
+}
+
+tests {
+  test("SHA256SUMS answers 200", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("every line is <64 hex> SP SP <name>", function() {
+    const raw = typeof res.body === 'function' ? res.body() : res.body;
+    const lines = String(raw).trim().split('\n');
+    expect(lines.length).to.be.at.least(8);
+    for (const line of lines) {
+      expect(line).to.match(/^[0-9a-f]{64}  \S+$/);
+    }
+  });
+}

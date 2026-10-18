@@ -200,11 +200,21 @@ test.describe('Workflow I: valid release fixture', () => {
 
     const failedToast = page.locator('[data-sonner-toast]', { hasText: d['update.signatureFailed'] });
     await expect(failedToast.first()).toBeVisible({ timeout: 10_000 });
-    // The pill tells the truth about what is deliverable, and the official
-    // releases page opened as the fallback.
+    // The pill tells the truth about what is deliverable, and the app
+    // itself opened NOTHING: the browser handoff is an offer, never an
+    // action (the no-auto-browser contract).
     await expect(page.locator('#header-update-pill')).toContainText(
       d['header.updatePillSeeReleases']
     );
+    await expect
+      .poll(async () => (await bridge(page))!.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([]);
+    // The Releases page is one explicit user click away: the labeled toast
+    // action.
+    await failedToast
+      .first()
+      .locator('button', { hasText: d['update.releasesPageAction'] })
+      .click();
     await expect
       .poll(async () => (await bridge(page))!.openedUrls ?? [], { timeout: 10_000 })
       .toEqual([`https://github.com/WasewaseX/Fress/releases/tag/v${NEXT_VERSION}`]);
@@ -321,17 +331,14 @@ test.describe('Workflow J: incompatible-asset release', () => {
     await expect(page.locator('#header-update-pill')).toBeVisible();
     await drainToasts(page);
 
-    // The fail-closed contract: no platform-matched asset -> the releases
-    // page opens (with the "no asset" hint), the download registry stays
-    // EMPTY, and the "downloading" toast never appears.
-    //
-    // openExternal records through an async dynamic import, so the bridge
-    // read must POLL for the recorded URL instead of racing it (CI runners
-    // lost this race once; the toast assertion below auto-waits already).
+    // The fail-closed contract: no platform-matched asset -> NO page opens
+    // by itself, the download registry stays EMPTY, the "downloading" toast
+    // never appears, and the refusal toast carries the labeled action that
+    // opens the releases page only when the user clicks it.
     await page.locator('#header-update-pill').click();
     await expect
       .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
-      .toEqual([VALID_RELEASE_URL]);
+      .toEqual([]);
     const b = (await bridge(page))!;
     expect(Object.keys(b.downloads)).toHaveLength(0);
 
@@ -339,6 +346,14 @@ test.describe('Workflow J: incompatible-asset release', () => {
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.noAssetHint']);
+
+    // The explicit handoff: the user's click, not the app's initiative.
+    await toast
+      .locator('button', { hasText: d['update.releasesPageAction'] })
+      .click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
 
     // The refusal is a plan-level fact, so the pill must say where the
     // update lives now - it may not revert to the plain available label
@@ -361,12 +376,12 @@ test.describe('Workflow J: unverifiable asset (checksum fail-closed)', () => {
     await expect(page.locator('#header-update-pill')).toBeVisible();
     await drainToasts(page);
 
-    // Same poll discipline as the ARM-only sibling above: the opener
-    // records through an async import, never race the bridge read.
+    // Same offer-not-action contract as the ARM-only sibling above: the
+    // pill click opens no page; the labeled toast action does.
     await page.locator('#header-update-pill').click();
     await expect
       .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
-      .toEqual([VALID_RELEASE_URL]);
+      .toEqual([]);
     const b = (await bridge(page))!;
     expect(Object.keys(b.downloads)).toHaveLength(0);
 
@@ -374,6 +389,12 @@ test.describe('Workflow J: unverifiable asset (checksum fail-closed)', () => {
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unverifiableHint']);
+    await toast
+      .locator('button', { hasText: d['update.releasesPageAction'] })
+      .click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
 
     // Same refusal truth as the ARM-only sibling: the pill names the
     // releases page, not a deliverable-looking available label.
@@ -525,9 +546,10 @@ test.describe('Workflow J: SHA256SUMS.txt omits the chosen asset (partial manife
     await drainToasts(page);
 
     await page.locator('#header-update-pill').click();
+    // No page opens by itself; the offer rides the toast action.
     await expect
       .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
-      .toEqual([VALID_RELEASE_URL]);
+      .toEqual([]);
     const b = (await bridge(page))!;
     expect(Object.keys(b.downloads)).toHaveLength(0);
 
@@ -535,6 +557,12 @@ test.describe('Workflow J: SHA256SUMS.txt omits the chosen asset (partial manife
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unverifiableHint']);
+    await toast
+      .locator('button', { hasText: d['update.releasesPageAction'] })
+      .click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
   });
 });
 
@@ -554,10 +582,11 @@ test.describe('Workflow J: unsigned platform artifact (no signature sidecar)', (
     await drainToasts(page);
 
     await page.locator('#header-update-pill').click();
-    // The official releases page opens as the fallback...
+    // The official releases page opens ONLY through the user's explicit
+    // click on the labeled action - never as the app's own fallback...
     await expect
       .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
-      .toEqual([VALID_RELEASE_URL]);
+      .toEqual([]);
     // ...and NO in-app delivery may start: the download registry stays
     // empty, so nothing can ever be presented as a verified update.
     const b = (await bridge(page))!;
@@ -568,6 +597,12 @@ test.describe('Workflow J: unsigned platform artifact (no signature sidecar)', (
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unsignedHint']);
+    await toast
+      .locator('button', { hasText: d['update.releasesPageAction'] })
+      .click();
+    await expect
+      .poll(async () => (await bridge(page))?.openedUrls ?? [], { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
     // The pill carries the see-releases label after the refusal - the
     // routed truthfulness fix (quality-gates finding 1): a plan-level
     // refusal may not revert the pill to the plain available label ("Update
@@ -631,12 +666,12 @@ test.describe('Workflow J2: truncated checksum manifest (native truncation contr
     await expect(page.locator('#header-update-pill')).toBeVisible();
     await drainToasts(page);
 
-    // The refusal opens the release's own page (the deliberate fallback)
-    // and starts no download.
+    // The refusal starts no download and opens no page by itself; the
+    // toast's labeled action is the explicit handoff.
     await page.locator('#header-update-pill').click();
     await expect
       .poll(async () => (await bridge(page))!.openedUrls, { timeout: 10_000 })
-      .toEqual([VALID_RELEASE_URL]);
+      .toEqual([]);
     expect(Object.keys((await bridge(page))!.downloads)).toHaveLength(0);
 
     // The toast explains WHY: unverifiable against the published manifest.
@@ -644,6 +679,12 @@ test.describe('Workflow J2: truncated checksum manifest (native truncation contr
     await expect(toast).toBeVisible();
     await expect(toast).toContainText(d['update.releasesPage']);
     await expect(toast).toContainText(d['update.unverifiableHint']);
+    await toast
+      .locator('button', { hasText: d['update.releasesPageAction'] })
+      .click();
+    await expect
+      .poll(async () => (await bridge(page))!.openedUrls, { timeout: 10_000 })
+      .toEqual([VALID_RELEASE_URL]);
 
     // And the pill names the honest action, never a deliverable.
     await expect(page.locator('#header-update-pill')).toContainText(d['header.updatePillSeeReleases']);

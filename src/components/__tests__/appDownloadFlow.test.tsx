@@ -211,21 +211,23 @@ describe('AppCard download flow (Agent 1 regression)', () => {
     );
   });
 
-  it('honest no-match on a page-only target: the official page opens and is labeled, no transfer starts', async () => {
+  it('honest no-match on a page-only target: the IN-APP options open, never a browser (no-auto-browser contract)', async () => {
     h.guessUserPlatform.mockReturnValue('windows');
     h.resolveDownloadFor.mockResolvedValue(null);
     h.peekResolveFailure.mockReturnValue(null);
     // id 'vlc' hits the REAL curated table: a 'page' target for windows.
-    await renderCard(baseApp({ id: 'vlc', name: 'VLC', githubUrl: 'https://github.com/videolan/vlc' }));
-    await clickCardDownload('VLC');
-    expect(h.startDownload).not.toHaveBeenCalled();
-    expect(h.openExternal).toHaveBeenCalledTimes(1);
-    expect(h.openExternal).toHaveBeenCalledWith('https://www.videolan.org/vlc/download-windows.html');
-    expect(h.recordExternalOpen).toHaveBeenCalledTimes(1);
-    expect(h.toast.info).toHaveBeenCalledWith(
-      'Opening the official download page for VLC',
-      expect.objectContaining({ description: 'VLC for Windows opens in your browser.' })
+    const { onOpenDetail } = await renderCard(
+      baseApp({ id: 'vlc', name: 'VLC', githubUrl: 'https://github.com/videolan/vlc' })
     );
+    await clickCardDownload('VLC');
+    // The Download button NEVER launches the system browser by itself: a
+    // page target lands in the in-app detail dialog where every official
+    // option is a labeled link the user opens by choice.
+    expect(h.openExternal).not.toHaveBeenCalled();
+    expect(h.recordExternalOpen).not.toHaveBeenCalled();
+    expect(h.startDownload).not.toHaveBeenCalled();
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(h.toast.info).toHaveBeenCalledWith('Showing the download options for VLC');
   });
 
   it('FAILED lookup: a retryable error replaces the page open (mutation detector for the failure branch)', async () => {
@@ -268,11 +270,13 @@ describe('AppCard download flow (Agent 1 regression)', () => {
     expect(h.openExternal).not.toHaveBeenCalled();
   });
 
-  it('Retry that honestly answers none may fall back to the curated page - only then', async () => {
+  it('Retry that honestly answers none lands in the in-app options - only then, never a browser', async () => {
     h.guessUserPlatform.mockReturnValue('windows');
     h.resolveDownloadFor.mockResolvedValue(null);
     h.peekResolveFailure.mockReturnValue({ kind: 'api', message: 'GitHub HTTP 500' });
-    await renderCard(baseApp({ id: 'vlc', name: 'VLC', githubUrl: 'https://github.com/videolan/vlc' }));
+    const { onOpenDetail } = await renderCard(
+      baseApp({ id: 'vlc', name: 'VLC', githubUrl: 'https://github.com/videolan/vlc' })
+    );
     await clickCardDownload('VLC');
     expect(h.openExternal).not.toHaveBeenCalled();
     const action = (h.toast.error.mock.calls[0][1] as { action: { onClick: () => Promise<void> | void } }).action;
@@ -280,10 +284,11 @@ describe('AppCard download flow (Agent 1 regression)', () => {
     await act(async () => {
       action.onClick();
     });
-    // The retry ANSWERED (no failure recorded): now the page open is the
-    // intended, honestly-labeled fallback.
-    expect(h.openExternal).toHaveBeenCalledTimes(1);
-    expect(h.openExternal).toHaveBeenCalledWith('https://www.videolan.org/vlc/download-windows.html');
+    // The retry ANSWERED (no failure recorded): the in-app options dialog is
+    // the intended fallback. The browser still never opens by itself.
+    expect(h.openExternal).not.toHaveBeenCalled();
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(h.toast.info).toHaveBeenCalledWith('Showing the download options for VLC');
   });
 
   it('an app with no curated target and no resolved artifact opens the in-app guide, not a browser', async () => {

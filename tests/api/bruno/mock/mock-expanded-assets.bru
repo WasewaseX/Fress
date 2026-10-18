@@ -1,0 +1,19 @@
+meta {
+  name: M3 expanded_assets modern + legacy (mock)
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{mockBase}}/github/example/tool/releases/expanded_assets/v2.0.0
+  body: none
+  auth: none
+}
+
+tests {
+  test("modern fragment answers 200 with anchors", function() {
+    expect(res.status).to.eql(200);
+    const raw = typeof res.body === 'function' ? res.body() : res.body;
+    expect(String(raw)).to.include('/releases/download/v2.0.0/');
+  });
+}

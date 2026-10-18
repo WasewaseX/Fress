@@ -357,3 +357,41 @@ jobs:
           path: scripts/perf/results/
           retention-days: 30
           if-no-files-found: ignore
+
+  api-gates:
+    # Wire-contract gates: pure HTTP request-context tests (NO browser, NO
+    # build) against the hermetic api-mock origin. Pins the exact response
+    # shapes, headers and failure semantics (429 with/without Retry-After,
+    # healing 503, deterministic 404, ETag revalidation) that the resolvers,
+    # the download engine and the self-updater are built on - the shared
+    # assumption every layer above is built on. Deterministic by design:
+    # shared upstream quota never decides whether a PR is green. The LIVE
+    # complement is the Bruno collection + the scheduled network-smoke.
+    name: API wire contracts (linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24 native; v4 warned "Node.js 20 is deprecated")
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (node24 native; installs the SAME pinned Node 20 toolchain via node-version)
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies from the lockfile
+        run: npm ci
+      - name: API wire-contract gates (Playwright request context + api-mock)
+        # Pure request context: no browser download, no production build -
+        # the gate boots in seconds and pins the contracts themselves.
+        run: npm run test:api
+      - name: Bruno collection against the mock (wire parity with the API gates)
+        # The Bruno CLI runs the mock/ folder of the same collection the
+        # scheduled live smoke uses, pointed at the mock origin: the two
+        # tool stacks stay in lockstep on what the wire must look like.
+        # (The collection's live probes run ONLY in the scheduled
+        # network-smoke - shared quota must not decide PR greenness.)
+        run: |
+          node scripts/api-mock/server.mjs &
+          sleep 1
+          cd tests/api/bruno && npx --yes @usebruno/cli run mock --env mock; code=$?; kill %1 2>/dev/null; exit $code
+

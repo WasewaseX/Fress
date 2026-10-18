@@ -516,8 +516,28 @@ async fn a_redirect_policy_refusal_is_never_retried() {
     let addr = listener.local_addr().expect("addr");
     let handle = std::thread::spawn(move || {
         while let Ok((mut stream, _)) = listener.accept() {
+            // Drain the request head BEFORE answering (on Windows a reply
+            // written ahead of the request - or a socket dropped the
+            // instant the reply lands - surfaces as a connection reset on
+            // the client instead of the 302), then linger so the client
+            // reads the response before the FIN/RST.
+            let mut buf = [0u8; 4096];
+            let mut head = Vec::new();
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        head.extend_from_slice(&buf[..n]);
+                        if head.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                }
+            }
             let reply = raw_response("HTTP/1.1 302 Found", &["Location: /elsewhere"], b"");
             let _ = stream.write_all(&reply);
+            let _ = stream.flush();
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     });
     let url = format!("http://{addr}/start");

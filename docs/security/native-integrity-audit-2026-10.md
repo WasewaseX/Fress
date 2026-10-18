@@ -1204,6 +1204,256 @@ dev-only lockfile-truth defect is recorded and routed (report-only,
 release-metadata owner); the §10.13 process finding is closed as
 resolved. No defect was found in audit-owned code this round.
 
+### §10.15 Round 7 — re-verification at main `1812878f` and `ab2e2723` after the resilience wave merged (Agent 6)
+
+**Why a new round:** under the exact-SHA rule the Round 6 results stand
+only at `d09914e`. Main then advanced twice: `d09914e` → `1812878f`
+(13 commits — PR #109, this audit's §10.14; PR #111, the deny-all
+loopback boundary fix; PR #112, the `write_part_meta` doc correction;
+PR #113, the rate-limit-proof release lookup; PR #114, the catalog
+lookup resilience layer), then `1812878f` → `ab2e2723` (PR #115, the
+v1.0.4 release commit `3447371`). Unlike Round 6, this round is **NOT**
+carried by byte-identity: the delta adds substantial Rust code and the
+full delta was read.
+
+**The resilience wave, audited in full.** Three new surfaces entered
+the native layer, all reviewed line-by-line at `ab2e2723`:
+
+- **`api_resilience.rs` (new, 604 lines + 564 test lines).** A bounded
+  retry + ETag-cache layer for API lookups: 4 attempts max, retryable
+  statuses limited to 408/429/5xx plus 403 only when GitHub's own
+  rate-limit headers say so; `Retry-After` honored but hard-capped
+  (15 s production); deterministic answers (other 4xx, policy
+  refusals, oversized bodies, non-UTF-8) never retried; redirect
+  refusals never retried. The persistent cache enforces three budgets
+  (2 MiB/entry, 256 entries, 16 MiB total) with oldest-first eviction,
+  is schema-version-filtered on load (a `version: 1` stamp written at
+  creation, not the integer default), persists via temp-file rename,
+  and every I/O error is swallowed by contract — the cache can never
+  become a new way for a lookup to fail. An unexpected 304 with no
+  cached body is an error, not a panic. Stale fallback is bounded to
+  7 days. The layer never constructs URLs, never chooses hosts, and
+  never sees a credential; admission and redirects stay in
+  `network_policy`. **One LOW observation (non-blocking):** a
+  retryable status that carries no `Retry-After` header is recorded as
+  `planned_delay = Some(ZERO)`, which skips the backoff schedule the
+  module docs promise would "fill every other gap" — bounded to the 4
+  attempts, politeness-only impact (quota and origin load, never
+  correctness or security). Report-only; no fix filed.
+- **Round-7 addendum (recorded while this section's PR was open):** the
+  observation received a follow-up fix, open as PR #116
+  (`9836212`, branch `fix/retry-backoff-headerless-status`, 12/12 CI
+  green at audit time). This round verified the fix independently: 
+  `retry_after_delay` now returns `Option<Duration>` — a numeric
+  `Retry-After` (including an explicit `0` = "immediately") is still
+  honored and capped, while an absent header or the deliberately
+  unsupported HTTP-date form returns `None`, handing the wait to the
+  backoff schedule. The proof is a timed-loopback test pair that
+  measures real arrival gaps: a headerless 503 must retry spaced
+  (≥55 ms floor; the pre-fix code retries in single-digit milliseconds
+  and fails this test) and a server-suggested `Retry-After: 0` must
+  still override a 1 s backoff base (the anti-over-correction guard).
+  Both directions pinned; author-guard compliant; no conflict with the
+  owned-file de-flake PR #117.
+- **PR #111's e2e deny-all fix verified as fixing a REAL leak.** The
+  old fallback pattern `/^https?:\/\/(?!127\.0\.0\.1|localhost)/` used
+  an unanchored lookahead: any host merely STARTING with a loopback
+  token (`localhost.evil.com`, `127.0.0.1.evil.com`) or the userinfo
+  trick (`localhost:80@evil.com`) made the lookahead succeed, the
+  negative lookahead fail, and the deny-all route never install — the
+  surprise request sailed through the harness's only network fence.
+  The new `DENY_ALL_ROUTE_RE` requires the loopback token to be
+  followed by an optional port and then path/query/fragment/end; each
+  bypass shape above was re-derived against the new pattern and now
+  aborts, while `localhost:3000/` (the legit dev server) still passes.
+  The exported constant is pinned by a boundary-matrix unit suite
+  (3 tests, executed locally this round).
+- **Sibling harness observation (report-only, test-oracle nuance, zero
+  product impact).** `tests/e2e/c-resolver-failure.spec.ts:298` binds
+  its fixture with an UNANCHORED pattern
+  (`/https:\/\/api\.github\.com\/repos\/localsend\/localsend\/releases/`):
+  any URL CONTAINING that substring — e.g. a leak to a foreign origin
+  with the API URL embedded as a query parameter — would be served the
+  canned fixture instead of being aborted by the deny-all, masking the
+  leak from the suite. The app under test constructs no such URLs
+  (resolvers build API URLs from curated catalog slugs on the pinned
+  host), so no live exposure; recorded as harness hygiene in the same
+  family PR #111 hardened. The only other route regex in the harness
+  (`netpolicy.ts:185`, the self-update mock) is anchored by its
+  `/desktop/` path segment and is safe.
+- **Two test-quality gaps in `api_resilience/tests.rs` (report-only,
+  upstream file; no production defect implied).** (1)
+  `cache_evicts_oldest_first_across_both_budgets` overclaims its name:
+  it inserts 264 tiny entries, which exercises only the entry-COUNT
+  budget — the 16 MiB total-byte-budget eviction branch never fires and
+  is untested. (2) The schema-version filter on load is unpinned: a
+  WELL-FORMED cache file carrying `version != 1` must be silently
+  discarded by `CacheStore::open` (the exact regression the
+  `CacheFile::default` doc comment warns a derived `Default` would have
+  caused), but no test feeds one; only malformed JSON is covered, by
+  `a_corrupt_cache_file_degrades_to_an_empty_store`. Both are
+  cheap-to-add pins for the next touch of this file.
+- **Round-9 addendum — PR #119 (`31f090d3`, "the text transports
+  survive one dropped packet too") audited in full; verdict SOUND.**
+  The PR promotes `fetch_text`'s retry-only loop to
+  `api_resilience::get_text_resilient` and shares it across all three
+  text commands (`fetch_text`, `fetch_github_release_doc`,
+  `fetch_self_update_text`), closing the last single-shot transports
+  in the crate. Verified independently: (a) `fetch_text`'s wire
+  behavior is byte-identical — same labels ("Manifest host returned
+  HTTP {code}" / "Manifest host could not be reached"), same
+  `Timing::production()` schedule, same transient/deterministic
+  classification; a pure refactor to the shared loop; (b) the two
+  adopters change exactly one wire shape — a non-2xx response,
+  previously returned as `Ok(TextFetch{status})` and thrown by the TS
+  caller (`HTTP ${status}`), now surfaces as an invoke rejection
+  (`"{label} returned HTTP {code}"`) — and every TS consumer funnels
+  both shapes identically: `atomReleases.fetchGithubText` throws
+  either way and `githubProvider`'s `catch {}` keeps the ORIGINAL
+  classified API error (the honest-404 short-circuit still keys on the
+  original message, never on the fallback's), `fetchAssetsForTag`
+  degrades either way to `assets = []`, and `fetchSelfUpdateText`
+  degrades either way to `null`; (c) `lib.rs` indeed holds zero direct
+  `.send().await` sites after this PR; (d) policy refusals are never
+  retried (`is_transient_send_error` excludes redirect refusals, pinned
+  by the existing loopback test); (e) the four new loopback tests are
+  genuine kill-tests — the connection-count oracle separates the
+  single-shot and retry eras, a 404 is answered exactly once, and
+  exhaustion reports the last transient status. CI 12/12 at `31f090d3`;
+  head commit author-guard compliant. Executed locally at `31f090d3`:
+  the five affected-area TS suites (atomFallback, selfUpdate,
+  selfUpdateDelivery, releaseFetchContracts, e2eDenyAllBoundary) —
+  173/173 green with the repo-local runner. **Three LOW report-only
+  observations, same family as this section's original backoff note:**
+  (1) the text loop ignores `Retry-After` — the API loop honors it via
+  `planned_delay` (PR #116), the text loop always uses the backoff
+  schedule; bounded to the 4 attempts, politeness-only; (2) a
+  quota-signature 403/429 on the text loop yields the generic
+  "returned HTTP 403/429" wording instead of `rate_limit_message` —
+  zero user impact, because text-path errors never reach the UI (they
+  are swallowed into the original error / `null` per (b), and
+  `fetch_text` never carried rate-limit wording); (3) a mid-body
+  stream death (`read_capped_text` → `"Bad response: {transport}"`)
+  propagates WITHOUT a retry, while the JSON loop retries exactly this
+  class (`is_transient_body_error` — "as transient as a failed send"),
+  so the PR's headline claim holds for the send phase specifically;
+  LOW probability, bounded impact (the pre-PR failure mode). None of
+  the three blocks the merge.
+- **`network_policy.rs` (+122).** A new request class
+  `github_releases_doc()` admitting github.com for exactly two document
+  shapes (`/{owner}/{repo}/releases.atom` and
+  `/{owner}/{repo}/releases/tag/{tag}/expanded_assets`) via a new
+  `ReleasesDocShape` gate: percent-encoded path segments validated
+  against a strict charset (non-empty, ≤120 bytes, no `.`/`..`,
+  `[A-Za-z0-9._~+%]` only), the shape re-checked on **every redirect
+  hop** (mirrored `RedirectRejection::OffDocumentShape`), private
+  addresses blocked, 3-hop budget, `PinToOrigin`. The pinned invariant
+  "github.com stays off the generic resolver-manifest allowlist" is
+  preserved — this is a dedicated class, not a widening — so the
+  self-update checksum document remains reachable only through its
+  path-pinned policy. Encoded lookalikes (`releases%2Eatom`) fail the
+  shape and are refused. Dedicated tests pin exact-two-shapes
+  admission, refusal of everything else on github.com, and hop-shape
+  re-checks.
+- **`lib.rs` (+170/−56).** The GitHub/F-Droid lookup commands now
+  route through the resilience layer via `AppHandle`-free `gh_*` /
+  `fdroid_package` cores (harness-drivable, cache injectable);
+  command signatures keep their frontend contract (Tauri injects the
+  handle). `fetch_text` gains retry-only resilience with **no cache**
+  — deliberate, manifest freshness is its contract — and
+  `fetch_github_release_doc` is the single-shot dedicated-class
+  reader. The 404 wording mapping preserves the frontend's failure
+  classification verbatim.
+
+**Owned-file deltas this round:** `download_finalize.rs` is
+**comment-only** (PR #112's doc correction; zero code semantics), and
+`download_integration.rs` is the command-rename + cache-parameter
+plumbing with matching test updates. `http_body.rs` is untouched; the
+transient-error wording contract between the capped reader
+(`"Bad response: {transport}"` → retryable; `"too large"`/`"not
+UTF-8"` → deterministic) and `api_resilience::is_transient_body_error`
+was re-verified against the new call sites.
+
+**The TS fallback path, audited in full.** `atomReleases.ts` builds
+URLs only from strict allowlists (`isSafeRepoSlug` charset regex
+before any request; tags ≤120 chars over `[A-Za-z0-9._+~ -]`), takes
+the release tag only from the canonical alternate link matching THIS
+exact repo, accepts exactly two path segments per asset href, refuses
+truncated documents outright (an anti-downgrade check: a body cut at
+the native cap could otherwise silently resolve an OLD release),
+bounds fragment fetches to 5 per run, and fails closed to the
+caller's ORIGINAL API error — the UI's failure classification never
+changes. `githubProvider.ts` short-circuits the honest 404 (a
+release-less repo gains nothing from the feed and must not spend
+requests on it) and rethrows the original error when the fallback
+dies. Minor observation, non-blocking: `repo` is interpolated into a
+`RegExp` in `parseExpandedAssets`, but the slug charset contains no
+significant metacharacters and catalog slugs are curated input.
+
+**Executed locally at `ab2e2723`:** the full TS/TSX suite — **897
+passed / 2 skipped / 0 failed across 61 files**, including the 19 new
+tests (16 atom-fallback, 3 deny-all-boundary). Disclosed limitation
+unchanged: this sandbox holds no Rust toolchain, so the native battery
+was not re-executed locally — CI executes it on linux/windows/macos
+instead, and no claim below relies on the unexecuted battery.
+
+**CI flake found at `1812878f`, root-caused, de-flaked (PR #117).**
+The macOS Rust-test check failed once at `1812878f` (run 39133960118,
+272 passed / 1 failed): the adversarial stall-window test pinned the
+body-phase stall wording (`"Connection stalled"`) but the attempt can
+equally name the same 60 s policy through the response-phase window
+(`"No response from the server for 60s"`). In the failing run every
+behavioral assertion passed (retryable error, `"network"` kind,
+`Failed` state, no finalization, `.part` survival) — only the wording
+differed. Both windows carry the identical retryable-`"network"`
+contract, and the sibling test already pins the response-phase
+wording on purpose. The suite is green on macOS at `5d8630e` (v1.0.3),
+`3447371` (v1.0.4 release commit) and `ab2e2723` (current main) —
+one-off, load-dependent scheduling race, not a regression. PR #117
+(owned file, test-only) accepts either naming; every other assertion
+stays byte-for-byte strict. Neither release was built from the red
+state.
+
+**Release provenance.** `v1.0.3` (`5d8630e7c`, the PR #114 merge):
+Release run 39130358671 built from exactly the tag SHA; 22 assets, 5
+`.sig` files, `SHA256SUMS.txt`, `latest.json` present — asset pattern
+identical to v1.0.1/v1.0.2 (macOS absence from the updater feed
+remains the established pattern, observation only). `v1.0.4`: release
+commit `3447371` touches version metadata + CHANGELOG only (verified
+clean sweep — the v1.0.2 lockfile corruption did NOT repeat, see
+below); the Release run 39135340523 was in progress at head `ab2e2723`
+at audit time with the stable tag not yet pushed, so its provenance
+verdict is deferred to the next round once the tag exists. **Note for
+the boundary record:** as with v1.0.2, the stable tag (built from the
+release commit) will not contain the fix PRs merged after it — here
+PR #113/#114 are IN v1.0.3/`5d8630e`, but PR #117's de-flake and any
+later merge land after `3447371`.
+
+**Issue #110 status at `ab2e2723`: still open and still valid.** The
+`is-potential-custom-element-name` field still carries the corrupted
+`"version": "1.0.2"` while `resolved`+`integrity` still pin the real
+1.0.1 tarball — the lockfile-truth lie persists unchanged. The 1.0.3
+and 1.0.4 version sweeps were clean (both lockfile deltas touch only
+the two root `version` fields and the two project crates), so the
+sweep process has evidently stopped repeating the mistake, but the
+one-line remediation of the pre-existing field remains outstanding
+for the release-metadata owner.
+
+**Author guard:** all 7 non-merge commits in `d09914e..ab2e2723` are
+authored `WasewaseX <WasewaseX@users.noreply.github.com>`; the
+gmail-shaped author on GitHub-composed merge commits remains the
+documented whitelisted pattern (§10.14).
+
+**Verdict of Round 7: PASS at `ab2e2723` (provisionally carried from
+the line-by-line native read; CI green on the release heads), with two
+routed items:** one LOW non-blocking observation on the resilience
+backoff (report-only), and one CI-wording flake fixed by PR #117
+(test-only, owned file). No defect was found in audit-owned code this
+round; the resilience wave's security posture is sound — bounded
+retries, budgeted cache, shape-gated github.com admission with the
+generic-allowlist invariant intact, and fail-closed semantics at
+every layer boundary.
+
 ## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified

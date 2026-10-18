@@ -1,0 +1,37 @@
+meta {
+  name: 05 fress sha256sums manifest
+  type: http
+  seq: 5
+}
+
+get {
+  url: https://github.com/WasewaseX/Fress/releases/latest/download/SHA256SUMS.txt
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The checksum manifest the self-update flow verifies against. Every
+  // non-empty line must satisfy the strict sha256sum grammar; anything
+  // else would poison the verifier.
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const body = typeof raw === 'string' ? raw : String(raw || '');
+  const lines = body.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length < 10) {
+    throw new Error('SHA256SUMS carries only ' + lines.length + ' entries');
+  }
+  const bad = lines.filter((l) => !/^[0-9a-f]{64}\s+\*?.+/i.test(l));
+  if (bad.length > 0) {
+    throw new Error('malformed sha256sum lines: ' + JSON.stringify(bad.slice(0, 2)));
+  }
+  console.log('SHA256SUMS entries: ' + lines.length);
+}
+
+tests {
+  test("SHA256SUMS answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast", function() {
+    expect(res.responseTime).to.be.below(15000);
+  });
+}

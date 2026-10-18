@@ -13,17 +13,26 @@ import { getLatestViaAtom, getReleasesViaAtom } from './atomReleases';
  * app, or plain fetch in the browser. Knows nothing about asset matching -
  * it only delivers normalized ReleaseInfo shapes.
  *
- * RATE-LIMIT-PROOF FALLBACK: api.github.com's unauthenticated quota is
- * 60 req/h per IP, shared with the live-star refresh, and when it is
- * exhausted every catalog lookup used to fail with "the download sources
- * could not be reached". Both functions therefore fall back to GitHub's
- * own quota-free web documents (releases.atom + expanded_assets fragments,
- * see atomReleases.ts) whenever the API call fails for a reason OTHER than
- * the honest "no stable release found" 404 - a repo with no releases at
- * all would gain nothing from the feed and must not spend requests on it.
- * If the fallback also fails, the ORIGINAL error is rethrown unchanged so
- * resolve.ts's failure classification (rate-limit vs network vs api) and
- * the UI's retry affordances keep working exactly as before.
+ * SOURCE PRIORITY (the quota is the scarce resource - spend it last):
+ *
+ * DESKTOP (Tauri): the quota-free github.com documents (releases.atom +
+ * expanded_assets fragments, see atomReleases.ts) answer FIRST. They are
+ * CDN-served static files - verified live at <1s with the API's hourly
+ * quota fully exhausted - so the common lookup costs ZERO api.github.com
+ * requests and cannot die with "No download was started: the download
+ * sources could not be reached". The REST API runs only when the atom
+ * path cannot answer (feed unreachable, or entries exist but none yielded
+ * assets within the fragment budget - fragment hiccups and missing sizes
+ * must not degrade the pick) and then provides the EXACT document:
+ * authoritative prerelease flags, byte-exact sizes, the full asset list.
+ *
+ * BROWSER: github.com does not answer CORS, so the webview build keeps
+ * the API-first order (unchanged historical behavior); the atom documents
+ * remain the fallback for environments where the API fails.
+ *
+ * If every attempted source fails, the ORIGINAL API error is rethrown
+ * unchanged so resolve.ts's failure classification (rate-limit vs network
+ * vs api) and the UI's retry affordances keep working exactly as before.
  */
 
 interface GhReleaseRaw {
@@ -33,6 +42,12 @@ interface GhReleaseRaw {
   html_url: string;
   assets: { name: string; size: number; download_url: string }[];
 }
+
+/** Browser-path API cap. A hung api.github.com connection used to stall a
+ * user's Download click indefinitely (no timeout on a bare fetch); with
+ * the timeout the lookup degrades to the next source instead. The native
+ * command path has its own production timing (api_resilience). */
+const BROWSER_API_TIMEOUT_MS = 20_000;
 
 async function fetchLatestReleaseViaApi(repo: string): Promise<ReleaseInfo> {
   if (isTauri()) {
@@ -47,6 +62,7 @@ async function fetchLatestReleaseViaApi(repo: string): Promise<ReleaseInfo> {
   }
   const resp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(BROWSER_API_TIMEOUT_MS),
   });
   if (resp.status === 404) throw new Error('No stable release found');
   if (resp.status === 403 || resp.status === 429) throw new Error('GitHub rate limit reached');
@@ -66,14 +82,33 @@ async function fetchLatestReleaseViaApi(repo: string): Promise<ReleaseInfo> {
 }
 
 export async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
+  if (isTauri()) {
+    // Desktop: quota-free documents FIRST. Two outcomes hand the decision
+    // to the API below: the feed/fragments are unreachable (network), or
+    // the feed parsed but no stable entry carried assets within the
+    // fragment budget (inconclusive - the API owns the exact answer:
+    // authoritative prerelease flags, byte-exact sizes, full asset list).
+    try {
+      const viaAtom = await getLatestViaAtom(repo, false);
+      if (viaAtom) return viaAtom;
+    } catch {
+      // Feed unreachable: the API attempt below may still answer.
+    }
+    // The API owns the exact answer (authoritative prerelease flags,
+    // byte-exact sizes, full asset list) and the honest 404 - whatever it
+    // throws here is the lookup's classified final state.
+    return await fetchLatestReleaseViaApi(repo);
+  }
+  // Browser: github.com documents are CORS-blocked, so the API goes first
+  // and the quota-free documents remain the failure fallback (unchanged
+  // historical order). The honest 404 ("this repo has no stable release")
+  // is an ANSWER, not a failure: the atom fallback cannot improve it (the
+  // feed of a release-less repo is empty too) and probing it would waste
+  // requests on every release-less mirror. Everything else - rate limit,
+  // network, API 5xx - is worth one quota-free second opinion.
   try {
     return await fetchLatestReleaseViaApi(repo);
   } catch (e) {
-    // The honest 404 ("this repo has no stable release") is an ANSWER, not
-    // a failure: the atom fallback cannot improve it (the feed of a
-    // release-less repo is empty too) and probing it would waste requests
-    // on every release-less mirror. Everything else - rate limit, network,
-    // API 5xx - is worth one quota-free second opinion.
     const msg = (e as Error).message || '';
     if (/no stable release/i.test(msg)) throw e;
     try {
@@ -118,7 +153,10 @@ async function fetchRecentReleasesViaApi(
   }
   const resp = await fetch(
     `https://api.github.com/repos/${repo}/releases?per_page=${count}`,
-    { headers: { Accept: 'application/vnd.github+json' } }
+    {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(BROWSER_API_TIMEOUT_MS),
+    }
   );
   if (resp.status === 404) throw new Error('No stable release found');
   if (resp.status === 403 || resp.status === 429) throw new Error('GitHub rate limit reached');
@@ -147,6 +185,11 @@ export async function getRecentReleases(
   count: number,
   includeFlagged = false
 ): Promise<ReleaseInfo[]> {
+  // The scan needs the API's depth (the atom feed carries only the newest
+  // ~10 releases) and its byte-exact sizes, so the API is attempted first
+  // on BOTH surfaces. On the desktop the previous atom-first
+  // getLatestRelease call has usually already answered without spending a
+  // single API request - the quota is available for exactly this scan.
   try {
     return await fetchRecentReleasesViaApi(repo, count, includeFlagged);
   } catch (e) {

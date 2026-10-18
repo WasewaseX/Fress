@@ -23,6 +23,10 @@ import { useEffect, useState } from 'react';
 const CACHE_KEY = 'fress.stars.v1';
 const ETAG_KEY = 'fress.stars.etags.v1';
 const TTL_MS = 6 * 60 * 60 * 1000;
+/** Cap on a single live-star request: a hung api.github.com connection
+ * must not pin a card's star row (or the one in-flight slot per repo)
+ * indefinitely. The request then simply yields to the stored number. */
+const STAR_FETCH_TIMEOUT_MS = 12_000;
 // Cache entries survive well past the refresh TTL: eviction only kicks in
 // when the store grows past 300 repos, and then drops entries older than
 // 30 days (a deliberate, distinct constant, not a multiple of TTL_MS).
@@ -143,7 +147,10 @@ async function fetchStars(repo: RepoKey): Promise<number | null> {
       const etag = etags[repo.key];
       if (etag) headers['If-None-Match'] = etag;
 
-      const res = await fetch(repo.api, { headers });
+      const res = await fetch(repo.api, {
+        headers,
+        signal: AbortSignal.timeout(STAR_FETCH_TIMEOUT_MS),
+      });
 
       if (res.status === 304 && cached) {
         writeCache(repo.key, cached.n, etag);

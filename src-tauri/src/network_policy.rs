@@ -308,10 +308,15 @@ impl PathPin {
 /// GitHub release documents of ANY repository:
 ///
 ///   - `/{owner}/{repo}/releases.atom`
-///   - `/{owner}/{repo}/releases/tag/{tag}/expanded_assets`
+///   - `/{owner}/{repo}/releases/tag/{tag}/expanded_assets` (the classic
+///     per-tag fragment path)
+///   - `/{owner}/{repo}/releases/expanded_assets/{tag}` (the fragment URL
+///     GitHub's release pages lazy-load since the 2026-10 rollout - the
+///     classic path began answering a page shell that references THIS URL
+///     instead of carrying the anchors itself)
 ///
 /// This is the load-bearing gate of the rate-limit-proof release-lookup
-/// fallback: github.com is admitted ONLY for these two document shapes,
+/// fallback: github.com is admitted ONLY for these release-document shapes,
 /// so the generic resolver-manifest allowlist keeps its pinned invariant
 /// (github.com stays off it - see the signature-document test in
 /// `network_policy/tests.rs`) and nothing else on github.com - a checksum
@@ -345,6 +350,9 @@ impl ReleasesDocShape {
         match segments.as_slice() {
             [owner, repo, "releases.atom"] => Self::segment_ok(owner) && Self::segment_ok(repo),
             [owner, repo, "releases", "tag", tag, "expanded_assets"] => {
+                Self::segment_ok(owner) && Self::segment_ok(repo) && Self::segment_ok(tag)
+            }
+            [owner, repo, "releases", "expanded_assets", tag] => {
                 Self::segment_ok(owner) && Self::segment_ok(repo) && Self::segment_ok(tag)
             }
             _ => false,

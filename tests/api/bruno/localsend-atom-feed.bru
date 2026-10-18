@@ -1,0 +1,45 @@
+meta {
+  name: 02 localsend atom feed
+  type: http
+  seq: 2
+}
+
+get {
+  url: https://github.com/localsend/localsend/releases.atom
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The quota-free release list. Extract the newest STABLE tag (unstable
+  // markers skipped, same heuristic as the app) and hand it to the next
+  // request via a runtime variable.
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const body = typeof raw === 'string' ? raw : String(raw || '');
+  if (body.indexOf('<entry>') === -1) {
+    throw new Error('atom feed carries no <entry> elements');
+  }
+  const hrefs = body.match(/href="https:\/\/github\.com\/localsend\/localsend\/releases\/tag\/([^"]+)"/g) || [];
+  let tag = '';
+  for (const h of hrefs) {
+    const t = decodeURIComponent(h.replace(/.*\/releases\/tag\//, '').replace(/"$/, ''));
+    if (/(beta|rc|alpha|nightly|canary|snapshot|dev|preview|prerelease)/i.test(t)) continue;
+    tag = t;
+    break;
+  }
+  if (!tag) throw new Error('atom feed carried no stable tag');
+  bru.setVar('lsTag', tag);
+  console.log('newest stable tag via atom: ' + tag);
+}
+
+tests {
+  test("atom feed answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("content is atom XML", function() {
+    expect(res.headers['content-type']).to.include('xml');
+  });
+  test("answers fast (quota-free documents must beat the API)", function() {
+    expect(res.responseTime).to.be.below(10000);
+  });
+}

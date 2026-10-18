@@ -183,9 +183,14 @@ export const LiveSearchModal: React.FC<LiveSearchModalProps> = ({
         }
       }
 
-      // 2. Client-side fallback to GitHub Search API
+      // 2. Client-side fallback to GitHub Search API. The search endpoint's
+      // unauthenticated budget is the tightest GitHub hands out (10/min per
+      // IP) and it can hang; the timeout turns a dead connection into the
+      // modal's honest rate-limited/network message instead of an endless
+      // spinner.
       const ghRes = await fetch(
-        `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}+is:public&sort=stars&order=desc&per_page=12`
+        `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}+is:public&sort=stars&order=desc&per_page=12`,
+        { signal: AbortSignal.timeout(15_000) }
       );
       if (ghRes.ok) {
         const ghData = await ghRes.json();

@@ -249,7 +249,9 @@ describe('parseExpandedAssets', () => {
     expect(assets[0].downloadUrl).toBe(
       'https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe'
     );
-    expect(assets[0].size).toBe(0); // the download engine learns the real size from Content-Length
+    // The fragment's own size label is parsed (best-effort, byte-rounded);
+    // the download engine still learns the exact size from Content-Length.
+    expect(assets[0].size).toBe(Math.round(42.1 * 1024 * 1024));
   });
 
   it('ignores badge images, other repos and non-download links', () => {

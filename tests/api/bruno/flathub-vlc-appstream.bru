@@ -1,0 +1,33 @@
+meta {
+  name: 07 flathub vlc appstream
+  type: http
+  seq: 7
+}
+
+get {
+  url: https://flathub.org/api/v2/appstream/org.videolan.VLC
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // Flathub's appstream document for the VLC flatpak the catalog's Linux
+  // rows point at (the official build channel for flatpak-first apps).
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const body = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
+  if (body.indexOf('VLC') === -1) {
+    throw new Error('appstream document does not mention VLC');
+  }
+  if (body.indexOf('org.videolan.VLC') === -1) {
+    throw new Error('appstream document is not for org.videolan.VLC');
+  }
+}
+
+tests {
+  test("flathub appstream answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast", function() {
+    expect(res.responseTime).to.be.below(15000);
+  });
+}

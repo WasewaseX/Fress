@@ -1,0 +1,38 @@
+meta {
+  name: 06 fdroid localsend index
+  type: http
+  seq: 6
+}
+
+get {
+  url: https://f-droid.org/api/v1/packages/org.localsend.localsend_app
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The F-Droid resolver's source: the suggested version code picks the
+  // APK the app downloads on Android.
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const doc = raw && typeof raw === 'object' ? raw : JSON.parse(raw || 'null');
+  if (!doc) throw new Error('f-droid index is not JSON');
+  if (typeof doc.suggestedVersionCode !== 'number') {
+    throw new Error('f-droid index has no numeric suggestedVersionCode');
+  }
+  if (!Array.isArray(doc.packages) || doc.packages.length === 0) {
+    throw new Error('f-droid index carries no packages');
+  }
+  if (doc.packageName !== 'org.localsend.localsend_app') {
+    throw new Error('f-droid answered for the wrong package: ' + doc.packageName);
+  }
+  console.log('f-droid suggested version code: ' + doc.suggestedVersionCode);
+}
+
+tests {
+  test("f-droid index answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast", function() {
+    expect(res.responseTime).to.be.below(15000);
+  });
+}

@@ -1,0 +1,34 @@
+meta {
+  name: 03 localsend expanded assets fragment
+  type: http
+  seq: 3
+}
+
+get {
+  url: https://github.com/localsend/localsend/releases/expanded_assets/{{lsTag}}
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The NEW fragment shape (2026-10 rollout): the real asset document the
+  // release page lazy-loads. A zero-anchor answer here is the page-shell
+  // regression that silently emptied the atom fallback and pushed users to
+  // the browser - the suite fails loudly instead.
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const body = typeof raw === 'string' ? raw : String(raw || '');
+  const anchors = body.match(/href="\/localsend\/localsend\/releases\/download\/[^"]+"/g) || [];
+  if (anchors.length === 0) {
+    throw new Error('fragment carries ZERO /releases/download/ anchors (page-shell regression?)');
+  }
+  console.log('fragment anchors: ' + anchors.length);
+}
+
+tests {
+  test("fragment answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast", function() {
+    expect(res.responseTime).to.be.below(10000);
+  });
+}

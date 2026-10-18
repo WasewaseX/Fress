@@ -1,0 +1,43 @@
+meta {
+  name: 08 cross-source tag consistency
+  type: http
+  seq: 8
+}
+
+get {
+  url: https://api.github.com/repos/localsend/localsend/releases/latest
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The two sources the resolver prioritizes must AGREE on the newest
+  // stable release. When the API quota is exhausted (403/429 - routine on
+  // shared runner IPs), the check is skipped honestly: the atom path is
+  // the one that must carry the app in that state, and request 02 already
+  // proved it answers.
+  if (res.status === 403 || res.status === 429) {
+    console.log('NOTICE: GitHub API quota exhausted for this IP - cross-source check skipped (atom path already proven by request 02)');
+    return;
+  }
+  if (res.status !== 200) {
+    throw new Error('unexpected API status: ' + res.status);
+  }
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const doc = raw && typeof raw === 'object' ? raw : JSON.parse(raw || 'null');
+  if (!doc) throw new Error('API response is not JSON');
+  const atomTag = bru.getVar('lsTag');
+  if (!atomTag) throw new Error('atom tag variable missing - request 02 did not run');
+  if (doc.tag_name !== atomTag) {
+    throw new Error('SOURCES DISAGREE: api=' + doc.tag_name + ' atom=' + atomTag);
+  }
+  console.log('cross-source consistency: both sources agree on ' + doc.tag_name);
+}
+
+tests {
+  test("api and atom agree on the newest stable tag (or the API is quota-dead)", function() {
+    // The script already validated (or skipped); assert the status family
+    // so a 5xx is never silently swallowed.
+    expect([200, 403, 429]).to.include(res.status);
+  });
+}

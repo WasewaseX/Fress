@@ -183,7 +183,11 @@ export const AddAppModal: React.FC<AddAppModalProps> = ({
       const [, owner, repo] = match;
       const cleanRepo = repo.replace(/\.git$/, '');
 
-      const res = await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}`);
+      const res = await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}`, {
+        // The Inspect button must never hang on a dead connection: the
+        // timeout surfaces the modal's honest failure message instead.
+        signal: AbortSignal.timeout(15_000),
+      });
       if (!res.ok) {
         throw new Error(formatMessage(t('add.githubApiStatus'), { status: res.status }));
       }

@@ -1,0 +1,40 @@
+meta {
+  name: 01 github quota probe
+  type: http
+  seq: 1
+}
+
+get {
+  url: https://api.github.com/rate_limit
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // This endpoint is quota-FREE and reports the shared unauthenticated
+  // budget. It never fails the suite on a low number - it documents the
+  // quota health that motivates Fress's quota-free-first source order:
+  // when `core.remaining` is 0, the REST API is dead for this IP and only
+  // the github.com documents (releases.atom + expanded_assets) can answer.
+  //
+  // Bruno's sandbox exposes the response body in different shapes across
+  // versions (string, parsed object, or a function returning either); the
+  // accessors below normalize all of them.
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const doc = raw && typeof raw === 'object' ? raw : JSON.parse(raw || 'null');
+  const core = doc && doc.resources && doc.resources.core;
+  if (!core || typeof core.limit !== 'number') {
+    throw new Error('rate_limit document has no core resource');
+  }
+  console.log('GitHub core quota: ' + core.remaining + '/' + core.limit +
+    ' remaining (reset ' + new Date(core.reset * 1000).toISOString() + ')');
+}
+
+tests {
+  test("rate_limit document answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast (quota probes must never be slow)", function() {
+    expect(res.responseTime).to.be.below(10000);
+  });
+}

@@ -1,0 +1,45 @@
+meta {
+  name: 04 fress updater latest.json
+  type: http
+  seq: 4
+}
+
+get {
+  url: https://github.com/WasewaseX/Fress/releases/latest/download/latest.json
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The Tauri updater's stable-channel manifest, served from the release
+  // asset CDN (quota-free). This is the chain the installed app checks.
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const doc = raw && typeof raw === 'object' ? raw : JSON.parse(raw || 'null');
+  if (!doc) throw new Error('latest.json is not JSON');
+  if (!/^\d+\.\d+\.\d+$/.test(doc.version || '')) {
+    throw new Error('latest.json version is not semver: ' + doc.version);
+  }
+  const platforms = doc.platforms || {};
+  const keys = Object.keys(platforms);
+  if (keys.length < 8) {
+    throw new Error('latest.json carries ' + keys.length + ' platforms, expected >= 8');
+  }
+  for (const k of keys) {
+    if (!platforms[k].signature || !platforms[k].url) {
+      throw new Error('platform ' + k + ' is missing signature or url');
+    }
+  }
+  if (Number.isNaN(Date.parse(doc.pub_date || ''))) {
+    throw new Error('latest.json pub_date is unparseable');
+  }
+  console.log('updater chain healthy: v' + doc.version + ' across ' + keys.length + ' platforms');
+}
+
+tests {
+  test("latest.json answers", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast", function() {
+    expect(res.responseTime).to.be.below(15000);
+  });
+}

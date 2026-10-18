@@ -253,6 +253,11 @@ fn github_release_documents_admit_exactly_the_two_shapes() {
         // The per-tag expanded_assets fragment (percent-encoded tag).
         "https://github.com/localsend/localsend/releases/tag/v1.17.0/expanded_assets",
         "https://github.com/obsidianmd/obsidian-releases/releases/tag/v1.5.3%2Bpatch/expanded_assets",
+        // The fragment URL the release pages lazy-load since the 2026-10
+        // rollout (verified live: the classic path answers a page shell
+        // whose <include-fragment src> points HERE).
+        "https://github.com/localsend/localsend/releases/expanded_assets/v1.17.0",
+        "https://github.com/obsidianmd/obsidian-releases/releases/expanded_assets/v1.5.3%2Bpatch",
         // A tag containing a slash arrives percent-encoded as one segment -
         // a real GitHub shape (git tags may contain slashes).
         "https://github.com/WasewaseX/Fress/releases/tag/release%2Fv1.0/expanded_assets",
@@ -277,6 +282,7 @@ fn github_release_documents_refuse_everything_else_on_github_com() {
         "https://github.com/WasewaseX/Fress/releases.atom/extra",
         // Wrong segment shapes that contain the right words.
         "https://github.com/WasewaseX/Fress/releases/tag/v1.0.3/expanded_assets/extra",
+        "https://github.com/WasewaseX/Fress/releases/expanded_assets/v1.0.3/extra",
         "https://github.com/WasewaseX/Fress/releases/tag/v1.0.3",
         // Traversal attempts (the URL parser normalizes dot segments away
         // before the shape check sees them, so both collapse to shapes with

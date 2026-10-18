@@ -16,16 +16,29 @@
  *
  *   - `https://github.com/<repo>/releases.atom` lists the recent releases
  *     (tag, title, updated timestamp) as a small XML document;
- *   - `https://github.com/<repo>/releases/tag/<tag>/expanded_assets` is the
- *     HTML fragment the releases page lazy-loads, and it contains one
- *     `/releases/download/...` anchor per uploadable asset.
+ *   - the per-tag asset fragment carries one `/releases/download/...`
+ *     anchor per uploadable asset, plus a `sha256:<hex>` span and a human
+ *     size label ("37.5 MB") next to each anchor - so the quota-free path
+ *     answers what the REST API answered, sizes and digests included.
  *
- * Together they answer exactly what the REST API answered, without the
- * quota. The desktop app reads them through the existing size-capped,
- * host-allowlisted, per-hop-checked `fetch_text` command (github.com was
- * added to the resolver allowlist for exactly these two document shapes);
- * in the browser plain fetch is attempted and simply degrades (github.com
- * does not answer CORS, so the browser keeps today's behavior).
+ * TWO FRAGMENT URL SHAPES (both quota-free, both parsed identically):
+ *   - NEW (verified live 2026-10-19):
+ *     `https://github.com/<repo>/releases/expanded_assets/<tag>`;
+ *   - OLD: `https://github.com/<repo>/releases/tag/<tag>/expanded_assets`.
+ *     During GitHub's 2026-10 rollout the old URL began answering a page
+ *     shell that lazy-loads the new document - the shell carries ZERO
+ *     asset anchors, so a parser pinned to the old shape silently saw an
+ *     asset-less release list, the resolver answered "no match", and the
+ *     card fell through to opening the official page in the browser. The
+ *     fetch tries the NEW shape first and falls back to the OLD shape
+ *     only when the new answer parses to zero anchors (rollback safety).
+ *
+ * The desktop app reads these documents through the size-capped,
+ * host-allowlisted, per-hop-checked `fetch_github_release_doc` command
+ * (the native shape validator admits exactly releases.atom and both
+ * fragment paths); in the browser plain fetch is attempted and simply
+ * degrades (github.com does not answer CORS, so the browser keeps the
+ * API-first behavior).
  *
  * TRUST MODEL: github.com is the naming authority here exactly as
  * api.github.com was - the tag comes from GitHub's own feed and the asset
@@ -39,8 +52,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../downloads';
 import { ReleaseInfo } from './types';
 
-/** Cap mirroring the official resolvers' transport budget. */
-const TEXT_TIMEOUT_MS = 25_000;
+/** Browser-path cap for the two github.com document shapes. The documents
+ * are CDN-served static files (verified: <1s live); 15s is generous while
+ * keeping a hung connection from stalling a user click. */
+const BROWSER_TEXT_TIMEOUT_MS = 15_000;
+
+/** How far past an asset anchor the size/digest enrichment may look. The
+ * fragment renders sha256 + size spans directly after each anchor; the
+ * window always ends at the NEXT asset anchor, so one asset's metadata
+ * can never bleed into the next. */
+const ASSET_META_WINDOW = 4000;
 
 /** Asset-fragment fetches per fallback run. The right stream for a
  * multi-product repo is virtually always inside the newest handful of
@@ -67,6 +88,13 @@ async function fetchGithubText(url: string): Promise<TextFetchResult> {
       'fetch_github_release_doc',
       { url }
     );
+    // A native build without this command (or an environment that resolves
+    // the call to null) is an honest "document reader unavailable", not a
+    // document: fail fast with a named error so the caller's API fallback
+    // decides, instead of dying on a TypeError deep in the parser.
+    if (!r || typeof (r as { status?: unknown }).status !== 'number') {
+      throw new Error('Release-document reader unavailable');
+    }
     if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
     // A body cut at the native cap is NOT a feed or a fragment: the newest
     // entries could be missing, silently resolving an OLD release. Refuse
@@ -77,7 +105,7 @@ async function fetchGithubText(url: string): Promise<TextFetchResult> {
   const resp = await fetch(url, {
     headers: { Accept: 'application/atom+xml, text/html' },
     redirect: 'follow',
-    signal: AbortSignal.timeout(TEXT_TIMEOUT_MS),
+    signal: AbortSignal.timeout(BROWSER_TEXT_TIMEOUT_MS),
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return { body: await resp.text() };
@@ -173,6 +201,31 @@ export interface AtomAsset {
   name: string;
   size: number;
   downloadUrl: string;
+  /** The digest GitHub's own release page renders for the uploaded asset
+   * (`sha256:<hex>` span next to the anchor). Same trust class as the
+   * download URL itself - the forge that hosts the file states its digest
+   * - but BEST-EFFORT: an older/absent span leaves this undefined and the
+   * artifact simply stays unverified, never falsely verified. */
+  sha256?: string;
+}
+
+/** Parses a human size label ("37.5 MB", "950 kB", "1.2 GB") into bytes.
+ * GitHub renders binary-ish decimal labels; the parser accepts the exact
+ * unit vocabulary the fragment uses and nothing else. */
+export function parseHumanSizeToBytes(label: string): number | null {
+  const m = /^([0-9]+(?:\.[0-9]+)?)\s?(B|[kKMGTP]i?B)$/.exec(label.trim());
+  if (!m) return null;
+  const value = Number(m[1]);
+  if (!Number.isFinite(value)) return null;
+  const unit = m[2];
+  const mult =
+    unit === 'B' ? 1 :
+    /^[kK]i?B$/.test(unit) ? 1024 :
+    /^[M]i?B$/.test(unit) ? 1024 ** 2 :
+    /^[G]i?B$/.test(unit) ? 1024 ** 3 :
+    1024 ** 4;
+  const bytes = Math.round(value * mult);
+  return Number.isFinite(bytes) && bytes >= 0 ? bytes : null;
 }
 
 /** Extract the release assets from an expanded_assets HTML fragment: the
@@ -180,12 +233,20 @@ export interface AtomAsset {
  * /<repo>/releases/download/<tag>/<asset>. Anything else (badge images,
  * source-tree links, arbitrary hrefs) is ignored; a malformed percent
  * escape or a path-looking asset name is skipped, never decoded into a
- * surprise. */
+ * surprise.
+ *
+ * Enrichment (best-effort, fail-open to size 0 / no digest): the fragment
+ * renders `sha256:<hex>` and a human size label shortly after each asset
+ * anchor. Each anchor's metadata window is bounded by the NEXT anchor, so
+ * digests and sizes can never cross-attach between assets, and a span
+ * that fails to parse is silently skipped. */
 export function parseExpandedAssets(body: string, repo: string): AtomAsset[] {
   const assets: AtomAsset[] = [];
   const hrefRe = new RegExp(`href="(/${repo}/releases/download/[^"]+)"`, 'g');
   const prefix = `/${repo}/releases/download/`;
-  for (const m of body.matchAll(hrefRe)) {
+  const matches = [...body.matchAll(hrefRe)];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
     const href = m[1];
     // Exactly TWO segments after the prefix - the tag and the flat asset
     // file name. A nested path is not an asset name; refuse it rather
@@ -200,15 +261,51 @@ export function parseExpandedAssets(body: string, repo: string): AtomAsset[] {
       continue;
     }
     if (!name || name === '.' || name === '..') continue;
-    assets.push({ name, size: 0, downloadUrl: `https://github.com${href}` });
+    // Metadata window: from the end of THIS anchor to the start of the
+    // NEXT asset anchor (the windows tile the fragment; nothing bleeds).
+    const windowEnd = i + 1 < matches.length ? matches[i + 1].index! : Math.min(body.length, (m.index ?? 0) + m[0].length + ASSET_META_WINDOW);
+    const window = body.slice((m.index ?? 0) + m[0].length, windowEnd);
+    const sha = /sha256:\s*([0-9a-fA-F]{64})/.exec(window)?.[1]?.toLowerCase();
+    const sizeText = /([0-9]+(?:\.[0-9]+)?)\s?(B|[kKMGTP]i?B)\b/.exec(window);
+    const size = sizeText ? parseHumanSizeToBytes(sizeText[0]) : null;
+    assets.push({
+      name,
+      size: size ?? 0,
+      downloadUrl: `https://github.com${href}`,
+      ...(sha ? { sha256: sha } : {}),
+    });
   }
   return assets;
 }
 
+/** Reads the asset fragment for one tag, trying BOTH URL shapes. The NEW
+ * shape (`/releases/expanded_assets/<tag>`) is what GitHub's release page
+ * lazy-loads since the 2026-10 rollout; the OLD shape
+ * (`/releases/tag/<tag>/expanded_assets`) is kept as the rollback path.
+ * A shape whose answer parses to zero anchors is treated as "not the real
+ * fragment" (the old URL answered a page shell with no anchors during the
+ * rollout) rather than as an asset-less release - the other shape gets
+ * its chance before the entry is recorded asset-less. */
 async function fetchAssetsForTag(repo: string, tag: string): Promise<AtomAsset[]> {
-  const url = `https://github.com/${repo}/releases/tag/${encodeURIComponent(tag)}/expanded_assets`;
-  const { body } = await fetchGithubText(url);
-  return parseExpandedAssets(body, repo);
+  const safeTag = encodeURIComponent(tag);
+  const urls = [
+    `https://github.com/${repo}/releases/expanded_assets/${safeTag}`,
+    `https://github.com/${repo}/releases/tag/${safeTag}/expanded_assets`,
+  ];
+  let lastError: unknown = null;
+  for (const url of urls) {
+    try {
+      const { body } = await fetchGithubText(url);
+      const assets = parseExpandedAssets(body, repo);
+      if (assets.length > 0) return assets;
+      // Zero anchors: not a usable fragment. Try the next shape; if none
+      // yields anchors the release genuinely has no uploadable assets.
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  if (lastError) throw lastError;
+  return [];
 }
 
 /** The atom-feed mirror of getRecentReleases: newest-first stable entries
@@ -220,7 +317,8 @@ async function fetchAssetsForTag(repo: string, tag: string): Promise<AtomAsset[]
 export async function getReleasesViaAtom(
   repo: string,
   count: number,
-  includeFlagged: boolean
+  includeFlagged: boolean,
+  stopAtFirstAssetful = false
 ): Promise<ReleaseInfo[]> {
   const slug = repo.trim();
   if (!isSafeRepoSlug(slug)) throw new Error('Unsafe repository slug for the atom fallback');
@@ -252,6 +350,11 @@ export async function getReleasesViaAtom(
       htmlUrl: entry.htmlUrl,
       assets,
     });
+    // The latest-release lookup only consumes the FIRST asset-ful entry:
+    // walking further fragments would spend requests on answers nobody
+    // reads. The recent-scan keeps the full budget (it needs every
+    // candidate's assets to pick from).
+    if (stopAtFirstAssetful && assets.length > 0) break;
   }
   return out;
 }
@@ -261,7 +364,7 @@ export async function getReleasesViaAtom(
  * does. Never throws for "no stable release with assets" - null is the
  * honest answer and the caller falls back to its original API error. */
 export async function getLatestViaAtom(repo: string, includeFlagged: boolean): Promise<ReleaseInfo | null> {
-  const list = await getReleasesViaAtom(repo, ATOM_ASSET_FETCH_BUDGET, includeFlagged);
+  const list = await getReleasesViaAtom(repo, ATOM_ASSET_FETCH_BUDGET, includeFlagged, true);
   for (const rel of list) {
     if (rel.assets.length > 0) return rel;
   }

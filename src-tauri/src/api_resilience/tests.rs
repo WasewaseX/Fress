@@ -570,7 +570,10 @@ async fn a_redirect_policy_refusal_is_never_retried() {
 // production hosts - so the shared loop is tested here, exactly where the
 // Tauri-free module design puts testable transport logic. Connection counts
 // are the kill oracle: the pre-fix transports were single-shot, so any
-// retry-when-transient assertion separates the two eras.
+// retry-when-transient assertion separates the two eras. The mid-body
+// oracle mirrors it: a stream that dies after the status line was served
+// costs a second connection only once the loop classifies `Bad response:`
+// as transient.
 // ---------------------------------------------------------------------------
 
 async fn get_text(
@@ -660,4 +663,58 @@ async fn text_helper_exhaustion_reports_the_last_transient_status() {
         .expect_err("every attempt failed");
     assert_eq!(err, "GitHub release document returned HTTP 503");
     assert_eq!(observed.lock().expect("lock").len(), 4);
+}
+
+#[tokio::test]
+async fn text_helper_retries_a_stream_that_dies_mid_body() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    // Headers promise 100 bytes, the origin ships 15 and hangs up: the
+    // reader sees a transport death after the status line - the shape a
+    // reset connection produces in the wild. The response has begun, so
+    // no HTTP layer retries on the client's behalf; the loop must.
+    let premature = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n<feed>ok</feed>".to_vec();
+    let url = spawn_scripted_http(
+        vec![
+            premature,
+            raw_response("HTTP/1.1 200 OK", &[], b"<feed>ok</feed>"),
+        ],
+        observed.clone(),
+    );
+    let doc = get_text(&url, "GitHub release document", &Timing::instant())
+        .await
+        .expect("the mid-body death must be retried");
+    assert_eq!(doc.status, 200);
+    assert_eq!(doc.body, "<feed>ok</feed>");
+    assert_eq!(
+        observed.lock().expect("lock").len(),
+        2,
+        "one mid-body death costs exactly one reconnect - a single-shot body reader stops at 1"
+    );
+}
+
+#[tokio::test]
+async fn text_helper_mid_body_deaths_exhaust_with_the_transport_wording() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let premature = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n<feed>ok</feed>".to_vec();
+    let url = spawn_scripted_http(
+        vec![
+            premature.clone(),
+            premature.clone(),
+            premature.clone(),
+            premature,
+        ],
+        observed.clone(),
+    );
+    let err = get_text(&url, "GitHub release document", &Timing::instant())
+        .await
+        .expect_err("every connection died mid-body");
+    assert!(
+        err.starts_with("Bad response:"),
+        "exhaustion must name the reader's transport failure, not a status: {err}"
+    );
+    assert_eq!(
+        observed.lock().expect("lock").len(),
+        4,
+        "all attempts must actually run - a single-shot body reader stops at 1"
+    );
 }

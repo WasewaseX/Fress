@@ -611,8 +611,11 @@ pub(crate) async fn get_json_resilient(
 /// failures (one dropped packet, a reset handshake) and retryable statuses
 /// (408/429/5xx, the quota-signature 403) are retried with the same
 /// jittered backoff, deterministic answers (404, plain 403, policy
-/// refusals, oversized bodies) are answered exactly once, and body-read
-/// errors propagate without a retry exactly as the readers classify them.
+/// refusals, oversized bodies) are answered exactly once, and a stream
+/// that dies mid-read is retried through the same [`is_transient_body_error`]
+/// gate the JSON loop applies: `Bad response:` is the capped reader's
+/// transport death, as transient as a failed send, so the next attempt
+/// re-asks the origin and the freshness contract is untouched.
 ///
 /// Error strings are label-prefixed so each command keeps its own wording
 /// ("Manifest host ...", "GitHub release document ...").
@@ -648,7 +651,22 @@ pub(crate) async fn get_text_resilient(
         if !status.is_success() {
             return Err(format!("{label} returned HTTP {}", status.as_u16()));
         }
-        return crate::http_body::read_capped_text(resp).await;
+        let doc = crate::http_body::read_capped_text(resp).await;
+        match doc {
+            Ok(doc) => return Ok(doc),
+            Err(msg) => {
+                if is_transient_body_error(&msg) {
+                    // The stream died mid-body after the status line was
+                    // served - a reset connection in the wild. Same family
+                    // as a failed send: re-ask the origin. The reader's
+                    // deterministic refusals never wear the `Bad response:`
+                    // prefix and stay single-shot below.
+                    last_transient = Some(msg);
+                    continue;
+                }
+                return Err(msg);
+            }
+        }
     }
     Err(last_transient.unwrap_or_else(|| format!("{label} could not be reached")))
 }

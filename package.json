@@ -19,6 +19,7 @@
     "test:visual": "playwright test tests/e2e/z-visual.spec.ts",
     "test:perf": "tsx scripts/perf/catalog-perf.ts",
     "test:live": "playwright test --config=playwright.live.config.ts",
+    "test:api:bruno": "cd tests/api/bruno && npx --yes @usebruno/cli run",
     "clean": "rm -rf dist",
     "tauri": "tauri"
   },

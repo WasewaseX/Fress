@@ -65,6 +65,11 @@ function toResolved(detailed: AssetPick, rel: ReleaseInfo): ResolvedDownload {
     releasePageUrl: rel.htmlUrl,
     matchedBy: detailed.matchedBy,
     weak: detailed.weak || undefined,
+    // The forge-rendered digest (GitHub's release page shows sha256:<hex>
+    // per uploaded asset, surfaced by the atom/fragment path). Undefined
+    // when the source carries none - the artifact stays honestly
+    // unverified, never falsely verified.
+    expectedSha256: detailed.pick.sha256 || undefined,
   };
 }
 

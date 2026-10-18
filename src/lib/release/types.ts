@@ -18,6 +18,13 @@ export interface ReleaseAsset {
   name: string;
   size: number;
   downloadUrl: string;
+  /** The digest the forge itself renders for this uploaded asset
+   * (GitHub's release page shows `sha256:<hex>` per asset). Same trust
+   * class as `downloadUrl` - the party serving the file states its digest
+   * - so it may flow into the engine's delete-on-mismatch verification.
+   * Optional: sources that carry no per-asset digest leave it undefined
+   * and the artifact stays honestly unverified. */
+  sha256?: string;
 }
 
 export interface ReleaseInfo {

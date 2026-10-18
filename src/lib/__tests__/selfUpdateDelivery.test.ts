@@ -272,7 +272,19 @@ describe('the complete in-app delivery path (Task 6 contract)', () => {
       fallback: true,
     });
     expect(toastError).toHaveBeenCalled();
-    expect(h.deps.openExternal).toHaveBeenCalledWith('https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta');
+    // No-auto-browser contract: the app never opens the Releases page by
+    // itself. The toast carries a labeled action instead - the browser
+    // opens only when the user clicks it.
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
+    const action = toastError.mock.calls.at(-1)![1].action as {
+      label: string;
+      onClick: () => void;
+    };
+    expect(action.label).toBe('update.releasesPageAction');
+    action.onClick();
+    expect(h.deps.openExternal).toHaveBeenCalledWith(
+      'https://github.com/WasewaseX/Fress/releases/tag/v1.0.9-beta'
+    );
     // The failure is visible in the download registry's own terms too: the
     // delivery left the "downloading" phase, so no pending claim remains.
     expect(isDelivering()).toBe(false);
@@ -293,12 +305,18 @@ describe('the complete in-app delivery path (Task 6 contract)', () => {
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it('a missing signature document never downloads (unsigned -> releases page)', async () => {
+  it('a missing signature document never downloads (unsigned -> in-app offer, never a browser)', async () => {
     const h = makeHarness();
     const release = makeRelease({ withSidecar: false });
     await h.start(release);
     expect(getDeliveryState()).toMatchObject({ phase: 'fallback', reason: 'unsigned' });
     expect(h.deps.startDownload).not.toHaveBeenCalled();
+    // No-auto-browser contract: the plan refusal shows the labeled action;
+    // the browser opens only on the user's explicit click.
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
+    const action = toastInfo.mock.calls.at(-1)![1].action as { label: string; onClick: () => void };
+    expect(action.label).toBe('update.releasesPageAction');
+    action.onClick();
     expect(h.deps.openExternal).toHaveBeenCalledWith(release.htmlUrl);
     expect(invokeMock).not.toHaveBeenCalledWith('verify_self_update_signature', expect.anything());
   });
@@ -309,6 +327,10 @@ describe('the complete in-app delivery path (Task 6 contract)', () => {
     await h.start(release);
     expect(getDeliveryState()).toMatchObject({ phase: 'fallback', reason: 'unsigned' });
     expect(h.deps.startDownload).not.toHaveBeenCalled();
+    // No-auto-browser contract: offer, never an automatic open.
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
+    const action = toastInfo.mock.calls.at(-1)![1].action as { label: string; onClick: () => void };
+    action.onClick();
     expect(h.deps.openExternal).toHaveBeenCalledWith(release.htmlUrl);
   });
 
@@ -333,6 +355,10 @@ describe('the complete in-app delivery path (Task 6 contract)', () => {
       fallback: true,
     });
     expect(h.deps.startDownload).not.toHaveBeenCalled();
+    // No-auto-browser contract: the fallback offer rides the toast action.
+    expect(h.deps.openExternal).not.toHaveBeenCalled();
+    const action = toastError.mock.calls.at(-1)![1].action as { label: string; onClick: () => void };
+    action.onClick();
     expect(h.deps.openExternal).toHaveBeenCalled();
   });
 

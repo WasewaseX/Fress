@@ -328,26 +328,42 @@ function failDelivery(
   const htmlUrl = current?.releaseHtmlUrl;
   plan = null;
   setState({ phase: 'failed', name, reason, fallback });
+  // The browser handoff is an OFFER, never an action the app takes by
+  // itself. The old code launched the system browser from a failing
+  // download - the exact "Fress opened a browser instead of downloading"
+  // surprise this module exists to prevent (the checksum branch's own
+  // contract line below says "nothing is opened automatically"; the
+  // fallback branch now honors the same rule). The Releases page stays one
+  // deliberate click away: the toast action and the "See releases" pill
+  // are both explicit user choices.
+  const releasesAction = fallback
+    ? {
+        label: t('update.releasesPageAction'),
+        onClick: () => {
+          void openExternalFn(htmlUrl ?? 'https://github.com/WasewaseX/Fress/releases');
+        },
+      }
+    : undefined;
   if (reason === 'signature') {
     toast.error(t('update.signatureFailed'), {
       description: t('update.signatureFailedHint'),
+      action: releasesAction,
     });
   } else if (reason === 'checksum') {
     toast.error(t('update.checksumFailed'), {
       description: t('update.checksumFailedHint'),
+      action: releasesAction,
     });
   } else if (reason === 'signature-fetch') {
     toast.error(t('update.signatureFetchFailed'), {
       description: t('update.signatureFetchFailedHint'),
+      action: releasesAction,
     });
   } else {
     toast.error(t('update.downloadFailed'), {
       description: t('update.downloadFailedHint'),
+      action: releasesAction,
     });
-  }
-  if (fallback) {
-    const url = htmlUrl ?? 'https://github.com/WasewaseX/Fress/releases';
-    void openExternalFn(url);
   }
 }
 
@@ -405,20 +421,24 @@ export async function startOwnUpdateDelivery(
       name: input.asset ? input.asset.name : input.release.tag,
       reason: delivery.reason,
     });
-    if (delivery.reason === 'unverifiable') {
-      toast.info(t('update.releasesPage'), {
-        description: t('update.unverifiableHint'),
-      });
-    } else if (delivery.reason === 'unsigned') {
-      toast.info(t('update.releasesPage'), {
-        description: t('update.unsignedHint'),
-      });
-    } else {
-      toast.info(t('update.releasesPage'), {
-        description: t('update.noAssetHint'),
-      });
-    }
-    void deps.openExternal(delivery.release.htmlUrl);
+    // Same no-auto-browser contract as every failure path here: the planner
+    // refuses, the pill says "See releases", and the browser opens only if
+    // the user clicks the labeled action below. The app itself never
+    // launches the system browser as a side effect of a click whose
+    // purpose was an IN-APP update.
+    const why =
+      delivery.reason === 'unverifiable'
+        ? t('update.unverifiableHint')
+        : delivery.reason === 'unsigned'
+          ? t('update.unsignedHint')
+          : t('update.noAssetHint');
+    toast.info(t('update.releasesPage'), {
+      description: why,
+      action: {
+        label: t('update.releasesPageAction'),
+        onClick: () => void deps.openExternal(delivery.release.htmlUrl),
+      },
+    });
     return;
   }
 
@@ -442,8 +462,11 @@ export async function startOwnUpdateDelivery(
     });
     toast.error(t('update.signatureFailed'), {
       description: t('update.signatureFailedHint'),
+      action: {
+        label: t('update.releasesPageAction'),
+        onClick: () => void deps.openExternal(input.release.htmlUrl),
+      },
     });
-    void deps.openExternal(input.release.htmlUrl);
     return;
   }
   if (sig.status === 'unreachable') {

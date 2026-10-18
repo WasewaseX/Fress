@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.6 (2026-10-19): the no-surprise-browser release
+
+The one defect users reported more than any other - a click that ended in the system browser instead of a download - had survived every earlier fix in three automatic paths the resolver's honesty could still legally reach. This release removes the last of them and states the contract outright: **Fress never launches the system browser by itself; every external handoff is a labeled offer the user clicks.**
+
+### The app never opens the browser by itself
+
+- **The card's curated fallback no longer opens pages.** When the resolver honestly answers "no automatic installer exists for this platform" and the curated target is a page, the Download button now lands in the in-app detail dialog (options toast + dialog) where every official option is a labeled link. A DIRECT curated target still starts the in-app transfer exactly as before. The old code recorded and opened the page straight from the click - the exact "Fress opened a browser instead of downloading" surprise, one refactor away from coming back.
+- **The self-update fallbacks are offers, not actions.** All three automatic Releases-page opens are gone: the planner's refusal (no verifiable asset for this machine), the missing/malformed signature sidecar, and the terminal delivery-failure fallback. Every one now shows the same toast with an explicit **"Open the releases page"** action; the browser opens only on the user's click. The pill's "See releases" affordance stays as the persistent path. (The checksum branch's own contract line - "nothing is opened automatically" - was already the rule; the fallback branches now honor it too.)
+- **Copy tells the truth.** "Opening the releases page instead" (five languages) became "This update ships from the official Releases page"; the two dead card toast keys were removed from every dictionary under the parity gate.
+- **Pinned at every seam.** The unit suites (card routing, delivery flow) and the six Workflow I/J/J2 E2E suites now assert the full sequence: the pill click opens NOTHING, the download registry stays empty, the refusal toast explains WHY, and the labeled action - the user's explicit choice - is what records the URL.
+
+### The lookup keeps getting harder to kill
+
+- **One fragment request per tag.** The atom fallback's walk now spends exactly ONE request per release entry: a 200 with zero anchors is the honest "no uploadable assets" answer, and the legacy fragment URL is a rollback for a REFUSED modern request only (404/5xx/policy), never a second probe of every asset-less tag. A full-depth scan over 20 entries costs 21 requests, not 40 - the quota-free property the fallback exists for.
+- **The whole scan is walked.** The latest-release lookup reaches as deep as the recent scan (20 entries, stopping at the first asset-bearing one), so a repo whose newest handful of entries are other-stream or asset-less releases no longer dead-ends the fallback.
+- **Prereleases are gated by grammar, not vocabulary.** The atom feed carries no prerelease flag, so the unstable gate reads strict SemVer: any tag that parses with a prerelease identifier (`-next`, `-beta.1`, ...) is unstable on a stable channel, with the boundary-guarded word scan covering what the grammar cannot. The parser is shared with the self-update channel policy (one module, no drift).
+- **Every text transport survives a dropped packet.** The manifest reader, the quota-free release-document reader and the self-update text reader share one resilient loop (transient statuses, jittered backoff, and a stream that dies mid-body is retried - `Bad response:` is transport death, not a verdict). The quota-free fallback can no longer resurrect the failure it exists to prevent.
+- **A retryable status without `Retry-After` is spaced by the backoff**, not retried back-to-back: the server-suggested delay is now an Option, and absence defers to the exponential schedule.
+
+### The wire contracts are a gate
+
+- **`ci.yml` gains `api-gates`.** A zero-dependency mock origin (`scripts/api-mock/server.mjs`) pins every wire contract byte for byte - GitHub REST shapes, the quota-free documents (atom + both fragment URL shapes), the F-Droid index, Fress's own updater chain (latest.json, SHA256SUMS, artifacts with ETag + 304 revalidation) and the FAILURE SHAPES whose handling separates a resilient lookup from a dead-end toast (429 with Retry-After, 429 without, a healing 503, a deterministic 404). 15 Playwright request-context gates (no browser, ~1 s) plus the Bruno CLI companion run on every PR: upstream quota and outages never decide whether a PR is green. The collection's live probes stay in the scheduled network smoke.
+
+### Housekeeping
+
+- The stale `v1.0.6`–`v1.0.9` beta tags (relics of the pre-rebuild history, pointing at commits no branch contains and matching no release) were removed so the stable chain can continue cleanly at 1.0.6.
+
 ## 1.0.5 (2026-10-19): the documents-answer-first release
 
 The two remaining symptoms of the quota era - a lookup that could still die with "No download was started: the download sources could not be reached" when the shared unauthenticated quota was exhausted, and the Download button that then handed the user to the browser - shared one root, and this release removes that root: **on the desktop, the quota-free github.com documents now answer the release lookup FIRST; api.github.com is spent last.** Live evidence the day this shipped: the shared quota sat at `remaining: 0/60` while `releases.atom` answered in 0.69 s.

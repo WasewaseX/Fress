@@ -20,10 +20,17 @@
 //   3. the honest 404 ("no stable release") never spends requests on the
 //      feed - it is an answer, not a failure;
 //   4. the parsers refuse everything they cannot parse confidently:
-//      foreign-repo ids, unsafe tags, badge links, path-looking names.
+//      foreign-repo ids, unsafe tags, badge links, path-looking names;
+//   5. the fragment walk reaches the whole recent-releases scan depth, so
+//      a compatible installer sitting past the first handful of entries
+//      (multi-stream repos) still resolves through the fallback;
+//   6. strict SemVer prerelease identifiers (-next, -experimental, ...)
+//      are gated as unstable even when the word list does not know them.
 //
 // The kill point is the provider wiring in githubProvider.ts: removing the
-// fallback there makes (1) fail while (2)/(3) keep passing.
+// fallback there makes (1) fail while (2)/(3) keep passing. Shrinking the
+// walk back to a five-fragment budget fails (5); dropping the SemVer gate
+// fails (6).
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
@@ -34,8 +41,11 @@ import {
   parseExpandedAssets,
   stageLooksUnstable,
   isSafeRepoSlug,
-  ATOM_ASSET_FETCH_BUDGET,
+  getReleasesViaAtom,
+  getLatestViaAtom,
+  ATOM_SCAN_DEPTH,
 } from '../release/atomReleases';
+import { RECENT_RELEASES_COUNT } from '../release/githubProvider';
 import type { AppItem } from '../../types';
 
 const CACHE_KEY = 'fress.resolveCache.v1';
@@ -118,10 +128,48 @@ function stubFetchWithLiveFallback(opts: {
   });
 }
 
+/** A feed of `tags` (newest first) whose API is dead and whose
+ * expanded_assets fragments answer per tag (`fragments[tag]`, default an
+ * asset-less fragment) - so a multi-release scenario can name exactly
+ * which entries carry installers and count how deep the walk actually
+ * went. */
+function stubFeedWithPerTagFragments(tags: string[], fragments: Record<string, string> = {}) {
+  const feed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>tag:github.com,2008:https://github.com/example/tool/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/example/tool/releases"/>
+  <title>Release notes from tool</title>
+  <updated>2026-10-01T00:00:00Z</updated>
+${tags
+  .map(
+    (tag) => `  <entry>
+    <id>tag:github.com,2008:Repository/1/example-tool/${tag}</id>
+    <updated>2026-10-01T00:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/example/tool/releases/tag/${tag}"/>
+    <title>${tag}</title>
+  </entry>`
+  )
+  .join('\n')}
+</feed>`;
+  return vi.fn(async (input: string | URL | Request) => {
+    const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (u.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
+    if (u.endsWith('/releases.atom')) return new Response(feed, { status: 200 });
+    const m = /\/releases\/tag\/([^/]+)\/expanded_assets$/.exec(u);
+    if (m) {
+      const tag = decodeURIComponent(m[1]);
+      return new Response(fragments[tag] ?? '<div></div>', { status: 200 });
+    }
+    return new Response('Unexpected URL', { status: 404 });
+  });
+}
+
+const fragmentFetches = (f: { mock: { calls: unknown[][] } }) =>
+  f.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/expanded_assets')).length;
+
 let n = 0;
 const appInRepo = (over: Partial<AppItem> = {}) =>
   makeApp({ githubUrl: `https://github.com/example/fb-${++n}`, ...over });
-
 /** The feed/fragment fixtures name the repo example/tool; end-to-end tests
  * must resolve THAT repo so the parser's repo attribution matches. */
 const appTool = (over: Partial<AppItem> = {}) =>
@@ -162,6 +210,61 @@ describe('atom fallback end-to-end (provider wiring)', () => {
     vi.stubGlobal('fetch', stubFetchWithLiveFallback());
     const r = await resolveGitHubDownload(app, 'windows');
     expect(r?.version).toBe('2.0.0');
+  });
+
+  it('a v2.1.0-next prerelease is never served while a stable release exists', async () => {
+    // The word list has no opinion about "next": the strict SemVer gate
+    // must catch the identifier space, or the newest entry - whose assets
+    // match this platform perfectly - would be served to a stable channel.
+    const app = appTool();
+    const f = stubFeedWithPerTagFragments(['v2.1.0-next', 'v2.0.0'], {
+      'v2.1.0-next': '<a href="/example/tool/releases/download/v2.1.0-next/Tool%202.1.0-next.exe">next</a>',
+      'v2.0.0': FRAGMENT_BODY,
+    });
+    vi.stubGlobal('fetch', f);
+    const r = await resolveGitHubDownload(app, 'windows');
+    expect(r?.version).toBe('2.0.0');
+    expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
+  });
+
+  it('finds a compatible release at position seven, past the old five-fragment budget', async () => {
+    // Six asset-less releases ahead of the real one: the API path sees it
+    // inside its 20-release scan; the fallback walk must reach just as
+    // deep instead of returning five empty entries and a dead end.
+    const app = appTool();
+    const f = stubFeedWithPerTagFragments(
+      [
+        'stream-a-1.0.0',
+        'stream-b-1.0.0',
+        'stream-c-1.0.0',
+        'stream-d-1.0.0',
+        'stream-e-1.0.0',
+        'stream-f-1.0.0',
+        'v2.0.0',
+      ],
+      { 'v2.0.0': FRAGMENT_BODY }
+    );
+    vi.stubGlobal('fetch', f);
+    const r = await resolveGitHubDownload(app, 'windows');
+    expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
+    expect(fragmentFetches(f)).toBe(7);
+  });
+
+  it('keeps walking past five other-stream releases that do carry assets', async () => {
+    // The audit's exact shape: the newest entries belong to other product
+    // streams and have real (wrong-platform) assets, so a budget spent on
+    // them never reaches the desktop installer six entries deeper.
+    const app = appTool();
+    const tags = ['v1.9.0', 'v1.9.1', 'v1.9.2', 'v1.9.3', 'v1.9.4', 'v1.9.5', 'v2.0.0'];
+    const fragments: Record<string, string> = { 'v2.0.0': FRAGMENT_BODY };
+    for (const t of tags.slice(0, -1)) {
+      fragments[t] = `<a href="/example/tool/releases/download/${t}/tool-${t}.apk">mobile</a>`;
+    }
+    const f = stubFeedWithPerTagFragments(tags, fragments);
+    vi.stubGlobal('fetch', f);
+    const r = await resolveGitHubDownload(app, 'windows');
+    expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
+    expect(fragmentFetches(f)).toBeGreaterThanOrEqual(7);
   });
 
   it('when the fallback is ALSO dead, the original classified error survives', async () => {
@@ -284,9 +387,63 @@ describe('stageLooksUnstable (the feed has no prerelease flag)', () => {
     for (const t of ['v2.0.0', '1.2.3', 'release-2026.10.01', 'v1.0.0 prebuilt', 'v9/devtools-bundle'])
       expect(stageLooksUnstable(t, ''), t).toBe(false);
   });
+
+  it('a strict SemVer prerelease identifier is unstable whatever it says', () => {
+    // The API path filters by GitHub's own prerelease flag; the feed has
+    // no such flag, and the stage vocabulary above cannot enumerate the
+    // identifier space. The strict parser can - any valid SemVer with a
+    // prerelease part is a prerelease, custom identifier or not.
+    for (const t of ['v2.1.0-next', 'v2.1.0-experimental', '2.0.0-nightly.1', '1.0.0-20261018', 'v1.2.3-next.5'])
+      expect(stageLooksUnstable(t, ''), t).toBe(true);
+  });
+
+  it('build metadata is not a prerelease stage', () => {
+    expect(stageLooksUnstable('v1.2.3+build.5', '')).toBe(false);
+  });
 });
 
-describe('slug safety and budget', () => {
+describe('fallback search depth (the walk reaches the whole scan)', () => {
+  it('returns real assets for every entry of the requested slice, not just the first five', async () => {
+    const tags = Array.from({ length: 8 }, (_, i) => `v1.0.${i}`);
+    const fragments: Record<string, string> = {};
+    for (const t of tags) {
+      fragments[t] = `<a href="/example/tool/releases/download/${t}/tool-${t}.exe">installer</a>`;
+    }
+    const f = stubFeedWithPerTagFragments(tags, fragments);
+    vi.stubGlobal('fetch', f);
+    const list = await getReleasesViaAtom('example/tool', 20, false);
+    expect(list).toHaveLength(8);
+    for (const rel of list) {
+      expect(rel.assets.map((a) => a.name)).toEqual([`tool-${rel.tag}.exe`]);
+    }
+    expect(fragmentFetches(f)).toBe(8);
+  });
+
+  it('the walk stays bounded by the requested count even when the feed is longer', async () => {
+    const tags = Array.from({ length: 25 }, (_, i) => `v1.0.${i}`);
+    const fragments: Record<string, string> = {};
+    for (const t of tags) {
+      fragments[t] = `<a href="/example/tool/releases/download/${t}/tool-${t}.exe">installer</a>`;
+    }
+    const f = stubFeedWithPerTagFragments(tags, fragments);
+    vi.stubGlobal('fetch', f);
+    const list = await getReleasesViaAtom('example/tool', ATOM_SCAN_DEPTH, false);
+    expect(list).toHaveLength(ATOM_SCAN_DEPTH);
+    expect(fragmentFetches(f)).toBe(ATOM_SCAN_DEPTH);
+  });
+
+  it('the latest lookup stops at the first asset-bearing entry but reaches deep when earlier ones have none', async () => {
+    const tags = ['v1.0.0', 'v1.0.1', 'v1.0.2', 'v1.0.3', 'v1.0.4', 'v1.0.5', 'v2.0.0'];
+    const f = stubFeedWithPerTagFragments(tags, { 'v2.0.0': FRAGMENT_BODY });
+    vi.stubGlobal('fetch', f);
+    const latest = await getLatestViaAtom('example/tool', false);
+    expect(latest?.tag).toBe('v2.0.0');
+    expect(latest?.assets.map((a) => a.name)).toEqual(['Tool 2.0.0.exe', 'Tool-2.0.0.zip']);
+    expect(fragmentFetches(f)).toBe(7);
+  });
+});
+
+describe('slug safety and scan depth', () => {
   it('accepts real GitHub slugs and refuses escapes', () => {
     expect(isSafeRepoSlug('localsend/localsend')).toBe(true);
     expect(isSafeRepoSlug('obsidianmd/obsidian-releases')).toBe(true);
@@ -296,8 +453,7 @@ describe('slug safety and budget', () => {
     expect(isSafeRepoSlug('')).toBe(false);
   });
 
-  it('keeps the fragment budget bounded', () => {
-    expect(ATOM_ASSET_FETCH_BUDGET).toBeGreaterThan(0);
-    expect(ATOM_ASSET_FETCH_BUDGET).toBeLessThanOrEqual(8);
+  it('walks as deep as the API path it stands in for', () => {
+    expect(ATOM_SCAN_DEPTH).toBe(RECENT_RELEASES_COUNT);
   });
 });

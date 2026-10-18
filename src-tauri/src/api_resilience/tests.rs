@@ -176,6 +176,39 @@ fn zero_base_backoff_is_immediate() {
 }
 
 #[test]
+fn retry_after_delay_defers_to_backoff_when_the_header_is_absent() {
+    let timing = Timing::production();
+    // No Retry-After: the caller's backoff schedule decides (None), so a
+    // headerless 502/503/429 can never retry back-to-back.
+    let empty = reqwest::header::HeaderMap::new();
+    assert_eq!(retry_after_delay(&timing, &empty), None);
+    // A numeric zero is honored exactly as sent: the server said "now".
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::RETRY_AFTER,
+        reqwest::header::HeaderValue::from_static("0"),
+    );
+    assert_eq!(retry_after_delay(&timing, &headers), Some(Duration::ZERO));
+    // A large suggestion is capped, not trusted.
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::RETRY_AFTER,
+        reqwest::header::HeaderValue::from_static("3600"),
+    );
+    assert_eq!(
+        retry_after_delay(&timing, &headers),
+        Some(timing.retry_after_cap)
+    );
+    // The HTTP-date form is deliberately unsupported: backoff decides.
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::RETRY_AFTER,
+        reqwest::header::HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"),
+    );
+    assert_eq!(retry_after_delay(&timing, &headers), None);
+}
+
+#[test]
 fn body_error_classification_matches_the_capped_readers() {
     assert!(is_transient_body_error("Bad response: connection reset"));
     assert!(!is_transient_body_error("Response body too large"));
@@ -353,6 +386,122 @@ async fn transient_5xx_is_retried_until_the_origin_answers() {
     assert_eq!(r.provenance, BodyProvenance::Fresh);
     assert_eq!(r.body, body);
     assert_eq!(observed.lock().expect("lock").len(), 3);
+}
+
+// ---------------------------------------------------------------------------
+// Timed loopback origin: same contract as spawn_scripted_http, but records
+// the arrival Instant of every request so a test can observe the WAIT
+// between attempts - the dimension Timing::instant() intentionally zeroes
+// out and therefore can never assert on.
+// ---------------------------------------------------------------------------
+
+fn spawn_timed_scripted_http(
+    replies: Vec<Vec<u8>>,
+    arrivals: Arc<Mutex<Vec<std::time::Instant>>>,
+) -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        for reply in replies {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            arrivals
+                .lock()
+                .expect("arrivals lock")
+                .push(std::time::Instant::now());
+            let mut buf = [0u8; 4096];
+            let mut head = Vec::new();
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        head.extend_from_slice(&buf[..n]);
+                        if head.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = stream.write_all(&reply);
+            let _ = stream.flush();
+        }
+    });
+    format!("http://{addr}/payload")
+}
+
+/// A production-shaped timing whose backoff floor is well above loopback
+/// noise: base 100 ms with the +-40% jitter means the smallest possible
+/// scheduled wait is 60 ms, while a wrongly immediate retry arrives in
+/// single-digit milliseconds.
+fn spaced_timing() -> Timing {
+    Timing {
+        max_attempts: 4,
+        backoff_base: Duration::from_millis(100),
+        backoff_cap: Duration::from_secs(2),
+        retry_after_cap: Duration::from_secs(15),
+    }
+}
+
+#[tokio::test]
+async fn a_retryable_status_without_retry_after_is_spaced_by_the_backoff() {
+    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    let body = json_body("v2.0.0");
+    let url = spawn_timed_scripted_http(
+        vec![
+            // The most common transient shape in the wild: a 503 from a
+            // CDN or load balancer that sends no Retry-After at all.
+            raw_response("HTTP/1.1 503 Service Unavailable", &[], b""),
+            raw_response("HTTP/1.1 200 OK", &[], body.as_bytes()),
+        ],
+        arrivals.clone(),
+    );
+    let r = get(&url, &spaced_timing(), None)
+        .await
+        .expect("second attempt succeeds");
+    assert_eq!(r.provenance, BodyProvenance::Fresh);
+    let times = arrivals.lock().expect("arrivals lock");
+    assert_eq!(times.len(), 2, "one retry after the headerless 503");
+    let gap = times[1].duration_since(times[0]);
+    // The backoff schedule (60..140 ms for attempt 0) must space the
+    // retry; an immediate back-to-back re-ask fails here.
+    assert!(
+        gap >= Duration::from_millis(55),
+        "headerless 503 retried after only {gap:?} - the backoff schedule was skipped"
+    );
+}
+
+#[tokio::test]
+async fn a_server_suggested_retry_after_still_overrides_the_backoff() {
+    // The guard against over-correcting: when the server DID send a
+    // Retry-After, its value (here 0 = "immediately") wins over the
+    // backoff schedule. With a 1 s backoff base, a fix that always used
+    // the backoff schedule would hold the retry for >= 600 ms and fail
+    // this assertion.
+    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    let body = json_body("v2.0.0");
+    let url = spawn_timed_scripted_http(
+        vec![
+            raw_response("HTTP/1.1 503 Service Unavailable", &["Retry-After: 0"], b""),
+            raw_response("HTTP/1.1 200 OK", &[], body.as_bytes()),
+        ],
+        arrivals.clone(),
+    );
+    let timing = Timing {
+        backoff_base: Duration::from_secs(1),
+        ..spaced_timing()
+    };
+    let r = get(&url, &timing, None)
+        .await
+        .expect("second attempt succeeds");
+    assert_eq!(r.provenance, BodyProvenance::Fresh);
+    let times = arrivals.lock().expect("arrivals lock");
+    assert_eq!(times.len(), 2);
+    let gap = times[1].duration_since(times[0]);
+    assert!(
+        gap < Duration::from_millis(500),
+        "the server's Retry-After: 0 was ignored - retry waited {gap:?}"
+    );
 }
 
 #[tokio::test]

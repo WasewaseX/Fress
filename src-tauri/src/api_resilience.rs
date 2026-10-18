@@ -452,16 +452,18 @@ pub(crate) fn rate_limit_message(label: &str) -> String {
     format!("{label} rate limit reached; try again in a few minutes")
 }
 
-/// The wait before the next attempt after a retryable status: the
-/// server's `Retry-After` when it sent one (capped), else the backoff
-/// schedule.
-fn retry_after_delay(timing: &Timing, headers: &reqwest::header::HeaderMap) -> Duration {
+/// The wait the server itself suggested for the next attempt after a
+/// retryable status: its numeric `Retry-After` (capped). `None` - no
+/// header, or the deliberately unsupported HTTP-date form - hands the
+/// decision back to the caller's backoff schedule, so a retryable status
+/// that arrives WITHOUT a `Retry-After` is still spaced by the
+/// exponential backoff and never retried back-to-back.
+fn retry_after_delay(timing: &Timing, headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     headers
         .get(RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
         .and_then(parse_retry_after)
         .map(|d| d.min(timing.retry_after_cap))
-        .unwrap_or(Duration::ZERO)
 }
 
 /// One conditional GET with the full resilience contract.
@@ -567,7 +569,7 @@ pub(crate) async fn get_json_resilient(
                     } else {
                         format!("{label} returned HTTP {}", status.as_u16())
                     });
-                    planned_delay = Some(retry_after_delay(timing, &headers));
+                    planned_delay = retry_after_delay(timing, &headers);
                     continue;
                 }
                 return Err(ApiFetchError::Status(format!(

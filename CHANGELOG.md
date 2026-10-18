@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.5 (2026-10-19): the documents-answer-first release
+
+The two remaining symptoms of the quota era - a lookup that could still die with "No download was started: the download sources could not be reached" when the shared unauthenticated quota was exhausted, and the Download button that then handed the user to the browser - shared one root, and this release removes that root: **on the desktop, the quota-free github.com documents now answer the release lookup FIRST; api.github.com is spent last.** Live evidence the day this shipped: the shared quota sat at `remaining: 0/60` while `releases.atom` answered in 0.69 s.
+
+### The shell-fragment regression (the browser handoffs)
+
+- **GitHub's 2026-10 rollout silently emptied the fallback.** The classic per-tag fragment URL (`/releases/tag/<tag>/expanded_assets`) began answering a page shell that lazy-loads a NEW document (`/releases/expanded_assets/<tag>`) instead of carrying the asset anchors itself. A parser pinned to the old shape saw a zero-anchor document, recorded an asset-less release list, and the resolver honestly answered "no match" - whereupon the card did exactly what it promises for honest no-matches: it opened the official page in the browser. Users saw "Fress opened a browser instead of downloading" even though every layer was behaving as designed.
+- **Both shapes are now understood, on both sides of the boundary.** The frontend fetches the NEW shape first and falls back to the OLD one only when the answer parses to zero anchors (rollback safety); a zero-anchor answer is classified "not the real fragment", never as an asset-less release. The native `ReleasesDocShape` gate admits both segment structures (admission and refusal tests extended), so the desktop document reader accepts exactly the same family the frontend requests.
+
+### Quota-free-first source priority (the sources-unreachable error)
+
+- **Desktop: the documents answer first.** `getLatestRelease` inside Tauri reads `releases.atom` + the asset fragments before the API is ever asked. The API runs only when the documents cannot answer (feed unreachable, or entries exist but none yielded assets within the fragment budget) and then owns the exact result: authoritative prerelease flags, byte-exact sizes, the full asset list, and the honest "no stable release" 404. The common lookup now costs ZERO api.github.com requests, so the shared 60/h quota cannot decide whether a download starts. The browser build keeps the historical API-first order (github.com does not answer CORS).
+- **Digests and sizes ride the quota-free path.** GitHub's release pages render a `sha256:<hex>` span and a human size label per uploaded asset; the fragment parser now extracts both with next-anchor-bounded windows (one asset's metadata can never bleed into the next; anything unparseable fails open to size 0 / no digest, never to a guess). A resolved download can now carry the forge-stated checksum into the engine's delete-on-mismatch verification even when the API was never spent.
+- **Budget discipline.** The latest-release path stops walking fragments at the first asset-ful entry (feed + 1 request); the recent-releases scan keeps the full budget because it needs every candidate's assets.
+
+### Every browser-path fetch is bounded
+
+- The releases lookup (20 s), the live-star refresh (12 s), the live search (15 s) and the add-app Inspect (15 s) now carry timeouts: a hung connection degrades to the next source or the honest typed failure ("network", the retryable kind) instead of stalling a click indefinitely. A native build without the document reader fails fast with a named error instead of a TypeError deep in the parser.
+
+### Verification tooling
+
+- **A Bruno API collection** (`tests/api/bruno`, `npm run test:api:bruno`) probes the live sources at the wire level: the quota probe, the atom feed (extracting the newest stable tag), the NEW fragment's anchors (fails loudly on any page-shell regression), the updater's `latest.json` (semver version, 8+ signed platforms, parseable pub_date) and `SHA256SUMS.txt` (strict grammar), the F-Droid index, Flathub's appstream, and an **API-vs-atom cross-source tag-consistency check** that skips honestly when the quota is dead. Verified live: 8/8 requests, 16/16 assertions.
+- **The scheduled live smoke (network-smoke.yml) runs the Bruno suite** alongside the extended Playwright probes (atom feed with timing budgets, fragment anchors, updater chain, cross-source consistency) - a weekly wire-level proof that the sources the app depends on still answer, never a PR gate.
+- 18 new unit tests pin the desktop ordering (zero-API resolution, NEW-before-OLD shape order, rollback path, shell-to-API exactness handoff, digest/size ride-through, fragment budget, null-reader degradation) and the browser timeout classification; the full deterministic battery (913 unit / 128 e2e) passes unchanged.
+
+
 ## 1.0.4 (2026-10-18): the quota-proof fallback release
 
 The rate-limit-proof release-lookup fallback (PR #113): when the GitHub REST API still fails - a repository never looked up before, inside an exhausted quota window - the resolver now reads GitHub's own quota-free web documents instead of surfacing "the download sources could not be reached". Shipped alongside the 1.0.3 native resilience layer, this closes the last path to that toast: the API attempt is retried, quota-conserved and stale-buffered natively, and when even that fails, the atom feed answers without a quota.

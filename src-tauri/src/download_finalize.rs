@@ -780,8 +780,11 @@ pub(crate) async fn read_part_meta(part: &Path) -> Option<PartMeta> {
 }
 
 /// Persist the validators from `headers` for the staging file `part`.
-/// Failures are deliberately silent: a missing sidecar only means the next
-/// resume cannot send If-Range and behaves like before.
+/// Failures are deliberately silent: a missing sidecar leaves the next
+/// resume without If-Range, and the resume planner's byte-identity rule
+/// then discards validator-less staging bytes (unless a published
+/// checksum will verify the assembled file anyway) - never a blind
+/// append against an unproven origin.
 pub(crate) async fn write_part_meta(part: &Path, url: &str, headers: &reqwest::header::HeaderMap) {
     let get = |key: &str| -> Option<String> {
         headers

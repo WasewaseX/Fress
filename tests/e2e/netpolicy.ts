@@ -87,6 +87,19 @@ export interface NetworkPolicyOptions {
   ownSigs?: string;
 }
 
+/** The deny-all fallback pattern: matches every URL that must be aborted
+ * because no fixture route claimed it. The loopback carve-out is
+ * BOUNDARY-exACT by design: "localhost" / "127.0.0.1" may be followed only
+ * by an optional :port and then path/query/fragment/end-of-URL. A host that
+ * merely STARTS with a loopback token must NOT escape the deny-all - the
+ * fallback's entire contract is "a surprise request fails loudly instead
+ * of leaking", and hosts like localhost.evil.com, 127.0.0.1.evil.com or a
+ * userinfo trick (localhost:80@evil.com) are exactly the surprises it
+ * exists to catch. Exported so the unit suite can pin the boundary matrix
+ * against regressions (src/lib/__tests__/e2eDenyAllBoundary.test.ts). */
+export const DENY_ALL_ROUTE_RE =
+  /^https?:\/\/(?!localhost(?::\d+)?(?:[/?#]|$))(?!127\.0\.0\.1(?::\d+)?(?:[/?#]|$))/;
+
 /** Installs the route layer on a page. Call after context creation, before goto.
  *
  * Route precedence: Playwright consults handlers LAST-registered first, so
@@ -104,8 +117,9 @@ export async function installNetworkPolicy(page: Page, opts: NetworkPolicyOption
 
   // 1) Deny-all fallback: everything external that no fixture route claims
   //    is aborted, so a surprise request fails loudly instead of hanging or
-  //    leaking into a live network.
-  await page.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (route) => route.abort('blockedbyclient'));
+  //    leaking into a live network. The loopback carve-out (dev server,
+  //    CSP test server) is boundary-exact - see DENY_ALL_ROUTE_RE.
+  await page.route(DENY_ALL_ROUTE_RE, (route) => route.abort('blockedbyclient'));
 
   // 2) GitHub API: releases (resolver) and repo metadata (stars).
   await page.route(apiRe, (route) => {

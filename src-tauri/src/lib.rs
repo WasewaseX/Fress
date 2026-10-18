@@ -20,6 +20,13 @@ use minisign_verify::{PublicKey, Signature};
 /// for usability; THIS module is what the native commands actually trust.
 pub mod network_policy;
 
+// The resilience layer behind every catalog source lookup: transient-error
+// retries, Retry-After honoring, ETag conditional requests against a small
+// persistent cache (304s spend no GitHub quota) and stale-while-error
+// serving. Module docs carry the full root-cause story.
+mod api_resilience;
+use api_resilience::ApiFetchError;
+
 // The download engine owns everything between "user clicked download" and
 // "a complete, verified file exists on disk": the lifecycle state machine,
 // staging (.part) files and their validator sidecars, resume correctness,
@@ -60,11 +67,46 @@ struct FdroidPackage {
     page_url: String,
 }
 
+/// Resolves the app-cache directory the lookup caches live in. A missing
+/// directory resolution degrades to a memory-only store: every resilience
+/// feature except the persistent 304/stale answers still works.
+fn resolver_cache_store(app: &AppHandle) -> api_resilience::CacheStore {
+    api_resilience::CacheStore::open(
+        app.path()
+            .app_cache_dir()
+            .ok()
+            .map(|d| d.join("api-responses")),
+    )
+}
+
+/// Maps the resilience layer's typed failure onto the command-level error
+/// strings the frontend already classifies ("rate limit" wording included).
+fn api_fetch_error_message(err: ApiFetchError, label: &str, not_found: &str) -> String {
+    match err {
+        ApiFetchError::Status(msg) => {
+            // The deterministic 404s keep their long-standing command
+            // wording ("No stable release found..." / "Package not found
+            // on F-Droid") - the resolvers special-case them as honest
+            // answers, not failures.
+            if msg == format!("{label} returned HTTP 404") {
+                not_found.to_string()
+            } else {
+                msg
+            }
+        }
+        ApiFetchError::Transient(msg) => msg,
+    }
+}
+
 /// Resolves the LATEST STABLE release of a GitHub repository.
 /// The /releases/latest endpoint already excludes drafts and prereleases,
 /// so beta/RC versions are never offered here.
-#[tauri::command]
-async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
+/// Core of `fetch_latest_release`, AppHandle-free so the integration
+/// harness can drive the exact production path (pass `cache: None`).
+async fn gh_latest_release(
+    repo: String,
+    cache: Option<&api_resilience::CacheStore>,
+) -> Result<GhRelease, String> {
     let repo = repo.trim().trim_matches('/').to_string();
     if repo.is_empty() {
         return Err("No GitHub repository configured".into());
@@ -75,27 +117,26 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
     // the request URL off the pinned API host is refused here, not sent.
     let url = policy.validate(&requested).map_err(|e| e.to_string())?;
     let client = policy.http_client()?;
-    let resp = client
-        .get(url.raw().clone())
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
-    let status = resp.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err("No stable release found for this project".into());
-    }
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN
-    {
-        return Err("GitHub rate limit reached; try again in a few minutes".into());
-    }
-    if !status.is_success() {
-        return Err(format!("GitHub returned HTTP {}", status));
-    }
-    let text = read_capped_api_text(resp).await?;
+    let resolved = api_resilience::get_json_resilient(
+        &client,
+        url.raw(),
+        "GitHub",
+        &api_resilience::Timing::production(),
+        cache,
+    )
+    .await
+    .map_err(|e| {
+        api_fetch_error_message(e, "GitHub", "No stable release found for this project")
+    })?;
     let body: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+        serde_json::from_str(&resolved.body).map_err(|e| format!("Bad response: {}", e))?;
     parse_gh_release(&body, &repo).ok_or_else(|| "Unexpected GitHub response".to_string())
+}
+
+#[tauri::command]
+async fn fetch_latest_release(app: AppHandle, repo: String) -> Result<GhRelease, String> {
+    let cache = resolver_cache_store(&app);
+    gh_latest_release(repo, Some(&cache)).await
 }
 
 /// Lists the most recent stable releases of a repository, newest first.
@@ -106,11 +147,13 @@ async fn fetch_latest_release(repo: String) -> Result<GhRelease, String> {
 /// the user wants, and every download resolves to nothing. This command
 /// hands back enough recent releases for the frontend to scan them in order
 /// and find the stream that actually carries the platform's installer.
-#[tauri::command]
-async fn fetch_recent_releases(
+/// Core of `fetch_recent_releases`, AppHandle-free so the integration
+/// harness can drive the exact production path (pass `cache: None`).
+async fn gh_recent_releases(
     repo: String,
     count: Option<u32>,
     include_flagged: Option<bool>,
+    cache: Option<&api_resilience::CacheStore>,
 ) -> Result<Vec<GhRelease>, String> {
     let repo = repo.trim().trim_matches('/').to_string();
     if repo.is_empty() {
@@ -124,23 +167,19 @@ async fn fetch_recent_releases(
     let policy = network_policy::UrlPolicy::api_github();
     let url = policy.validate(&requested).map_err(|e| e.to_string())?;
     let client = policy.http_client()?;
-    let resp = client
-        .get(url.raw().clone())
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
-    let status = resp.status();
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::FORBIDDEN
-    {
-        return Err("GitHub rate limit reached; try again in a few minutes".into());
-    }
-    if !status.is_success() {
-        return Err(format!("GitHub returned HTTP {}", status));
-    }
-    let text = read_capped_api_text(resp).await?;
+    let resolved = api_resilience::get_json_resilient(
+        &client,
+        url.raw(),
+        "GitHub",
+        &api_resilience::Timing::production(),
+        cache,
+    )
+    .await
+    .map_err(|e| {
+        api_fetch_error_message(e, "GitHub", "No stable release found for this project")
+    })?;
     let body: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+        serde_json::from_str(&resolved.body).map_err(|e| format!("Bad response: {}", e))?;
     let list = body
         .as_array()
         .ok_or_else(|| "Unexpected GitHub response".to_string())?;
@@ -155,6 +194,17 @@ async fn fetch_recent_releases(
         .filter(|r| include_flagged || r.get("prerelease").and_then(|v| v.as_bool()) != Some(true))
         .filter_map(|r| parse_gh_release(r, &repo))
         .collect())
+}
+
+#[tauri::command]
+async fn fetch_recent_releases(
+    app: AppHandle,
+    repo: String,
+    count: Option<u32>,
+    include_flagged: Option<bool>,
+) -> Result<Vec<GhRelease>, String> {
+    let cache = resolver_cache_store(&app);
+    gh_recent_releases(repo, count, include_flagged, Some(&cache)).await
 }
 
 /// Shared parser for one GitHub release JSON object.
@@ -218,7 +268,7 @@ fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
 // compile and run everywhere - see the module docs for the two-rail design
 // (size cap + request timeout) and its test matrix.
 mod http_body;
-use http_body::{read_capped_api_text, read_capped_text, TextFetch};
+use http_body::{read_capped_text, TextFetch};
 
 /// Reads a small text document (manifest, directory index, YAML feed) from a
 /// vendor host. Returns the final URL after redirects so callers that only
@@ -237,12 +287,40 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
     // malformed or disallowed request is refused before any client exists.
     let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
     let client = policy.http_client()?;
-    let resp = client
-        .get(parsed.raw().clone())
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
-    read_capped_text(resp).await
+    // Retry-only resilience (no cache: manifest reads may be
+    // redirect-to-file probes whose freshness is the contract). The same
+    // transient contract as the API lookups - a vendor manifest behind one
+    // dropped packet used to fail the whole official-resolver chain.
+    let mut last_transient: Option<String> = None;
+    let timing = api_resilience::Timing::production();
+    for attempt in 0..timing.max_attempts {
+        if attempt > 0 {
+            let delay = api_resilience::backoff_delay(&timing, attempt - 1);
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+        }
+        let resp = match client.get(parsed.raw().clone()).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if api_resilience::is_transient_send_error(&e) {
+                    last_transient = Some(network_policy::describe_network_error(&e));
+                    continue;
+                }
+                return Err(network_policy::describe_network_error(&e));
+            }
+        };
+        let status = resp.status();
+        if api_resilience::is_retryable_status(status.as_u16(), resp.headers()) {
+            last_transient = Some(format!("Manifest host returned HTTP {}", status.as_u16()));
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("Manifest host returned HTTP {}", status.as_u16()));
+        }
+        return read_capped_text(resp).await;
+    }
+    Err(last_transient.unwrap_or_else(|| "Manifest host could not be reached".to_string()))
 }
 
 /// Reads one of GitHub's quota-free release documents for the
@@ -965,9 +1043,12 @@ async fn reveal_download_file(
     }
 }
 
-/// Resolves the suggested stable package version from the F-Droid index.
-#[tauri::command]
-async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
+/// Core of `fetch_fdroid_package`, AppHandle-free so the integration
+/// harness can drive the exact production path (pass `cache: None`).
+async fn fdroid_package(
+    pkg: String,
+    cache: Option<&api_resilience::CacheStore>,
+) -> Result<FdroidPackage, String> {
     let pkg = pkg.trim().to_string();
     if pkg.is_empty() {
         return Err("No F-Droid package configured".into());
@@ -976,20 +1057,20 @@ async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
     let policy = network_policy::UrlPolicy::api_fdroid();
     let url = policy.validate(&url).map_err(|e| e.to_string())?;
     let client = policy.http_client()?;
-    let resp = client
-        .get(url.raw().clone())
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err("Package not found on F-Droid".into());
-    }
-    if !resp.status().is_success() {
-        return Err(format!("F-Droid returned HTTP {}", resp.status()));
-    }
-    let text = read_capped_api_text(resp).await?;
+    // Full resilience contract, cache included (F-Droid serves ETags): the
+    // package index is a per-lookup network read on mobile networks, where
+    // one dropped request used to fail the Android resolution outright.
+    let resolved = api_resilience::get_json_resilient(
+        &client,
+        url.raw(),
+        "F-Droid",
+        &api_resilience::Timing::production(),
+        cache,
+    )
+    .await
+    .map_err(|e| api_fetch_error_message(e, "F-Droid", "Package not found on F-Droid"))?;
     let body: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("Bad response: {}", e))?;
+        serde_json::from_str(&resolved.body).map_err(|e| format!("Bad response: {}", e))?;
 
     let mut max_code: i64 = 0;
     if let Some(list) = body.get("packages").and_then(|v| v.as_array()) {
@@ -1027,6 +1108,13 @@ async fn fetch_fdroid_package(pkg: String) -> Result<FdroidPackage, String> {
         version,
         version_code,
     })
+}
+
+/// Resolves the suggested stable package version from the F-Droid index.
+#[tauri::command]
+async fn fetch_fdroid_package(app: AppHandle, pkg: String) -> Result<FdroidPackage, String> {
+    let cache = resolver_cache_store(&app);
+    fdroid_package(pkg, Some(&cache)).await
 }
 
 /// The architecture of the MACHINE, not of this process, on Windows.

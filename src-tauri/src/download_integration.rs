@@ -19,9 +19,7 @@ use super::download_finalize::{
     percent_decode, read_part_meta, write_part_meta, PartMeta,
 };
 use super::sanitize_filename;
-use super::{
-    fetch_fdroid_package, fetch_latest_release, fetch_recent_releases, fetch_text, parse_gh_release,
-};
+use super::{fdroid_package, fetch_text, gh_latest_release, gh_recent_releases, parse_gh_release};
 
 // ---------------------------------------------------------------------------
 // temp dir helper
@@ -427,18 +425,18 @@ fn err_of<T>(r: Result<T, String>) -> String {
 async fn release_commands_reject_empty_repositories_before_network() {
     for repo in ["", "   ", " / ", "//"] {
         assert!(
-            fetch_latest_release(repo.to_string()).await.is_err(),
+            gh_latest_release(repo.to_string(), None).await.is_err(),
             "empty repo {repo:?} must be rejected"
         );
         assert!(
-            fetch_recent_releases(repo.to_string(), None, None)
+            gh_recent_releases(repo.to_string(), None, None, None)
                 .await
                 .is_err(),
             "empty repo {repo:?} must be rejected"
         );
     }
-    assert!(fetch_fdroid_package(String::new()).await.is_err());
-    assert!(fetch_fdroid_package("   ".to_string()).await.is_err());
+    assert!(fdroid_package(String::new(), None).await.is_err());
+    assert!(fdroid_package("   ".to_string(), None).await.is_err());
 }
 
 #[tokio::test]

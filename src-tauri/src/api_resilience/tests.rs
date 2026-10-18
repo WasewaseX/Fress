@@ -562,3 +562,102 @@ async fn a_redirect_policy_refusal_is_never_retried() {
     }
     drop(handle);
 }
+
+// ---------------------------------------------------------------------------
+// get_text_resilient: the retry-only contract shared by the capped text
+// transports (fetch_text, fetch_github_release_doc, fetch_self_update_text).
+// The commands themselves cannot be loopback-tested - their URL policies pin
+// production hosts - so the shared loop is tested here, exactly where the
+// Tauri-free module design puts testable transport logic. Connection counts
+// are the kill oracle: the pre-fix transports were single-shot, so any
+// retry-when-transient assertion separates the two eras.
+// ---------------------------------------------------------------------------
+
+async fn get_text(
+    url: &str,
+    label: &'static str,
+    timing: &Timing,
+) -> Result<crate::http_body::TextFetch, String> {
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("loopback client");
+    let parsed = reqwest::Url::parse(url).expect("loopback url");
+    get_text_resilient(&client, &parsed, label, timing).await
+}
+
+#[tokio::test]
+async fn text_helper_returns_the_fresh_document_shape() {
+    let url = spawn_scripted_http(
+        vec![raw_response("HTTP/1.1 200 OK", &[], b"<feed>ok</feed>")],
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let doc = get_text(&url, "GitHub release document", &Timing::instant())
+        .await
+        .expect("fresh answer");
+    assert_eq!(doc.status, 200);
+    assert_eq!(doc.body, "<feed>ok</feed>");
+    assert!(!doc.truncated);
+    assert_eq!(doc.final_url, url);
+}
+
+#[tokio::test]
+async fn text_helper_retries_a_headerless_503_until_the_origin_answers() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let url = spawn_scripted_http(
+        vec![
+            // The most common transient shape in the wild: a 503 from a
+            // CDN or load balancer that sends no Retry-After at all.
+            raw_response("HTTP/1.1 503 Service Unavailable", &[], b""),
+            raw_response("HTTP/1.1 200 OK", &[], b"<feed>ok</feed>"),
+        ],
+        observed.clone(),
+    );
+    let doc = get_text(&url, "GitHub release document", &Timing::instant())
+        .await
+        .expect("the retry must rescue the lookup");
+    assert_eq!(doc.status, 200);
+    assert_eq!(doc.body, "<feed>ok</feed>");
+    assert_eq!(
+        observed.lock().expect("lock").len(),
+        2,
+        "exactly one retry for one headerless 503 - a single-shot transport stops at 1"
+    );
+}
+
+#[tokio::test]
+async fn text_helper_answers_a_deterministic_404_exactly_once() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let url = spawn_scripted_http(
+        vec![raw_response("HTTP/1.1 404 Not Found", &[], b"not here")],
+        observed.clone(),
+    );
+    let err = get_text(&url, "GitHub release document", &Timing::instant())
+        .await
+        .expect_err("a 404 is a deterministic answer");
+    assert_eq!(err, "GitHub release document returned HTTP 404");
+    assert_eq!(
+        observed.lock().expect("lock").len(),
+        1,
+        "a repo without releases must be answered once, not retried"
+    );
+}
+
+#[tokio::test]
+async fn text_helper_exhaustion_reports_the_last_transient_status() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let url = spawn_scripted_http(
+        vec![
+            raw_response("HTTP/1.1 502 Bad Gateway", &[], b""),
+            raw_response("HTTP/1.1 503 Service Unavailable", &[], b""),
+            raw_response("HTTP/1.1 502 Bad Gateway", &[], b""),
+            raw_response("HTTP/1.1 503 Service Unavailable", &[], b""),
+        ],
+        observed.clone(),
+    );
+    let err = get_text(&url, "GitHub release document", &Timing::instant())
+        .await
+        .expect_err("every attempt failed");
+    assert_eq!(err, "GitHub release document returned HTTP 503");
+    assert_eq!(observed.lock().expect("lock").len(), 4);
+}

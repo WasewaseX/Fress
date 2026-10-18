@@ -1293,6 +1293,52 @@ the native layer, all reviewed line-by-line at `ab2e2723`:
   caused), but no test feeds one; only malformed JSON is covered, by
   `a_corrupt_cache_file_degrades_to_an_empty_store`. Both are
   cheap-to-add pins for the next touch of this file.
+- **Round-9 addendum — PR #119 (`31f090d3`, "the text transports
+  survive one dropped packet too") audited in full; verdict SOUND.**
+  The PR promotes `fetch_text`'s retry-only loop to
+  `api_resilience::get_text_resilient` and shares it across all three
+  text commands (`fetch_text`, `fetch_github_release_doc`,
+  `fetch_self_update_text`), closing the last single-shot transports
+  in the crate. Verified independently: (a) `fetch_text`'s wire
+  behavior is byte-identical — same labels ("Manifest host returned
+  HTTP {code}" / "Manifest host could not be reached"), same
+  `Timing::production()` schedule, same transient/deterministic
+  classification; a pure refactor to the shared loop; (b) the two
+  adopters change exactly one wire shape — a non-2xx response,
+  previously returned as `Ok(TextFetch{status})` and thrown by the TS
+  caller (`HTTP ${status}`), now surfaces as an invoke rejection
+  (`"{label} returned HTTP {code}"`) — and every TS consumer funnels
+  both shapes identically: `atomReleases.fetchGithubText` throws
+  either way and `githubProvider`'s `catch {}` keeps the ORIGINAL
+  classified API error (the honest-404 short-circuit still keys on the
+  original message, never on the fallback's), `fetchAssetsForTag`
+  degrades either way to `assets = []`, and `fetchSelfUpdateText`
+  degrades either way to `null`; (c) `lib.rs` indeed holds zero direct
+  `.send().await` sites after this PR; (d) policy refusals are never
+  retried (`is_transient_send_error` excludes redirect refusals, pinned
+  by the existing loopback test); (e) the four new loopback tests are
+  genuine kill-tests — the connection-count oracle separates the
+  single-shot and retry eras, a 404 is answered exactly once, and
+  exhaustion reports the last transient status. CI 12/12 at `31f090d3`;
+  head commit author-guard compliant. Executed locally at `31f090d3`:
+  the five affected-area TS suites (atomFallback, selfUpdate,
+  selfUpdateDelivery, releaseFetchContracts, e2eDenyAllBoundary) —
+  173/173 green with the repo-local runner. **Three LOW report-only
+  observations, same family as this section's original backoff note:**
+  (1) the text loop ignores `Retry-After` — the API loop honors it via
+  `planned_delay` (PR #116), the text loop always uses the backoff
+  schedule; bounded to the 4 attempts, politeness-only; (2) a
+  quota-signature 403/429 on the text loop yields the generic
+  "returned HTTP 403/429" wording instead of `rate_limit_message` —
+  zero user impact, because text-path errors never reach the UI (they
+  are swallowed into the original error / `null` per (b), and
+  `fetch_text` never carried rate-limit wording); (3) a mid-body
+  stream death (`read_capped_text` → `"Bad response: {transport}"`)
+  propagates WITHOUT a retry, while the JSON loop retries exactly this
+  class (`is_transient_body_error` — "as transient as a failed send"),
+  so the PR's headline claim holds for the send phase specifically;
+  LOW probability, bounded impact (the pre-PR failure mode). None of
+  the three blocks the merge.
 - **`network_policy.rs` (+122).** A new request class
   `github_releases_doc()` admitting github.com for exactly two document
   shapes (`/{owner}/{repo}/releases.atom` and

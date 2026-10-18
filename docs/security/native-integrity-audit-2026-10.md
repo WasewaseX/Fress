@@ -1240,6 +1240,21 @@ the native layer, all reviewed line-by-line at `ab2e2723`:
   module docs promise would "fill every other gap" — bounded to the 4
   attempts, politeness-only impact (quota and origin load, never
   correctness or security). Report-only; no fix filed.
+- **Round-7 addendum (recorded while this section's PR was open):** the
+  observation received a follow-up fix, open as PR #116
+  (`9836212`, branch `fix/retry-backoff-headerless-status`, 12/12 CI
+  green at audit time). This round verified the fix independently: 
+  `retry_after_delay` now returns `Option<Duration>` — a numeric
+  `Retry-After` (including an explicit `0` = "immediately") is still
+  honored and capped, while an absent header or the deliberately
+  unsupported HTTP-date form returns `None`, handing the wait to the
+  backoff schedule. The proof is a timed-loopback test pair that
+  measures real arrival gaps: a headerless 503 must retry spaced
+  (≥55 ms floor; the pre-fix code retries in single-digit milliseconds
+  and fails this test) and a server-suggested `Retry-After: 0` must
+  still override a 1 s backoff base (the anti-over-correction guard).
+  Both directions pinned; author-guard compliant; no conflict with the
+  owned-file de-flake PR #117.
 - **`network_policy.rs` (+122).** A new request class
   `github_releases_doc()` admitting github.com for exactly two document
   shapes (`/{owner}/{repo}/releases.atom` and

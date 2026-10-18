@@ -47,7 +47,7 @@ pub(crate) const API_BODY_CAP: u64 = 10 * 1024 * 1024;
 /// A small text document fetched through the bounded readers: status,
 /// redirect-resolved URL, advertised length, the capped body and whether
 /// the body was cut at [`FETCH_TEXT_BODY_CAP`].
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub(crate) struct TextFetch {
     pub(crate) status: u16,
     pub(crate) final_url: String,

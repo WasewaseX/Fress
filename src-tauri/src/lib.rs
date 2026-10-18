@@ -268,7 +268,7 @@ fn parse_gh_release(body: &serde_json::Value, repo: &str) -> Option<GhRelease> {
 // compile and run everywhere - see the module docs for the two-rail design
 // (size cap + request timeout) and its test matrix.
 mod http_body;
-use http_body::{read_capped_text, TextFetch};
+use http_body::TextFetch;
 
 /// Reads a small text document (manifest, directory index, YAML feed) from a
 /// vendor host. Returns the final URL after redirects so callers that only
@@ -290,37 +290,17 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
     // Retry-only resilience (no cache: manifest reads may be
     // redirect-to-file probes whose freshness is the contract). The same
     // transient contract as the API lookups - a vendor manifest behind one
-    // dropped packet used to fail the whole official-resolver chain.
-    let mut last_transient: Option<String> = None;
-    let timing = api_resilience::Timing::production();
-    for attempt in 0..timing.max_attempts {
-        if attempt > 0 {
-            let delay = api_resilience::backoff_delay(&timing, attempt - 1);
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-        }
-        let resp = match client.get(parsed.raw().clone()).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                if api_resilience::is_transient_send_error(&e) {
-                    last_transient = Some(network_policy::describe_network_error(&e));
-                    continue;
-                }
-                return Err(network_policy::describe_network_error(&e));
-            }
-        };
-        let status = resp.status();
-        if api_resilience::is_retryable_status(status.as_u16(), resp.headers()) {
-            last_transient = Some(format!("Manifest host returned HTTP {}", status.as_u16()));
-            continue;
-        }
-        if !status.is_success() {
-            return Err(format!("Manifest host returned HTTP {}", status.as_u16()));
-        }
-        return read_capped_text(resp).await;
-    }
-    Err(last_transient.unwrap_or_else(|| "Manifest host could not be reached".to_string()))
+    // dropped packet used to fail the whole official-resolver chain. The
+    // loop itself is shared with the GitHub release-document and
+    // self-update text commands in `api_resilience::get_text_resilient`,
+    // where the loopback tests pin its schedule.
+    api_resilience::get_text_resilient(
+        &client,
+        parsed.raw(),
+        "Manifest host",
+        &api_resilience::Timing::production(),
+    )
+    .await
 }
 
 /// Reads one of GitHub's quota-free release documents for the
@@ -340,12 +320,18 @@ async fn fetch_github_release_doc(url: String) -> Result<TextFetch, String> {
     let policy = network_policy::UrlPolicy::github_releases_doc();
     let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
     let client = policy.http_client()?;
-    let resp = client
-        .get(parsed.raw().clone())
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
-    read_capped_text(resp).await
+    // The same retry-only resilience contract as every other text
+    // transport: the quota-free fallback exists for the exact moment the
+    // API path is already exhausted, so one dropped packet on the atom
+    // feed or an expanded_assets fragment must not resurrect the very
+    // failure this path exists to prevent.
+    api_resilience::get_text_resilient(
+        &client,
+        parsed.raw(),
+        "GitHub release document",
+        &api_resilience::Timing::production(),
+    )
+    .await
 }
 
 /// The self-update repo pin: the only github.com documents the self-update
@@ -394,12 +380,17 @@ async fn fetch_self_update_text(url: String) -> Result<TextFetch, String> {
     let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
     check_self_update_repo_path(parsed.raw())?;
     let client = policy.http_client()?;
-    let resp = client
-        .get(parsed.raw().clone())
-        .send()
-        .await
-        .map_err(|e| network_policy::describe_network_error(&e))?;
-    read_capped_text(resp).await
+    // Same retry-only contract as the other text transports: the update
+    // check and the checksum reference rode the same one-dropped-packet
+    // risk, and the TS caller degrades any failure to "no update info"
+    // until the next poll - the retry only makes that outcome rarer.
+    api_resilience::get_text_resilient(
+        &client,
+        parsed.raw(),
+        "Self-update document",
+        &api_resilience::Timing::production(),
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------

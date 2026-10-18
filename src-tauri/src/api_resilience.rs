@@ -602,5 +602,76 @@ pub(crate) async fn get_json_resilient(
     ))
 }
 
+/// The retry-only resilience contract for the capped TEXT transports
+/// (`fetch_text`, `fetch_github_release_doc`, `fetch_self_update_text`).
+///
+/// These commands read vendor manifests, GitHub's quota-free release
+/// documents, and the self-update checksum reference - documents whose
+/// freshness is the contract, so unlike [`get_json_resilient`] there is
+/// deliberately no cache and no conditional requests: a retry re-asks the
+/// origin, full stop. Everything else mirrors the API loop: transient send
+/// failures (one dropped packet, a reset handshake) and retryable statuses
+/// (408/429/5xx, the quota-signature 403) are retried with the same
+/// jittered backoff, deterministic answers (404, plain 403, policy
+/// refusals, oversized bodies) are answered exactly once, and a stream
+/// that dies mid-read is retried through the same [`is_transient_body_error`]
+/// gate the JSON loop applies: `Bad response:` is the capped reader's
+/// transport death, as transient as a failed send, so the next attempt
+/// re-asks the origin and the freshness contract is untouched.
+///
+/// Error strings are label-prefixed so each command keeps its own wording
+/// ("Manifest host ...", "GitHub release document ...").
+pub(crate) async fn get_text_resilient(
+    client: &reqwest::Client,
+    url: &reqwest::Url,
+    label: &'static str,
+    timing: &Timing,
+) -> Result<crate::http_body::TextFetch, String> {
+    let mut last_transient: Option<String> = None;
+    for attempt in 0..timing.max_attempts {
+        if attempt > 0 {
+            let delay = backoff_delay(timing, attempt - 1);
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+        }
+        let resp = match client.get(url.clone()).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if is_transient_send_error(&e) {
+                    last_transient = Some(crate::network_policy::describe_network_error(&e));
+                    continue;
+                }
+                return Err(crate::network_policy::describe_network_error(&e));
+            }
+        };
+        let status = resp.status();
+        if is_retryable_status(status.as_u16(), resp.headers()) {
+            last_transient = Some(format!("{label} returned HTTP {}", status.as_u16()));
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("{label} returned HTTP {}", status.as_u16()));
+        }
+        let doc = crate::http_body::read_capped_text(resp).await;
+        match doc {
+            Ok(doc) => return Ok(doc),
+            Err(msg) => {
+                if is_transient_body_error(&msg) {
+                    // The stream died mid-body after the status line was
+                    // served - a reset connection in the wild. Same family
+                    // as a failed send: re-ask the origin. The reader's
+                    // deterministic refusals never wear the `Bad response:`
+                    // prefix and stay single-shot below.
+                    last_transient = Some(msg);
+                    continue;
+                }
+                return Err(msg);
+            }
+        }
+    }
+    Err(last_transient.unwrap_or_else(|| format!("{label} could not be reached")))
+}
+
 #[cfg(test)]
 mod tests;

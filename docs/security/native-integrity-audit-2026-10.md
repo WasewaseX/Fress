@@ -1204,6 +1204,157 @@ dev-only lockfile-truth defect is recorded and routed (report-only,
 release-metadata owner); the §10.13 process finding is closed as
 resolved. No defect was found in audit-owned code this round.
 
+### §10.15 Round 7 — re-verification at main `1812878f` and `ab2e2723` after the resilience wave merged (Agent 6)
+
+**Why a new round:** under the exact-SHA rule the Round 6 results stand
+only at `d09914e`. Main then advanced twice: `d09914e` → `1812878f`
+(13 commits — PR #109, this audit's §10.14; PR #111, the deny-all
+loopback boundary fix; PR #112, the `write_part_meta` doc correction;
+PR #113, the rate-limit-proof release lookup; PR #114, the catalog
+lookup resilience layer), then `1812878f` → `ab2e2723` (PR #115, the
+v1.0.4 release commit `3447371`). Unlike Round 6, this round is **NOT**
+carried by byte-identity: the delta adds substantial Rust code and the
+full delta was read.
+
+**The resilience wave, audited in full.** Three new surfaces entered
+the native layer, all reviewed line-by-line at `ab2e2723`:
+
+- **`api_resilience.rs` (new, 604 lines + 564 test lines).** A bounded
+  retry + ETag-cache layer for API lookups: 4 attempts max, retryable
+  statuses limited to 408/429/5xx plus 403 only when GitHub's own
+  rate-limit headers say so; `Retry-After` honored but hard-capped
+  (15 s production); deterministic answers (other 4xx, policy
+  refusals, oversized bodies, non-UTF-8) never retried; redirect
+  refusals never retried. The persistent cache enforces three budgets
+  (2 MiB/entry, 256 entries, 16 MiB total) with oldest-first eviction,
+  is schema-version-filtered on load (a `version: 1` stamp written at
+  creation, not the integer default), persists via temp-file rename,
+  and every I/O error is swallowed by contract — the cache can never
+  become a new way for a lookup to fail. An unexpected 304 with no
+  cached body is an error, not a panic. Stale fallback is bounded to
+  7 days. The layer never constructs URLs, never chooses hosts, and
+  never sees a credential; admission and redirects stay in
+  `network_policy`. **One LOW observation (non-blocking):** a
+  retryable status that carries no `Retry-After` header is recorded as
+  `planned_delay = Some(ZERO)`, which skips the backoff schedule the
+  module docs promise would "fill every other gap" — bounded to the 4
+  attempts, politeness-only impact (quota and origin load, never
+  correctness or security). Report-only; no fix filed.
+- **`network_policy.rs` (+122).** A new request class
+  `github_releases_doc()` admitting github.com for exactly two document
+  shapes (`/{owner}/{repo}/releases.atom` and
+  `/{owner}/{repo}/releases/tag/{tag}/expanded_assets`) via a new
+  `ReleasesDocShape` gate: percent-encoded path segments validated
+  against a strict charset (non-empty, ≤120 bytes, no `.`/`..`,
+  `[A-Za-z0-9._~+%]` only), the shape re-checked on **every redirect
+  hop** (mirrored `RedirectRejection::OffDocumentShape`), private
+  addresses blocked, 3-hop budget, `PinToOrigin`. The pinned invariant
+  "github.com stays off the generic resolver-manifest allowlist" is
+  preserved — this is a dedicated class, not a widening — so the
+  self-update checksum document remains reachable only through its
+  path-pinned policy. Encoded lookalikes (`releases%2Eatom`) fail the
+  shape and are refused. Dedicated tests pin exact-two-shapes
+  admission, refusal of everything else on github.com, and hop-shape
+  re-checks.
+- **`lib.rs` (+170/−56).** The GitHub/F-Droid lookup commands now
+  route through the resilience layer via `AppHandle`-free `gh_*` /
+  `fdroid_package` cores (harness-drivable, cache injectable);
+  command signatures keep their frontend contract (Tauri injects the
+  handle). `fetch_text` gains retry-only resilience with **no cache**
+  — deliberate, manifest freshness is its contract — and
+  `fetch_github_release_doc` is the single-shot dedicated-class
+  reader. The 404 wording mapping preserves the frontend's failure
+  classification verbatim.
+
+**Owned-file deltas this round:** `download_finalize.rs` is
+**comment-only** (PR #112's doc correction; zero code semantics), and
+`download_integration.rs` is the command-rename + cache-parameter
+plumbing with matching test updates. `http_body.rs` is untouched; the
+transient-error wording contract between the capped reader
+(`"Bad response: {transport}"` → retryable; `"too large"`/`"not
+UTF-8"` → deterministic) and `api_resilience::is_transient_body_error`
+was re-verified against the new call sites.
+
+**The TS fallback path, audited in full.** `atomReleases.ts` builds
+URLs only from strict allowlists (`isSafeRepoSlug` charset regex
+before any request; tags ≤120 chars over `[A-Za-z0-9._+~ -]`), takes
+the release tag only from the canonical alternate link matching THIS
+exact repo, accepts exactly two path segments per asset href, refuses
+truncated documents outright (an anti-downgrade check: a body cut at
+the native cap could otherwise silently resolve an OLD release),
+bounds fragment fetches to 5 per run, and fails closed to the
+caller's ORIGINAL API error — the UI's failure classification never
+changes. `githubProvider.ts` short-circuits the honest 404 (a
+release-less repo gains nothing from the feed and must not spend
+requests on it) and rethrows the original error when the fallback
+dies. Minor observation, non-blocking: `repo` is interpolated into a
+`RegExp` in `parseExpandedAssets`, but the slug charset contains no
+significant metacharacters and catalog slugs are curated input.
+
+**Executed locally at `ab2e2723`:** the full TS/TSX suite — **897
+passed / 2 skipped / 0 failed across 61 files**, including the 19 new
+tests (16 atom-fallback, 3 deny-all-boundary). Disclosed limitation
+unchanged: this sandbox holds no Rust toolchain, so the native battery
+was not re-executed locally — CI executes it on linux/windows/macos
+instead, and no claim below relies on the unexecuted battery.
+
+**CI flake found at `1812878f`, root-caused, de-flaked (PR #117).**
+The macOS Rust-test check failed once at `1812878f` (run 39133960118,
+272 passed / 1 failed): the adversarial stall-window test pinned the
+body-phase stall wording (`"Connection stalled"`) but the attempt can
+equally name the same 60 s policy through the response-phase window
+(`"No response from the server for 60s"`). In the failing run every
+behavioral assertion passed (retryable error, `"network"` kind,
+`Failed` state, no finalization, `.part` survival) — only the wording
+differed. Both windows carry the identical retryable-`"network"`
+contract, and the sibling test already pins the response-phase
+wording on purpose. The suite is green on macOS at `5d8630e` (v1.0.3),
+`3447371` (v1.0.4 release commit) and `ab2e2723` (current main) —
+one-off, load-dependent scheduling race, not a regression. PR #117
+(owned file, test-only) accepts either naming; every other assertion
+stays byte-for-byte strict. Neither release was built from the red
+state.
+
+**Release provenance.** `v1.0.3` (`5d8630e7c`, the PR #114 merge):
+Release run 39130358671 built from exactly the tag SHA; 22 assets, 5
+`.sig` files, `SHA256SUMS.txt`, `latest.json` present — asset pattern
+identical to v1.0.1/v1.0.2 (macOS absence from the updater feed
+remains the established pattern, observation only). `v1.0.4`: release
+commit `3447371` touches version metadata + CHANGELOG only (verified
+clean sweep — the v1.0.2 lockfile corruption did NOT repeat, see
+below); the Release run 39135340523 was in progress at head `ab2e2723`
+at audit time with the stable tag not yet pushed, so its provenance
+verdict is deferred to the next round once the tag exists. **Note for
+the boundary record:** as with v1.0.2, the stable tag (built from the
+release commit) will not contain the fix PRs merged after it — here
+PR #113/#114 are IN v1.0.3/`5d8630e`, but PR #117's de-flake and any
+later merge land after `3447371`.
+
+**Issue #110 status at `ab2e2723`: still open and still valid.** The
+`is-potential-custom-element-name` field still carries the corrupted
+`"version": "1.0.2"` while `resolved`+`integrity` still pin the real
+1.0.1 tarball — the lockfile-truth lie persists unchanged. The 1.0.3
+and 1.0.4 version sweeps were clean (both lockfile deltas touch only
+the two root `version` fields and the two project crates), so the
+sweep process has evidently stopped repeating the mistake, but the
+one-line remediation of the pre-existing field remains outstanding
+for the release-metadata owner.
+
+**Author guard:** all 7 non-merge commits in `d09914e..ab2e2723` are
+authored `WasewaseX <WasewaseX@users.noreply.github.com>`; the
+gmail-shaped author on GitHub-composed merge commits remains the
+documented whitelisted pattern (§10.14).
+
+**Verdict of Round 7: PASS at `ab2e2723` (provisionally carried from
+the line-by-line native read; CI green on the release heads), with two
+routed items:** one LOW non-blocking observation on the resilience
+backoff (report-only), and one CI-wording flake fixed by PR #117
+(test-only, owned file). No defect was found in audit-owned code this
+round; the resilience wave's security posture is sound — bounded
+retries, budgeted cache, shape-gated github.com admission with the
+generic-allowlist invariant intact, and fail-closed semantics at
+every layer boundary.
+
 ## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified

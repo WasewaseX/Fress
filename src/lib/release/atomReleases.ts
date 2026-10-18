@@ -59,7 +59,14 @@ interface TextFetchResult {
  * already knows how to handle). */
 async function fetchGithubText(url: string): Promise<TextFetchResult> {
   if (isTauri()) {
-    const r = await invoke<{ status: number; body: string; truncated: boolean }>('fetch_text', { url });
+    // Dedicated command, NOT fetch_text: github.com stays OFF the generic
+    // resolver-manifest allowlist by pinned audit invariant; this class
+    // admits exactly the two release-document shapes (releases.atom and
+    // expanded_assets fragments) and refuses everything else on github.com.
+    const r = await invoke<{ status: number; body: string; truncated: boolean }>(
+      'fetch_github_release_doc',
+      { url }
+    );
     if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
     // A body cut at the native cap is NOT a feed or a fragment: the newest
     // entries could be missing, silently resolving an OLD release. Refuse

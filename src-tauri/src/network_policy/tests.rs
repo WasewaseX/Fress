@@ -207,11 +207,6 @@ fn resolver_accepts_allowlisted_hosts() {
         "https://www.zotero.org/download/client/dl?channel=release&platform=win-x64",
         "https://updates.signal.org/desktop/latest.yml",
         "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/i/Inkscape/Inkscape",
-        // The rate-limit-proof release-lookup fallback documents: the atom
-        // feed and the per-tag expanded_assets fragment live on plain
-        // github.com (see src/lib/release/atomReleases.ts).
-        "https://github.com/localsend/localsend/releases.atom",
-        "https://github.com/localsend/localsend/releases/tag/v1.17.0/expanded_assets",
     ] {
         UrlPolicy::resolver_manifest()
             .validate(raw)
@@ -233,12 +228,6 @@ fn resolver_rejects_unlisted_hosts() {
     for raw in [
         "https://evil-download.kde.org/x",
         "https://download.kde.org.evil.example/x",
-        // github.com admission must not admit look-alikes either. (A
-        // userinfo trick like https://api.github.com@github.com.evil.example/
-        // is refused as EmbeddedCredentials - covered by the dedicated test
-        // below - so only pure host look-alikes belong in this loop.)
-        "https://github.com.evil.example/localsend/localsend/releases.atom",
-        "https://evil-github.com/localsend/localsend/releases.atom",
     ] {
         assert!(
             matches!(
@@ -248,6 +237,129 @@ fn resolver_rejects_unlisted_hosts() {
             "{raw}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Admission: the github.com release-document class (rate-limit-proof
+// release-lookup fallback - see src/lib/release/atomReleases.ts)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn github_release_documents_admit_exactly_the_two_shapes() {
+    for raw in [
+        // The atom feed of any repository.
+        "https://github.com/localsend/localsend/releases.atom",
+        "https://github.com/WasewaseX/Fress/releases.atom",
+        // The per-tag expanded_assets fragment (percent-encoded tag).
+        "https://github.com/localsend/localsend/releases/tag/v1.17.0/expanded_assets",
+        "https://github.com/obsidianmd/obsidian-releases/releases/tag/v1.5.3%2Bpatch/expanded_assets",
+        // A tag containing a slash arrives percent-encoded as one segment -
+        // a real GitHub shape (git tags may contain slashes).
+        "https://github.com/WasewaseX/Fress/releases/tag/release%2Fv1.0/expanded_assets",
+    ] {
+        UrlPolicy::github_releases_doc()
+            .validate(raw)
+            .unwrap_or_else(|e| panic!("{raw} must validate: {e}"));
+    }
+}
+
+#[test]
+fn github_release_documents_refuse_everything_else_on_github_com() {
+    // Well-formed host, wrong path: the SHAPE is the gate, not the host.
+    for raw in [
+        // A checksum document - exactly what the pinned invariant keeps out
+        // of the generic text policy must stay out of THIS class too.
+        "https://github.com/WasewaseX/Fress/releases/download/v1.0.3/SHA256SUMS.txt",
+        // Arbitrary repository files and pages.
+        "https://github.com/WasewaseX/Fress/blob/main/README.md",
+        "https://github.com/WasewaseX/Fress",
+        "https://github.com/WasewaseX/Fress/releases",
+        "https://github.com/WasewaseX/Fress/releases.atom/extra",
+        // Wrong segment shapes that contain the right words.
+        "https://github.com/WasewaseX/Fress/releases/tag/v1.0.3/expanded_assets/extra",
+        "https://github.com/WasewaseX/Fress/releases/tag/v1.0.3",
+        // Traversal attempts (the URL parser normalizes dot segments away
+        // before the shape check sees them, so both collapse to shapes with
+        // the wrong segment count).
+        "https://github.com/../secret/releases.atom",
+        "https://github.com/WasewaseX/../..//releases.atom",
+        // NOTE: the segment charset is deliberately not a gate in itself -
+        // the WHATWG parser percent-encodes every raw path byte before the
+        // shape check runs, so any segment arrives looking like
+        // alphanumeric/`%`-escape text. The gate is the SEGMENT STRUCTURE
+        // plus the literal "releases.atom" / "releases/tag/.../expanded_assets"
+        // words, which arbitrary paths cannot satisfy.
+    ] {
+        assert!(
+            matches!(
+                UrlPolicy::github_releases_doc().validate(raw),
+                Err(PolicyError::DisallowedPath { .. }) | Err(PolicyError::DisallowedHost { .. })
+            ),
+            "{raw} must be refused"
+        );
+    }
+    // Pure host look-alikes are DisallowedHost (exact-match admission).
+    for raw in [
+        "https://github.com.evil.example/localsend/localsend/releases.atom",
+        "https://evil-github.com/localsend/localsend/releases.atom",
+    ] {
+        assert!(
+            matches!(
+                UrlPolicy::github_releases_doc().validate(raw),
+                Err(PolicyError::DisallowedHost { .. })
+            ),
+            "{raw} must be refused as a host violation"
+        );
+    }
+}
+
+#[test]
+fn github_release_document_hops_stay_on_shape() {
+    // Every hop re-checks the shape: a redirect that leaves the release
+    // documents is refused even though it stays on github.com.
+    let policy = UrlPolicy::github_releases_doc();
+    let rules = policy.redirects;
+    let origin: Url = "https://github.com/localsend/localsend/releases.atom"
+        .parse()
+        .unwrap();
+    // A shape-preserving hop - from the feed to one of the repo's asset
+    // fragments, both inside the admitted family - is followed.
+    assert!(evaluate_redirect_hop(
+        &rules,
+        std::slice::from_ref(&origin),
+        &"https://github.com/localsend/localsend/releases/tag/v1.17.0/expanded_assets"
+            .parse()
+            .unwrap()
+    )
+    .is_ok());
+    // A hop to the URL already visited is a LOOP, refused on its own rule
+    // (before the shape check would even run).
+    assert!(matches!(
+        evaluate_redirect_hop(
+            &rules,
+            std::slice::from_ref(&origin),
+            &"https://github.com/localsend/localsend/releases.atom"
+                .parse()
+                .unwrap()
+        ),
+        Err(RedirectRejection::Loop)
+    ));
+    // A hop to another github.com path is refused BY SHAPE.
+    let err = evaluate_redirect_hop(
+        &rules,
+        std::slice::from_ref(&origin),
+        &"https://github.com/WasewaseX/Fress/releases/download/v1.0.3/SHA256SUMS.txt"
+            .parse()
+            .unwrap(),
+    )
+    .expect_err("an off-shape hop must be refused");
+    assert_eq!(
+        err,
+        RedirectRejection::OffDocumentShape {
+            host: "github.com".to_string(),
+            path: "/WasewaseX/Fress/releases/download/v1.0.3/SHA256SUMS.txt".to_string(),
+        }
+    );
 }
 
 #[test]
@@ -326,6 +438,7 @@ fn hop_result_flagged(
             host_rule,
             block_private_literals,
             path_pin: None,
+            path_shape: None,
         },
         &previous,
         &next,

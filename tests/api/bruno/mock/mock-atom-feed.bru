@@ -1,0 +1,24 @@
+meta {
+  name: M2 atom feed + fragment (mock)
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{mockBase}}/github/example/tool/releases.atom
+  body: none
+  auth: none
+}
+
+tests {
+  test("atom feed answers 200", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("feed carries entries", function() {
+    const raw = typeof res.body === 'function' ? res.body() : res.body;
+    const body = String(raw);
+    expect(body).to.include('<feed');
+    expect(body).to.include('<entry>');
+    expect(body).to.include('releases/tag/v2.0.0');
+  });
+}

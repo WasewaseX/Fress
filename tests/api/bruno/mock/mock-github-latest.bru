@@ -1,0 +1,33 @@
+meta {
+  name: M1 github latest release (mock)
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{mockBase}}/github/repos/example/tool/releases/latest
+  body: none
+  auth: none
+}
+
+script:post-response {
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const doc = raw && typeof raw === 'object' ? raw : JSON.parse(raw || 'null');
+  if (!doc.tag_name) throw new Error('latest release has no tag_name');
+  if (!/^v?\d+\.\d+\.\d+$/.test(doc.tag_name)) throw new Error('tag is not a stable semver: ' + doc.tag_name);
+  if (!doc.assets || doc.assets.length === 0) throw new Error('latest release carries no assets');
+  for (const a of doc.assets) {
+    if (!a.browser_download_url || typeof a.size !== 'number') {
+      throw new Error('asset missing browser_download_url or size: ' + a.name);
+    }
+  }
+}
+
+tests {
+  test("latest release answers 200", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers inside the latency budget", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+}

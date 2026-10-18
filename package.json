@@ -21,7 +21,8 @@
     "test:live": "playwright test --config=playwright.live.config.ts",
     "test:api:bruno": "cd tests/api/bruno && npx --yes @usebruno/cli run",
     "clean": "rm -rf dist",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:api": "playwright test --config=playwright.api.config.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",

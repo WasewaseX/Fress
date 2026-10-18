@@ -1,0 +1,19 @@
+meta {
+  name: M4 failure shapes (mock)
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{mockBase}}/fault/429-retry-after
+  body: none
+  auth: none
+}
+
+tests {
+  test("rate limit carries Retry-After + quota signature", function() {
+    expect(res.status).to.eql(429);
+    expect(res.headers['retry-after']).to.eql('1');
+    expect(res.headers['x-ratelimit-remaining']).to.eql('0');
+  });
+}

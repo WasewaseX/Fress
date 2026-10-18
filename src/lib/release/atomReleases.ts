@@ -295,34 +295,31 @@ export function parseExpandedAssets(body: string, repo: string): AtomAsset[] {
   return assets;
 }
 
-/** Reads the asset fragment for one tag, trying BOTH URL shapes. The NEW
- * shape (`/releases/expanded_assets/<tag>`) is what GitHub's release page
- * lazy-loads since the 2026-10 rollout; the OLD shape
- * (`/releases/tag/<tag>/expanded_assets`) is kept as the rollback path.
- * A shape whose answer parses to zero anchors is treated as "not the real
- * fragment" (the old URL answered a page shell with no anchors during the
- * rollout) rather than as an asset-less release - the other shape gets
- * its chance before the entry is recorded asset-less. */
+/** Reads the asset fragment for one tag. The MODERN shape
+ * (`/releases/expanded_assets/<tag>`) is what GitHub's release page
+ * lazy-loads since the 2026-10 rollout and is the only shape probed while
+ * it answers: a 200 whose body parses to zero anchors is the honest
+ * "this release has no uploadable assets" answer, so an asset-less scan
+ * still costs exactly ONE request per tag. The OLD shape
+ * (`/releases/tag/<tag>/expanded_assets`) stays as the rollback for a
+ * REFUSED modern request (404/5xx/policy) - the rollout's page-shell
+ * answer is a 200, so it is classified asset-less here and the API owns
+ * the exact answer, exactly like the shell test pins. */
 async function fetchAssetsForTag(repo: string, tag: string): Promise<AtomAsset[]> {
   const safeTag = encodeURIComponent(tag);
-  const urls = [
-    `https://github.com/${repo}/releases/expanded_assets/${safeTag}`,
-    `https://github.com/${repo}/releases/tag/${safeTag}/expanded_assets`,
-  ];
-  let lastError: unknown = null;
-  for (const url of urls) {
-    try {
-      const { body } = await fetchGithubText(url);
-      const assets = parseExpandedAssets(body, repo);
-      if (assets.length > 0) return assets;
-      // Zero anchors: not a usable fragment. Try the next shape; if none
-      // yields anchors the release genuinely has no uploadable assets.
-    } catch (e) {
-      lastError = e;
-    }
+  try {
+    const { body } = await fetchGithubText(
+      `https://github.com/${repo}/releases/expanded_assets/${safeTag}`
+    );
+    return parseExpandedAssets(body, repo);
+  } catch (e) {
+    const { body } = await fetchGithubText(
+      `https://github.com/${repo}/releases/tag/${safeTag}/expanded_assets`
+    ).catch((legacyError: unknown) => {
+      throw legacyError ?? e;
+    });
+    return parseExpandedAssets(body, repo);
   }
-  if (lastError) throw lastError;
-  return [];
 }
 
 /** Options for the fragment walk. */

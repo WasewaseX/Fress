@@ -155,9 +155,14 @@ ${tags
     const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (u.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
     if (u.endsWith('/releases.atom')) return new Response(feed, { status: 200 });
-    const m = /\/releases\/tag\/([^/]+)\/expanded_assets$/.exec(u);
-    if (m) {
-      const tag = decodeURIComponent(m[1]);
+    // Both fragment URL shapes answer identically: the walk fetches the
+    // MODERN shape (`/releases/expanded_assets/<tag>`) and must spend
+    // exactly ONE request per tag on it - the legacy shape
+    // (`/releases/tag/<tag>/expanded_assets`) is routed too so a future
+    // URL change cannot silently redirect the fixture's answers.
+    if (u.includes('/expanded_assets')) {
+      const m = /\/expanded_assets\/([^/?]+)$/.exec(u) ?? /\/releases\/tag\/([^/]+)\/expanded_assets$/.exec(u);
+      const tag = m ? decodeURIComponent(m[1]) : '';
       return new Response(fragments[tag] ?? '<div></div>', { status: 200 });
     }
     return new Response('Unexpected URL', { status: 404 });

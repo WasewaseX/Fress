@@ -4037,8 +4037,19 @@ mod tests {
         // retry's connection failure against the exhausted mock.
         let retries = log.retries.lock().unwrap();
         assert_eq!(retries.len(), 2);
+        // Both 60 s stall detections are legitimate here and carry the same
+        // retryable "network" contract (verified by the assertions above):
+        // the response-phase window ("No response from the server for 60s")
+        // and the body-phase window ("Connection stalled"). Which one wins
+        // depends on whether the paused clock's first 61 s jump lands before
+        // or after the attempt is polled past the response gate - a
+        // load-dependent race observed once on a macOS CI runner (run
+        // 39133960118). The sibling test below pins the response-phase
+        // wording on purpose; this test accepts either naming of the same
+        // policy so the suite stays green on both scheduling orders.
         assert!(
-            retries[0].message.contains("Connection stalled"),
+            retries[0].message.contains("Connection stalled")
+                || retries[0].message.contains("No response from the server"),
             "the first retry must name the stall, got: {}",
             retries[0].message
         );

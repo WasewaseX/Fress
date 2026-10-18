@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.4 (2026-10-18): the quota-proof fallback release
+
+The rate-limit-proof release-lookup fallback (PR #113): when the GitHub REST API still fails - a repository never looked up before, inside an exhausted quota window - the resolver now reads GitHub's own quota-free web documents instead of surfacing "the download sources could not be reached". Shipped alongside the 1.0.3 native resilience layer, this closes the last path to that toast: the API attempt is retried, quota-conserved and stale-buffered natively, and when even that fails, the atom feed answers without a quota.
+
+### The fallback (PR #113, hardening review included)
+
+- **The atom feed + expanded_assets fragments answer what the API answered.** `https://github.com/<repo>/releases.atom` lists recent releases; the per-tag `expanded_assets` fragment carries one anchor per uploaded asset. Parsed fail-closed: conservative tag charset, slug-validated URLs, a bounded budget of asset-fragment fetches per run, entries that cannot be confidently attributed to the exact repository are skipped rather than guessed. The honest "no stable release" 404 short-circuits the fallback (a release-less repo gains nothing); any other API failure earns one quota-free second opinion; if the fallback also fails, the ORIGINAL classified error is rethrown so the UI's failure kinds and retry affordances are unchanged.
+- **A dedicated shape-validated request class, not an allowlist widening.** The review pass caught the branch widening the generic resolver-manifest allowlist with github.com - which a pinned audit invariant forbids (that invariant is what keeps the self-update checksum document reachable only through the path-pinned self-update policy). The shipped form is a new `github-releases-doc` request class: github.com by exact host match, redirects pinned to origin, and a new path-SHAPE gate (`ReleasesDocShape`) admitting exactly `/{owner}/{repo}/releases.atom` and `/{owner}/{repo}/releases/tag/{tag}/expanded_assets` - the two documents the fallback reads, of any repository, and nothing else (checksum documents, repository files, arbitrary pages fail closed at admission and on every hop). The invariant test passes unchanged.
+- **The e2e deny-all carve-out is boundary-exact (PR #111).** The loopback exception in the test harness's deny-all fallback matched hosts that merely START with `localhost`/`127.0.0.1` - `localhost.evil.com` would have slipped the net. The exported `DENY_ALL_ROUTE_RE` now requires a host boundary (optional port, then path/query/fragment/end), with the boundary matrix pinned by unit tests.
+
+### Documentation
+
+- `write_part_meta`'s doc now states the real fail-closed consumption (PR #112): a missing sidecar leaves the resume planner to discard validator-less staging bytes (unless a published checksum covers the assembled file) - never a blind append against an unproven origin.
+- Security audit §10.14: round-6 re-verification at main `d09914e` / v1.0.2 (PR #109).
+
 ## 1.0.3 (2026-10-18): the never-unreached release
 
 The "No download was started: the download sources could not be reached" toast had three independent roots, and this release closes all of them at the source. Every catalog lookup (GitHub Releases, the F-Droid index, and the official vendor manifests) used to be a SINGLE unauthenticated HTTP request: one dropped packet, one DNS hiccup, or one exhausted rate-limit window turned a healthy-enough network into a failed lookup with no download started. The native layer now owns a resilience contract (`src-tauri/src/api_resilience.rs`) that every API lookup goes through, with loopback-HTTP regression tests pinning each path.

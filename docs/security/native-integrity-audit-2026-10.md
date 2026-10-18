@@ -1255,6 +1255,32 @@ the native layer, all reviewed line-by-line at `ab2e2723`:
   still override a 1 s backoff base (the anti-over-correction guard).
   Both directions pinned; author-guard compliant; no conflict with the
   owned-file de-flake PR #117.
+- **PR #111's e2e deny-all fix verified as fixing a REAL leak.** The
+  old fallback pattern `/^https?:\/\/(?!127\.0\.0\.1|localhost)/` used
+  an unanchored lookahead: any host merely STARTING with a loopback
+  token (`localhost.evil.com`, `127.0.0.1.evil.com`) or the userinfo
+  trick (`localhost:80@evil.com`) made the lookahead succeed, the
+  negative lookahead fail, and the deny-all route never install — the
+  surprise request sailed through the harness's only network fence.
+  The new `DENY_ALL_ROUTE_RE` requires the loopback token to be
+  followed by an optional port and then path/query/fragment/end; each
+  bypass shape above was re-derived against the new pattern and now
+  aborts, while `localhost:3000/` (the legit dev server) still passes.
+  The exported constant is pinned by a boundary-matrix unit suite
+  (3 tests, executed locally this round).
+- **Sibling harness observation (report-only, test-oracle nuance, zero
+  product impact).** `tests/e2e/c-resolver-failure.spec.ts:298` binds
+  its fixture with an UNANCHORED pattern
+  (`/https:\/\/api\.github\.com\/repos\/localsend\/localsend\/releases/`):
+  any URL CONTAINING that substring — e.g. a leak to a foreign origin
+  with the API URL embedded as a query parameter — would be served the
+  canned fixture instead of being aborted by the deny-all, masking the
+  leak from the suite. The app under test constructs no such URLs
+  (resolvers build API URLs from curated catalog slugs on the pinned
+  host), so no live exposure; recorded as harness hygiene in the same
+  family PR #111 hardened. The only other route regex in the harness
+  (`netpolicy.ts:185`, the self-update mock) is anchored by its
+  `/desktop/` path segment and is safe.
 - **`network_policy.rs` (+122).** A new request class
   `github_releases_doc()` admitting github.com for exactly two document
   shapes (`/{owner}/{repo}/releases.atom` and

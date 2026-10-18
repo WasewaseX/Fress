@@ -1108,6 +1108,102 @@ was found in audit-owned code at `0be68b7`; one process finding (the
 #103 author-guard violation) is recorded above. The audit doc's claims
 now stand verified at `0be68b7` under the exact-SHA rule.
 
+### §10.14 Round 6 — re-verification at main `d09914e` and the v1.0.2 release `e60d2a9` (Agent 6)
+
+**Why a new round:** under the exact-SHA rule the Round 5 results stand
+only at `0be68b7`. Main then advanced in three merges: PR #106 (the
+v1.0.2 release, tag `v1.0.2` = `e60d2a9`), PR #108 (the zlib-bomb DoS
+fix, `1a53399`), and PR #107 (this audit's §10.13). This round
+re-verifies at main `d09914e` and records what the new commits surface.
+
+**Native carry-over by byte-identity.** `git diff 0be68b7..d09914e --
+src-tauri/` touches four metadata files only — `Cargo.toml`,
+`Cargo.lock` (both version-only: `fress` and `tauri-plugin-fress-open`
+1.0.1 → 1.0.2, no URL or hash swaps), `plugins/fress-open/Cargo.toml`,
+and `tauri.conf.json`. **Zero `.rs` deltas.** Every Round 5 claim (the
+full-delta read of PR #103's four clusters, the 217/0 native battery,
+both kill-tests, the 0-vulnerability dependency audit) therefore
+transfers verbatim to `d09914e` by the byte-identity rule. CI
+independently executes the tree at `d09914e`: 13/13 check runs green.
+Disclosed limitation: this sandbox holds no Rust toolchain this round,
+so the battery was not re-executed locally — no claim below relies on
+it.
+
+**PR #108 reviewed in full (the round's only new security-relevant
+code).** `boundedInflate()` wraps `inflateSync(buf, { maxOutputLength:
+64 MiB })` — the correct Node zlib cap API; cap overflow and malformed
+streams both return null. Callers preserve the pre-existing failure
+semantics exactly: iTXt falls back to the raw bytes (still passed
+through the scan), zTXt skips the payload (previously the whole
+`out.push` was skipped on catch). The gate cannot crash and cannot be
+bypassed — a capped chunk becomes undetectable, which matches the
+pre-fix behavior for malformed streams while removing the OOM. Test 27
+pins the composite case: an ~80 MiB-expansion bomb and a normal
+compressed Han chunk in the same PNG → bomb neutralized, Han still
+detected, exit 1 (gate healthy, fail-closed). Style note, non-blocking:
+`boundedInflate` is declared between two import statements — legal ESM
+(imports hoist), cosmetically unusual.
+
+**Release-boundary record:** `v1.0.2` (`e60d2a9`) does NOT contain
+`1a53399` — `git merge-base --is-ancestor 1a53399 e60d2a9` is false;
+the fix merged one merge later (`909fb49`). Impact is bounded: the
+changed file is the CI no-Chinese gate, never shipped in any artifact;
+the weakness was availability-only (the gate could be disrupted, never
+bypassed); the tag tree is fixed trusted content, so a CI re-run at the
+tag has no attacker-controlled PNG path; the real attack surface — PR
+heads — all carry the fix. Residual exposure of the v1.0.2 tag itself:
+negligible; recorded for exact-SHA honesty.
+
+**Finding (report-only, release-metadata owner): the v1.0.2 release
+commit corrupted one dev-transitive lockfile version field.** `aced69d`
+bumped `"version": "1.0.1"` → `"version": "1.0.2"` across
+`package-lock.json` and swept three occurrences; two are the project's
+own root entries, the third is `node_modules/is-potential-custom-element-name`
+(a jsdom test-infra dependency, `dev: true`) — the only dependency in
+the tree whose version coincidentally equaled the old project version.
+The registry carries no 1.0.2 of that package (published versions:
+1.0.0/1.0.1, untouched since 2022-06-19); `resolved` and `integrity`
+still pin the real 1.0.1 tarball and the hash matches the registry, so
+the installed bytes are authentic and unchanged — a lockfile-truth lie,
+not a supply-chain swap. `npm ls` stays green and CI (which installs
+from this lock) is 13/13 green at `d09914e`; exposure is dev-only and
+not bundled. Fix is one line on main (revert that field to 1.0.1) plus
+a process note: version sweeps over lockfiles must exclude `packages`
+entries, or delegate to the tool's own version update. `Cargo.lock` was
+verified clean — its delta touches exactly the two project crates and
+no other crate.
+
+**Correction to §10.13's process finding.** §10.13 recorded PR #103 as
+"merged with its commit authored `agent2@fress.local`". The final
+merged history supersedes that record: both merged commits (`6016a81`,
+`84ee6c9`) are authored `WasewaseX <WasewaseX@users.noreply.github.com>`
+— the violation flagged during review was remediated before the merge
+landed, and the merged tree is compliant. Separately, the gmail-shaped
+author on GitHub-composed merge commits (`WasewaseX
+<khosraviasghar55@gmail.com>`, uniform across the last ten merges) is
+explicitly whitelisted by `author-guard.yml` with a comment noting the
+shape ends when the account enables private-email mode — documented
+pattern, not a violation. The §10.13 process finding is closed as
+resolved-by-rebase.
+
+**Release surface cross-check (report-only):** the `v1.0.2` GitHub
+release lists 22 assets including `.sig` signatures for every signable
+bundle, not draft, not prerelease, target `main`. The changelog's 1.0.2
+claims were cross-checked against this audit's own per-PR verification
+(not the PR bodies): #103's bounded wait/flush/taxonomy, #101's per-id
+slots at `download_finalize.rs:386`, #97's tinypool removal, #102's
+live-verified reroutes, #105's token parity, #96's Han G/H/I — all
+match. The changelog's unit-battery figure (877 passed / 2 skipped
+across 59 files) is the frontend suite, outside this audit's execution
+scope; CI green at the released heads backs it.
+
+**Verdict of Round 6: PASS carried to `d09914e` / `v1.0.2`.** The
+native verdict transfers by byte-identity with zero `.rs` drift; the
+round's one new security-relevant review (PR #108) is sound; one
+dev-only lockfile-truth defect is recorded and routed (report-only,
+release-metadata owner); the §10.13 process finding is closed as
+resolved. No defect was found in audit-owned code this round.
+
 ## 11. Conclusion
 
 **PASS with the dependency follow-up RESOLVED — PR #81's fixes verified

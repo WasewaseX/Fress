@@ -197,6 +197,9 @@ pub enum PolicyError {
     /// The host is not admitted by this policy (resolver allowlist or
     /// pinned API host).
     DisallowedHost { host: String },
+    /// The host is admitted, but the path does not match the document
+    /// SHAPE the policy scopes it to (github.com release documents).
+    DisallowedPath { host: String, path: String },
 }
 
 impl fmt::Display for PolicyError {
@@ -215,6 +218,9 @@ impl fmt::Display for PolicyError {
             }
             PolicyError::DisallowedHost { host } => {
                 write!(f, "Host {host} is not on the resolver allowlist")
+            }
+            PolicyError::DisallowedPath { host, path } => {
+                write!(f, "Path {path} is not a release document of {host}")
             }
         }
     }
@@ -296,6 +302,56 @@ impl PathPin {
     }
 }
 
+/// A path SHAPE re-checked at admission and on every redirect hop that
+/// lands on the shape's host. Unlike [`PathPin`] (one fixed prefix), this
+/// admits a FAMILY of paths with a validated segment structure - the
+/// GitHub release documents of ANY repository:
+///
+///   - `/{owner}/{repo}/releases.atom`
+///   - `/{owner}/{repo}/releases/tag/{tag}/expanded_assets`
+///
+/// This is the load-bearing gate of the rate-limit-proof release-lookup
+/// fallback: github.com is admitted ONLY for these two document shapes,
+/// so the generic resolver-manifest allowlist keeps its pinned invariant
+/// (github.com stays off it - see the signature-document test in
+/// `network_policy/tests.rs`) and nothing else on github.com - a checksum
+/// document, a repository file, an arbitrary page - is readable through
+/// this class. Segments are the URL's percent-encoded path segments,
+/// validated against the charset GitHub itself uses for owner/repository
+/// and percent-encoded tags; anything else fails closed.
+#[derive(Debug, Clone, Copy)]
+struct ReleasesDocShape {
+    host: &'static str,
+}
+
+impl ReleasesDocShape {
+    fn segment_ok(s: &str) -> bool {
+        !s.is_empty()
+            && s.len() <= 120
+            && s != "."
+            && s != ".."
+            && s.bytes().all(|b| {
+                b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'~' | b'+' | b'%')
+            })
+    }
+
+    fn admits(&self, url: &Url) -> bool {
+        if url.host_str().map(|h| h.to_ascii_lowercase()).as_deref() != Some(self.host) {
+            // The shape rule binds only its own host; other hosts (if a
+            // policy ever combines them) are governed by their own rules.
+            return true;
+        }
+        let segments: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
+        match segments.as_slice() {
+            [owner, repo, "releases.atom"] => Self::segment_ok(owner) && Self::segment_ok(repo),
+            [owner, repo, "releases", "tag", tag, "expanded_assets"] => {
+                Self::segment_ok(owner) && Self::segment_ok(repo) && Self::segment_ok(tag)
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Per-redirect-hop rules plus the hop budget.
 #[derive(Debug, Clone, Copy)]
 struct RedirectRules {
@@ -312,6 +368,10 @@ struct RedirectRules {
     /// pinned path (mirrors an admission-time pin that lives in the command
     /// layer). `None` for every policy that has no path-scoped admission.
     path_pin: Option<PathPin>,
+    /// When set, every hop landing on the shape's host must match the
+    /// documented path SHAPE (mirrors the admission-time shape rule).
+    /// `None` for every policy without a shape-scoped admission.
+    path_shape: Option<ReleasesDocShape>,
 }
 
 /// The request classes Fress's native layer makes, each with its own rules.
@@ -355,6 +415,7 @@ impl UrlPolicy {
                 host_rule: RedirectHostRule::AnyHttps,
                 block_private_literals: false,
                 path_pin: None,
+                path_shape: None,
             },
             block_private_addrs: false,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -376,6 +437,7 @@ impl UrlPolicy {
                 host_rule: RedirectHostRule::PinToOrigin,
                 block_private_literals: true,
                 path_pin: None,
+                path_shape: None,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -394,6 +456,33 @@ impl UrlPolicy {
                 host_rule: RedirectHostRule::PinToOrigin,
                 block_private_literals: true,
                 path_pin: None,
+                path_shape: None,
+            },
+            block_private_addrs: true,
+            request_timeout: Some(API_REQUEST_TIMEOUT),
+        }
+    }
+
+    /// GitHub's own quota-free release documents (`fetch_github_release_doc`):
+    /// the `releases.atom` feed and the per-tag `expanded_assets` fragments
+    /// the rate-limit-proof release-lookup fallback reads when the REST API
+    /// fails. A dedicated request class - NOT a widening of the
+    /// resolver-manifest allowlist - because the pinned audit invariant
+    /// "github.com stays off the generic resolver-manifest policy" is what
+    /// keeps the self-update checksum document unreachable through any
+    /// generic text fetch. Here github.com is admitted for exactly the two
+    /// document shapes above (every redirect hop re-checked), with the
+    /// standard scheme/credential/private-address rules unchanged.
+    pub fn github_releases_doc() -> Self {
+        UrlPolicy {
+            label: "github-releases-doc",
+            admission: AdmissionRule::Exact("github.com"),
+            redirects: RedirectRules {
+                max_hops: 3,
+                host_rule: RedirectHostRule::PinToOrigin,
+                block_private_literals: true,
+                path_pin: None,
+                path_shape: Some(ReleasesDocShape { host: "github.com" }),
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -414,6 +503,7 @@ impl UrlPolicy {
                 host_rule: RedirectHostRule::Allowlist(RESOLVER_ALLOWED_HOSTS),
                 block_private_literals: true,
                 path_pin: None,
+                path_shape: None,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -473,6 +563,7 @@ impl UrlPolicy {
                     prefix: "/WasewaseX/Fress/",
                     bare: "/WasewaseX/Fress",
                 }),
+                path_shape: None,
             },
             block_private_addrs: true,
             request_timeout: Some(API_REQUEST_TIMEOUT),
@@ -497,6 +588,7 @@ impl UrlPolicy {
                 host_rule: RedirectHostRule::AnyHttps,
                 block_private_literals: true,
                 path_pin: None,
+                path_shape: None,
             },
             block_private_addrs: true,
             request_timeout: None,
@@ -564,6 +656,20 @@ impl UrlPolicy {
                 }
             } else if is_local_hostname(&host) {
                 return Err(PolicyError::PrivateAddress { host });
+            }
+        }
+
+        // Path-shape admission: when a policy scopes its host to a
+        // document SHAPE (github.com release documents), a well-formed
+        // host on a shape-violating path is refused here, before any
+        // client exists - the hop-side twin keeps redirect chains to the
+        // same contract.
+        if let Some(shape) = self.redirects.path_shape {
+            if !shape.admits(&url) {
+                return Err(PolicyError::DisallowedPath {
+                    host: host.clone(),
+                    path: url.path().to_string(),
+                });
             }
         }
 
@@ -703,6 +809,18 @@ fn evaluate_redirect_hop(
         }
     }
 
+    // Path-shape twin for the policies that scope one host to a document
+    // SHAPE (see [`ReleasesDocShape`]): same contract as the admission
+    // check, applied to every hop.
+    if let Some(shape) = rules.path_shape {
+        if !shape.admits(next) {
+            return Err(RedirectRejection::OffDocumentShape {
+                host: next.host_str().unwrap_or("").to_string(),
+                path: next.path().to_string(),
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -731,6 +849,7 @@ enum RedirectRejection {
     LeftAllowlist { host: String },
     PrivateDestination { host: String },
     OffPinnedPath { host: String, path: String },
+    OffDocumentShape { host: String, path: String },
 }
 
 impl RedirectRejection {
@@ -757,6 +876,9 @@ impl RedirectRejection {
             }
             RedirectRejection::OffPinnedPath { host, path } => {
                 format!("Redirect left the pinned repository path on {host} ({path})")
+            }
+            RedirectRejection::OffDocumentShape { host, path } => {
+                format!("Redirect left the release-document path shape on {host} ({path})")
             }
         }
     }

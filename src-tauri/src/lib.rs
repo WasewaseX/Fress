@@ -323,6 +323,31 @@ async fn fetch_text(url: String) -> Result<TextFetch, String> {
     Err(last_transient.unwrap_or_else(|| "Manifest host could not be reached".to_string()))
 }
 
+/// Reads one of GitHub's quota-free release documents for the
+/// rate-limit-proof release-lookup fallback (`releases.atom` and the
+/// per-tag `expanded_assets` fragments).
+///
+/// Why a dedicated command instead of `fetch_text`: the resolver-manifest
+/// allowlist deliberately pins the invariant "github.com stays off the
+/// generic text policy" (that is what keeps the self-update checksum
+/// document reachable only through the path-pinned self-update policy).
+/// This command gets its own request class instead - github.com is
+/// admitted for exactly the two release-document shapes, every redirect
+/// hop re-checked, standard scheme/credential/private-address rules
+/// unchanged (see `network_policy::ReleasesDocShape`).
+#[tauri::command]
+async fn fetch_github_release_doc(url: String) -> Result<TextFetch, String> {
+    let policy = network_policy::UrlPolicy::github_releases_doc();
+    let parsed = policy.validate(url.trim()).map_err(|e| e.to_string())?;
+    let client = policy.http_client()?;
+    let resp = client
+        .get(parsed.raw().clone())
+        .send()
+        .await
+        .map_err(|e| network_policy::describe_network_error(&e))?;
+    read_capped_text(resp).await
+}
+
 /// The self-update repo pin: the only github.com documents the self-update
 /// flow may read are this repository's atom feed and release assets. Shared
 /// by the command and its admission tests so the tests drive the PRODUCTION
@@ -1360,6 +1385,7 @@ pub fn run() {
             default_download_dir,
             fetch_latest_release,
             fetch_recent_releases,
+            fetch_github_release_doc,
             fetch_fdroid_package,
             fetch_text,
             fetch_self_update_text,

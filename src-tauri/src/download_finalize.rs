@@ -4049,9 +4049,7 @@ mod tests {
         // policy so the suite stays green on both scheduling orders.
         assert!(
             retries[0].message.contains("Connection stalled")
-                || retries[0]
-                    .message
-                    .contains("No response from the server"),
+                || retries[0].message.contains("No response from the server"),
             "the first retry must name the stall, got: {}",
             retries[0].message
         );

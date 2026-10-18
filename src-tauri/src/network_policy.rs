@@ -168,6 +168,20 @@ const RESOLVER_ALLOWED_HOSTS: &[&str] = &[
     "download.nextcloud.com",
     "gitlab.com",
     "www.sumatrapdfreader.org",
+    // github.com (NOT the API host) serves the releases.atom feed and the
+    // per-tag expanded_assets fragments. These are the rate-limit-PROOF
+    // fallback documents for release lookup: api.github.com shares a
+    // 60 req/h unauthenticated per-IP quota with the live-star refresh, and
+    // when that quota is exhausted every catalog download used to die with
+    // "the download sources could not be reached". The atom feed and the
+    // assets fragment are plain github.com web documents with no such
+    // quota, so the GitHub release resolver falls back to them (see
+    // `src/lib/release/atomReleases.ts`) when the API fails. Only the
+    // github.com ORIGIN is admitted here; release ASSET downloads are not
+    // fetched through this policy (the download runner pins its own
+    // release-assets hosts), and the scheme/credential/private-address
+    // rules apply unchanged.
+    "github.com",
     "api.github.com",
     "raw.githubusercontent.com",
 ];

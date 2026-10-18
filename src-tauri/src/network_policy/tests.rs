@@ -207,6 +207,11 @@ fn resolver_accepts_allowlisted_hosts() {
         "https://www.zotero.org/download/client/dl?channel=release&platform=win-x64",
         "https://updates.signal.org/desktop/latest.yml",
         "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/i/Inkscape/Inkscape",
+        // The rate-limit-proof release-lookup fallback documents: the atom
+        // feed and the per-tag expanded_assets fragment live on plain
+        // github.com (see src/lib/release/atomReleases.ts).
+        "https://github.com/localsend/localsend/releases.atom",
+        "https://github.com/localsend/localsend/releases/tag/v1.17.0/expanded_assets",
     ] {
         UrlPolicy::resolver_manifest()
             .validate(raw)
@@ -228,6 +233,12 @@ fn resolver_rejects_unlisted_hosts() {
     for raw in [
         "https://evil-download.kde.org/x",
         "https://download.kde.org.evil.example/x",
+        // github.com admission must not admit look-alikes either. (A
+        // userinfo trick like https://api.github.com@github.com.evil.example/
+        // is refused as EmbeddedCredentials - covered by the dedicated test
+        // below - so only pure host look-alikes belong in this loop.)
+        "https://github.com.evil.example/localsend/localsend/releases.atom",
+        "https://evil-github.com/localsend/localsend/releases.atom",
     ] {
         assert!(
             matches!(

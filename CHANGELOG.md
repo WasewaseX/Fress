@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.3 (2026-10-18): the never-unreached release
+
+The "No download was started: the download sources could not be reached" toast had three independent roots, and this release closes all of them at the source. Every catalog lookup (GitHub Releases, the F-Droid index, and the official vendor manifests) used to be a SINGLE unauthenticated HTTP request: one dropped packet, one DNS hiccup, or one exhausted rate-limit window turned a healthy-enough network into a failed lookup with no download started. The native layer now owns a resilience contract (`src-tauri/src/api_resilience.rs`) that every API lookup goes through, with loopback-HTTP regression tests pinning each path.
+
+### Transient failures are retried; deterministic ones never are
+
+- **Up to four attempts** for the transient family: network errors (timeouts, connect failures, mid-stream resets), HTTP 408/429/5xx, and 403s that GitHub's own headers mark as rate limits (`x-ratelimit-remaining: 0`, or a `Retry-After`). Waits grow exponentially (0.5 s base, jittered ±40%, hard-capped at 4 s) and a server-sent `Retry-After` is honored and capped at 15 s.
+- **Deterministic answers are never re-asked**: 404 ("no stable release"), plain 403 refusals, redirect-policy refusals, oversized and non-UTF-8 bodies fail exactly once - retrying them can only reproduce them. A refused redirect is still named for what it is, not misreported as a connection failure.
+- **The vendor-manifest path (`fetch_text`) shares the same retry contract** - a KDE mirror or Tor manifest behind one lost packet used to fail the whole official-resolver chain after a single attempt.
+
+### GitHub quota is conserved instead of drained
+
+- **Conditional requests against a small persistent cache.** Every 200 answer and its `ETag` are stored (per-URL, bounded: 2 MiB/entry, 256 entries, 16 MiB total, oldest-first eviction); repeat lookups revalidate with `If-None-Match` and a `304 Not Modified` is served from the cache - which per GitHub's API semantics costs no rate-limit budget. Steady-state browsing of an unchanged catalog spends almost no quota, so the 60-requests-per-hour window is no longer something a catalog walk can exhaust.
+- **Stale-while-error: a failed fresh lookup serves the last known answer** (up to 7 days old) instead of surfacing an error. A slightly old release list still names real, downloadable files, and a working download beats an honest toast; entries younger than the window are refreshed by every successful 304, so active use keeps them alive indefinitely. Beyond the window the failure is honest - the card's Retry seam and the curated fallbacks remain available.
+- The frontend is deliberately unchanged: the persistence layer's 6-hour resolution cache, the 30-second failure memo, and the card's Retry seam already compose with the new serving paths, and failure-kind classification recognizes the (unchanged) rate-limit wording.
+
+### Security posture
+
+- The resilience layer never constructs URLs, never chooses hosts, and never sees a credential: admission, redirect rules, and the public-address-only resolver are untouched in `network_policy`, and callers pass already-validated URLs built from already-validated policy clients. The cache stores only public API response bodies in the app's own cache directory, written atomically (tmp + rename) with every I/O error swallowed - the cache can never become a new way for a lookup to fail.
+- 22 new tests (pure decision helpers, cache store behaviors including corruption recovery and budget eviction, and real-loopback-HTTP scenarios for every serving path: fresh 200, quota-free 304 with `If-None-Match` proof, 5xx retries to success, exactly-once 404/403/redirect refusals, stale-serve through a rate-limited window, and the ancient-entry refusal). Command input validation now drives the AppHandle-free core functions, so the pre-network rejection tests exercise the exact production path.
+
 ## 1.0.2 (2026-10-17): the queue-honesty release
 
 Every open pull request of the second review wave (#93, #96, #97, #101, #102, #103, #104, #105) was reviewed, defect-fixed where review found defects, and merged; #94 was closed as byte-identical content already carried by #104. The release tree's unit battery is 877 passed / 2 environment-skipped across 59 files with `tsc --noEmit` clean, the production build is green, and `npm audit` reports **zero vulnerabilities** (the two critical tinypool RCE gadgets and the moderate mocker path traversal of the 1.0.1 dev toolchain are gone). Integration evidence: every merged head ran the full 12-check CI matrix, and the two PRs whose review found defects were fixed on their branches and re-verified green before merging.

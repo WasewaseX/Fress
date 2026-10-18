@@ -210,5 +210,7 @@ export async function getRecentReleases(
 }
 
 /** Exposed for tests and callers that want the scan depth without the
- * magic number. */
+ * magic number. The atom fallback's ATOM_SCAN_DEPTH is pinned equal to
+ * this in tests: the fallback must never search shallower than the API
+ * path it stands in for. */
 export { RECENT_RELEASES_COUNT };

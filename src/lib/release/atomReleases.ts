@@ -43,13 +43,15 @@
  * TRUST MODEL: github.com is the naming authority here exactly as
  * api.github.com was - the tag comes from GitHub's own feed and the asset
  * names from GitHub's own release page. Parsing is deliberately bounded
- * (fixed budget of asset-fragment fetches, conservative tag charset,
- * size-capped documents) and fails closed: anything this module cannot
- * parse confidently is skipped, and the caller falls back to the ORIGINAL
- * API error, never to a silent wrong answer.
+ * (the fragment walk is bounded by the requested scan depth, tags pass a
+ * conservative charset, documents are size-capped) and fails closed:
+ * anything this module cannot parse confidently is skipped, and the
+ * caller falls back to the ORIGINAL API error, never to a silent wrong
+ * answer.
  */
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../downloads';
+import { parseVersion } from './semver';
 import { ReleaseInfo } from './types';
 
 /** Browser-path cap for the two github.com document shapes. The documents
@@ -63,11 +65,15 @@ const BROWSER_TEXT_TIMEOUT_MS = 15_000;
  * can never bleed into the next. */
 const ASSET_META_WINDOW = 4000;
 
-/** Asset-fragment fetches per fallback run. The right stream for a
- * multi-product repo is virtually always inside the newest handful of
- * releases; bounding this keeps a rate-limited session from trading the
- * API quota for an unbounded fragment walk. */
-export const ATOM_ASSET_FETCH_BUDGET = 5;
+/** How deep the fragment walk may reach, mirroring the API path's
+ * recent-releases scan (multi-stream repos - desktop + mobile + server
+ * tags from one repo: Obsidian, Tuta, Ente - need roughly a dozen entries
+ * before the right stream appears; 20 covers every catalog repo there
+ * with one API call, so the fallback must not stop shorter or a
+ * compatible installer silently stops existing). Bounded, not unbounded:
+ * the walk costs at most one small quota-free fragment per scanned
+ * entry, exactly the bound the caller chose for the API path. */
+export const ATOM_SCAN_DEPTH = 20;
 
 interface TextFetchResult {
   body: string;
@@ -135,12 +141,23 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
-/** Unstable-stage heuristic over tag + title, mirroring the repo's own
- * stage vocabulary (v1.0.N-beta, rc, alpha, nightly, canary, ...). The
- * atom feed carries no prerelease flag, so the catalog's existing
+/** Unstable-stage gate over tag + title, mirroring the repo's own stage
+ * vocabulary (v1.0.N-beta, rc, alpha, nightly, canary, ...). The atom
+ * feed carries no prerelease flag, so the catalog's existing
  * includeFlaggedReleases opt-in gates these the same way the API path
- * does. Boundary-guarded so "prebuilt" is not read as a prerelease. */
+ * does.
+ *
+ * A tag that parses as strict SemVer WITH a prerelease part is unstable
+ * whatever the identifier says: `-next`, `-experimental` and every other
+ * custom identifier is a prerelease by the spec's own grammar, and no
+ * word list can enumerate that space - a miss here would serve a
+ * prerelease to a stable channel. The word scan below then covers what
+ * the strict grammar cannot see: non-SemVer tags ("nightly-2026.10") and
+ * the release TITLE. Boundary-guarded so "prebuilt" is not read as a
+ * prerelease; build metadata ("1.2.3+build.5") is not a prerelease. */
 export function stageLooksUnstable(tag: string, title: string): boolean {
+  const parsed = parseVersion(tag);
+  if (parsed && parsed.prerelease.length > 0) return true;
   const hay = `${tag} ${title}`;
   return /(?:^|[^a-z0-9])(?:alpha|beta|rc|nightly|canary|snapshot|unstable|dev|preview|prerelease|pre-release|beta-release)(?:[^a-z0-9]|$)/i.test(
     hay
@@ -278,47 +295,57 @@ export function parseExpandedAssets(body: string, repo: string): AtomAsset[] {
   return assets;
 }
 
-/** Reads the asset fragment for one tag, trying BOTH URL shapes. The NEW
- * shape (`/releases/expanded_assets/<tag>`) is what GitHub's release page
- * lazy-loads since the 2026-10 rollout; the OLD shape
- * (`/releases/tag/<tag>/expanded_assets`) is kept as the rollback path.
- * A shape whose answer parses to zero anchors is treated as "not the real
- * fragment" (the old URL answered a page shell with no anchors during the
- * rollout) rather than as an asset-less release - the other shape gets
- * its chance before the entry is recorded asset-less. */
+/** Reads the asset fragment for one tag. The MODERN shape
+ * (`/releases/expanded_assets/<tag>`) is what GitHub's release page
+ * lazy-loads since the 2026-10 rollout and is the only shape probed while
+ * it answers: a 200 whose body parses to zero anchors is the honest
+ * "this release has no uploadable assets" answer, so an asset-less scan
+ * still costs exactly ONE request per tag. The OLD shape
+ * (`/releases/tag/<tag>/expanded_assets`) stays as the rollback for a
+ * REFUSED modern request (404/5xx/policy) - the rollout's page-shell
+ * answer is a 200, so it is classified asset-less here and the API owns
+ * the exact answer, exactly like the shell test pins. */
 async function fetchAssetsForTag(repo: string, tag: string): Promise<AtomAsset[]> {
   const safeTag = encodeURIComponent(tag);
-  const urls = [
-    `https://github.com/${repo}/releases/expanded_assets/${safeTag}`,
-    `https://github.com/${repo}/releases/tag/${safeTag}/expanded_assets`,
-  ];
-  let lastError: unknown = null;
-  for (const url of urls) {
-    try {
-      const { body } = await fetchGithubText(url);
-      const assets = parseExpandedAssets(body, repo);
-      if (assets.length > 0) return assets;
-      // Zero anchors: not a usable fragment. Try the next shape; if none
-      // yields anchors the release genuinely has no uploadable assets.
-    } catch (e) {
-      lastError = e;
-    }
+  try {
+    const { body } = await fetchGithubText(
+      `https://github.com/${repo}/releases/expanded_assets/${safeTag}`
+    );
+    return parseExpandedAssets(body, repo);
+  } catch (e) {
+    const { body } = await fetchGithubText(
+      `https://github.com/${repo}/releases/tag/${safeTag}/expanded_assets`
+    ).catch((legacyError: unknown) => {
+      throw legacyError ?? e;
+    });
+    return parseExpandedAssets(body, repo);
   }
-  if (lastError) throw lastError;
-  return [];
+}
+
+/** Options for the fragment walk. */
+export interface AtomScanOptions {
+  /** Stop the walk as soon as this many entries carry real assets - the
+   * latest-release lookup reads only the first one, so it has no reason
+   * to fetch the fragments behind it. Absent: walk every entry in the
+   * requested slice (the recent scan needs each entry's real assets to
+   * pick from). */
+  stopAfterAssetBearing?: number;
 }
 
 /** The atom-feed mirror of getRecentReleases: newest-first stable entries
  * (unstable stages filtered out unless the catalog entry vouches for
- * flagged releases), each of the first ATOM_ASSET_FETCH_BUDGET entries
- * carrying its real asset list. Throws when the feed itself is
- * unreachable or unparseable - the caller keeps the ORIGINAL API error in
- * that case, so the UI's failure classification never changes. */
+ * flagged releases), each carrying its real asset list - one fragment
+ * per entry across the whole requested slice, so a compatible installer
+ * is found wherever the API path would have found it. The walk stays
+ * bounded by the caller's count, exactly as the API path is bounded by
+ * its per_page. Throws when the feed itself is unreachable or
+ * unparseable - the caller keeps the ORIGINAL API error in that case, so
+ * the UI's failure classification never changes. */
 export async function getReleasesViaAtom(
   repo: string,
   count: number,
   includeFlagged: boolean,
-  stopAtFirstAssetful = false
+  opts: AtomScanOptions = {}
 ): Promise<ReleaseInfo[]> {
   const slug = repo.trim();
   if (!isSafeRepoSlug(slug)) throw new Error('Unsafe repository slug for the atom fallback');
@@ -329,19 +356,16 @@ export async function getReleasesViaAtom(
     0,
     Math.max(1, count)
   );
-  let budget = ATOM_ASSET_FETCH_BUDGET;
   const out: ReleaseInfo[] = [];
+  let assetBearing = 0;
   for (const entry of usable) {
+    // One fragment per tag; a missing/empty fragment (or a hiccup) is
+    // not fatal - the entry simply has no fallback assets to pick from.
     let assets: AtomAsset[] = [];
-    if (budget > 0) {
-      budget -= 1;
-      // One fragment per tag; a missing/empty fragment (or a hiccup) is
-      // not fatal - the entry simply has no fallback assets to pick from.
-      try {
-        assets = await fetchAssetsForTag(slug, entry.tag);
-      } catch {
-        assets = [];
-      }
+    try {
+      assets = await fetchAssetsForTag(slug, entry.tag);
+    } catch {
+      assets = [];
     }
     out.push({
       tag: entry.tag,
@@ -350,21 +374,31 @@ export async function getReleasesViaAtom(
       htmlUrl: entry.htmlUrl,
       assets,
     });
-    // The latest-release lookup only consumes the FIRST asset-ful entry:
-    // walking further fragments would spend requests on answers nobody
-    // reads. The recent-scan keeps the full budget (it needs every
-    // candidate's assets to pick from).
-    if (stopAtFirstAssetful && assets.length > 0) break;
+    if (assets.length > 0) {
+      assetBearing += 1;
+      if (opts.stopAfterAssetBearing !== undefined && assetBearing >= opts.stopAfterAssetBearing) {
+        break;
+      }
+    }
   }
   return out;
 }
 
 /** The atom-feed mirror of getLatestRelease: the newest stable entry that
  * actually carries assets, or null when none of the examined entries
- * does. Never throws for "no stable release with assets" - null is the
- * honest answer and the caller falls back to its original API error. */
-export async function getLatestViaAtom(repo: string, includeFlagged: boolean): Promise<ReleaseInfo | null> {
-  const list = await getReleasesViaAtom(repo, ATOM_ASSET_FETCH_BUDGET, includeFlagged, true);
+ * does. The search reaches as deep as the recent scan - a repo whose
+ * newest handful of entries are other-stream or asset-less releases must
+ * not dead-end the lookup - while stopping at the first entry that has
+ * assets, the only one this lookup reads. Never throws for "no stable
+ * release with assets" - null is the honest answer and the caller falls
+ * back to its original API error. */
+export async function getLatestViaAtom(
+  repo: string,
+  includeFlagged: boolean
+): Promise<ReleaseInfo | null> {
+  const list = await getReleasesViaAtom(repo, ATOM_SCAN_DEPTH, includeFlagged, {
+    stopAfterAssetBearing: 1,
+  });
   for (const rel of list) {
     if (rel.assets.length > 0) return rel;
   }

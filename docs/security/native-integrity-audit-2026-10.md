@@ -1281,6 +1281,18 @@ the native layer, all reviewed line-by-line at `ab2e2723`:
   family PR #111 hardened. The only other route regex in the harness
   (`netpolicy.ts:185`, the self-update mock) is anchored by its
   `/desktop/` path segment and is safe.
+- **Two test-quality gaps in `api_resilience/tests.rs` (report-only,
+  upstream file; no production defect implied).** (1)
+  `cache_evicts_oldest_first_across_both_budgets` overclaims its name:
+  it inserts 264 tiny entries, which exercises only the entry-COUNT
+  budget — the 16 MiB total-byte-budget eviction branch never fires and
+  is untested. (2) The schema-version filter on load is unpinned: a
+  WELL-FORMED cache file carrying `version != 1` must be silently
+  discarded by `CacheStore::open` (the exact regression the
+  `CacheFile::default` doc comment warns a derived `Default` would have
+  caused), but no test feeds one; only malformed JSON is covered, by
+  `a_corrupt_cache_file_degrades_to_an_empty_store`. Both are
+  cheap-to-add pins for the next touch of this file.
 - **`network_policy.rs` (+122).** A new request class
   `github_releases_doc()` admitting github.com for exactly two document
   shapes (`/{owner}/{repo}/releases.atom` and

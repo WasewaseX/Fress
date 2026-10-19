@@ -91,13 +91,13 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     ],
   },
   {
-    version: '1.0.6-beta',
-    date: '2026-10-11',
-    title: 'A catalog that uses its desktop, and a table that speaks',
+    version: '1.0.6',
+    date: '2026-10-19',
+    title: 'Fress never opens your browser by itself',
     items: [
-      'On a wide monitor Fress finally spreads out: header, hero, filters and the catalog share one wide content boundary, and the grid grows a fourth column on large desktops. Narrow screens keep the exact layout they had — three columns on medium desktops, two on tablets, one on phones — and nothing overflows sideways at any width.',
-      'The table view was the last untranslated corner of the app; its headers, copy-command button, badges and platform names speak all five languages now, and every row\'s name is a real keyboard-focusable button. Card titles became proper buttons too, so the whole catalog is keyboard-operable, and every small icon control is sized for real fingers on touch screens.',
-      'Switching between Apps and Privacy Pack no longer leaves you stranded mid-page after a deep scroll — the new page always starts at the top with its heading fully visible, while switching grid/table never scrolls at all. Filters, favorites, batch selection and downloads behave exactly as before.',
+      'The one surprise left in the app is gone: a Download or update click can no longer hand you to the system browser on its own. When no automatic installer exists for your platform, the card now opens Fress\'s own detail dialog with every official option laid out, and the self-update fallbacks show their reason with an explicit "Open the releases page" button you click when you want it.',
+      'Release lookups got cheaper and harder to kill: the quota-free fallback spends one request per release instead of two, walks the whole recent history instead of the first few entries, recognizes prereleases by their version grammar rather than a word list, and every text transport now survives a connection that dies mid-download.',
+      'Every web endpoint Fress talks to - GitHub, F-Droid, the update feed - is now pinned by an automated wire-contract suite that runs on every code change in about a second, so a silent upstream change can never again turn "download" into "browser page".',
     ],
   },
   {

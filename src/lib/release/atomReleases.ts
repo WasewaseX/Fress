@@ -259,12 +259,26 @@ export function parseHumanSizeToBytes(label: string): number | null {
  * that fails to parse is silently skipped. */
 export function parseExpandedAssets(body: string, repo: string): AtomAsset[] {
   const assets: AtomAsset[] = [];
-  const hrefRe = new RegExp(`href="(/${repo}/releases/download/[^"]+)"`, 'g');
+  // The slug is interpolated into a RegExp, so it MUST be escaped first.
+  // GitHub slugs legally contain "." ("calcom/cal.diy" in the live
+  // catalog), and an unescaped dot means "any character": a fragment
+  // carrying a lookalike link ("/calcom/calXdiy/releases/download/...")
+  // matched the pattern, and the prefix-length slice below then trusted a
+  // prefix that was never verified - a download URL under a foreign
+  // repository. Escaping pins the match to the literal slug.
+  const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hrefRe = new RegExp(`href="(/${escapedRepo}/releases/download/[^"]+)"`, 'g');
   const prefix = `/${repo}/releases/download/`;
   const matches = [...body.matchAll(hrefRe)];
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     const href = m[1];
+    // Belt over the braces: the matched href must start with the EXACT
+    // expected repository prefix. The escaping above already guarantees
+    // it; this explicit check keeps the guarantee even if the pattern is
+    // ever edited, and replaces the old length-only slice (which measured
+    // the expected prefix without ever comparing it).
+    if (!href.startsWith(prefix)) continue;
     // Exactly TWO segments after the prefix - the tag and the flat asset
     // file name. A nested path is not an asset name; refuse it rather
     // than decoding a surprise.

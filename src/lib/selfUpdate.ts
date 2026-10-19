@@ -31,6 +31,30 @@ import { parseVersion, stripVPrefix, type ParsedVersion } from './release/semver
 const REPO = 'WasewaseX/Fress';
 
 /**
+ * Deadline for ONE self-update API attempt, mirroring the catalog release
+ * provider's 20 s budget (githubProvider's BROWSER_API_TIMEOUT_MS).
+ *
+ * Without it a pending-forever socket (silent middlebox, dead connection
+ * that never finishes the handshake) leaves `fetch()` unsettled: no error,
+ * no result, so the Atom fallback never starts and `useSelfUpdate`'s
+ * `checking` state never clears - the pill stuck "checking" for the whole
+ * session. `AbortSignal.timeout` aborts the request AND its body read, so
+ * the check is bounded end to end and the existing catch-then-fallback
+ * flow treats the deadline like any other API failure.
+ */
+export const SELF_UPDATE_API_TIMEOUT_MS = 20_000;
+
+// Test seam for the deadline above: the hang-regression test must prove
+// the timeout actually fires without burning 20 real seconds. Production
+// code never calls this.
+let apiTimeoutOverrideMs: number | null = null;
+
+/** @internal replaced in production by nothing - test-only override. */
+export function setSelfUpdateApiTimeoutForTests(ms: number | null): void {
+  apiTimeoutOverrideMs = ms;
+}
+
+/**
  * Reads a small text document from the Fress release feed (releases.atom,
  * SHA256SUMS.txt).
  *
@@ -541,6 +565,10 @@ export function pickOwnAsset(
 async function fetchFromApi(channel: UpdateChannel): Promise<OwnRelease> {
   const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=20`, {
     headers: { Accept: 'application/vnd.github+json' },
+    // Bounded attempt: see SELF_UPDATE_API_TIMEOUT_MS. A never-settling
+    // socket must reject into the catch below, where the Atom fallback
+    // already lives - never hang the whole check.
+    signal: AbortSignal.timeout(apiTimeoutOverrideMs ?? SELF_UPDATE_API_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
   const raw = (await res.json()) as RawRelease[];

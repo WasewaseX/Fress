@@ -778,6 +778,72 @@ async fn text_helper_retries_a_headerless_503_until_the_origin_answers() {
 }
 
 #[tokio::test]
+async fn text_helper_a_retryable_status_without_retry_after_is_spaced_by_the_backoff() {
+    // The headerless half of the Retry-After contract: without the header
+    // the jittered backoff stays in charge. This pins the invariant the
+    // JSON loop shares - adding the server-suggested-wait path must never
+    // remove the spacing a headerless retryable answer still needs.
+    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    let url = spawn_timed_scripted_http(
+        vec![
+            // The most common transient shape in the wild: a 503 from a
+            // CDN or load balancer that sends no Retry-After at all.
+            raw_response("HTTP/1.1 503 Service Unavailable", &[], b""),
+            raw_response("HTTP/1.1 200 OK", &[], b"<feed>ok</feed>"),
+        ],
+        arrivals.clone(),
+    );
+    let doc = get_text(&url, "GitHub release document", &spaced_timing())
+        .await
+        .expect("second attempt succeeds");
+    assert_eq!(doc.status, 200);
+    assert_eq!(doc.body, "<feed>ok</feed>");
+    let times = arrivals.lock().expect("arrivals lock");
+    assert_eq!(times.len(), 2, "one retry after the headerless 503");
+    let gap = times[1].duration_since(times[0]);
+    // The backoff schedule (60..140 ms for attempt 0) must space the
+    // retry; an immediate back-to-back re-ask fails here.
+    assert!(
+        gap >= Duration::from_millis(55),
+        "headerless 503 retried after only {gap:?} - the backoff schedule was skipped"
+    );
+}
+
+#[tokio::test]
+async fn text_helper_a_server_suggested_retry_after_overrides_the_backoff() {
+    // The text transports used to ignore Retry-After entirely: a 429 that
+    // asked the client to wait was re-asked on the local backoff schedule,
+    // adding pressure to the very endpoint that asked for patience. With a
+    // 1 s backoff base, the pre-fix loop waits >= 600 ms before the retry;
+    // the server's explicit "Retry-After: 0" (immediately) must win
+    // instead - the same contract the JSON loop already honors.
+    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    let url = spawn_timed_scripted_http(
+        vec![
+            raw_response("HTTP/1.1 429 Too Many Requests", &["Retry-After: 0"], b""),
+            raw_response("HTTP/1.1 200 OK", &[], b"<feed>ok</feed>"),
+        ],
+        arrivals.clone(),
+    );
+    let timing = Timing {
+        backoff_base: Duration::from_secs(1),
+        ..spaced_timing()
+    };
+    let doc = get_text(&url, "GitHub release document", &timing)
+        .await
+        .expect("second attempt succeeds");
+    assert_eq!(doc.status, 200);
+    assert_eq!(doc.body, "<feed>ok</feed>");
+    let times = arrivals.lock().expect("arrivals lock");
+    assert_eq!(times.len(), 2);
+    let gap = times[1].duration_since(times[0]);
+    assert!(
+        gap < Duration::from_millis(500),
+        "the server's Retry-After: 0 was ignored - retry waited {gap:?}"
+    );
+}
+
+#[tokio::test]
 async fn text_helper_answers_a_deterministic_404_exactly_once() {
     let observed = Arc::new(Mutex::new(Vec::new()));
     let url = spawn_scripted_http(

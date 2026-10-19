@@ -380,6 +380,36 @@ describe('parseExpandedAssets', () => {
     // Nested paths are not flat asset names: only the plain file survives.
     expect(assets.map((a) => a.name)).toEqual(['ok.exe']);
   });
+
+  it('a dotted repo slug (calcom/cal.diy) never matches a lookalike repository', () => {
+    // Live-catalog regression: the slug was interpolated into the asset
+    // RegExp unescaped, so the "." in "cal.diy" meant "any character" and
+    // a fragment carrying a calXdiy link produced a download URL under a
+    // foreign repository. The segment-count check could not catch it: it
+    // sliced by the EXPECTED prefix's length without comparing the actual
+    // prefix. Escaping pins the pattern to the literal slug.
+    const body = `<a href="/calcom/calXdiy/releases/download/v9/app.apk">lookalike</a>
+      <a href="/calcom/cal.diy/releases/download/v9/app.apk">real</a>`;
+    const assets = parseExpandedAssets(body, 'calcom/cal.diy');
+    expect(assets).toHaveLength(1);
+    expect(assets[0].name).toBe('app.apk');
+    expect(assets[0].downloadUrl).toBe(
+      'https://github.com/calcom/cal.diy/releases/download/v9/app.apk'
+    );
+  });
+
+  it('every download URL sits under the exact requested repo prefix (boundary pin)', () => {
+    // The explicit startsWith check is the second wall: even if a future
+    // pattern edit re-widened the match, a sibling slug's href can never
+    // become this repo's download URL.
+    const body = `<a href="/example/tool/releases/download/v1/real.exe">real</a>
+      <a href="/example/tool2/releases/download/v1/sibling.exe">sibling</a>`;
+    const assets = parseExpandedAssets(body, 'example/tool');
+    expect(assets).toHaveLength(1);
+    expect(assets[0].downloadUrl).toBe(
+      'https://github.com/example/tool/releases/download/v1/real.exe'
+    );
+  });
 });
 
 describe('stageLooksUnstable (the feed has no prerelease flag)', () => {

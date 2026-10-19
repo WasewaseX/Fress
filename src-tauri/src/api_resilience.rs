@@ -619,6 +619,15 @@ pub(crate) async fn get_json_resilient(
 /// transport death, as transient as a failed send, so the next attempt
 /// re-asks the origin and the freshness contract is untouched.
 ///
+/// The `Retry-After` contract matches the JSON loop too: a retryable
+/// status that carries a numeric `Retry-After` overrides the backoff for
+/// exactly the next attempt (capped by [`Timing::retry_after_cap`]);
+/// a missing or HTTP-date header keeps the backoff schedule in charge.
+/// A text endpoint answering 429 + "Retry-After: 30" used to be re-asked
+/// on the local backoff schedule alone - extra pressure on the very
+/// endpoint that asked for patience, and a faster path to exhausting the
+/// bounded attempts before the server was ready.
+///
 /// Error strings are label-prefixed so each command keeps its own wording
 /// ("Manifest host ...", "GitHub release document ...").
 pub(crate) async fn get_text_resilient(
@@ -628,9 +637,12 @@ pub(crate) async fn get_text_resilient(
     timing: &Timing,
 ) -> Result<crate::http_body::TextFetch, String> {
     let mut last_transient: Option<String> = None;
+    let mut planned_delay: Option<Duration> = None;
     for attempt in 0..timing.max_attempts {
         if attempt > 0 {
-            let delay = backoff_delay(timing, attempt - 1);
+            let delay = planned_delay
+                .take()
+                .unwrap_or_else(|| backoff_delay(timing, attempt - 1));
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
@@ -640,6 +652,7 @@ pub(crate) async fn get_text_resilient(
             Err(e) => {
                 if is_transient_send_error(&e) {
                     last_transient = Some(crate::network_policy::describe_network_error(&e));
+                    planned_delay = None;
                     continue;
                 }
                 return Err(crate::network_policy::describe_network_error(&e));
@@ -648,6 +661,11 @@ pub(crate) async fn get_text_resilient(
         let status = resp.status();
         if is_retryable_status(status.as_u16(), resp.headers()) {
             last_transient = Some(format!("{label} returned HTTP {}", status.as_u16()));
+            // The server's own wait suggestion wins for the next attempt
+            // (capped); no header or an unparsable one leaves the backoff
+            // schedule in charge. Same per-call state machine as the JSON
+            // loop - the delay is consumed once, never carried further.
+            planned_delay = retry_after_delay(timing, resp.headers());
             continue;
         }
         if !status.is_success() {
@@ -664,6 +682,7 @@ pub(crate) async fn get_text_resilient(
                     // deterministic refusals never wear the `Bad response:`
                     // prefix and stay single-shot below.
                     last_transient = Some(msg);
+                    planned_delay = None;
                     continue;
                 }
                 return Err(msg);

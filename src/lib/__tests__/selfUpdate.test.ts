@@ -15,6 +15,7 @@ import {
   signatureSidecarFor,
   checkForUpdate,
   setUpdateChannel,
+  setSelfUpdateApiTimeoutForTests,
 } from '../selfUpdate';
 import type { OwnRelease } from '../selfUpdate';
 
@@ -1438,5 +1439,74 @@ describe('fetchExpectedSha256 hardening (via checkForUpdate, browser path)', () 
     expect(second.kind).toBe('available');
     if (second.kind === 'available') expect(second.expectedSha256).toBe(B);
     expect(getSumsCalls()).toBe(2);
+  });
+});
+
+describe('the self-update API deadline (a hung socket can never stall the check)', () => {
+  beforeEach(() => {
+    // The fixture feed is a beta prerelease, so the channel is pinned via
+    // the same minimal node-env storage stub the checksum describes use
+    // (the running build's default channel would hide the fallback).
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    setUpdateChannel('beta');
+  });
+  afterEach(() => {
+    setSelfUpdateApiTimeoutForTests(null);
+    vi.unstubAllGlobals();
+  });
+
+  /** Minimal atom feed the fallback can parse; `tag` is parameterized. */
+  const atomFeed = (tag: string) => `<feed xmlns="http://www.w3.org/2005/Atom">
+    <entry><id>tag:github.com,2008:Repository/942107/${tag}</id><updated>2026-10-18T00:00:00Z</updated><title>${tag}</title></entry>
+  </feed>`;
+
+  /** The hung-connection shape: the API fetch neither resolves nor rejects
+   * on its own; it settles only when the caller's deadline aborts it -
+   * exactly what a real fetch does against a silent, open socket. Every
+   * other URL (the atom feed) is served normally. */
+  const hungApiServing = (atom: string) =>
+    vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes('api.github.com')) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject((init.signal as AbortSignal).reason)
+          );
+        });
+      }
+      return new Response(atom, { status: 200 });
+    });
+
+  it('a never-resolving API answer times out and the atom fallback answers', async () => {
+    setSelfUpdateApiTimeoutForTests(40);
+    const api = hungApiServing(atomFeed('v1.0.8-beta'));
+    vi.stubGlobal('fetch', api as unknown as typeof fetch);
+    // Pre-fix this await never settled: no error, no result, so the Atom
+    // fallback never started and useSelfUpdate's checking flag never
+    // cleared. Post-fix the deadline rejects into the catch and the
+    // fallback owns the answer.
+    const release = await fetchOwnLatestRelease('beta');
+    expect(release?.tag).toBe('v1.0.8-beta');
+    // The deadline really rode the API attempt (and only that attempt).
+    const apiCalls = api.mock.calls.filter(([u]) => String(u).includes('api.github.com'));
+    expect(apiCalls).toHaveLength(1);
+    const signal = (apiCalls[0][1] as RequestInit).signal as AbortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(true);
+  });
+
+  it('the same deadline bounds the full checkForUpdate the pill awaits', async () => {
+    setSelfUpdateApiTimeoutForTests(40);
+    vi.stubGlobal('fetch', hungApiServing(atomFeed('v99.0.0-beta')) as unknown as typeof fetch);
+    // useSelfUpdate's await sits on checkForUpdate; with the API hung the
+    // check must still settle (fallback answer => update available) instead
+    // of pending forever and leaving the pill stuck on "checking".
+    const res = await checkForUpdate('0.0.1');
+    expect(res.kind).toBe('available');
+    if (res.kind === 'available') expect(res.release.tag).toBe('v99.0.0-beta');
   });
 });

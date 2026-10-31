@@ -58,7 +58,20 @@ jobs:
         # cross-source tag-consistency check (API vs atom, skipped honestly
         # when the shared quota is dead). Fails loudly on a page-shell
         # regression (zero-anchor fragment) or a source disagreement.
-        run: npm run test:api:bruno
+        # The collection also carries the mock/ fixtures (silent-prerelease
+        # gate, failure shapes, the updater artifact chain) - they resolve
+        # {{mockBase}} to a local hermetic origin, so THIS step starts the
+        # api-mock server and selects the mock environment. Without them
+        # the mock requests fail on an unresolved variable - the
+        # 2026-10-26 scheduled run's six red requests, a CI configuration
+        # gap, not a broken download source.
+        run: |
+          node scripts/api-mock/server.mjs &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8787/updater/latest.json >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          npm run test:api:bruno; code=$?; kill %1 2>/dev/null; exit $code
       - name: Upload the smoke report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

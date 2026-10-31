@@ -156,7 +156,17 @@ def _doc(doc: str) -> bytes:
     lines = doc.strip().splitlines()
     if not lines or not lines[0].startswith("untrusted comment:") or len(lines) < 2:
         raise ValueError("not a minisign document")
-    return base64.b64decode("".join(lines[1:]).strip())
+    # The box is exactly line 1 - never a join of the remaining lines. A
+    # signature document continues past the box with the trusted comment and
+    # its own (deliberately unverified here) wrapper box; joining lines[1:]
+    # glued that text onto the box and only decoded correctly while CPython's
+    # a2b_base64 stopped at the first padding. The ubuntu-latest image roll of
+    # 2026-10-31 (CI run 41213244976) shipped a Python that raises
+    # "Incorrect padding" on the trailing alphabet characters instead - the
+    # same join would have failed the release workflow's own final artifact
+    # audit (verify-release runs this file). Decoding the designated line is
+    # the format's contract and works on every Python.
+    return base64.b64decode(lines[1].strip())
 
 
 def _pubkey(box: bytes):

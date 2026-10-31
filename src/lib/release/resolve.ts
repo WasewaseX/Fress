@@ -147,7 +147,11 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           //    still runs.
           let latest: ReleaseInfo | null = null;
           try {
-            latest = await getLatestRelease(repo);
+            // The vouch rides along: a repo whose own stable builds are
+            // flagged prerelease (DevToys) must keep receiving its newest
+            // release verbatim, while every other repo gets the
+            // silent-prerelease cut (feed cut + textual gate).
+            latest = await getLatestRelease(repo, app.includeFlaggedReleases === true);
           } catch (e) {
             latest = null;
             const msg = (e as Error).message || '';

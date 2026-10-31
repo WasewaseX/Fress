@@ -89,6 +89,56 @@ const PLATFORM_KEYS = [
   'windows-x86_64', 'windows-i686', 'windows-aarch64', 'android-arm64',
 ];
 
+// ---- Silent-prerelease fixture (example/silent) --------------------------
+// The dangerous shape the 2026-10-31 live audit caught on ShareX v22.0.0,
+// rustdesk 1.5.1 and SimpleX v7.0.4: a GitHub-FLAGGED prerelease whose tag
+// and title carry NO unstable marker, sitting on top of the atom feed with
+// real assets. The feed cannot carry the flag; /releases/latest resolves
+// it - GitHub answers the redirect with the newest NON-draft
+// NON-prerelease tag, the quota-free oracle the silent-prerelease cut
+// follows (getLatestStableTagViaDoc).
+const SILENT_ATOM_FEED = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>tag:github.com,2008:https://github.com/example/silent/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/example/silent/releases"/>
+  <title>Release notes from silent</title>
+  <updated>2026-10-20T00:00:00Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/9/example-silent/v2.2.0</id>
+    <updated>2026-10-20T00:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/example/silent/releases/tag/v2.2.0"/>
+    <title>Silent 2.2.0</title>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/8/example-silent/v2.1.0</id>
+    <updated>2026-10-02T00:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/example/silent/releases/tag/v2.1.0"/>
+    <title>Silent 2.1.0</title>
+  </entry>
+</feed>`;
+
+const SILENT_STABLE = {
+  tag_name: 'v2.1.0',
+  name: 'Silent 2.1.0',
+  published_at: '2026-10-02T00:00:00Z',
+  prerelease: false,
+  html_url: 'https://github.com/example/silent/releases/tag/v2.1.0',
+  assets: [
+    { name: 'Silent-2.1.0.exe', size: 33000000, browser_download_url: 'https://github.com/example/silent/releases/download/v2.1.0/Silent-2.1.0.exe' },
+  ],
+};
+
+const SILENT_PRERELEASE = {
+  tag_name: 'v2.2.0',
+  name: 'Silent 2.2.0', // clean tag AND clean title - only the flag knows
+  published_at: '2026-10-20T00:00:00Z',
+  prerelease: true,
+  html_url: 'https://github.com/example/silent/releases/tag/v2.2.0',
+  assets: [
+    { name: 'Silent-2.2.0.exe', size: 34000000, browser_download_url: 'https://github.com/example/silent/releases/download/v2.2.0/Silent-2.2.0.exe' },
+  ],
+};
+
 const latestJson = () => ({
   version: '2.0.0',
   pub_date: '2026-10-18T20:57:56Z',
@@ -142,7 +192,22 @@ const server = createServer((req, res) => {
   }
 
   // ---- GitHub REST (JSON) ----------------------------------------------
-  let m = /^\/github\/repos\/([^/]+)\/([^/]+)\/releases\/latest$/.exec(p);
+  // Repo-specific fixtures FIRST: the generic regexes below would swallow
+  // them otherwise.
+  let m;
+  m = /^\/github\/repos\/example\/silent\/releases\/latest$/.exec(p);
+  if (m) return json(res, 200, SILENT_STABLE);
+
+  m = /^\/github\/repos\/example\/silent\/releases$/.exec(p);
+  if (m) {
+    // Newest first: the silent prerelease on top, the real stable below -
+    // exactly what GitHub returns for the ShareX-class repos.
+    const perPage = Number(url.searchParams.get('per_page') || 20);
+    const list = [SILENT_PRERELEASE, SILENT_STABLE].slice(0, Math.max(1, Math.min(perPage, 2)));
+    return json(res, 200, list);
+  }
+
+  m = /^\/github\/repos\/([^/]+)\/([^/]+)\/releases\/latest$/.exec(p);
   if (m) return json(res, 200, STABLE);
 
   m = /^\/github\/repos\/([^/]+)\/([^/]+)\/releases$/.exec(p);
@@ -156,6 +221,22 @@ const server = createServer((req, res) => {
   if (p === '/github/example/tool/releases.atom') {
     res.writeHead(200, { 'content-type': 'application/atom+xml; charset=utf-8' });
     return res.end(ATOM_FEED);
+  }
+  if (p === '/github/example/silent/releases.atom') {
+    res.writeHead(200, { 'content-type': 'application/atom+xml; charset=utf-8' });
+    return res.end(SILENT_ATOM_FEED);
+  }
+  // The stable-tag oracle: GitHub answers /releases/latest with a 302 to
+  // the newest non-draft non-prerelease release page. The mock redirects
+  // to a same-origin path so request contexts that follow redirects land
+  // on a real document and expose the FINAL URL to assertions.
+  if (p === '/github/example/silent/releases/latest') {
+    res.writeHead(302, { location: '/github/example/silent/releases/tag/v2.1.0' });
+    return res.end();
+  }
+  if (p === '/github/example/silent/releases/tag/v2.1.0') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    return res.end('<html><body><link rel="canonical" href="https://github.com/example/silent/releases/tag/v2.1.0"></body></html>');
   }
   m = /^\/github\/([^/]+)\/([^/]+)\/releases\/expanded_assets\/([^/]+)$/.exec(p);
   if (m) {

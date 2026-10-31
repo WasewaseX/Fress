@@ -201,7 +201,11 @@ describe('desktop atom-first source priority (Tauri)', () => {
     stubInvoke();
     await getLatestRelease('example/tool');
     const docs = invokeCalls('fetch_github_release_doc');
-    expect(docs[1]).toBe('https://github.com/example/tool/releases/expanded_assets/v2.0.0');
+    // Order: feed, stable-tag oracle (/releases/latest, the silent-
+    // prerelease cut), then the NEW fragment shape for the surviving pick.
+    expect(docs[0]).toBe('https://github.com/example/tool/releases.atom');
+    expect(docs[1]).toBe('https://github.com/example/tool/releases/latest');
+    expect(docs[2]).toBe('https://github.com/example/tool/releases/expanded_assets/v2.0.0');
     expect(docs.some((u) => u.endsWith('/releases/tag/v2.0.0/expanded_assets'))).toBe(false);
   });
 
@@ -210,9 +214,9 @@ describe('desktop atom-first source priority (Tauri)', () => {
     const rel = await getLatestRelease('example/tool');
     expect(rel.tag).toBe('v2.0.0');
     expect(rel.assets.length).toBe(2);
-    const docs = invokeCalls('fetch_github_release_doc');
-    expect(docs[1]).toBe('https://github.com/example/tool/releases/expanded_assets/v2.0.0');
-    expect(docs[2]).toBe('https://github.com/example/tool/releases/tag/v2.0.0/expanded_assets');
+    const frags = invokeCalls('fetch_github_release_doc').filter((u) => u.includes('/expanded_assets'));
+    expect(frags[0]).toBe('https://github.com/example/tool/releases/expanded_assets/v2.0.0');
+    expect(frags[1]).toBe('https://github.com/example/tool/releases/tag/v2.0.0/expanded_assets');
   });
 
   it('a shell-page fragment (zero anchors on both shapes) hands the decision to the API', async () => {

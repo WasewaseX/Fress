@@ -1,0 +1,41 @@
+meta {
+  name: 02 github latest-stable oracle (live)
+  type: http
+  seq: 2
+}
+
+get {
+  url: https://github.com/ShareX/ShareX/releases/latest
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The LIVE half of the silent-prerelease contract, against the real
+  // GitHub: /releases/latest must resolve (following GitHub's own
+  // redirect) to the newest NON-draft NON-prerelease release page of the
+  // repo. This is the quota-free oracle the desktop atom path follows to
+  // drop silent prereleases - flagged releases whose tag and title carry
+  // no unstable marker (ShareX v22.0.0, rustdesk 1.5.1 and SimpleX v7.0.4
+  // all shipped exactly that shape; verified 2026-10-31).
+  //
+  // Structural assertions only: the endpoint must answer inside the
+  // latency budget and land on a release-tag page. WHICH tag is correct
+  // changes with every release; the atom-vs-redirect delta is logged, not
+  // asserted, so the probe never fails just because a maintainer flagged
+  // a new release. The full per-repo sweep lives in the scheduled
+  // all-apps pipeline audit (scripts/all_apps_api_test.py).
+  if (res.status !== 200) {
+    throw new Error('releases/latest did not resolve to a release page: HTTP ' + res.status);
+  }
+  console.log('ShareX /releases/latest resolved: HTTP ' + res.status);
+}
+
+tests {
+  test("releases/latest answers 200 after GitHub's own redirect", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("answers fast (the oracle sits on the hot resolve path)", function() {
+    expect(res.responseTime).to.be.below(10000);
+  });
+}

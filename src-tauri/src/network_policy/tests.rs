@@ -245,7 +245,7 @@ fn resolver_rejects_unlisted_hosts() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn github_release_documents_admit_exactly_the_two_shapes() {
+fn github_release_documents_admit_exactly_the_release_shapes() {
     for raw in [
         // The atom feed of any repository.
         "https://github.com/localsend/localsend/releases.atom",
@@ -261,6 +261,15 @@ fn github_release_documents_admit_exactly_the_two_shapes() {
         // A tag containing a slash arrives percent-encoded as one segment -
         // a real GitHub shape (git tags may contain slashes).
         "https://github.com/WasewaseX/Fress/releases/tag/release%2Fv1.0/expanded_assets",
+        // The stable-tag ORACLE (silent-prerelease cut, see
+        // getLatestStableTagViaDoc): the entry URL and the release page it
+        // redirects to. GitHub answers /releases/latest with a redirect to
+        // the newest NON-draft NON-prerelease tag - the authoritative
+        // stable the feed itself cannot name.
+        "https://github.com/localsend/localsend/releases/latest",
+        "https://github.com/WasewaseX/Fress/releases/latest",
+        "https://github.com/localsend/localsend/releases/tag/v1.17.0",
+        "https://github.com/WasewaseX/Fress/releases/tag/release%2Fv1.0",
     ] {
         UrlPolicy::github_releases_doc()
             .validate(raw)
@@ -283,7 +292,10 @@ fn github_release_documents_refuse_everything_else_on_github_com() {
         // Wrong segment shapes that contain the right words.
         "https://github.com/WasewaseX/Fress/releases/tag/v1.0.3/expanded_assets/extra",
         "https://github.com/WasewaseX/Fress/releases/expanded_assets/v1.0.3/extra",
-        "https://github.com/WasewaseX/Fress/releases/tag/v1.0.3",
+        // /releases/latest with extra segments is NOT the oracle shape.
+        "https://github.com/WasewaseX/Fress/releases/latest/extra",
+        // /releases/latest/ without the repo segment, and other near-misses.
+        "https://github.com/WasewaseX/Fress/releases/latest/tag/v1.0.3",
         // Traversal attempts (the URL parser normalizes dot segments away
         // before the shape check sees them, so both collapse to shapes with
         // the wrong segment count).

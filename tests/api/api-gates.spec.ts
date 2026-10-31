@@ -102,6 +102,46 @@ test.describe('quota-free release documents', () => {
   });
 });
 
+test.describe('silent-prerelease oracle contract (example/silent)', () => {
+  // The live shape the 2026-10-31 audit caught on ShareX v22.0.0, rustdesk
+  // 1.5.1 and SimpleX v7.0.4: a GitHub-FLAGGED prerelease with a clean tag,
+  // a clean title and real assets, sitting on TOP of the atom feed. The
+  // feed cannot carry the flag; the /releases/latest redirect resolves it.
+  // These gates pin the WIRE contracts the silent-prerelease cut (vitest:
+  // silentPrerelease.test.ts) is built on.
+
+  test('the dangerous shape is real: silent prerelease on top of the feed, stable below', async ({ request }) => {
+    const res = await request.get('/github/example/silent/releases.atom');
+    expect(res.status()).toBe(200);
+    const body = await res.text();
+    const links = [...body.matchAll(/rel="alternate"[^>]*href="([^"]+)\/tag\/([^"]+)"/g)].map((m) => m[2]);
+    expect(links).toEqual(['v2.2.0', 'v2.1.0']);
+    // Only the REST flag knows v2.2.0 is a prerelease - the feed is mute.
+    const list = await (await request.get('/github/repos/example/silent/releases?per_page=20')).json();
+    expect(list[0].tag_name).toBe('v2.2.0');
+    expect(list[0].prerelease).toBe(true);
+    expect(list[1].tag_name).toBe('v2.1.0');
+    expect(list[1].prerelease).toBe(false);
+  });
+
+  test('/releases/latest redirects to the newest NON-prerelease tag - the oracle', async ({ request }) => {
+    const res = await request.get('/github/example/silent/releases/latest', {
+      maxRedirects: 5,
+    });
+    expect(res.status()).toBe(200);
+    // The final URL is the whole contract: the redirect resolved to the
+    // stable release page, NOT the silent prerelease the feed puts on top.
+    expect(res.url()).toContain('/releases/tag/v2.1.0');
+    expect(res.url()).not.toContain('/tag/v2.2.0');
+  });
+
+  test('the oracle lands on a real document a request context can read', async ({ request }) => {
+    const res = await request.get('/github/example/silent/releases/tag/v2.1.0');
+    expect(res.status()).toBe(200);
+    expect(await res.text()).toContain('releases/tag/v2.1.0');
+  });
+});
+
 test.describe('failure shapes the resilience layer is built on', () => {
   test('a rate-limit answer carries Retry-After and the quota signature', async ({ request }) => {
     const res = await request.get('/fault/429-retry-after');

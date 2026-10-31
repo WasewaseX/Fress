@@ -117,6 +117,72 @@ async function fetchGithubText(url: string): Promise<TextFetchResult> {
   return { body: await resp.text() };
 }
 
+/**
+ * The quota-free stable-tag ORACLE.
+ *
+ * The atom feed carries NO prerelease flag: a maintainer who flags
+ * "v22.0.0" as a pre-release on GitHub without writing beta/rc/preview
+ * anywhere in the tag or title gets that release served as "stable" by
+ * every textual gate - ShareX, rustdesk and SimpleX all did exactly that
+ * (source-verified 2026-10-31: their flagged releases carry clean tags,
+ * real assets, and sit ABOVE the newest unflagged one in the feed).
+ *
+ * github.com/{repo}/releases/latest answers with a redirect to the newest
+ * NON-draft NON-prerelease release page. The redirect is resolved by the
+ * transport (final_url), so the authoritative latest-stable tag costs one
+ * small quota-free document - no api.github.com request, no HTML parsing.
+ *
+ * Returns:
+ *   - the tag string  -> entries ABOVE it in the (newest-first) feed are
+ *     prereleases/drafts by GitHub's own resolution and may be dropped;
+ *   - null            -> the repo has no stable release at all (404, the
+ *     honest answer the atom side can mirror);
+ *   - throws          -> transport/policy failure; callers FAIL OPEN (the
+ *     oracle is hardening, never a new failure mode for the quota-free
+ *     path that stands between the user and a rate-limited API).
+ */
+export async function getLatestStableTagViaDoc(repo: string): Promise<string | null> {
+  const slug = repo.trim();
+  if (!isSafeRepoSlug(slug)) return null;
+  if (!isTauri()) {
+    // Desktop-only by construction: github.com refuses CORS outright, so
+    // the browser can neither read the body nor see the redirect target -
+    // there is no honest browser implementation of this probe. Throwing
+    // (instead of pretending to try) keeps the browser atom fallback's
+    // behavior byte-for-byte what it was, and test mocks that happily
+    // answer github.com URLs must not create oracle answers the real
+    // webview can never produce. The browser surface stays covered by the
+    // API-first order (GitHub's own flags) + the textual unstable gate.
+    throw new Error('Latest-stable oracle is desktop-only (github.com refuses CORS)');
+  }
+  const url = `https://github.com/${slug}/releases/latest`;
+  // Same dedicated command as the feed/fragments (github.com stays off
+  // the generic text policy). The release PAGE body is irrelevant here
+  // - a page over the native cap still reports its final URL, so
+  // `truncated` is deliberately not a failure for this probe.
+  const r = await invoke<{ status: number; final_url?: string; body: string; truncated: boolean }>(
+    'fetch_github_release_doc',
+    { url }
+  );
+  if (!r || typeof (r as { status?: unknown }).status !== 'number') {
+    throw new Error('Release-document reader unavailable');
+  }
+  const status = r.status;
+  const finalUrl = r.final_url ?? '';
+  if (status === 404) return null; // no stable release: the honest answer
+  if (status !== 200) throw new Error(`HTTP ${status}`);
+  const m = /\/releases\/tag\/([^/?#]+)/.exec(finalUrl || '');
+  if (!m) throw new Error('Latest-stable redirect carried no tag');
+  let tag: string;
+  try {
+    tag = decodeURIComponent(m[1]);
+  } catch {
+    tag = m[1];
+  }
+  if (!isSafeTag(tag)) throw new Error('Unsafe tag from latest-stable redirect');
+  return tag;
+}
+
 /** Repo slugs this module will build URLs from. Same charset GitHub
  * itself uses for owner/repository paths; anything else is refused
  * before a request is made. */
@@ -354,7 +420,19 @@ export interface AtomScanOptions {
  * bounded by the caller's count, exactly as the API path is bounded by
  * its per_page. Throws when the feed itself is unreachable or
  * unparseable - the caller keeps the ORIGINAL API error in that case, so
- * the UI's failure classification never changes. */
+ * the UI's failure classification never changes.
+ *
+ * SILENT-PRERELEASE CUT (unvouched repos): before the walk, the stable-tag
+ * oracle (/releases/latest redirect) pins the authoritative latest stable.
+ * The feed is newest-first and GitHub's latest skips drafts and
+ * prereleases, so EVERY entry above the oracle's tag is a prerelease or a
+ * draft regardless of how stable its tag and title look - they are cut
+ * before a fragment is ever fetched for them. The cut never removes a
+ * stable entry: other streams' stables are all older than (or equal to)
+ * the newest stable, so they sit at or below the oracle's position. A 404
+ * mirrors the API's honest "no stable release"; an unreachable oracle
+ * fails open (entries above it keep today's behavior) because this
+ * fallback must not gain a new way to die. */
 export async function getReleasesViaAtom(
   repo: string,
   count: number,
@@ -366,7 +444,29 @@ export async function getReleasesViaAtom(
   const { body } = await fetchGithubText(`https://github.com/${slug}/releases.atom`);
   const entries = parseAtomFeed(body, slug);
   if (entries.length === 0) throw new Error('Atom feed carried no usable release entries');
-  const usable = (includeFlagged ? entries : entries.filter((e) => !stageLooksUnstable(e.tag, e.title))).slice(
+  // The silent-prerelease cut runs BEFORE the stage filter and the
+  // fragment walk: one small quota-free document prices out every
+  // prerelease the feed's text could not expose.
+  let candidates = entries;
+  if (!includeFlagged) {
+    try {
+      const stableTag = await getLatestStableTagViaDoc(slug);
+      if (stableTag === null) {
+        // No stable release exists: the atom side answers exactly what the
+        // API side answers for such repos (DevToys-class repos are vouched
+        // and never reach this branch).
+        return [];
+      }
+      const idx = entries.findIndex((e) => e.tag === stableTag);
+      if (idx > 0) candidates = entries.slice(idx); // drop prereleases/drafts above it
+      // idx === 0: the oracle agrees with the feed top - nothing to cut.
+      // idx === -1: the oracle's tag is absent from this feed page (older
+      // than its window, or feed/oracle clock skew) - fail open.
+    } catch {
+      // Oracle unreachable: fail open, the textual gate stays in charge.
+    }
+  }
+  const usable = (includeFlagged ? entries : candidates.filter((e) => !stageLooksUnstable(e.tag, e.title))).slice(
     0,
     Math.max(1, count)
   );

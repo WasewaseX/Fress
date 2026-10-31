@@ -142,6 +142,18 @@ function stubInvoke(opts: {
           if (opts.atomBody instanceof Error) throw opts.atomBody;
           return { status: 200, body: opts.atomBody ?? ATOM_BODY, truncated: false };
         }
+        if (/\/releases\/latest$/.test(url)) {
+          // The stable-tag oracle, healthy by default: GitHub's redirect
+          // pins v2.0.0 - the feed top - so the silent-prerelease cut is a
+          // no-op here and the quota contract ("zero api.github.com
+          // commands on a healthy atom path") stays pinned.
+          return {
+            status: 200,
+            final_url: 'https://github.com/example/tool/releases/tag/v2.0.0',
+            body: '',
+            truncated: false,
+          };
+        }
         if (/\/releases\/expanded_assets\//.test(url)) {
           if (opts.newFragment instanceof Error) throw opts.newFragment;
           return { status: 200, body: opts.newFragment ?? FRAGMENT_BODY, truncated: false };

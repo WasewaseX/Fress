@@ -19,7 +19,11 @@
 //      newest NON-draft NON-prerelease tag straight from GitHub - cuts
 //      every feed entry ABOVE it (they are prereleases/drafts by
 //      construction) before a fragment is fetched for them; 404 answers
-//      "no stable release" honestly; transport failure FAILS OPEN.
+//      "no stable release" honestly; transport failure FAILS CLOSED - the
+//      atom path refuses and the caller's API stage (which brackets every
+//      atom call) verifies instead. The 2026-10-31 release-audit verdict
+//      rejected the earlier fail-open draft: an unreachable oracle must
+//      never let a silent prerelease sail through.
 //
 //   L2 (both surfaces, API answers): the textual unstable gate also runs
 //      over flag-filtered API results, catching unflagged betas.
@@ -228,14 +232,45 @@ describe('L1: the /releases/latest oracle cuts silent prereleases (desktop, quot
     expect(rel.tag).toBe('v21.0.0'); // from the API document, not the feed
   });
 
-  it('oracle transport failure FAILS OPEN - today\'s behavior is preserved', async () => {
+  it('oracle transport failure FAILS CLOSED - the API verifier answers instead', async () => {
     stubInvoke({
       atomBody: SILENT,
       fragmentByTag: { 'v22.0.0': FRAG_V22 },
       oracle: new Error('connection reset'),
     });
     const rel = await getLatestRelease(REPO);
-    expect(rel.tag).toBe('v22.0.0'); // pre-fix behavior; hardening never adds a way to die
+    // The feed top (v22.0.0, the silent prerelease) is NEVER served: the
+    // atom path refused the unverified feed, and the API - the one
+    // authority that carries the real flag - answered with the stable.
+    expect(rel.tag).toBe('v21.0.0');
+    expect(docUrls().some((u) => u.includes('/expanded_assets/v22.0.0'))).toBe(false);
+  });
+
+  it('oracle down AND API down - nothing unverified is served, the classified error survives', async () => {
+    stubInvoke({
+      atomBody: SILENT,
+      oracle: new Error('connection reset'),
+      apiDoc: new Error('GitHub rate limit reached'),
+    });
+    // The lookup ends in the honest failure it would have had without the
+    // feed - never in a silent prerelease dressed as stable.
+    await expect(getLatestRelease(REPO)).rejects.toThrow(/rate limit/i);
+    await expect(getReleasesViaAtom(REPO, 20, false)).rejects.toThrow('connection reset');
+  });
+
+  it('a verified tag absent from the feed page - the scan refuses, the API owns the answer', async () => {
+    // The oracle's stable tag is not on this feed page: the feed is stale
+    // (everything here is older than the newest stable) or every entry is
+    // a prerelease newer than it. Either way the feed cannot answer -
+    // serving its top would be a guess.
+    stubInvoke({
+      atomBody: SILENT,
+      fragmentByTag: { 'v22.0.0': FRAG_V22, 'v21.0.0': FRAG_V21 },
+      oracle: { status: 200, finalUrl: `https://github.com/${REPO}/releases/tag/v9.9.9` },
+    });
+    await expect(getReleasesViaAtom(REPO, 20, false)).rejects.toThrow('cannot be verified');
+    const rel = await getLatestRelease(REPO);
+    expect(rel.tag).toBe('v21.0.0');
   });
 
   it('VOUCHED repos skip the oracle entirely (DevToys contract)', async () => {
@@ -291,7 +326,7 @@ describe('the oracle itself', () => {
     expect(await getLatestStableTagViaDoc('example/tool')).toBe('v1.0+build.5');
   });
 
-  it('a tag outside the feed parser\'s charset throws - the cut then fails open, matching the feed\'s own contract', async () => {
+  it('a tag outside the feed parser\'s charset throws - the cut then refuses, matching the feed\'s own contract', async () => {
     // Slash-tagged streams (mullvad ios%2F2026.7) are excluded by
     // parseAtomFeed's isSafeTag gate too: the oracle must not accept what
     // the feed could never match.
@@ -304,12 +339,12 @@ describe('the oracle itself', () => {
     expect(await getLatestStableTagViaDoc('example/tool')).toBeNull();
   });
 
-  it('non-200 non-404 -> throws (caller fails open)', async () => {
+  it('non-200 non-404 -> throws (the scan refuses, fail closed)', async () => {
     stubInvoke({ oracle: { status: 502 } });
     await expect(getLatestStableTagViaDoc('example/tool')).rejects.toThrow('HTTP 502');
   });
 
-  it('a final URL without a tag -> throws (caller fails open)', async () => {
+  it('a final URL without a tag -> throws (the scan refuses, fail closed)', async () => {
     stubInvoke({ oracle: { status: 200, finalUrl: 'https://github.com/example/tool' } });
     await expect(getLatestStableTagViaDoc('example/tool')).rejects.toThrow('no tag');
   });

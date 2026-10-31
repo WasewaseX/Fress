@@ -137,9 +137,11 @@ async function fetchGithubText(url: string): Promise<TextFetchResult> {
  *     prereleases/drafts by GitHub's own resolution and may be dropped;
  *   - null            -> the repo has no stable release at all (404, the
  *     honest answer the atom side can mirror);
- *   - throws          -> transport/policy failure; callers FAIL OPEN (the
- *     oracle is hardening, never a new failure mode for the quota-free
- *     path that stands between the user and a rate-limited API).
+ *   - throws          -> transport/policy failure; callers REFUSE (fail
+ *     closed) and their API stage - which brackets every atom call -
+ *     verifies the answer instead. The 2026-10-31 release-audit verdict
+ *     rejected the earlier fail-open draft: a silent prerelease sailed
+ *     through whenever the oracle was unreachable.
  */
 export async function getLatestStableTagViaDoc(repo: string): Promise<string | null> {
   const slug = repo.trim();
@@ -148,11 +150,10 @@ export async function getLatestStableTagViaDoc(repo: string): Promise<string | n
     // Desktop-only by construction: github.com refuses CORS outright, so
     // the browser can neither read the body nor see the redirect target -
     // there is no honest browser implementation of this probe. Throwing
-    // (instead of pretending to try) keeps the browser atom fallback's
-    // behavior byte-for-byte what it was, and test mocks that happily
-    // answer github.com URLs must not create oracle answers the real
-    // webview can never produce. The browser surface stays covered by the
-    // API-first order (GitHub's own flags) + the textual unstable gate.
+    // (instead of pretending to try) routes the browser caller to the
+    // API verifier below, and test mocks that happily answer github.com
+    // URLs must not create oracle answers the real webview can never
+    // produce.
     throw new Error('Latest-stable oracle is desktop-only (github.com refuses CORS)');
   }
   const url = `https://github.com/${slug}/releases/latest`;
@@ -430,9 +431,16 @@ export interface AtomScanOptions {
  * before a fragment is ever fetched for them. The cut never removes a
  * stable entry: other streams' stables are all older than (or equal to)
  * the newest stable, so they sit at or below the oracle's position. A 404
- * mirrors the API's honest "no stable release"; an unreachable oracle
- * fails open (entries above it keep today's behavior) because this
- * fallback must not gain a new way to die. */
+ * mirrors the API's honest "no stable release". When the quota-free
+ * oracle is unreachable, the scan REFUSES - fail-closed by design: an
+ * unverifiable feed answer must never masquerade as stable (the
+ * 2026-10-31 release-audit verdict rejected the earlier fail-open draft
+ * for exactly that hole). The refusal is also the API backstop: every
+ * caller brackets the atom path with the API (latest lookups fall
+ * through to /releases/latest on any atom throw; recent scans reach the
+ * atom path only after the API has answered), so a refusal hands the
+ * decision to the one authority that carries the real prerelease flags
+ * - without a second, duplicated API request. */
 export async function getReleasesViaAtom(
   repo: string,
   count: number,
@@ -444,27 +452,34 @@ export async function getReleasesViaAtom(
   const { body } = await fetchGithubText(`https://github.com/${slug}/releases.atom`);
   const entries = parseAtomFeed(body, slug);
   if (entries.length === 0) throw new Error('Atom feed carried no usable release entries');
-  // The silent-prerelease cut runs BEFORE the stage filter and the
-  // fragment walk: one small quota-free document prices out every
-  // prerelease the feed's text could not expose.
   let candidates = entries;
   if (!includeFlagged) {
-    try {
-      const stableTag = await getLatestStableTagViaDoc(slug);
-      if (stableTag === null) {
-        // No stable release exists: the atom side answers exactly what the
-        // API side answers for such repos (DevToys-class repos are vouched
-        // and never reach this branch).
-        return [];
-      }
-      const idx = entries.findIndex((e) => e.tag === stableTag);
-      if (idx > 0) candidates = entries.slice(idx); // drop prereleases/drafts above it
-      // idx === 0: the oracle agrees with the feed top - nothing to cut.
-      // idx === -1: the oracle's tag is absent from this feed page (older
-      // than its window, or feed/oracle clock skew) - fail open.
-    } catch {
-      // Oracle unreachable: fail open, the textual gate stays in charge.
+    // The silent-prerelease cut runs BEFORE the stage filter and the
+    // fragment walk: one small quota-free document prices out every
+    // prerelease the feed's text could not expose. NO try/catch around
+    // the oracle on purpose: a transport failure, an unsafe tag, an
+    // unavailable reader - any of them must REFUSE the scan rather than
+    // silently serve the unverified feed top. The throw IS the fail-
+    // closed contract, and the caller's API stage is the verifier.
+    const stableTag = await getLatestStableTagViaDoc(slug);
+    if (stableTag === null) {
+      // No stable release exists: the atom side answers exactly what the
+      // API side answers for such repos (DevToys-class repos are vouched
+      // and never reach this branch).
+      return [];
     }
+    const idx = entries.findIndex((e) => e.tag === stableTag);
+    if (idx === -1) {
+      // The VERIFIED newest stable is absent from this feed page. Either
+      // the feed is stale (the stable is newer than everything here, so
+      // the feed cannot answer "latest" at all) or every entry on the
+      // page sits above the newest stable (all prereleases/drafts).
+      // Refuse rather than guess: the caller's API stage owns the exact
+      // answer.
+      throw new Error('Atom feed cannot be verified against the latest-stable oracle');
+    }
+    if (idx > 0) candidates = entries.slice(idx); // drop prereleases/drafts above it
+    // idx === 0: the oracle agrees with the feed top - nothing to cut.
   }
   const usable = (includeFlagged ? entries : candidates.filter((e) => !stageLooksUnstable(e.tag, e.title))).slice(
     0,

@@ -34,6 +34,12 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+}));
+
 import { ghCache, fdCache, peekResolveFailure } from '../release/resolveCache';
 import { resolveGitHubDownload } from '../release/resolve';
 import {
@@ -105,35 +111,65 @@ const FRAGMENT_BODY = `<div>
   <a href="/example/tool/releases/download/v2.0.0/..">dotdot</a>
 </div>`;
 
-/** Routing mock: the API is dead (403), github.com's quota-free documents
- * answer. `atomBody`/`fragmentBody`/`fragmentStatus` are overridable. */
-function stubFetchWithLiveFallback(opts: {
+/** Desktop bridge mock: the Tauri transport carries the quota-free
+ * documents (feed, stable-tag oracle, fragments) while the API commands
+ * answer the rate-limit failure the suite's scenario needs. The shipping
+ * surface IS desktop: the silent-prerelease oracle is desktop-native, so
+ * "API dead, quota-free documents alive" is only honest here - a plain
+ * browser can neither read github.com documents (CORS) nor see the
+ * oracle's redirect target, which is exactly why the earlier browser-
+ * mode mocks in this suite could not survive the fail-closed oracle.
+ * `atomBody`/`fragmentBody`/`fragmentStatus` are overridable. */
+function stubBridgeWithLiveFallback(opts: {
   atomBody?: string;
   fragmentBody?: string;
   fragmentStatus?: number;
   atomStatus?: number;
+  oracle?: { status: number; finalUrl?: string } | Error;
+  apiError?: Error;
 } = {}) {
-  return vi.fn(async (input: string | URL | Request) => {
-    const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (u.startsWith('https://api.github.com/')) {
-      return new Response('rate limited', { status: 403 });
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  invokeMock.mockReset();
+  invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    const url = typeof args?.url === 'string' ? args.url : '';
+    if (cmd === 'fetch_github_release_doc') {
+      if (url.endsWith('/releases.atom')) {
+        return { status: opts.atomStatus ?? 200, body: opts.atomBody ?? ATOM_BODY, truncated: false };
+      }
+      if (/\/releases\/latest$/.test(url)) {
+        if (opts.oracle instanceof Error) throw opts.oracle;
+        return {
+          status: opts.oracle?.status ?? 200,
+          final_url: opts.oracle?.finalUrl ?? 'https://github.com/example/tool/releases/tag/v2.0.0',
+          body: '',
+          truncated: false,
+        };
+      }
+      if (url.includes('/expanded_assets')) {
+        return { status: opts.fragmentStatus ?? 200, body: opts.fragmentBody ?? FRAGMENT_BODY, truncated: false };
+      }
+      throw new Error(`Unexpected release-document URL: ${url}`);
     }
-    if (u.endsWith('/releases.atom')) {
-      return new Response(opts.atomBody ?? ATOM_BODY, { status: opts.atomStatus ?? 200 });
+    if (cmd === 'fetch_latest_release' || cmd === 'fetch_recent_releases') {
+      throw opts.apiError ?? new Error('GitHub rate limit reached');
     }
-    if (u.includes('/expanded_assets')) {
-      return new Response(opts.fragmentBody ?? FRAGMENT_BODY, { status: opts.fragmentStatus ?? 200 });
-    }
-    return new Response('Unexpected URL', { status: 404 });
+    throw new Error(`Unexpected command: ${cmd}`);
   });
+  return invokeMock;
 }
 
 /** A feed of `tags` (newest first) whose API is dead and whose
  * expanded_assets fragments answer per tag (`fragments[tag]`, default an
  * asset-less fragment) - so a multi-release scenario can name exactly
  * which entries carry installers and count how deep the walk actually
- * went. */
-function stubFeedWithPerTagFragments(tags: string[], fragments: Record<string, string> = {}) {
+ * went. The oracle agrees with the feed top unless the scenario pins
+ * another stable (`oracleTag`). */
+function stubBridgeWithPerTagFragments(
+  tags: string[],
+  fragments: Record<string, string> = {},
+  opts: { oracleTag?: string; apiError?: Error } = {}
+) {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   const feed = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <id>tag:github.com,2008:https://github.com/example/tool/releases</id>
@@ -151,26 +187,55 @@ ${tags
   )
   .join('\n')}
 </feed>`;
-  return vi.fn(async (input: string | URL | Request) => {
-    const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (u.startsWith('https://api.github.com/')) return new Response('rate limited', { status: 403 });
-    if (u.endsWith('/releases.atom')) return new Response(feed, { status: 200 });
-    // Both fragment URL shapes answer identically: the walk fetches the
-    // MODERN shape (`/releases/expanded_assets/<tag>`) and must spend
-    // exactly ONE request per tag on it - the legacy shape
-    // (`/releases/tag/<tag>/expanded_assets`) is routed too so a future
-    // URL change cannot silently redirect the fixture's answers.
-    if (u.includes('/expanded_assets')) {
-      const m = /\/expanded_assets\/([^/?]+)$/.exec(u) ?? /\/releases\/tag\/([^/]+)\/expanded_assets$/.exec(u);
-      const tag = m ? decodeURIComponent(m[1]) : '';
-      return new Response(fragments[tag] ?? '<div></div>', { status: 200 });
+  invokeMock.mockReset();
+  invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    const url = typeof args?.url === 'string' ? args.url : '';
+    if (cmd === 'fetch_github_release_doc') {
+      if (url.endsWith('/releases.atom')) return { status: 200, body: feed, truncated: false };
+      // GitHub's oracle agrees with the feed top unless the scenario pins
+      // another stable. (An unflagged SemVer prerelease at the top IS
+      // what the real oracle would answer - the textual gate cuts it.)
+      if (/\/releases\/latest$/.test(url)) {
+        const tag = opts.oracleTag ?? tags[0];
+        return {
+          status: 200,
+          final_url: `https://github.com/example/tool/releases/tag/${tag}`,
+          body: '',
+          truncated: false,
+        };
+      }
+      // Both fragment URL shapes answer identically: the walk fetches the
+      // MODERN shape (`/releases/expanded_assets/<tag>`) and must spend
+      // exactly ONE request per tag on it - the legacy shape
+      // (`/releases/tag/<tag>/expanded_assets`) is routed too so a future
+      // URL change cannot silently redirect the fixture's answers.
+      if (url.includes('/expanded_assets')) {
+        const m = /\/expanded_assets\/([^/?]+)$/.exec(url) ?? /\/releases\/tag\/([^/]+)\/expanded_assets$/.exec(url);
+        const tag = m ? decodeURIComponent(m[1]) : '';
+        return { status: 200, body: fragments[tag] ?? '<div></div>', truncated: false };
+      }
+      throw new Error(`Unexpected release-document URL: ${url}`);
     }
-    return new Response('Unexpected URL', { status: 404 });
+    if (cmd === 'fetch_latest_release' || cmd === 'fetch_recent_releases') {
+      throw opts.apiError ?? new Error('GitHub rate limit reached');
+    }
+    throw new Error(`Unexpected command: ${cmd}`);
   });
+  return invokeMock;
 }
 
-const fragmentFetches = (f: { mock: { calls: unknown[][] } }) =>
-  f.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/expanded_assets')).length;
+const invokeFragmentFetches = () =>
+  invokeMock.mock.calls.filter(
+    ([cmd, args]) => cmd === 'fetch_github_release_doc' && String((args as { url?: string })?.url ?? '').includes('/expanded_assets')
+  ).length;
+
+const invokeDocUrls = () =>
+  invokeMock.mock.calls
+    .filter(([cmd]) => cmd === 'fetch_github_release_doc')
+    .map(([, args]) => String((args as { url?: string })?.url ?? ''));
+
+const invokeApiCommands = () =>
+  invokeMock.mock.calls.filter(([cmd]) => cmd === 'fetch_latest_release' || cmd === 'fetch_recent_releases');
 
 let n = 0;
 const appInRepo = (over: Partial<AppItem> = {}) =>
@@ -187,6 +252,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -194,25 +260,26 @@ afterEach(() => {
 describe('atom fallback end-to-end (provider wiring)', () => {
   it('a rate-limited API lookup now RESOLVES through releases.atom + expanded_assets', async () => {
     const app = appTool();
-    const f = stubFetchWithLiveFallback();
-    vi.stubGlobal('fetch', f);
+    stubBridgeWithLiveFallback();
     const r = await resolveGitHubDownload(app, 'windows');
     expect(r).not.toBeNull();
     expect(r?.source).toBe('github');
     expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
     expect(r?.filename).toBe('Tool 2.0.0.exe');
     expect(r?.version).toBe('2.0.0');
-    // The fallback answered from the quota-free documents, in order: API,
-    // atom feed, one expanded_assets fragment.
-    const urls = f.mock.calls.map((c) => String(c[0]));
-    expect(urls[0]).toMatch(/^https:\/\/api\.github\.com\//);
-    expect(urls.some((u) => u.endsWith('/releases.atom'))).toBe(true);
+    // The fallback answered from the quota-free documents alone: not ONE
+    // api.github.com command was spent (the stable-tag oracle is a
+    // github.com document too), in order: feed, oracle, fragment.
+    expect(invokeApiCommands()).toEqual([]);
+    const urls = invokeDocUrls();
+    expect(urls[0]).toBe('https://github.com/example/tool/releases.atom');
+    expect(urls[1]).toBe('https://github.com/example/tool/releases/latest');
     expect(urls.some((u) => u.includes('/expanded_assets'))).toBe(true);
   });
 
   it('an unstable-stage feed entry is never served while a stable one exists', async () => {
     const app = appTool();
-    vi.stubGlobal('fetch', stubFetchWithLiveFallback());
+    stubBridgeWithLiveFallback();
     const r = await resolveGitHubDownload(app, 'windows');
     expect(r?.version).toBe('2.0.0');
   });
@@ -221,12 +288,13 @@ describe('atom fallback end-to-end (provider wiring)', () => {
     // The word list has no opinion about "next": the strict SemVer gate
     // must catch the identifier space, or the newest entry - whose assets
     // match this platform perfectly - would be served to a stable channel.
+    // (The unflagged -next tag IS what GitHub's oracle answers - the flag
+    // does not see it either - so this cut is L2's textual gate.)
     const app = appTool();
-    const f = stubFeedWithPerTagFragments(['v2.1.0-next', 'v2.0.0'], {
+    stubBridgeWithPerTagFragments(['v2.1.0-next', 'v2.0.0'], {
       'v2.1.0-next': '<a href="/example/tool/releases/download/v2.1.0-next/Tool%202.1.0-next.exe">next</a>',
       'v2.0.0': FRAGMENT_BODY,
     });
-    vi.stubGlobal('fetch', f);
     const r = await resolveGitHubDownload(app, 'windows');
     expect(r?.version).toBe('2.0.0');
     expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
@@ -237,7 +305,7 @@ describe('atom fallback end-to-end (provider wiring)', () => {
     // inside its 20-release scan; the fallback walk must reach just as
     // deep instead of returning five empty entries and a dead end.
     const app = appTool();
-    const f = stubFeedWithPerTagFragments(
+    stubBridgeWithPerTagFragments(
       [
         'stream-a-1.0.0',
         'stream-b-1.0.0',
@@ -249,10 +317,9 @@ describe('atom fallback end-to-end (provider wiring)', () => {
       ],
       { 'v2.0.0': FRAGMENT_BODY }
     );
-    vi.stubGlobal('fetch', f);
     const r = await resolveGitHubDownload(app, 'windows');
     expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
-    expect(fragmentFetches(f)).toBe(7);
+    expect(invokeFragmentFetches()).toBe(7);
   });
 
   it('keeps walking past five other-stream releases that do carry assets', async () => {
@@ -265,17 +332,17 @@ describe('atom fallback end-to-end (provider wiring)', () => {
     for (const t of tags.slice(0, -1)) {
       fragments[t] = `<a href="/example/tool/releases/download/${t}/tool-${t}.apk">mobile</a>`;
     }
-    const f = stubFeedWithPerTagFragments(tags, fragments);
-    vi.stubGlobal('fetch', f);
+    stubBridgeWithPerTagFragments(tags, fragments);
     const r = await resolveGitHubDownload(app, 'windows');
     expect(r?.url).toBe('https://github.com/example/tool/releases/download/v2.0.0/Tool%202.0.0.exe');
-    expect(fragmentFetches(f)).toBeGreaterThanOrEqual(7);
+    expect(invokeFragmentFetches()).toBeGreaterThanOrEqual(7);
   });
 
   it('when the fallback is ALSO dead, the original classified error survives', async () => {
     const app = appInRepo();
-    // Everything 403s: API, atom feed, fragments.
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 403 })));
+    // Everything fails: the feed 403s on the native transport, and the
+    // API commands answer the rate limit.
+    stubBridgeWithLiveFallback({ atomStatus: 403 });
     expect(await resolveGitHubDownload(app, 'windows')).toBeNull();
     const failure = peekResolveFailure(app, 'windows');
     expect(failure).not.toBeNull();
@@ -285,39 +352,39 @@ describe('atom fallback end-to-end (provider wiring)', () => {
 
   it('a feed with no usable entries keeps the original API error too', async () => {
     const app = appInRepo();
-    vi.stubGlobal(
-      'fetch',
-      stubFetchWithLiveFallback({ atomBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>' })
-    );
+    stubBridgeWithLiveFallback({ atomBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>' });
     expect(await resolveGitHubDownload(app, 'windows')).toBeNull();
     expect(peekResolveFailure(app, 'windows')?.kind).toBe('rate-limit');
   });
 
-  it('the honest 404 (no stable release) never spends requests on the feed', async () => {
+  it('the honest 404 (no stable release) stays a quiet miss with no fragment spend', async () => {
     const app = appInRepo();
-    // A genuinely release-less repo: /releases/latest answers 404 while
-    // the list endpoint answers 200 with an empty array - the resolver's
-    // existing "quiet miss" shape. The feed must not be contacted at all.
-    const f = vi.fn(async (input: string | URL | Request) => {
-      const u = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (u.endsWith('/releases/latest')) return new Response('Not Found', { status: 404 });
-      if (u.includes('/releases?per_page=')) return new Response('[]', { status: 200 });
-      return new Response('Unexpected URL', { status: 404 });
+    // A genuinely release-less repo: the native API command answers the
+    // classified 404 and the recent scan answers empty - the resolver's
+    // existing "quiet miss" shape. No fragment may be probed for a repo
+    // with nothing to show.
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      const url = typeof args?.url === 'string' ? args.url : '';
+      if (cmd === 'fetch_github_release_doc') {
+        if (url.endsWith('/releases.atom')) {
+          return { status: 200, body: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>', truncated: false };
+        }
+        throw new Error(`Unexpected release-document URL: ${url}`);
+      }
+      if (cmd === 'fetch_latest_release') throw new Error('No stable release found for this project');
+      if (cmd === 'fetch_recent_releases') return [];
+      throw new Error(`Unexpected command: ${cmd}`);
     });
-    vi.stubGlobal('fetch', f);
     expect(await resolveGitHubDownload(app, 'windows')).toBeNull();
     expect(peekResolveFailure(app, 'windows')).toBeNull();
-    for (const call of f.mock.calls) {
-      expect(String(call[0])).toMatch(/^https:\/\/api\.github\.com\//);
-    }
+    expect(invokeFragmentFetches()).toBe(0);
   });
 
   it('fragments that answer 404 degrade to asset-less entries, not a crash', async () => {
     const app = appTool();
-    vi.stubGlobal(
-      'fetch',
-      stubFetchWithLiveFallback({ fragmentStatus: 404, fragmentBody: 'nope' })
-    );
+    stubBridgeWithLiveFallback({ fragmentStatus: 404, fragmentBody: 'nope' });
     expect(await resolveGitHubDownload(app, 'windows')).toBeNull();
   });
 });
@@ -444,14 +511,13 @@ describe('fallback search depth (the walk reaches the whole scan)', () => {
     for (const t of tags) {
       fragments[t] = `<a href="/example/tool/releases/download/${t}/tool-${t}.exe">installer</a>`;
     }
-    const f = stubFeedWithPerTagFragments(tags, fragments);
-    vi.stubGlobal('fetch', f);
+    stubBridgeWithPerTagFragments(tags, fragments);
     const list = await getReleasesViaAtom('example/tool', 20, false);
     expect(list).toHaveLength(8);
     for (const rel of list) {
       expect(rel.assets.map((a) => a.name)).toEqual([`tool-${rel.tag}.exe`]);
     }
-    expect(fragmentFetches(f)).toBe(8);
+    expect(invokeFragmentFetches()).toBe(8);
   });
 
   it('the walk stays bounded by the requested count even when the feed is longer', async () => {
@@ -460,21 +526,19 @@ describe('fallback search depth (the walk reaches the whole scan)', () => {
     for (const t of tags) {
       fragments[t] = `<a href="/example/tool/releases/download/${t}/tool-${t}.exe">installer</a>`;
     }
-    const f = stubFeedWithPerTagFragments(tags, fragments);
-    vi.stubGlobal('fetch', f);
+    stubBridgeWithPerTagFragments(tags, fragments);
     const list = await getReleasesViaAtom('example/tool', ATOM_SCAN_DEPTH, false);
     expect(list).toHaveLength(ATOM_SCAN_DEPTH);
-    expect(fragmentFetches(f)).toBe(ATOM_SCAN_DEPTH);
+    expect(invokeFragmentFetches()).toBe(ATOM_SCAN_DEPTH);
   });
 
   it('the latest lookup stops at the first asset-bearing entry but reaches deep when earlier ones have none', async () => {
     const tags = ['v1.0.0', 'v1.0.1', 'v1.0.2', 'v1.0.3', 'v1.0.4', 'v1.0.5', 'v2.0.0'];
-    const f = stubFeedWithPerTagFragments(tags, { 'v2.0.0': FRAGMENT_BODY });
-    vi.stubGlobal('fetch', f);
+    stubBridgeWithPerTagFragments(tags, { 'v2.0.0': FRAGMENT_BODY });
     const latest = await getLatestViaAtom('example/tool', false);
     expect(latest?.tag).toBe('v2.0.0');
     expect(latest?.assets.map((a) => a.name)).toEqual(['Tool 2.0.0.exe', 'Tool-2.0.0.zip']);
-    expect(fragmentFetches(f)).toBe(7);
+    expect(invokeFragmentFetches()).toBe(7);
   });
 });
 

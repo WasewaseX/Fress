@@ -20,6 +20,7 @@ import {
 import {
   getDeliveryState,
   isDelivering,
+  OWN_RELEASES_PAGE_URL,
   setDeliveryTranslator,
   startOwnUpdateDelivery,
   subscribeDelivery,
@@ -314,7 +315,44 @@ export function useSelfUpdate(
     invoke('reveal_download_file', { path });
 
   const handleHeaderUpdateClick = () => {
-    if (!ownUpdate) return;
+    if (!ownUpdate) {
+      // A delivery can outlive its detection: a channel switch clears
+      // ownUpdate mid-transfer (deliberately - the old channel's detection
+      // is stale), and any check that lands non-`available` keeps it
+      // cleared. The pill's click must never dead-end (issue #128): the
+      // delivery record below answers with the action its label promises.
+      // (With the current App wiring the pill is not even rendered without
+      // a detection - updateVersion gates the button - so this is
+      // defense-in-depth for the render contract, tested at the hook.)
+      if (deliveryState.phase === 'verified') {
+        // "Ready": reveal the verified artifact, the same action the
+        // detected-path click performs.
+        void revealDeliveredUpdate(deliveryState.path);
+        return;
+      }
+      if (deliveryState.phase === 'failed' && !deliveryState.fallback) {
+        // "Retry" without a detection: a fresh quiet check re-arms the
+        // pill (and re-lands ownUpdate) under the CURRENT channel; the
+        // user's next click then retries the delivery for real. Retrying
+        // blind - without a detection - would bypass the three-gate plan.
+        void runUpdateCheck(false);
+        return;
+      }
+      if (deliveryState.phase === 'fallback' || (deliveryState.phase === 'failed' && deliveryState.fallback)) {
+        // "See releases": the exact destination the failure toasts offer.
+        void openExternal(OWN_RELEASES_PAGE_URL);
+        return;
+      }
+      if (isDelivering()) {
+        // Mid-transfer with the detection already cleared: the same honest
+        // guard toast the detected path shows.
+        toast.info(t('update.alreadyInProgress'), {
+          description: t('update.alreadyInProgressHint'),
+        });
+        return;
+      }
+      return;
+    }
     // The delivery-lifecycle state describes ONE pinned version (the one
     // its delivery was started for). Only the VERIFIED reveal is bound to
     // that version: clicking "Update v1.0.14" must never reveal the file a

@@ -561,7 +561,7 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
 
     def test_doc_parses_exactly_the_signature_line(self):
         # A minisign document continues past the box: trusted comment, then
-        # the wrapper box. _doc() must decode LINE 1 ONLY. The historical
+        # the wrapper box. _doc() must decode LINE 2 ONLY. The historical
         # implementation joined lines[1:], which silently glued the trusted
         # section onto the box and only decoded because CPython's
         # a2b_base64 stopped at the first padding; the ubuntu-latest image
@@ -569,10 +569,14 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         # raises "Incorrect padding" on the trailing alphabet characters,
         # turning every signature verification red (and the release
         # workflow's verify-release job would have failed the same way).
-        # Source contract (this is what pins it on EVERY interpreter):
+        # Source contract - STRICT decoding (validate=True): the box is
+        # base64 and nothing else, so junk a loose decoder would discard
+        # must be rejected, on every interpreter. (Regression test ported
+        # from the v1.0.7 release-prep branch, tightened to the strict
+        # call this branch ships.)
         source = open(os.path.join(_HERE, "verify-release-artifacts.py"), encoding="utf-8").read()
-        self.assertIn("base64.b64decode(lines[1].strip())", source,
-                      "_doc must decode exactly the box line")
+        self.assertIn("base64.b64decode(lines[1].strip(), validate=True)", source,
+                      "_doc must decode exactly the box line, strictly")
         self.assertNotIn('"".join(lines[1:])', source,
                          "the box must never be parsed from a join over the trusted section")
         # Behavioral: a well-formed document WITH a trusted section yields
@@ -587,6 +591,16 @@ class TestCorruptionRejection(ArtifactAuditTestBase):
         pk_box = b"Ed" + b"\x44" * 8 + b"\x55" * 32
         pk_doc = "untrusted comment: minisign public key\n" + base64.b64encode(pk_box).decode() + "\n"
         self.assertEqual(V._doc(pk_doc), pk_box)
+        # Strictness the validate=True flag buys: non-alphabet junk inside
+        # the box line must be REJECTED (a loose decoder silently discards
+        # it and hands back a different byte string - a signature box that
+        # would never verify), and so must a box with broken padding.
+        junky = "untrusted comment: signature\n!!" + base64.b64encode(sig_box).decode() + "\n"
+        with self.assertRaises(ValueError):
+            V._doc(junky)
+        broken = "untrusted comment: signature\n" + base64.b64encode(sig_box).decode()[:-2] + "\n"
+        with self.assertRaises(ValueError):
+            V._doc(broken)
         # And the full minisign_verify path still accepts a document whose
         # trusted section follows the box (the shape every real sidecar has).
         ok, detail = V.minisign_verify(TEST_PUBKEY_DOC, _sign(b"trailer-shape message"), b"trailer-shape message")

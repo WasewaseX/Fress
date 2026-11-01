@@ -38,6 +38,7 @@ classes, missing optional darwin bundles) are reported, not failed.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -153,20 +154,26 @@ _ED_TAGS = (b"Ed", b"ED")  # tauri signer writes "ED"; classic minisign "Ed"
 
 
 def _doc(doc: str) -> bytes:
+    """The BOX of a minisign document: line 2, decoded alone.
+
+    minisign layout: line 1 the untrusted comment, line 2 the base64 box,
+    line 3 the trusted comment, line 4 the (unused here) global signature.
+    The box must be parsed from line 2 ALONE - never by joining every
+    remaining line: the trusted-comment text and the global signature are
+    full of base64-alphabet characters, so a joined decode silently
+    folded them into the box. Older CPython hid that bug by stopping at
+    the first padding character, but Python 3.13+ decodes straight past
+    the padding (the ubuntu-26.04 runner roll turned it into
+    "bad signature box" for byte-identical inputs). Strict per-line
+    decoding is the format-correct behavior on EVERY Python: it also
+    rejects junk a loose decoder would have swallowed."""
     lines = doc.strip().splitlines()
     if not lines or not lines[0].startswith("untrusted comment:") or len(lines) < 2:
         raise ValueError("not a minisign document")
-    # The box is exactly line 1 - never a join of the remaining lines. A
-    # signature document continues past the box with the trusted comment and
-    # its own (deliberately unverified here) wrapper box; joining lines[1:]
-    # glued that text onto the box and only decoded correctly while CPython's
-    # a2b_base64 stopped at the first padding. The ubuntu-latest image roll of
-    # 2026-10-31 (CI run 41213244976) shipped a Python that raises
-    # "Incorrect padding" on the trailing alphabet characters instead - the
-    # same join would have failed the release workflow's own final artifact
-    # audit (verify-release runs this file). Decoding the designated line is
-    # the format's contract and works on every Python.
-    return base64.b64decode(lines[1].strip())
+    try:
+        return base64.b64decode(lines[1].strip(), validate=True)
+    except binascii.Error as exc:
+        raise ValueError(f"malformed base64 in box: {exc}") from exc
 
 
 def _pubkey(box: bytes):

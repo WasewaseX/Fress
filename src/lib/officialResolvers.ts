@@ -884,6 +884,14 @@ export function officialSupported(app: AppItem, platform: Platform): boolean {
   return !!resolvers[app.id]?.[platform];
 }
 
+/** Test seam: reset the session official memo. jsdom tests share this
+ * module instance across the cases of one file, so a cached null or a
+ * cached success from an earlier case would silently answer a later one;
+ * tests call this in beforeEach instead of relying on case order. */
+export function __clearOfficialCacheForTests(): void {
+  officialCache.clear();
+}
+
 export function resolveOfficialDownload(app: AppItem, platform: Platform): Promise<ResolvedDownload | null> {
   if (!officialSupported(app, platform)) return Promise.resolve(null);
   const key = `official|${app.id}|${platform}`;

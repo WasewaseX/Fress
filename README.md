@@ -1,15 +1,22 @@
 <!-- ============================================================================
-STATUS: stable-release edition (Agent 3 release qualification, 2026-10-14).
-The stable v1.0.0 release IS PUBLISHED (2026-10-14T16:40Z, prerelease=false,
-22 assets) from commit 78d5e8ff8e1bc38ca8789539da005fdea4b15613 (Release
-workflow run #43, conclusion success). Every byte-level claim below was
-re-proven against the PUBLISHED v1.0.0 bytes on 2026-10-14: all 22 assets
-downloaded and re-hashed (21/21 SHA256SUMS.txt entries match, no orphans),
-the repository's own verifier scripts/ci/verify-release-artifacts.py exits 0
-on the downloaded bytes, an independent Ed25519 implementation minisign-verifies
-all 5 sidecars (negative control rejected), and latest.json carries version
-1.0.0 with eight windows-*/linux-* entries pointing at v1.0.0 assets. The
-evidence lives in the v1.0.0 audit section of [CODE_SIGNING.md](CODE_SIGNING.md).
+STATUS: stable-release edition (release qualification refreshed 2026-10-31).
+The current stable release is v1.0.6 (published 2026-10-19T00:23Z,
+prerelease=false, 22 assets). The 22-file inventory below was re-verified
+against the PUBLISHED v1.0.6 assets on 2026-10-31: the same 15
+installers/archives, the 5 minisign .sig sidecars (both *-setup.exe,
+AppImage, deb, rpm), SHA256SUMS.txt with 21 entries (re-counted from the
+published file), and latest.json (version 1.0.6, 8 platform entries, every
+embedded signature byte-equal to its published sidecar). The v1.0.6 Windows
+build log (release run 39179162111) shows FRESS_SIGNING_CONFIGURED=false and
+"No signing configured; uploading the unsigned MSI", so the Authenticode
+absence below is verified on the CURRENT stable's build, not only on the
+older audit. Full byte-level release audits on record: v1.0.0 (2026-10-14:
+all 22 assets downloaded and re-hashed, 21/21 manifest entries match, all 5
+sidecars minisign-verified with a negative control rejected — evidence in
+the v1.0.0 audit section of [CODE_SIGNING.md](CODE_SIGNING.md)) and the
+beta-track round-9 audit (docs/release-readiness.md). The next stable
+release (v1.0.7) is gated on the open go-live checklist:
+docs/release-readiness-v1.0.7.md.
 ============================================================================ -->
 
 # Fress
@@ -25,7 +32,7 @@ There is no telemetry and no advertising, and nothing in the catalog is sponsore
 - **Curated, not scraped.** Every entry is checked by hand: official links, real descriptions, honest notes about what the app replaces.
 - **One-click stable downloads.** Pick your platform and Fress resolves the app's actual latest STABLE file straight from GitHub Releases or F-Droid. No hunting through release pages, and beta/RC builds are never offered.
 - **Update check for Fress itself.** The header pill and the footer button compare your installed version with the newest release on your update channel, pick the right file for your platform, and verify it against the release's published `SHA256SUMS.txt` entry AND the release's minisign signature before the app calls the update "verified" — after the download finishes, the app checks the completed file's bytes against the release's `<file>.sig` sidecar with the updater public key embedded in the binary, and only then reports it as verified and ready (it is never launched automatically). When a check cannot be established — no checksum entry, no signature sidecar, an unreachable signature document, or a failed verification — Fress does not deliver the file and instead links to the releases page with the reason spelled out, rather than passing an unverified installer off as an update. The same rule applies to architecture: if the release carries no installer your machine can actually run (for example an ARM64-only build while you are on Intel), Fress also links to the releases page rather than offering a wrong file.
-  On every release so far — including stable `v1.0.0` (verified from its published bytes 2026-10-14) — the Windows setup installers (the two `*-setup.exe` files) and the Linux bundles carry updater signatures, so those are the artifacts delivered in-app; the Windows MSI, the portable zips, the macOS dmgs and the Android APKs do not, so for those Fress routes you to the releases page. By default a stable build like this one is offered only releases from the stable track — never a newer-numbered beta — and the updater never moves you down a track in the background: if you explicitly pick a channel whose newest release is older than your build, the app says so and links to the releases page instead of offering a downgrade. [CODE_SIGNING.md](CODE_SIGNING.md) records which artifacts are signed, which platforms get cryptographically verified in-app updates, and how to verify a download manually.
+  On every release so far — including the current stable `v1.0.6` (published asset list re-verified 2026-10-31) and stable `v1.0.0` (verified from its published bytes 2026-10-14) — the Windows setup installers (the two `*-setup.exe` files) and the Linux bundles carry updater signatures, so those are the artifacts delivered in-app; the Windows MSI, the portable zips, the macOS dmgs and the Android APKs do not, so for those Fress routes you to the releases page. By default a stable build like this one is offered only releases from the stable track — never a newer-numbered beta — and the updater never moves you down a track in the background: if you explicitly pick a channel whose newest release is older than your build, the app says so and links to the releases page instead of offering a downgrade. [CODE_SIGNING.md](CODE_SIGNING.md) records which artifacts are signed, which platforms get cryptographically verified in-app updates, and how to verify a download manually.
 - **Download manager built in.** Downloads stream inside the app with progress, speed, ETA, cancel, retry, and SHA-256 verification, saved to the folder you choose (your system Downloads folder by default).
 - **Device-aware downloads.** Windows, macOS, Linux, and Android (GitHub APK, F-Droid, Google Play): Fress picks the right file for your architecture.
 - **Light and dark themes.** The light mode uses warm paper tones, the dark mode is easy on the eyes, and both follow your system preference until you pick one yourself.
@@ -67,9 +74,9 @@ The web preview works without Rust: download buttons hand off to your browser. I
 
 ## Releases
 
-Releases are tagged and published on the [official Releases page](https://github.com/WasewaseX/Fress/releases). Every published release ships installers for all platforms, built by GitHub Actions. The table below uses `*` in place of the version, so it does not go stale.
+Releases are tagged and published on the [official Releases page](https://github.com/WasewaseX/Fress/releases). Every published release ships installers for all platforms, built by GitHub Actions. The table below uses `*` in place of the version, so it does not go stale. The next stable release (`v1.0.7`) has an open go-live checklist — independent review and merge of the silent-prerelease fix (PR #130), the physical smoke-test matrix, and independent artifact verification — tracked in [docs/release-readiness-v1.0.7.md](docs/release-readiness-v1.0.7.md).
 
-The shapes below were re-verified file-by-file against release [`v1.0.0`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.0) (published 2026-10-14, 22 files: the 15 installers/archives below, their 5 minisign `.sig` sidecars, plus `SHA256SUMS.txt` and the updater manifest `latest.json`).
+The shapes below were re-verified file-by-file against release [`v1.0.0`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.0) (published 2026-10-14, 22 files: the 15 installers/archives below, their 5 minisign `.sig` sidecars, plus `SHA256SUMS.txt` and the updater manifest `latest.json`). The same 22-file inventory is on every stable release since; it was re-verified against the published [`v1.0.6`](https://github.com/WasewaseX/Fress/releases/tag/v1.0.6) asset list (the current stable, 2026-10-19) on 2026-10-31.
 
 | Platform | File | Updater signature | In-app update |
 | --- | --- | --- | --- |
@@ -87,7 +94,7 @@ The shapes below were re-verified file-by-file against release [`v1.0.0`](https:
 
 **Fress is distributed only through this repository's GitHub Releases page**, always with `SHA256SUMS.txt` next to the files. If you found a Fress installer anywhere else (a file host, a mirror, a "download site"), it is not ours.
 
-Every published release includes a `SHA256SUMS.txt` covering every other asset on the release (21 entries on every 22-file release — a checksum file cannot cover itself; on `v1.0.0` all 21 entries match the published bytes, re-hashed 2026-10-14). Verify before running:
+Every published release includes a `SHA256SUMS.txt` covering every other asset on the release (21 entries on every 22-file release — a checksum file cannot cover itself; on `v1.0.0` all 21 entries match the published bytes, re-hashed 2026-10-14; the current stable `v1.0.6` publishes the same 21-entry manifest, re-counted 2026-10-31). Verify before running:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
@@ -103,23 +110,23 @@ install test. The packaged-os / physical-device rows that would prove them
 (docs/testing/stable-release-smoke.md install + migration rows;
 docs/testing/download-open-smoke.md A1-A6) are all NOT RUN. Do not remove
 this caveat until those rows have real PASS entries. Note also that
-1.0.12-beta is numerically NEWER than 1.0.0 on the beta track; no updater on
-the stable track will downgrade you, and the move is a deliberate manual
-install. -->
+1.0.12-beta (the newest beta so far) is numerically NEWER than 1.0.6 on the
+beta track; no updater on the stable track will downgrade you, and the move
+is a deliberate manual install. -->
 
-Stable (`1.0.0`) and beta (`1.0.13-beta` and onward) are separate tracks; the app's updater never moves you between them automatically — a stable build defaults to the Stable channel, your own channel choice in the app's More menu is always respected, and the updater never offers a downgrade (if your build is newer than the channel's newest release, it says so and links here instead). To switch deliberately:
+Stable (`1.0.6`) and beta (`1.0.12-beta` is the newest so far) are separate tracks; the app's updater never moves you between them automatically — a stable build defaults to the Stable channel, your own channel choice in the app's More menu is always respected, and the updater never offers a downgrade (if your build is newer than the channel's newest release, it says so and links here instead). To switch deliberately:
 
-- **Windows (NSIS installer):** run the `Fress_1.0.0_x64-setup.exe` (or `_arm64-`) installer over your existing install. Your settings are kept in the app's WebView profile, which the installer update does not delete — the packaged test that proves it end to end (W-1 in the testing docs) has not run yet. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST — no packaged-os install row has run yet.*</sub>
-- **Windows (MSI):** two hypotheses are on the record and only a real install test (W-3 in the testing docs) decides: the toolchain evidence (Tauri's `allowDowngrades` defaults to enabled and the beta MSI carries the matching bytes) predicts the v1.0.0 MSI installs straight over the beta MSI as a normal major upgrade, while the release notes' current wording says the beta must be uninstalled first. Either way your WebView profile is not touched by the install itself. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
-- **macOS:** replace the app in `/Applications` with the one from the `Fress_1.0.0_*.dmg`. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
-- **Linux:** install the v1.0.0 bundle. `deb` and `rpm` need an explicit downgrade flag because 1.0.12-beta sorts above 1.0.0: `sudo apt install ./Fress_1.0.0_amd64.deb --allow-downgrades` or `sudo rpm -U --oldpackage Fress-1.0.0-1.x86_64.rpm`. AppImage: replace the file. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
-- **Android:** uninstall the beta APK first (Android refuses a downgrade install, and uninstalling clears the app's private data — favorites and custom entries), then install the v1.0.0 APK from the Releases page. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST — physical-device rows NOT RUN.*</sub>
+- **Windows (NSIS installer):** run the `Fress_1.0.6_x64-setup.exe` (or `_arm64-`) installer over your existing install. Your settings are kept in the app's WebView profile, which the installer update does not delete — the packaged test that proves it end to end (W-1 in the testing docs) has not run yet. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST — no packaged-os install row has run yet.*</sub>
+- **Windows (MSI):** two hypotheses are on the record and only a real install test (W-3 in the testing docs) decides: the toolchain evidence (Tauri's `allowDowngrades` defaults to enabled and the beta MSI carries the matching bytes) predicts the v1.0.6 MSI installs straight over the beta MSI as a normal major upgrade, while the release notes' current wording says the beta must be uninstalled first. Either way your WebView profile is not touched by the install itself. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
+- **macOS:** replace the app in `/Applications` with the one from the `Fress_1.0.6_*.dmg`. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
+- **Linux:** install the v1.0.6 bundle. `deb` and `rpm` need an explicit downgrade flag because 1.0.12-beta sorts above 1.0.6: `sudo apt install ./Fress_1.0.6_amd64.deb --allow-downgrades` or `sudo rpm -U --oldpackage Fress-1.0.6-1.x86_64.rpm`. AppImage: replace the file. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST.*</sub>
+- **Android:** uninstall the beta APK first (Android refuses a downgrade install, and uninstalling clears the app's private data — favorites and custom entries), then install the v1.0.6 APK from the Releases page. <sub>*HYPOTHESIS-PENDING-INSTALLER-TEST — physical-device rows NOT RUN.*</sub>
 
 Settings, favorites and custom entries are stored in the app's own profile storage; no installer or updater in the pipeline deletes that storage. Whether the profile location survives each specific installer transition is exactly what the packaged qualification rows (W-1/W-2/W-5/M-1/L-1/L-2/L-3 in the testing docs) exist to prove — none of them has run yet, so treat survival as the expected outcome, not a tested guarantee. The one path where data loss is certain by design is the Android uninstall-first transition, which is documented as data loss, not papered over.
 
 ### Make sure you run the newest build
 
-Each Fress app shows its exact version in the header, right next to the name — the version you see is the release tag the build was published as (for example, a build published as `v1.0.0` shows `v1.0.0`).
+Each Fress app shows its exact version in the header, right next to the name — the version you see is the release tag the build was published as (for example, a build published as `v1.0.6` shows `v1.0.6`).
 
 The badges at the top of this page track the two release tracks separately: the **version** badge shows the newest published release of any kind, the **stable** badge shows the newest stable release — because a newer beta number does not mean a newer stable build. The development sources on `main` carry the version that will ship next (`package.json` is the source of truth — it moves ahead of the badges as soon as a release is published), so a newer version number in the repository does not always mean that version has been published yet. If your installed app does not show the version you expect, install the newest installer for your channel from the [Releases page](https://github.com/WasewaseX/Fress/releases). Old installers keep working and can silently sit on your machine next to the new one.
 
@@ -135,10 +142,10 @@ Fress picks each operating system's own download location, the same place your b
 | Android | The app's private storage (Android does not let apps pick arbitrary folders) | No — completed downloads open through Android's own handlers: an APK is handed to the **system package installer** (the same consent flow a file manager uses; Fress never bypasses it), and any other file opens with a viewer or the share sheet, read-grant only. The handoff is registry-validated in the app, but its on-device behavior is proven only by mocked tests so far — the physical-device QA pass is tracked as NOT RUN in the testing docs. You can still download an APK with your **browser** from the [Releases page](https://github.com/WasewaseX/Fress/releases) |
 
 ### Why Windows shows "Unknown publisher"
-The Windows installer is **not Authenticode-signed today**: no signing certificate is configured for CI, and the published installers carry no certificate table (verified on the current stable release's bytes, `v1.0.0`: both setup exes' PE certificate tables are empty and the v1.0.0 CI run took the no-signing-certificate path — see [CODE_SIGNING.md](CODE_SIGNING.md) for the audit and the free routes), so Windows shows the blue "Unknown publisher" / "Windows protected your PC" warning and will keep showing it until the publisher is covered by a certificate Windows already trusts. What protects the file you download is the release integrity and authenticity chain, not a publisher certificate:
+The Windows installer is **not Authenticode-signed today**: no signing certificate is configured for CI, and the published installers carry no certificate table (verified on the current stable release's build, `v1.0.6`: CI release run 39179162111 shows `FRESS_SIGNING_CONFIGURED: false` and "No signing configured; uploading the unsigned MSI", and the `v1.0.0` audit found both setup exes' PE certificate tables empty — see [CODE_SIGNING.md](CODE_SIGNING.md) for the audit and the free routes), so Windows shows the blue "Unknown publisher" / "Windows protected your PC" warning and will keep showing it until the publisher is covered by a certificate Windows already trusts. What protects the file you download is the release integrity and authenticity chain, not a publisher certificate:
 
 - Every release ships a `SHA256SUMS.txt` covering every other asset on the release, and the app itself verifies its own updates against that file before offering the installer. Verify manually with `sha256sum -c SHA256SUMS.txt` after downloading. A checksum match is an integrity guarantee — it is not publisher identity.
-- The Windows setup installers and Linux bundles additionally carry a minisign updater signature produced by CI; the signatures on the current stable release (`v1.0.0`) have been verified byte-for-byte against the published public key over the exact downloaded bytes (repository verifier + an independent Ed25519 implementation, 2026-10-14 — see the release signature audit in [CODE_SIGNING.md](CODE_SIGNING.md)). For its own in-app updates, Fress checks the downloaded file against that signature — through the key embedded in the app — before it reports the update as verified, and an update without a verifiable signature is routed to the releases page instead. A checksum proves integrity with the release manifest, the signature proves who authorized the artifact — they are separate guarantees, and neither is an Authenticode publisher identity.
+- The Windows setup installers and Linux bundles additionally carry a minisign updater signature produced by CI. Signature audits on record verified the five sidecars byte-for-byte against the published public key over the exact downloaded bytes on `v1.0.0` (2026-10-14: repository verifier + an independent Ed25519 implementation, negative control rejected) and on the beta track (`v1.0.11-beta` / `v1.0.12-beta`, the round-9 audit in docs/release-readiness.md); on the current stable `v1.0.6`, the same pipeline verifier gates publication and the manifest's embedded signatures were re-checked byte-equal to the published sidecars (2026-10-31) — see the release signature audit in [CODE_SIGNING.md](CODE_SIGNING.md). For its own in-app updates, Fress checks the downloaded file against that signature — through the key embedded in the app — before it reports the update as verified, and an update without a verifiable signature is routed to the releases page instead. A checksum proves integrity with the release manifest, the signature proves who authorized the artifact — they are separate guarantees, and neither is an Authenticode publisher identity.
 - [CODE_SIGNING.md](CODE_SIGNING.md) documents the signing fix, including a free signing route for open-source projects (SignPath Foundation). Until that is set up, you can:
   - Click **More info → Run anyway** after checking the checksum against `SHA256SUMS.txt`, or
   - Build the app yourself from this repository (`npm run tauri build`).

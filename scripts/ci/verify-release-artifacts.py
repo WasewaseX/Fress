@@ -38,6 +38,7 @@ classes, missing optional darwin bundles) are reported, not failed.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -153,10 +154,26 @@ _ED_TAGS = (b"Ed", b"ED")  # tauri signer writes "ED"; classic minisign "Ed"
 
 
 def _doc(doc: str) -> bytes:
+    """The BOX of a minisign document: line 2, decoded alone.
+
+    minisign layout: line 1 the untrusted comment, line 2 the base64 box,
+    line 3 the trusted comment, line 4 the (unused here) global signature.
+    The box must be parsed from line 2 ALONE - never by joining every
+    remaining line: the trusted-comment text and the global signature are
+    full of base64-alphabet characters, so a joined decode silently
+    folded them into the box. Older CPython hid that bug by stopping at
+    the first padding character, but Python 3.13+ decodes straight past
+    the padding (the ubuntu-26.04 runner roll turned it into
+    "bad signature box" for byte-identical inputs). Strict per-line
+    decoding is the format-correct behavior on EVERY Python: it also
+    rejects junk a loose decoder would have swallowed."""
     lines = doc.strip().splitlines()
     if not lines or not lines[0].startswith("untrusted comment:") or len(lines) < 2:
         raise ValueError("not a minisign document")
-    return base64.b64decode("".join(lines[1:]).strip())
+    try:
+        return base64.b64decode(lines[1].strip(), validate=True)
+    except binascii.Error as exc:
+        raise ValueError(f"malformed base64 in box: {exc}") from exc
 
 
 def _pubkey(box: bytes):

@@ -335,6 +335,16 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
    * matter here: this set is updated at the exact moments a slot is taken
    * (start resolved) and freed (Rust reported completion/error/cancel). */
   const activeSlotIdsRef = useRef<Set<number>>(new Set());
+  /** Starts that passed the concurrency gate but whose native
+   * `start_download` invoke has not resolved yet - the window in which no
+   * real slot exists (the slot is registered only when the invoke returns
+   * the Rust id). Counted ATOMICALLY with the registered slots: the batch
+   * loop fires `void startDownload(...)` without awaiting, so every entry
+   * of a warm-cache batch used to run its gate check inside this window
+   * and launch in parallel, bypassing the limit entirely (issue #129).
+   * Incremented synchronously BEFORE the first await, released when the
+   * start settles - the reservation can never interleave with a check. */
+  const inFlightStartsRef = useRef(0);
   /** Terminal events that arrived for an id whose start had not resolved
    * yet (so its slot was never taken). Consumed by the start path, which
    * would otherwise resurrect the slot after the fact. */
@@ -429,8 +439,12 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     };
   }, [persistence]);
 
-  /** How many Rust downloads are transferring right now. */
-  const activeTauriCount = (): number => activeSlotIdsRef.current.size;
+  /** Capacity already claimed: registered slots (Rust transfers running)
+   * PLUS starts still in flight (gate passed, native id not yet returned).
+   * The single number every capacity decision reads - the start gate and
+   * the promotion pump - so a start that is on its way can never be
+   * double-counted into a parallel launch (issue #129). */
+  const claimedSlots = (): number => activeSlotIdsRef.current.size + inFlightStartsRef.current;
 
   /** Start the next queued download(s) while slots are free. Called after
    * every state change that can free a slot: completion, error, cancel,
@@ -440,7 +454,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     promotingRef.current = true;
     const pump = async (): Promise<void> => {
       try {
-        while (queueRef.current.size > 0 && activeTauriCount() < MAX_CONCURRENT_DOWNLOADS) {
+        while (queueRef.current.size > 0 && claimedSlots() < MAX_CONCURRENT_DOWNLOADS) {
           const next = queueRef.current.shift();
           if (!next) break;
           // The queued placeholder item (negative local id) is replaced by
@@ -451,6 +465,10 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             prev.filter((it) => !(it.status === 'queued' && it.id === next.localId))
           );
           let startedId: number | null = null;
+          // The pump's own start claims capacity atomically, exactly like
+          // startDownload does: while it is in flight, a concurrent batch
+          // gate check must see the slot as taken (issue #129).
+          inFlightStartsRef.current += 1;
           try {
             startedId = await startTauriDownload(next.url, next.name, next.opts);
           } catch {
@@ -459,6 +477,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             // rejection escape killed the whole promotion loop with an
             // unhandled rejection and left every later queued entry stuck
             // until some unrelated event happened to fire promoteQueued.
+          } finally {
+            inFlightStartsRef.current -= 1;
           }
           // Consume the cancel marker for THIS entry whether or not the
           // start succeeded: with a transfer running, the marker means
@@ -746,8 +766,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       // once. Everything else waits in a FIFO queue shown in the manager.
       // A batch of thirty used to start thirty parallel streams that fought
       // for bandwidth; now each one gets a real share and the queue drains
-      // automatically as slots free up.
-      if (activeTauriCount() >= MAX_CONCURRENT_DOWNLOADS) {
+      // automatically as slots free up. The count is CLAIMED capacity -
+      // registered slots plus starts still in flight - so a warm-cache
+      // batch whose `void startDownload(...)` calls all land inside the
+      // start window cannot talk every entry past the gate (issue #129).
+      if (claimedSlots() >= MAX_CONCURRENT_DOWNLOADS) {
         let guessedName: string | undefined;
         try {
           guessedName =
@@ -784,6 +807,17 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Atomic reservation (issue #129): claim the capacity synchronously,
+      // BEFORE the first await of startTauriDownload. The native slot is
+      // registered only when start_download's invoke resolves, so the
+      // window between this gate check and that registration is exactly
+      // where a batch's parallel entries used to slip through; a claimed
+      // slot is visible to every other gate check the moment this one
+      // passes. Released when the start settles, before promoteQueued()
+      // reads capacity on the failure path - the pump must see the freed
+      // claim, or a queued entry could stall until an unrelated event.
+      inFlightStartsRef.current += 1;
+      let startFailed = false;
       try {
         await startTauriDownload(url, nameHint, opts);
         // Only a transfer that actually started announces itself; queued
@@ -792,8 +826,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // The start failed; the error toast is already up. A slot may have
         // been conceptually freed (nothing is running in its place).
-        promoteQueued();
+        startFailed = true;
+      } finally {
+        inFlightStartsRef.current -= 1;
       }
+      if (startFailed) promoteQueued();
     },
     [startTauriDownload, promoteQueued]
   );

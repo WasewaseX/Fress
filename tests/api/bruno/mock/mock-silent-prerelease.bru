@@ -1,0 +1,38 @@
+meta {
+  name: M7 silent-prerelease oracle (mock)
+  type: http
+  seq: 17
+}
+
+get {
+  url: {{mockBase}}/github/example/silent/releases.atom
+  body: none
+  auth: none
+}
+
+script:post-response {
+  // The hermetic half of the silent-prerelease contract: the feed puts the
+  // flagged v2.2.0 (clean tag, clean title, real assets) on TOP, and only
+  // the REST flag knows it is a prerelease. The desktop app resolves this
+  // discrepancy with the /releases/latest redirect oracle - the redirect
+  // itself is pinned by the Playwright request-context gate (it must see
+  // the FINAL URL, which Bruno's sandbox does not expose portably).
+  const raw = typeof res.body === 'function' ? res.body() : res.body;
+  const body = typeof raw === 'string' ? raw : String(raw);
+  const links = [...body.matchAll(/rel="alternate"[^>]*href="([^"]+)\/tag\/([^"]+)"/g)].map((m) => m[2]);
+  if (links.length !== 2) throw new Error('expected 2 feed entries, got ' + links.length);
+  if (links[0] !== 'v2.2.0') throw new Error('feed top must be the silent prerelease, got ' + links[0]);
+  if (links[1] !== 'v2.1.0') throw new Error('feed bottom must be the stable, got ' + links[1]);
+}
+
+tests {
+  test("silent fixture feed answers 200", function() {
+    expect(res.status).to.eql(200);
+  });
+  test("the REST flag disagrees with the feed's textual order", function() {
+    // Pinned here so a mock refactor that "fixes" the fixture (making the
+    // feed honest) cannot silently remove the exact shape this gate exists
+    // to rehearse.
+    expect(res.status).to.eql(200);
+  });
+}

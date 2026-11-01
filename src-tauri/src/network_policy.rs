@@ -314,6 +314,11 @@ impl PathPin {
 ///     GitHub's release pages lazy-load since the 2026-10 rollout - the
 ///     classic path began answering a page shell that references THIS URL
 ///     instead of carrying the anchors itself)
+///   - `/{owner}/{repo}/releases/latest` (the stable-tag ORACLE: GitHub
+///     answers with a redirect to the newest NON-draft NON-prerelease
+///     release page, so the final URL's tag is the authoritative latest
+///     stable - the quota-free document that lets the atom fallback drop
+///     silent prereleases, whose flag the feed itself never carries)
 ///
 /// This is the load-bearing gate of the rate-limit-proof release-lookup
 /// fallback: github.com is admitted ONLY for these release-document shapes,
@@ -353,6 +358,16 @@ impl ReleasesDocShape {
                 Self::segment_ok(owner) && Self::segment_ok(repo) && Self::segment_ok(tag)
             }
             [owner, repo, "releases", "expanded_assets", tag] => {
+                Self::segment_ok(owner) && Self::segment_ok(repo) && Self::segment_ok(tag)
+            }
+            // The stable-tag oracle: the entry URL (/releases/latest) and
+            // the release page it redirects to (/releases/tag/{tag}). Both
+            // carry no asset data - only the final URL's tag matters - so
+            // neither shape widens the class beyond release documents.
+            [owner, repo, "releases", "latest"] => {
+                Self::segment_ok(owner) && Self::segment_ok(repo)
+            }
+            [owner, repo, "releases", "tag", tag] => {
                 Self::segment_ok(owner) && Self::segment_ok(repo) && Self::segment_ok(tag)
             }
             _ => false,

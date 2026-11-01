@@ -147,7 +147,11 @@ export function resolveGitHubDownload(app: AppItem, platform: Platform): Promise
           //    still runs.
           let latest: ReleaseInfo | null = null;
           try {
-            latest = await getLatestRelease(repo);
+            // The vouch rides along: a repo whose own stable builds are
+            // flagged prerelease (DevToys) must keep receiving its newest
+            // release verbatim, while every other repo gets the
+            // silent-prerelease cut (feed cut + textual gate).
+            latest = await getLatestRelease(repo, app.includeFlaggedReleases === true);
           } catch (e) {
             latest = null;
             const msg = (e as Error).message || '';
@@ -344,7 +348,13 @@ export async function resolveDownloadFor(
 ): Promise<ResolvedDownload | null> {
   const gh = await resolveGitHubDownload(app, platform);
   const fdAllowed = platform === 'android' && !!app.fdroidId;
-  if (gh && (!gh.weak || !fdAllowed)) return gh;
+  // A CONFIDENT GitHub pick wins outright. A WEAK one must not return here:
+  // the documented order of trust puts the vendor's official manifest ABOVE
+  // a weak GitHub guess on every platform (issue #127) - on desktop this
+  // used to return the weak guess immediately, because `!fdAllowed` was
+  // always true there, and the official resolver below never ran. For apps
+  // without an official resolver this check is a cheap memoized no-op.
+  if (gh && !gh.weak) return gh;
   if (fdAllowed && app.fdroidId) {
     const fd = await resolveFdroidDownload(app.fdroidId);
     if (fd) return fd;
@@ -388,7 +398,11 @@ export async function resolveWithOutcome(app: AppItem, platform: Platform): Prom
 
   const gh = await resolveGitHubDownload(app, platform);
   const fdAllowed = platform === 'android' && !!app.fdroidId;
-  if (gh && (!gh.weak || !fdAllowed)) {
+  // Same precedence as resolveDownloadFor (issue #127): only a confident
+  // GitHub pick short-circuits; a weak one yields to F-Droid and the
+  // official manifest first, and surfaces below - flagged - when neither
+  // has an answer.
+  if (gh && !gh.weak) {
     return { status: 'resolved', download: gh, confident: !gh.weak };
   }
   if (fdAllowed && app.fdroidId) {

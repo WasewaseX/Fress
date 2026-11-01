@@ -69,6 +69,13 @@ export function setDeliveryTranslator(translate: DeliveryTranslate): void {
   t = translate;
 }
 
+/** The project's own Releases page - the destination every "See releases"
+ * affordance promises. One constant so the pill's click handler, the
+ * failure toasts and the event-driven failure path all name the SAME page
+ * (issue #128: a delivery whose detection was cleared must still land
+ * somewhere honest when its pill is clicked). */
+export const OWN_RELEASES_PAGE_URL = 'https://github.com/WasewaseX/Fress/releases';
+
 /* ------------------------------------------------------------------ */
 /* State                                                               */
 /* ------------------------------------------------------------------ */
@@ -340,7 +347,7 @@ function failDelivery(
     ? {
         label: t('update.releasesPageAction'),
         onClick: () => {
-          void openExternalFn(htmlUrl ?? 'https://github.com/WasewaseX/Fress/releases');
+          void openExternalFn(htmlUrl ?? OWN_RELEASES_PAGE_URL);
         },
       }
     : undefined;

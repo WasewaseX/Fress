@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../downloads';
 import { ReleaseInfo } from './types';
-import { getLatestViaAtom, getReleasesViaAtom } from './atomReleases';
+import { getLatestViaAtom, getReleasesViaAtom, stageLooksUnstable } from './atomReleases';
 
 /**
  * GitHub Releases provider: talks to the GitHub REST API through the Tauri
@@ -49,31 +49,65 @@ interface GhReleaseRaw {
  * command path has its own production timing (api_resilience). */
 const BROWSER_API_TIMEOUT_MS = 20_000;
 
-async function fetchLatestReleaseViaApi(repo: string): Promise<ReleaseInfo> {
+/**
+ * Fetch the repo's latest release through api.github.com.
+ *
+ * SILENT-PRERELEASE BACKSTOP: GitHub's prerelease FLAG and the tag text
+ * are independent - listmonk shipped "v7.0.0-beta.1" UNFLAGGED (verified
+ * 2026-10-31), so /releases/latest happily answered a beta and the
+ * flag-only filter kept it. For unvouched repos the same textual unstable
+ * gate the atom path applies now also runs over the API's answer; a hit
+ * throws a classified error so the caller's quota-free fallback (or the
+ * recent scan, which filters deeper) takes over - the same
+ * belt-over-the-braces contract as the escaped-slug parser fix.
+ *
+ * VOUCHED repos (includeFlagged, e.g. DevToys - every release flagged,
+ * website links to the 2.x builds) skip the flag filter AND the textual
+ * gate entirely, and /releases/latest is the WRONG endpoint for them (it
+ * pins the newest unflagged release - an ancient v1.0.13.0 for DevToys);
+ * the list endpoint's newest entry carries the vouch contract instead.
+ */
+async function fetchLatestReleaseViaApi(repo: string, includeFlagged = false): Promise<ReleaseInfo> {
   if (isTauri()) {
     const r = await invoke<GhReleaseRaw>('fetch_latest_release', { repo });
-    return {
+    const mapped = {
       tag: r.tag,
       name: r.name,
       publishedAt: r.published_at,
       htmlUrl: r.html_url,
       assets: (r.assets || []).map((a) => ({ name: a.name, size: a.size, downloadUrl: a.download_url })),
     };
+    if (!includeFlagged && stageLooksUnstable(mapped.tag, mapped.name)) {
+      throw new Error('GitHub latest release is an unstable stage');
+    }
+    return mapped;
   }
-  const resp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+  const url = includeFlagged
+    ? `https://api.github.com/repos/${repo}/releases?per_page=1`
+    : `https://api.github.com/repos/${repo}/releases/latest`;
+  const resp = await fetch(url, {
     headers: { Accept: 'application/vnd.github+json' },
     signal: AbortSignal.timeout(BROWSER_API_TIMEOUT_MS),
   });
   if (resp.status === 404) throw new Error('No stable release found');
   if (resp.status === 403 || resp.status === 429) throw new Error('GitHub rate limit reached');
   if (!resp.ok) throw new Error(`GitHub HTTP ${resp.status}`);
-  const d = await resp.json();
+  const raw: unknown = await resp.json();
+  const d = (includeFlagged ? (Array.isArray(raw) ? raw[0] : undefined) : raw) as
+    | { tag_name?: string; name?: string; published_at?: string; html_url?: string; assets?: { name: string; size: number; browser_download_url: string }[] }
+    | undefined;
+  if (!d || !d.tag_name) throw new Error('No stable release found');
+  const tag = d.tag_name || '';
+  const name = d.name || d.tag_name || '';
+  if (!includeFlagged && stageLooksUnstable(tag, name)) {
+    throw new Error('GitHub latest release is an unstable stage');
+  }
   return {
-    tag: d.tag_name || '',
-    name: d.name || d.tag_name || '',
+    tag,
+    name,
     publishedAt: d.published_at || '',
     htmlUrl: d.html_url || `https://github.com/${repo}/releases`,
-    assets: (d.assets || []).map((a: { name: string; size: number; browser_download_url: string }) => ({
+    assets: (d.assets || []).map((a) => ({
       name: a.name,
       size: a.size,
       downloadUrl: a.browser_download_url,
@@ -81,7 +115,17 @@ async function fetchLatestReleaseViaApi(repo: string): Promise<ReleaseInfo> {
   };
 }
 
-export async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
+/**
+ * The repo's single latest stable release.
+ *
+ * `includeFlagged` threads the catalog's vouch (app.includeFlagged-
+ * Releases - DevToys-class repos whose own stable builds are flagged
+ * prerelease): vouched repos trust the newest release verbatim, everyone
+ * else gets the silent-prerelease cut on BOTH surfaces - the desktop
+ * atom path cuts feed entries above the /releases/latest oracle, and the
+ * API answer passes the textual unstable gate.
+ */
+export async function getLatestRelease(repo: string, includeFlagged = false): Promise<ReleaseInfo> {
   if (isTauri()) {
     // Desktop: quota-free documents FIRST. Two outcomes hand the decision
     // to the API below: the feed/fragments are unreachable (network), or
@@ -89,7 +133,7 @@ export async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
     // fragment budget (inconclusive - the API owns the exact answer:
     // authoritative prerelease flags, byte-exact sizes, full asset list).
     try {
-      const viaAtom = await getLatestViaAtom(repo, false);
+      const viaAtom = await getLatestViaAtom(repo, includeFlagged);
       if (viaAtom) return viaAtom;
     } catch {
       // Feed unreachable: the API attempt below may still answer.
@@ -97,7 +141,7 @@ export async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
     // The API owns the exact answer (authoritative prerelease flags,
     // byte-exact sizes, full asset list) and the honest 404 - whatever it
     // throws here is the lookup's classified final state.
-    return await fetchLatestReleaseViaApi(repo);
+    return await fetchLatestReleaseViaApi(repo, includeFlagged);
   }
   // Browser: github.com documents are CORS-blocked, so the API goes first
   // and the quota-free documents remain the failure fallback (unchanged
@@ -105,14 +149,15 @@ export async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
   // is an ANSWER, not a failure: the atom fallback cannot improve it (the
   // feed of a release-less repo is empty too) and probing it would waste
   // requests on every release-less mirror. Everything else - rate limit,
-  // network, API 5xx - is worth one quota-free second opinion.
+  // network, API 5xx, the unstable-stage backstop - is worth one
+  // quota-free second opinion.
   try {
-    return await fetchLatestReleaseViaApi(repo);
+    return await fetchLatestReleaseViaApi(repo, includeFlagged);
   } catch (e) {
     const msg = (e as Error).message || '';
     if (/no stable release/i.test(msg)) throw e;
     try {
-      const viaAtom = await getLatestViaAtom(repo, false);
+      const viaAtom = await getLatestViaAtom(repo, includeFlagged);
       if (viaAtom) return viaAtom;
     } catch {
       // Fallback dead: keep the original, already-classified API error.
@@ -143,7 +188,14 @@ async function fetchRecentReleasesViaApi(
 ): Promise<ReleaseInfo[]> {
   if (isTauri()) {
     const r = await invoke<GhReleaseRaw[]>('fetch_recent_releases', { repo, count, includeFlagged });
-    return (r || []).map((rel) => ({
+    // The native command already drops GitHub-flagged prereleases for
+    // unvouched repos; this textual backstop ALSO drops what the flag
+    // misses (unflagged betas - listmonk v7.0.0-beta.1 shipped unflagged,
+    // verified 2026-10-31). Same contract as the browser branch below.
+    const list = (r || []).filter(
+      (rel) => includeFlagged || !stageLooksUnstable(rel.tag, rel.name || rel.tag)
+    );
+    return list.map((rel) => ({
       tag: rel.tag,
       name: rel.name,
       publishedAt: rel.published_at,
@@ -165,8 +217,11 @@ async function fetchRecentReleasesViaApi(
   const list = Array.isArray(d) ? d : [];
   // Some projects flag their own stable builds as prereleases (DevToys has
   // never shipped an unflagged release). Only a catalog entry that vouches
-  // for that repo may include them.
-  const stable = includeFlagged ? list : list.filter((r) => r.prerelease !== true);
+  // for that repo may include them. The textual gate then catches what the
+  // FLAG misses: unflagged prereleases (listmonk v7.0.0-beta.1).
+  const stable = includeFlagged
+    ? list
+    : list.filter((r) => r.prerelease !== true && !stageLooksUnstable(r.tag_name, r.name || r.tag_name));
   return stable.map((r) => ({
     tag: r.tag_name || '',
     name: r.name || r.tag_name || '',

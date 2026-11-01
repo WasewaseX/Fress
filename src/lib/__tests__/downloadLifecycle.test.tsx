@@ -375,3 +375,106 @@ describe('retry state handling', () => {
     expect(p.items.find((it) => it.id === queuedRow!.id)?.status).toBe('queued');
   });
 });
+
+describe('batch starts under warm-cache timing (issue #129)', () => {
+  it('an un-awaited batch cannot talk every entry past the concurrency gate', async () => {
+    const p = await mountProvider();
+    // Five batch entries whose native starts all stay PENDING: the invoke
+    // has not resolved, so NO Rust slot is registered yet - the exact
+    // warm-cache window in which the batch loop's un-awaited
+    // `void startDownload(...)` calls used to run every gate check against
+    // an empty slot set and launch all of them in parallel (the issue's
+    // reported shape: eight native starts, zero queued entries).
+    const urls = [
+      'https://example.com/b1.exe',
+      'https://example.com/b2.exe',
+      'https://example.com/b3.exe',
+      'https://example.com/b4.exe',
+      'https://example.com/b5.exe',
+    ];
+    urls.forEach((u) => h.deferUrls.add(u));
+    await act(async () => {
+      // The batch loop's exact pattern: fire-and-forget, no awaiting.
+      urls.forEach((u, i) => {
+        void p.actions.startDownload(u, `b${i + 1}.exe`);
+      });
+      await tick();
+    });
+    // Only MAX_CONCURRENT_DOWNLOADS native starts went out; the rest are
+    // waiting in the FIFO line, and each passing gate has ALREADY claimed
+    // its capacity (the reservation is synchronous with the check).
+    expect(startCalls()).toHaveLength(3);
+    expect(p.items.filter((it) => it.status === 'queued')).toHaveLength(2);
+    // The three in-flight starts resolve: their slots register. Capacity
+    // is full, so the queued entries stay in line - no fifth parallel start.
+    await act(async () => {
+      h.pending.get(1)?.(1);
+      h.pending.get(2)?.(2);
+      h.pending.get(3)?.(3);
+      await tick();
+    });
+    expect(startCalls()).toHaveLength(3);
+    expect(p.items.filter((it) => it.status === 'queued')).toHaveLength(2);
+    // Slots free one at a time; the pump drains the line with the ORIGINAL
+    // payloads, one promotion per freed slot. The pump is single-flight:
+    // it promotes b4, and only after b4's own start settles does it look
+    // at the line again.
+    emit('download-complete', { id: 1, path: '/downloads/b1.exe', bytes: 3, sha256: 'aa' });
+    await act(async () => {
+      await tick();
+    });
+    expect(startCalls()).toHaveLength(4);
+    expect(startCalls()[3]?.url).toBe('https://example.com/b4.exe');
+    // b4's invoke resolves, its slot registers, the pump sees a full gate
+    // and parks; completing b2 then promotes the LAST queued entry.
+    await act(async () => {
+      h.pending.get(4)?.(4);
+      await tick();
+    });
+    emit('download-complete', { id: 2, path: '/downloads/b2.exe', bytes: 3, sha256: 'ab' });
+    await act(async () => {
+      await tick();
+    });
+    expect(startCalls()).toHaveLength(5);
+    expect(startCalls()[4]?.url).toBe('https://example.com/b5.exe');
+    expect(p.items.some((it) => it.status === 'queued')).toBe(false);
+  });
+
+  it('a start that FAILS while in flight releases its claim and promotes the next queued entry', async () => {
+    const p = await mountProvider();
+    // One permanently failing start (rejecting invoke) followed by two
+    // deferred ones: the failed start's capacity must be released BEFORE
+    // the pump reads it, or the queue would stall until an unrelated event.
+    h.invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'default_download_dir') return '/downloads';
+      if (cmd === 'start_download') {
+        const url = args?.url as string | undefined;
+        if (url === 'https://example.com/fail.exe') throw new Error('boom');
+        const id = h.nextId++;
+        if (url && h.deferUrls.has(url)) {
+          return new Promise<number>((resolve) => h.pending.set(id, resolve));
+        }
+        return id;
+      }
+      return null;
+    });
+    h.deferUrls.add('https://example.com/d1.exe');
+    h.deferUrls.add('https://example.com/d2.exe');
+    const seq = ['https://example.com/fail.exe', 'https://example.com/d1.exe', 'https://example.com/d2.exe'];
+    await act(async () => {
+      seq.forEach((u, i) => {
+        void p.actions.startDownload(u, `s${i + 1}.exe`);
+      });
+      await tick();
+    });
+    // The failing start passed the gate first (claimed 1), so both
+    // deferred starts claimed too; nothing queued yet.
+    expect(startCalls()).toHaveLength(3);
+    // The failure settles: claim released, pump promotes... nothing yet
+    // (the other two are still in flight, capacity 2 + 1 = 3 claimed).
+    await act(async () => {
+      await tick();
+    });
+    expect(p.items.some((it) => it.status === 'queued')).toBe(false);
+  });
+});
